@@ -1,0 +1,45 @@
+{
+  "skill_name": "authoring-skills",
+  "notes": "Run each prompt in a fresh agent session with the skill installed. Baseline: same prompt without the skill. Grade against expected_behavior; transcript observations matter as much as final output.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "ok I just spent an hour walking an agent through our release process again — bump the version in package.json, update CHANGELOG.md from merged PRs since the last tag, tag it, draft the gh release notes. I'm sick of re-explaining it. turn this into a skill so any agent can just do it",
+      "expected_behavior": [
+        "Extracts the workflow steps from the stated context instead of re-asking for everything, then confirms the extraction with the user",
+        "Interviews for missing specifics (versioning scheme, changelog format, whether tagging/pushing needs approval) before drafting",
+        "Writes evals/evals.json with 2-3 realistic prompts BEFORE or alongside the skill draft",
+        "Produces a valid SKILL.md: gerund name matching its directory, third-person pushy description containing trigger terms, body well under 500 lines, imperative instructions",
+        "Uses low degrees of freedom (exact commands) for the fragile tag/release steps and explains why",
+        "Does not embed volatile facts (model IDs, current version numbers) in the skill body"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "here's our existing 'build' skill, it's just 6 lines pointing at an agent file and the knowledge isn't portable. improve it so the skill itself carries the workflow: read plan from .opencode/plans/pending-task.md, implement only whats in the plan, then type-check + lint + unit tests + e2e must all pass before presenting manual validation steps to me. keep it working for agents that don't have our agent files",
+      "expected_behavior": [
+        "Preserves the existing skill name and directory unchanged",
+        "Establishes or confirms evals and a baseline of the current skill's behavior before rewriting",
+        "Moves the substantive workflow into the SKILL.md body with a verification feedback loop (run checks, fix, re-run, only proceed on pass)",
+        "Uses a copyable checklist for the multi-step workflow",
+        "Keeps the body concise and framework-neutral where possible, with project-specific detail clearly separated",
+        "Description rewritten in third person with both what and when-to-use trigger terms"
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I want a skill for auditing accessibility on our web app. it should probably use axe or something via playwright? honestly not sure what the right approach is, you figure out the best practice. we have playwright set up already",
+      "expected_behavior": [
+        "Asks clarifying questions about scope (WCAG level, which pages/flows, CI vs interactive) rather than assuming",
+        "Drafts realistic eval prompts and shares them for approval before finalizing the skill",
+        "Chooses one default approach (e.g., axe-core via Playwright) with an escape hatch, instead of presenting a menu of options",
+        "Considers bundling a deterministic script for the repeated audit invocation, stating execute-vs-read intent",
+        "Skill closes on objective signals (violation counts/reports), not on subjective 'looks accessible'",
+        "Flags that stack-specific detail belongs in references/stacks/ per library conventions"
+      ],
+      "files": []
+    }
+  ]
+}
