@@ -126,7 +126,16 @@ Test with the models that will actually run the skill — at minimum one
 Go-tier open model and one Zen-tier model (see
 `reference/model-routing.md` at the repo root for current role bindings).
 Guidance sufficient for a frontier model may underspecify for a mid-tier
-one; that gap is a finding, not an annoyance.
+one; that gap is a finding, not an annoyance. If the harness cannot vary
+the model (e.g. subagents are pinned to one tier), document the deferred
+validation in `evals.json` notes so it is re-run when the harness allows
+— a documented deferral is honest; a silent skip looks like coverage.
+
+For skills that must stop and ask the user before proceeding, a
+single-turn eval cannot test the full behavior. Use a **two-turn
+harness**: turn 1 expects the agent to stop at the gate and ask the
+right questions; turn 2 resumes the same session with answers and
+expects the answers recorded in the output artifact. Grade both turns.
 
 ### Step 7: Iterate on observed behavior
 

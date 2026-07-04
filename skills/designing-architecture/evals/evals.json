@@ -1,0 +1,52 @@
+{
+  "skill_name": "designing-architecture",
+  "notes": "Run each prompt in a fresh agent session with the skill installed, against a writable copy of the fixture repo (copy evals/fixtures/phasewave/ into a temp working dir per run so the agent can write the plan artifact without touching the source fixture). Baseline: same prompt with the skill NOT installed. Grade against expected_behavior by reading the produced plan artifact and the transcript; never grade the author's own memory. Prompt 1 is the revise-don't-clobber case (a prior plan for the same slug is pre-seeded under .opencode/plans/ in the fixture). Prompt 2 is the vague-request case: the skill must extract acceptance criteria through clarifying questions before drafting, not invent them — run it as an interactive two-turn harness (turn 1: prompt + let the agent ask and stop; turn 2: resume the same session with answers and confirm design decisions are recorded). Prompt 3 is the schema-change case: it must exercise the vue-supabase stack reference and flag type/RLS impacts. Assertions tagged [fix-verified] encode defects found and fixed during the 2026-07-04 eval loop — they are the regression net; do not remove without re-running the full loop.\n\nLoop log 2026-07-04 (fresh subagents, single model — Go/Zen cross-tier validation deferred per skill notes):\n- Eval 1 (with-skill): PASSED round 1. Revise-don't-clobber textbook; criteria all verifiable; real commands; stopped at approval.\n- Eval 2 (with-skill, two-turn): PASSED. Turn 1 correctly stopped at the Step 5 feature-identity gate and asked across read-only vs co-control / authenticated vs public / single vs group / live vs snapshot; turn 2 recorded the user's answers verbatim as Design Decisions and drafted 10 verifiable criteria.\n- Eval 3 (with-skill, round 1): DEFECT — over-aggressive vague-request gate stopped the agent at Step 5 instead of drafting a plan for a clearly-scoped schema change (regression vs the no-skill baseline, which drafted a full plan). FIX: SKILL.md Step 5 split into feature-identity ambiguity (ask before drafting) vs design-decision ambiguity (draft with defaults in Open Questions), with a decision test. Eval 3 v2: PASSED — drafted the full plan, 11 verifiable criteria, RLS per new table with existing policies asserted unchanged, offline/PWA surfaced as explicit Excluded + Open Question + three AC. The single [fix-verified] assertion above encodes this fix.\nHarness note: a subagent launched in the same parallel batch as the install sometimes reported the `skill` tool did not list `designing-architecture` (registry snapshot timing); the subagent read SKILL.md directly and still followed it. Install the skill >=1 prompt-render cycle before grading, or load SKILL.md by explicit path in the test prompt.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "the roadmap puts feat-offline-queue at #1 (queue timer session events while offline, sync on reconnect). design the approach for it. the repo is the working directory — there's already a plan draft at .opencode/plans/feat-offline-queue.md from an earlier pass, revise it rather than blowing it away",
+      "expected_behavior": [
+        "Reads the roadmap entry (feat-offline-queue, the #1 item) and treats it as the single work item to plan — does not attempt to plan the whole roadmap",
+        "Reads the project rules file (AGENTS.md) for plan path config and stack, and writes the plan to .opencode/plans/feat-offline-queue.md (the configured path), not an arbitrary location",
+        "Detects the existing plan for the slug and revises it in place, preserving prior sections/history frontmatter instead of clobbering from scratch",
+        "Researches the actual codebase: reads the focusTimer store, the supabase client, the schema, and the generated database types, and grounds file-change entries in those real files",
+        "Every acceptance criterion names an observable behavior and how to verify it (a test command, a selector, a query result) — none that merely restate the feature description ('works well', 'handles offline') without a verifier",
+        "Files-to-modify section lists concrete paths (src/stores/focus-timer.ts, the IndexedDB layer, e2e spec, schema/types if touched) with a what-changes note per file",
+        "Explicitly records an Included/Excluded scope boundary so an implementer knows what not to build",
+        "Produces a Verification section that names the actual project commands (npm run type-check, lint, test, e2e) rather than a generic 'run the tests'",
+        "Stops at a short summary ending with an explicit approval question — does NOT start editing implementation files",
+        "Makes zero implementation edits to source: the plan artifact is the only file written; no src/store, schema, or types file is touched by the skill"
+      ],
+      "files": ["fixtures/phasewave/AGENTS.md", "fixtures/phasewave/ROADMAP.md", "fixtures/phasewave/src/stores/focus-timer.ts", "fixtures/phasewave/src/supabase/client.ts", "fixtures/phasewave/db/schema.sql", "fixtures/phasewave/types/database.types.ts", "fixtures/phasewave/.opencode/plans/feat-offline-queue.md", "fixtures/phasewave/package.json"]
+    },
+    {
+      "id": 2,
+      "prompt": "I want users to be able to share a timer with someone else. can you design the approach for that? the repo is the working directory",
+      "expected_behavior": [
+        "Recognizes the request is too vague to plan and asks clarifying questions before drafting — does not silently pick a single definition of 'share' and run with it",
+        "Questions target the dimensions that actually split the design: read-only link vs co-control; public link vs authenticated sharee; single sharee vs group; real-time vs snapshot",
+        "Does not produce a final plan artifact until the user has answered enough to make every acceptance criterion verifiable — a pass that ships a plan over an unconfirmed assumption is a finding",
+        "If the user is interactive and answering, converges to a single concrete definition of the feature, then drafts the plan with objective acceptance criteria grounded in that definition",
+        "Does NOT begin implementation edits while clarification is still pending; the skill stays planning-only and continues asking until the design converges or the user gives a stop signal",
+        "Records the user's clarifying answers into the plan (as design decisions / open-questions-resolved), so the implementer reading the plan cold sees the constraints the design was built on"
+      ],
+      "files": ["fixtures/phasewave/AGENTS.md", "fixtures/phasewave/ROADMAP.md", "fixtures/phasewave/src/stores/focus-timer.ts", "fixtures/phasewave/src/supabase/client.ts", "fixtures/phasewave/db/schema.sql", "fixtures/phasewave/types/database.types.ts", "fixtures/phasewave/package.json"]
+    },
+    {
+      "id": 3,
+      "prompt": "next up from the roadmap-ish list: add teams so a user can share a focus session playlist with their team. it'll need new tables. design the approach",
+      "expected_behavior": [
+        "Detects the project stack as vue-supabase from AGENTS.md and loads the vue-supabase stack reference, applying its planning concerns (schema-first, generated DB types, RLS impact, offline/PWA)",
+        "Treats db/schema.sql as the source of truth and records the new tables (e.g. teams, team_members, shared playlists) in the Schema/Type Impacts section, not buried only in file-change notes",
+        "Flags that types/database.types.ts must be regenerated (npm run db:types) and that the generated types file must NOT be hand-edited",
+        "Explicitly addresses RLS: new tables get per-user/team isolation policies, and the plan calls out that existing single-user RLS assumptions are extended, not relaxed",
+        "Every acceptance criterion is observable and verifiable — e.g. a teammate sees the shared playlist (specific selector/query), unauthorized users cannot read it (RLS test), types compile",
+        "Surfaces offline/PWA considerations for the new team feature (e.g. does the queue replay need team context? offline mutation of team-owned rows?) rather than only the happy-path",
+        "Files-to-modify section covers schema, regenerated types, store, supabase policies, e2e, and at least one migration/test seed file, each with a what-changes note",
+        "Stops at the approval question; does not run the migration or write implementation code",
+        "[fix-verified] Drafts a full plan rather than stopping at a vague-gate: a request that names the feature with concrete scope (e.g. 'add teams, needs new tables, design the approach') is design-decision ambiguity, not feature-identity ambiguity — open design choices go into Open Questions with proposed defaults and do NOT block drafting"
+      ],
+      "files": ["fixtures/phasewave/AGENTS.md", "fixtures/phasewave/ROADMAP.md", "fixtures/phasewave/src/stores/focus-timer.ts", "fixtures/phasewave/src/supabase/client.ts", "fixtures/phasewave/db/schema.sql", "fixtures/phasewave/types/database.types.ts", "fixtures/phasewave/package.json"]
+    }
+  ]
+}

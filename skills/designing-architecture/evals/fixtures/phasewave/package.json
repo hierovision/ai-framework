@@ -1,0 +1,18 @@
+{
+  "name": "phasewave",
+  "version": "0.4.0",
+  "type": "module",
+  "scripts": {
+    "type-check": "vue-tsc --noEmit",
+    "lint": "eslint src e2e",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "db:types": "supabase gen types typescript --local > types/database.types.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.40.0",
+    "pinia": "^2.1.0",
+    "vue": "^3.4.0",
+    "vuetify": "^3.5.0"
+  }
+}
