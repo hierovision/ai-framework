@@ -74,11 +74,18 @@ solving real problems instead of documenting imagined ones.
         "Observable outcome 1",
         "Observable outcome 2"
       ],
-      "files": []
+      "files": ["fixtures/sample-input.json"]
     }
   ]
 }
 ```
+
+**Evals must be self-contained.** Any file an eval depends on lives in
+`evals/fixtures/` inside the skill directory and is listed in `files[]`
+(paths relative to `evals/`). Fixtures left in `/tmp` or pointing at a
+live repo make the eval unreproducible after the environment resets —
+which means no regression testing on the next edit. Embedding fixture
+content directly in the prompt is equally valid for text sources.
 
 ### Step 4: Draft the skill
 
@@ -130,6 +137,17 @@ down unproductive paths; make prominent what it missed. Explain *why* things
 matter instead of stacking ALL-CAPS MUSTs — all-caps is a yellow flag that
 reasoning is missing. Repeat Steps 6–7 until evals pass and the user is
 satisfied.
+
+**Encode every fix as an eval assertion before declaring stable.** When a
+test round finds a defect and you fix it, add an expected_behavior line
+that asserts the fixed behavior (tag it, e.g. `[fix-verified]`). The
+reports from a test round are ephemeral; `evals.json` is the regression
+net. A fix that exists only in the skill body can be silently reverted by
+a future edit — a fix that exists as an assertion cannot. Also scan skill
+instructions and references for content that gives away eval answers
+(project-specific examples mirroring eval scenarios): it inflates eval
+results and leaks one project's details into a portable skill. Fixture
+data may be project-flavored; instructions must not be.
 
 ### Step 8: Finalize and install
 
