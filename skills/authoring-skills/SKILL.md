@@ -87,6 +87,13 @@ live repo make the eval unreproducible after the environment resets —
 which means no regression testing on the next edit. Embedding fixture
 content directly in the prompt is equally valid for text sources.
 
+**Verifiers in fixtures must be able to fail.** When the skill under
+test closes its loop on command exit codes, the fixture's verification
+commands must actually execute, exit non-zero while the work is absent
+or wrong, and exit 0 when it is done correctly (small script stubs that
+assert on the produced files are fine). An eval whose verification
+cannot fail proves nothing about the skill's feedback loop.
+
 ### Step 4: Draft the skill
 
 Create `skills/<name>/SKILL.md` plus bundled resources as needed. Follow the
@@ -121,6 +128,13 @@ Run each eval prompt against a fresh agent session with the skill installed
 (subagent via the task tool, or a separate session). Where feasible, also
 run a baseline without the skill for comparison. The author must not grade
 its own memory — only the fresh agent's observable behavior counts.
+
+Mid-session installs may not be discoverable: the harness snapshots
+available skills at session start, so a skill installed during the
+authoring session can be invisible to same-session subagents. If the
+subagent cannot see the skill, have it read the SKILL.md (and needed
+references) from disk instead, and note the workaround in the report —
+what this stops testing is description-based triggering, not the body.
 
 Test with the models that will actually run the skill — at minimum one
 Go-tier open model and one Zen-tier model (see
@@ -188,6 +202,12 @@ These apply to every skill in this library, on top of the general guidance:
   proceed generically and flag the gap if not.
 - **Loops close on objective signals**: test exit codes, screenshots,
   computed styles — a skill must never declare success from intent alone.
+- **Cross-skill contracts have one source of truth**: when a skill
+  consumes another skill's output artifact, link the producer's
+  reference file (relative sibling path, e.g.
+  `../producer-skill/references/format.md`) instead of duplicating the
+  format. The library installs as a set, so the sibling resolves in
+  both the repo and the symlinked global layout.
 
 ## Improving an existing skill
 

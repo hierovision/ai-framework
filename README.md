@@ -35,6 +35,11 @@ Per-project overrides: a skill of the same name in a project's
 [skill permissions](https://opencode.ai/docs/skills/#configure-permissions)
 in `opencode.json`.
 
+Install the library as a set: some skills reference sibling skills'
+contract files (e.g. `implementing-features` consumes
+`designing-architecture`'s plan format via a relative sibling path).
+`install.sh` links everything, so this is only a concern if you cherry-pick.
+
 ## Layout
 
 ```

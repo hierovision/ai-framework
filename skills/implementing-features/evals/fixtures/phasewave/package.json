@@ -1,0 +1,10 @@
+{
+  "name": "phasewave",
+  "version": "0.4.0",
+  "private": true,
+  "scripts": {
+    "type-check": "node scripts/type-check.js",
+    "lint": "node scripts/lint.js",
+    "test": "node scripts/test.js"
+  }
+}
