@@ -57,11 +57,12 @@ point at it; do not silently replace.
 
 ### Step 3 — Detect stack & load the matching stack reference
 
-Identify the project stack from the rules file. If a matching stack
-reference exists under `references/stacks/`, read it now and apply its
-planning concerns. If none exists, proceed generically and flag the gap
-in the plan's Open Questions — the absence of stack-specific guidance is
-a finding, not a silent "I'll wing it."
+Identify the project stack from the rules file. If this skill bundles a
+matching stack reference under `references/stacks/` (resolved against
+this skill's own directory — not the project's), read it now and apply
+its planning concerns. If none exists, proceed generically and flag the
+gap in the plan's Open Questions — the absence of stack-specific
+guidance is a finding, not a silent "I'll wing it."
 
 Available stack references:
 

@@ -161,6 +161,12 @@ matter instead of stacking ALL-CAPS MUSTs — all-caps is a yellow flag that
 reasoning is missing. Repeat Steps 6–7 until evals pass and the user is
 satisfied.
 
+**Propagate fixes to sibling skills.** When a test round exposes a
+defect in wording or structure this library uses in more than one skill
+(shared step patterns, shared conventions), check the siblings for the
+same latent defect and fix them in the same change — an eval only ran
+against one skill, but the defect class rarely lives in just one.
+
 **Encode every fix as an eval assertion before declaring stable.** When a
 test round finds a defect and you fix it, add an expected_behavior line
 that asserts the fixed behavior (tag it, e.g. `[fix-verified]`). The
@@ -188,6 +194,15 @@ These apply to every skill in this library, on top of the general guidance:
 
 - **Gerund names**: `writing-e2e-tests`, `iterating-on-ui` — never vague
   (`helper`, `utils`).
+- **Description headroom**: target ≤900 characters. The hard cap is 1024
+  and pushy descriptions grow toward it — a description written at the
+  cap leaves no room for the trigger-optimization pass or future
+  negative triggers.
+- **Skill-relative paths are explicit**: when instructions name a path
+  that could be mistaken for a project path (`references/stacks/`),
+  say "resolved against this skill's own directory — not the project's".
+  A fresh agent operating inside a project repo defaults to project-
+  relative reading.
 - **Evals are mandatory**: no skill merges without `evals/evals.json`.
 - **Roles, not model IDs**: skills say "escalate to the `planner` role",
   never "use glm-5.2". Bindings live only in `reference/model-routing.md`.

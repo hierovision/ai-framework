@@ -79,8 +79,9 @@ every "should I do this too?" temptation is checked against.
 ### Step 3 — Detect stack & load the matching stack reference
 
 Identify the project stack from the rules file (`AGENTS.md` /
-`.opencode/agents.md`). If a matching stack reference exists under
-`references/stacks/`, read it now and apply its implementation-time
+`.opencode/agents.md`). If this skill bundles a matching stack reference
+under `references/stacks/` (resolved against this skill's own directory
+— not the project's), read it now and apply its implementation-time
 concerns. If none exists, proceed generically and flag the gap to the
 user in the handoff (a missing stack reference is a finding, not a
 silent "I'll improvise").
