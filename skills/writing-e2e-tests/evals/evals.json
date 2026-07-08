@@ -1,0 +1,81 @@
+{
+  "skill_name": "writing-e2e-tests",
+  "notes": "Run each prompt in a fresh agent session WITH the skill installed, against a WRITABLE COPY of the scenario fixture (copy evals/fixtures/phasewave/<scenario>/ into a fresh temp working dir per run — agents must never write into evals/fixtures/ source). Baseline: same prompt WITHOUT the skill, for eval 1 and eval 2 (highest-signal differentiators). Grade by reading the resulting repo state + the transcript; never grade the author's own memory.\n\nREAL-BROWSER DEFERRAL (important): a real browser is NOT available in this eval harness, so `npm run e2e` is deferred (scripts/e2e-deferred.js prints a note and exits 0). The objective check is `npm run test`, which runs the STRUCTURAL verifier scripts/verify-spec.js that parses e2e/*.spec.ts and fails objectively on the e2e discipline violations: waitForTimeout usage, bare CSS selectors (instead of role/accessible-name/testid), un-awaited web-first assertions, un-awaited page actions, <2 `// AC` mapping comments, login-UI replay (password-field fill) instead of the auth fixture, no auth-fixture usage, !=1 test() journey (one journey per spec), <2 user-observable assertions, trace set to 'off'/absent. The offline fixture's verifier passes --offline and additionally requires context.setOffline usage. Real-browser red-on-broken (a spec going red when the guarded UI behaviour breaks) is a DEFERRED validation — documented here, not silently skipped. Re-run with a real browser (playwright test --trace=on) when the harness allows; the structural verifier is the regression net for the authoring discipline in the meantime.\n\nFailable-verifier rule (enforced): the structural verifier actually exits non-zero when the spec is absent or violates the discipline, and exits 0 only when the spec passes every structural check. Eval 1 and Eval 2 each ship a pre-provided auth fixture (e2e/fixtures/auth.ts) and playwright.config.ts (trace: 'retain-on-failure') so the agent authors only the journey spec.\n\nDe-mirroring (propagated from the writing-unit-tests round-1 fix): the skill body must NOT name the eval scenarios' specific tokens (the timer journey, the offline queued indicator, formatDuration) in its examples. The body's right-layer and selector examples use generic phrasing so the evals test generalization, not pattern-matching.\n\nMid-session-install: a subagent launched right after `./install.sh` sometimes reports the `skill` tool does not list `writing-e2e-tests` yet (registry snapshot timing). Install the skill >=1 prompt-render cycle before grading, OR instruct the subagent to load the skill file by explicit path (skills/writing-e2e-tests/SKILL.md) as a fallback.\n\nModel-tier deferral: subagents in this harness are pinned to one tier; Go-tier vs Zen-tier cross-validation is deferred per this note. The skill body is written to work across the fleet (no model-specific wording).\n\nRight-layer routing (eval 3) is graded from the transcript: the observable is that the agent names the sibling skill writing-unit-tests and refuses to write a Playwright spec that drives a real browser around a pure function with no UI. The fixture provides context files only.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "add e2e for the focus timer journey. plan's at .opencode/plans/feat-timer-journey.md, approved. an authenticated user starts a timer, sees the remaining indicator, completes it, sees the completed state. we have playwright set up already with an auth fixture at e2e/fixtures/auth.ts. repo is the working directory — write the spec",
+      "expected_behavior": [
+        "Reads the plan at .opencode/plans/feat-timer-journey.md before writing — derives the journey from the ACs",
+        "Classifies the behaviour as e2e: the start/complete/observe journey is only observable through the real UI",
+        "Writes e2e/timer.spec.ts as ONE journey (one test() per spec)",
+        "Maps ACs to steps with `// AC` comments: AC1 start -> remaining visible; AC2 complete -> completed visible",
+        "Selects by role / accessible name / data-testid (getByRole, getByText) — NOT bare CSS selectors (no locator('.cls'), no page.$())",
+        "Waits on conditions and selectors (await expect(...).toBeVisible(), await getByRole(...).click()) — NO waitForTimeout anywhere",
+        "Awaits every web-first assertion (await expect(...).toBeVisible()) and every page action — no bare un-awaited expect/action",
+        "Uses the auth fixture (imports { test, expect } from './fixtures/auth', uses the authedPage fixture) — does NOT replay the login UI (no password-field fill)",
+        "Asserts on user-observable outcomes (visible indicators), >=2 web-first assertions",
+        "Runs `npm run test` (the structural verifier) and it exits 0; runs `npm run type-check && npm run lint` and they exit 0",
+        "Notes that `npm run e2e` (real browser) is deferred in the harness and that real-browser red-on-broken is the deferred validation",
+        "Presents a concise handoff: the spec file, the AC -> step mapping, the structural-verifier result, and the deferred real-browser validation; then waits"
+      ],
+      "files": [
+        "fixtures/phasewave/timer-journey/AGENTS.md",
+        "fixtures/phasewave/timer-journey/package.json",
+        "fixtures/phasewave/timer-journey/scripts/type-check.js",
+        "fixtures/phasewave/timer-journey/scripts/lint.js",
+        "fixtures/phasewave/timer-journey/scripts/verify-spec.js",
+        "fixtures/phasewave/timer-journey/scripts/e2e-deferred.js",
+        "fixtures/phasewave/timer-journey/e2e/fixtures/auth.ts",
+        "fixtures/phasewave/timer-journey/playwright.config.ts",
+        "fixtures/phasewave/timer-journey/.opencode/plans/feat-timer-journey.md"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "write the e2e spec for the offline PWA journey. plan's at .opencode/plans/feat-offline-journey.md, approved. user goes offline, starts a timer, sees a queued indicator, comes back online, sees it sync. auth fixture's at e2e/fixtures/auth.ts. repo is the working directory",
+      "expected_behavior": [
+        "Reads the plan at .opencode/plans/feat-offline-journey.md before writing — derives the journey from the ACs",
+        "Writes e2e/offline.spec.ts as ONE journey",
+        "Drives the browser offline via `await context.setOffline(true)` and back online via `await context.setOffline(false)` — a real network toggle at the Playwright context boundary, NOT a mocked network inside the app",
+        "Maps ACs to steps with `// AC` comments: AC1 offline -> queued visible; AC2 reconnect -> synced visible",
+        "Selects by role / accessible name / data-testid — NOT bare CSS",
+        "Waits on the visible indicator after setOffline (await expect(...).toBeVisible()) — NO waitForTimeout (service workers settle asynchronously; a fixed timeout is the class 4 flake)",
+        "Uses the auth fixture (authedPage) — does NOT replay the login UI",
+        "Awaits every web-first assertion and page action (including setOffline)",
+        "Notes the service-worker caching caveat in the handoff if relevant (SW may serve cached page on offline reload — wait on the indicator, not a timeout)",
+        "Runs `npm run test` (structural verifier with --offline) and it exits 0; runs `npm run type-check && npm run lint` and they exit 0",
+        "Notes real-browser execution is deferred; structural verifier is the objective check here",
+        "Presents a concise handoff with the AC -> step mapping and the deferred real-browser validation; then waits"
+      ],
+      "files": [
+        "fixtures/phasewave/offline-journey/AGENTS.md",
+        "fixtures/phasewave/offline-journey/package.json",
+        "fixtures/phasewave/offline-journey/scripts/type-check.js",
+        "fixtures/phasewave/offline-journey/scripts/lint.js",
+        "fixtures/phasewave/offline-journey/scripts/verify-spec.js",
+        "fixtures/phasewave/offline-journey/scripts/e2e-deferred.js",
+        "fixtures/phasewave/offline-journey/e2e/fixtures/auth.ts",
+        "fixtures/phasewave/offline-journey/playwright.config.ts",
+        "fixtures/phasewave/offline-journey/.opencode/plans/feat-offline-journey.md"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "write e2e tests for the duration formatter — formatDuration in src/lib/duration.js. I want to drive a real browser to confirm it formats durations correctly. plan's at .opencode/plans/feat-duration-format.md. repo is the working directory",
+      "expected_behavior": [
+        "Recognizes this is NOT an e2e-layer request: formatDuration is a pure function (no I/O, no store, no DOM, no UI) — logic computable in isolation. There is no user journey through the real UI to observe",
+        "Does NOT write a Playwright spec that spins up a real browser to test a pure function — that is a wrong-layer e2e (slow, brittle, and the browser adds nothing the function's own return does not already provide)",
+        "Routes to the sibling skill: names writing-unit-tests as the right skill (unit = isolated logic)",
+        "Cites the right-layer reasoning: isolated logic -> unit; behaviour at a seam -> integration; a user journey through the real UI -> e2e. A pure formatter with no UI is unit",
+        "Does not produce a wrong-layer e2e spec file (no e2e/duration.spec.ts driving a browser around the pure function); the terminal state is a routing handoff",
+        "If the user insists, the agent still explains the layer mismatch rather than silently authoring a browser-driven test for logic with no UI"
+      ],
+      "files": [
+        "fixtures/phasewave/pure-context-e2e/AGENTS.md",
+        "fixtures/phasewave/pure-context-e2e/src/lib/duration.js",
+        "fixtures/phasewave/pure-context-e2e/.opencode/plans/feat-duration-format.md"
+      ]
+    }
+  ]
+}

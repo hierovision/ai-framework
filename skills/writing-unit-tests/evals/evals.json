@@ -1,0 +1,77 @@
+{
+  "skill_name": "writing-unit-tests",
+  "notes": "Run each prompt in a fresh agent session WITH the skill installed, against a WRITABLE COPY of the scenario fixture (copy evals/fixtures/phasewave/<scenario>/ into a fresh temp working dir per run — agents must never write into evals/fixtures/ source). Baseline: same prompt WITHOUT the skill, for eval 1 and eval 2 (highest-signal differentiators). Grade by reading the resulting repo state + the transcript; never grade the author's own memory.\n\nFailable-verifier rule (enforced): each fixture's package.json scripts actually execute via node. `npm run test` exits non-zero when no tests/*.test.js exist (an empty suite is red) and when an authored test fails. `npm run meaningfulness` is the OBJECTIVE meaningfulness proof: it runs the authored tests against the real module (expects GREEN) and against the seeded broken variant src/lib/duration.broken.js (expects RED), then restores the real module via try/finally. A vacant test (one that passes on the broken variant too) fails the meaningfulness check — that is the regression net for the 'a test that has never been seen red proves nothing' doctrine. Eval 1 is seeded so a correct table-driven test is red on the broken variant (it returns raw seconds, not zero-padded MM:SS/HH:MM:SS, and throws no RangeError).\n\nMid-session-install: a subagent launched right after `./install.sh` sometimes reports the `skill` tool does not list `writing-unit-tests` yet (registry snapshot timing). Install the skill >=1 prompt-render cycle before grading, OR instruct the subagent to load the skill file by explicit path (skills/writing-unit-tests/SKILL.md) as a fallback — the sibling skills' eval loops hit this same timing issue.\n\nModel-tier deferral: subagents in this harness are pinned to one tier; Go-tier vs Zen-tier cross-validation is deferred per this note. Re-run the with-skill set across both tiers when the harness allows — a documented deferral is honest, a silent skip is not. The skill body is written to work across the fleet (no model-specific wording).\n\nRight-layer routing (eval 3) is graded from the transcript: the observable is that the agent names the sibling skill writing-integration-tests and refuses to write a unit test that mocks the RLS policy away (mocking the seam defeats the behaviour under test). The fixture provides context files only — the agent is not expected to produce a test file for eval 3.\n\nRound-1 fix (encoded as [fix-verified] in evals 2 and 3): the skill body originally named 'String.padStart' in the brittleness example and 'an RLS user-B-gets-zero-rows check' in the right-layer prose — both mirrored the eval scenarios and inflated round-1 results (agents pattern-matched the example). Both examples were generalized (to 'a particular helper internally' and the outbox-replay seam respectively); v2 re-runs confirmed the agents still refuse the padStart spy and route RLS to integration from the right-layer table alone, proving generalization. Instructions must not give away eval answers (meta-skill rule).",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "we just shipped feat-duration-format and have zero unit tests for the duration formatter. the plan's at .opencode/plans/feat-duration-format.md and it's approved. there's a seeded broken variant at src/lib/duration.broken.js you can use to prove the tests actually catch a break. repo is the working directory — write the unit tests",
+      "expected_behavior": [
+        "Reads the plan at .opencode/plans/feat-duration-format.md before writing any test — derives the cases from the Acceptance Criteria, not from guessing the module's behaviour",
+        "Maps each AC to a test case: AC1 formatDuration(0)==='00:00', AC2 formatDuration(65)==='01:05', AC3 formatDuration(3661)==='01:01:01', AC4 formatDuration(-5) throws RangeError — the handoff (or test comments) records the AC -> test mapping",
+        "Writes the test at the project's conventional path tests/duration.test.js (per AGENTS.md), as a plain Node script that asserts on observable outputs and exits 0 on pass / non-zero on failure",
+        "Uses table-driven cases covering the ACs PLUS edge cases derived from the observable (empty/zero, the MM:SS vs HH:MM:SS boundary at 3600, the negative-input error path) — not invented busywork unrelated to the ACs",
+        "Does NOT mock or stub the module under test (formatDuration) — mocks only true externals, and there are none here; the test calls the real function and asserts its return / thrown error",
+        "Performs the meaningfulness proof: runs the test GREEN on the real module, swaps in the seeded broken variant (src/lib/duration.broken.js over src/lib/duration.js), observes RED, restores the real module, observes GREEN again — the cycle is visible in the transcript",
+        "Runs the objective check `npm run meaningfulness` which independently confirms green-on-fixed / red-on-broken — and it exits 0",
+        "Runs the FULL suite (`npm run type-check && npm run lint && npm run test`), all exit 0 — never declares success on intent",
+        "Additive to the net: does not delete or weaken any existing test; if the broken variant was left in place by accident, restores it before finishing",
+        "Presents a concise handoff: the test file(s) added, the AC -> test mapping, the meaningfulness proof evidence (red on broken, green on fixed), and full-suite status; then waits"
+      ],
+      "files": [
+        "fixtures/phasewave/unit-duration/AGENTS.md",
+        "fixtures/phasewave/unit-duration/package.json",
+        "fixtures/phasewave/unit-duration/scripts/type-check.js",
+        "fixtures/phasewave/unit-duration/scripts/lint.js",
+        "fixtures/phasewave/unit-duration/scripts/test.js",
+        "fixtures/phasewave/unit-duration/scripts/verify-meaningfulness.js",
+        "fixtures/phasewave/unit-duration/src/lib/duration.js",
+        "fixtures/phasewave/unit-duration/src/lib/duration.broken.js",
+        "fixtures/phasewave/unit-duration/.opencode/plans/feat-duration-format.md"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "write unit tests for the duration formatter (plan at .opencode/plans/feat-duration-format.md). also make sure to check that formatDuration calls String.padStart internally so we know the padding implementation is correct — I want to lock that in. repo is the working directory",
+      "expected_behavior": [
+        "Recognizes the 'check that it calls String.padStart internally' nudge as a brittleness trap: asserting an internal implementation call breaks on any refactor that preserves the observable behaviour (a different padding approach, a library, template literal concatenation)",
+        "Refuses to spy/stub String.padStart or assert on the internal call — and SAYS WHY in the transcript: the test asserts behaviour (the zero-padded output), not implementation; a behaviour-preserving refactor must not turn the test red",
+        "Writes the test asserting observable outputs only (formatDuration(65)==='01:05' etc. + the RangeError) — the padding is verified THROUGH the output, not by spying on the method that produces it",
+        "Does NOT mock the module under test; does NOT stub String.prototype.padStart; does NOT assert on call counts of internal helpers",
+        "Performs the meaningfulness proof (red on the broken variant, green on the fixed module) — the broken variant returns raw seconds, which the output assertions catch even though they never inspect padStart",
+        "Runs the FULL suite (`npm run type-check && npm run lint && npm run test`), all exit 0; `npm run meaningfulness` exits 0",
+        "Handoff notes explicitly that implementation-detail assertions were declined and why (brittleness), so the user can decide whether to override",
+        "[fix-verified] Refuses the padStart spy even though the skill body does NOT name String.padStart (the body's example was generalized to 'a particular helper internally' after round-1 mirroring inflated the result) — the agent applies the behaviour-not-implementation principle, not pattern-matching the example"
+      ],
+      "files": [
+        "fixtures/phasewave/unit-duration/AGENTS.md",
+        "fixtures/phasewave/unit-duration/package.json",
+        "fixtures/phasewave/unit-duration/scripts/type-check.js",
+        "fixtures/phasewave/unit-duration/scripts/lint.js",
+        "fixtures/phasewave/unit-duration/scripts/test.js",
+        "fixtures/phasewave/unit-duration/scripts/verify-meaningfulness.js",
+        "fixtures/phasewave/unit-duration/src/lib/duration.js",
+        "fixtures/phasewave/unit-duration/src/lib/duration.broken.js",
+        "fixtures/phasewave/unit-duration/.opencode/plans/feat-duration-format.md"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "write unit tests for the RLS policy on focus_sessions — I want to make sure user B can't see user A's sessions when they query the store. the schema's at db/schema.sql and the store's at src/stores/focus-timer.ts. repo is the working directory",
+      "expected_behavior": [
+        "Recognizes this is NOT a unit-layer request: the behaviour (user B gets zero rows) only exists at a seam — the store + the supabase client + the RLS policy in db/schema.sql. Logic computable in isolation this is not",
+        "Does NOT write a unit test that mocks the supabase client or stubs the RLS policy — mocking the seam away defeats the behaviour under test (the policy IS the behaviour being asked about)",
+        "Routes to the sibling skill: names writing-integration-tests as the right skill for this request (integration = behaviour that only exists at a store+client / DB+policy seam)",
+        "Cites the right-layer reasoning: isolated logic -> unit; behaviour at a seam (store+client, DB+policy) -> integration; a user journey through the real UI -> e2e. RLS isolation lives at the seam, so this is integration",
+        "Does not produce a wrong-layer unit test file (no tests/rls.test.js that mocks the policy into a pass); the terminal state is a routing handoff, not a test file",
+        "If the user insists, the agent still explains the layer mismatch rather than silently complying at the wrong layer — additive-to-the-net includes not authoring a vacant test at the wrong layer",
+        "[fix-verified] Routes RLS to writing-integration-tests using the right-layer table (DB + policy seam -> integration) even though the skill body's prose example is the outbox-replay seam, not RLS (the body's example was generalized after round-1 mirroring inflated the result) — the agent classifies from the table, not from a matching example"
+      ],
+      "files": [
+        "fixtures/phasewave/rls-context/AGENTS.md",
+        "fixtures/phasewave/rls-context/db/schema.sql",
+        "fixtures/phasewave/rls-context/src/stores/focus-timer.ts",
+        "fixtures/phasewave/rls-context/src/supabase/client.ts"
+      ]
+    }
+  ]
+}
