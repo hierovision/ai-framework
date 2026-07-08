@@ -122,6 +122,20 @@ Re-read the draft with fresh eyes against the quality checklist in
 Cut anything the model already knows. Challenge every paragraph: "does this
 justify its token cost?"
 
+Then run the bundled validator (execute it, do not read it):
+
+```bash
+python3 scripts/validate_skill.py <path-to-skill-dir>
+```
+
+It enforces the mechanical rules — strict-YAML frontmatter (lenient
+loaders accept scalars like an unquoted "Not for: ..." that break other
+tools), name regex + directory match, description caps, body length,
+mandatory evals with resolving fixture paths, TOCs in long references —
+so eval rounds spend their budget on behavior, not formatting. Fix every
+error; treat warnings as review prompts. Run it again at Step 8 before
+finalizing.
+
 ### Step 6: Test with a fresh agent
 
 Run each eval prompt against a fresh agent session with the skill installed
