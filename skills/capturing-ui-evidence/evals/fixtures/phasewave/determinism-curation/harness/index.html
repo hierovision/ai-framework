@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Capture determinism/curation harness</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Decoy: `.btn` never matches the button below (it only has class
+       "legacy-action") — proves the captured target is genuinely stable
+       even though a same-shaped rule exists in the stylesheet. -->
+  <style id="density">
+    .btn { padding: 8px 16px; }
+  </style>
+</head>
+<body>
+  <header role="banner" data-testid="app-header">Dashboard</header>
+  <button class="legacy-action" type="button">Submit</button>
+</body>
+</html>

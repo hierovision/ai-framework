@@ -1,0 +1,9 @@
+/* Isolated button component harness. Exercised by the canned CDP data
+   in scripts/fake-chromium.mjs (padding overridden by the density block). */
+.btn {
+  padding: 16px 24px;
+  color: #ffffff;
+  background-color: #1976d2;
+  border-radius: 4px;
+  font-size: 14px;
+}

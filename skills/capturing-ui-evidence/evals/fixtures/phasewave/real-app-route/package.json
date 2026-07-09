@@ -1,0 +1,10 @@
+{
+  "name": "phasewave-capture-real-app-route",
+  "version": "0.8.0",
+  "private": true,
+  "scripts": {
+    "test": "node scripts/verify-capture.js",
+    "validate": "node scripts/validate-evidence.js",
+    "capture": "node scripts/capture-deferred.js"
+  }
+}

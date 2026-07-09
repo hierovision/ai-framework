@@ -1,0 +1,11 @@
+{
+  "name": "phasewave-capture-determinism-curation",
+  "version": "0.8.0",
+  "private": true,
+  "scripts": {
+    "test": "node scripts/verify-capture.js",
+    "validate": "node scripts/validate-evidence.js",
+    "determinism": "node scripts/check-determinism.js",
+    "capture": "node scripts/capture-deferred.js"
+  }
+}

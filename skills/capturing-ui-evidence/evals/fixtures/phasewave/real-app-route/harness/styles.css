@@ -1,0 +1,14 @@
+/* Phasewave capture harness — component styles.
+   Exercised by the canned CDP data in scripts/fake-chromium.mjs
+   (the matched-styles map must trace padding/color/background here). */
+.btn {
+  padding: 16px 24px;        /* line 5 — overridden by .card .btn in the theme block */
+  color: #ffffff;
+  background-color: #1976d2;
+  border-radius: 4px;
+  font-size: 14px;
+}
+.card {
+  padding: 16px;
+  background-color: #ffffff;
+}
