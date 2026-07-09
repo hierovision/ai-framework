@@ -1,0 +1,10 @@
+{
+  ".opencode/plans/feat-offline-queue.md": "083885e7a9076ba57fcdbd2fa4fc5d6c9e4a516a7886362432563a6ec2220da6",
+  "AGENTS.md": "34c62e4b75f5e5e99b23cb1b60ce0e285bf6035b13af86b7c75a42f6781f029a",
+  "change.diff": "48acf99e8bb78b52280580142f54ed3166b15f1fc61855795a0f559bc0e1198f",
+  "db/schema.sql": "21965bd50de0c9686e51ca7e3aaeaa485f42424591eee7013468a82136b7297e",
+  "src/lib/offline-queue.ts": "4b1e031cecee6b61ba3bc93ce967b3aa06ae3a111c48bf1725b1e9607e20ba65",
+  "src/stores/focus-timer.original.ts": "d007e153c83a683df280c909f83e277650572eb9f3f3d52169cd6b9926f74d2d",
+  "src/stores/focus-timer.ts": "658a31ed002d0a0ec8e2933700ae72710993bb5b14e25277d867024ad3840ed5",
+  "types/database.types.ts": "de491449f1da0f2cf17d60180e6d042750a6e44f2b20b8233680f3a0f1fedeea"
+}

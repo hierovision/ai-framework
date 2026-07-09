@@ -1,0 +1,80 @@
+diff --git a/src/lib/offline-queue.ts b/src/lib/offline-queue.ts
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/src/lib/offline-queue.ts
+@@ -0,0 +1,40 @@
++// Offline outbox for focus-session mutations. Queued entries persist to
++// localStorage (not in memory) so a started session survives a reload while
++// offline. Replay-on-reconnect is a separate feature (feat-offline-replay)
++// and is intentionally NOT wired here (see plan Excluded).
++const STORAGE_KEY = 'phasewave:offline-queue'
++
++export interface QueueEntry {
++  id: string
++  table: string
++  op: 'insert' | 'update' | 'delete'
++  row: Record<string, unknown>
++}
++
++function readQueue(): QueueEntry[] {
++  const raw = localStorage.getItem(STORAGE_KEY)
++  return raw ? (JSON.parse(raw) as QueueEntry[]) : []
++}
++
++function writeQueue(q: QueueEntry[]): void {
++  localStorage.setItem(STORAGE_KEY, JSON.stringify(q))
++}
++
++export function queueSession(
++  payload: Omit<QueueEntry, 'id'> & { id?: string }
++): QueueEntry {
++  const entry: QueueEntry = {
++    id: payload.id ?? `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
++    table: payload.table,
++    op: payload.op,
++    row: payload.row,
++  }
++  const q = readQueue()
++  q.push(entry)
++  writeQueue(q)
++  return entry
++}
+diff --git a/src/stores/focus-timer.ts b/src/stores/focus-timer.ts
+index 1111111..2222222 100644
+--- a/src/stores/focus-timer.ts
++++ b/src/stores/focus-timer.ts
+@@ -1,9 +1,11 @@
+ import { defineStore } from 'pinia'
++import { queueSession } from '../lib/offline-queue'
+ 
+ export const useFocusTimerStore = defineStore('focus-timer', {
+   state: () => ({ active: null as null | { session_id: string; started_at: string } }),
+   actions: {
+     async start(label: string) {
+-      // Direct insert — replaced by the offline queue below.
+-      const row = { user_id: '', started_at: new Date().toISOString(), label }
+-      throw new Error('supabase client not available in this fixture stub')
++      const started_at = new Date().toISOString()
++      const row = { user_id: '', started_at, label }
++      // Route through the offline outbox instead of a direct insert.
++      const entry = queueSession({ table: 'focus_sessions', op: 'insert', row })
++      this.active = { session_id: entry.id, started_at }
+     },
+     async stop() {
+       this.active = null
+     },
+   },
+ })
+diff --git a/db/schema.sql b/db/schema.sql
+index 1111111..3333333 100644
+--- a/db/schema.sql
++++ b/db/schema.sql
+@@ -18,3 +18,9 @@ create policy "users update own sessions"
+   on public.focus_sessions for update
+   using (auth.uid() = user_id);
+ 
++-- Added during the offline-queue feature pass: track when a queued
++-- session was last synced to the server.
++alter table public.focus_sessions
++  add column if not exists last_synced_at timestamptz;

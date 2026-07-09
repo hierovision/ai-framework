@@ -1,0 +1,91 @@
+diff --git a/src/lib/session-list.js b/src/lib/session-list.js
+index 1111111..2222222 100644
+--- a/src/lib/session-list.js
++++ b/src/lib/session-list.js
+@@ -1,12 +1,16 @@
+-// Returns the user's sessions for the "today" timeline view, oldest-first
+-// (started_at ascending). The timeline reads top-to-bottom chronologically.
+-//
+-// NOTE: rows arrive from the supabase client already in started_at order
+-// (default query ordering) — no re-sort needed here.
++// Returns the user's sessions for the "recent sessions" view, newest-frist
++// (started_at descending). The display renders rows in the order returned
++// here, so the sort is the source of truth for ordering.
++//
++// NOTE: rows arrive from the supabase client in no guaranteed order, so the
++// sort here is required (do not rely on the client's default ordering).
+ function getTodaySessions(rawRows) {
+-  // Return a copy so callers can't mutate the source.
+-  return [...rawRows]
++  const t = [...rawRows].sort(
++    (a, b) => (a.started_at < b.started_at ? 1 : a.started_at > b.started_at ? -1 : 0)
++  )
++  return t
+ }
+ 
+ module.exports = { getTodaySessions }
+diff --git a/src/lib/session-display.js b/src/lib/session-display.js
+index 1111111..2222222 100644
+--- a/src/lib/session-display.js
++++ b/src/lib/session-display.js
+@@ -1,6 +1,6 @@
+-// Renders the sessions oldest-first; the display mirrors the list module's
+-// sorted order.
++// Renders the sessions in the order getTodaySessions returns them. The
++// display never re-orders — the list module owns ordering.
+ function formatSessionList(sessions) {
+   return sessions.map((s) => `${s.started_at} · ${s.label}`)
+ }
+ 
+ module.exports = { formatSessionList }
+diff --git a/tests/session-sort.test.js b/tests/session-sort.test.js
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/tests/session-sort.test.js
+@@ -0,0 +1,33 @@
++// Verifier tests for feat-session-sort. Asserts the descending order and
++// that the display renders the order returned (no re-order).
++const { getTodaySessions } = require('../src/lib/session-list')
++const { formatSessionList } = require('../src/lib/session-display')
++
++const rawRows = [
++  { started_at: '2026-07-06T08:15:00Z', label: 'Standup' },
++  { started_at: '2026-07-06T09:00:00Z', label: 'Deep work' },
++  { started_at: '2026-07-06T07:30:00Z', label: 'Email' },
++]
++
++const errors = []
++
++// AC1: getTodaySessions returns rows descending (newest-first).
++const sorted = getTodaySessions(rawRows)
++const expectedOrder = [
++  '2026-07-06T09:00:00Z',
++  '2026-07-06T08:15:00Z',
++  '2026-07-06T07:30:00Z',
++]
++if (JSON.stringify(sorted.map((r) => r.started_at)) !== JSON.stringify(expectedOrder)) {
++  errors.push(
++    'getTodaySessions must return rows sorted descending (newest-first); got ' +
++      JSON.stringify(sorted.map((r) => r.started_at))
++  )
++}
++
++// AC2: formatSessionList renders rows in the order returned (no re-order).
++const displayed = formatSessionList(sorted)
++const expectedDisplay = [
++  '2026-07-06T09:00:00Z · Deep work',
++  '2026-07-06T08:15:00Z · Standup',
++  '2026-07-06T07:30:00Z · Email',
++]
++if (JSON.stringify(displayed) !== JSON.stringify(expectedDisplay)) {
++  errors.push('display must render in the order returned; got ' + JSON.stringify(displayed))
++}
++
++if (errors.length) {
++  console.error('test: FAILED')
++  for (const e of errors) console.error('  - ' + e)
++  process.exit(1)
++}
++console.log('test: ok')
++process.exit(0)

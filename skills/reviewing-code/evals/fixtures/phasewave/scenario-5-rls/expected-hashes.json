@@ -1,0 +1,8 @@
+{
+  ".opencode/plans/feat-shared-sessions.md": "e35949a40b23ea54057b38bc9efcab97e9f50ab5594efb28d7188da5f9a1fec7",
+  "AGENTS.md": "a06f25a13c0155f832f03bcbeb1f33b18f7d25c172d9d42cabb601802ac9dcb9",
+  "change.diff": "a58b591dd5ca4dbefe60fd47d78e4dce9bc01bf1448d5f3be1f719f8a040225c",
+  "db/schema.sql": "516f2c9d18505250f06e791ea6e4bf139fb24027a20efdeba31e81622914a909",
+  "src/stores/sessions.ts": "aab531ee8bc083f2a5b4b7cbe25328a77a05be48a9f22c0092fddf0f1a1ff707",
+  "types/database.types.ts": "e97c10ca3dd655232a61c8479ef02867aec66089329ba450e04fe5495778a006"
+}

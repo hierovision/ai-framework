@@ -1,0 +1,8 @@
+{
+  ".opencode/plans/feat-session-sort.md": "cf302261e1551f301cbd06ed2d5f88c6050452b64fc7b4ae7a6ac9193b0b3c05",
+  "AGENTS.md": "547c56c48234dcbad5cb3adec1d88cd44b70a60e208e2f74c2affacacb835e8a",
+  "change.diff": "5eeadb8a900efdfc95f1e29fda8cdd07c26f39d605cd39fc6cdba8f78d6834fb",
+  "src/lib/session-display.js": "5c03823661716e6226f11a04a3886e7565f88f106740e2993b95d9e6f45f8762",
+  "src/lib/session-list.js": "f3de7c1889ab412a704293493408e5655f0487cd3ddf84357fa10ceb419c4ac4",
+  "tests/session-sort.test.js": "85a90b97f27ef6438243cc4e8b4c5d4b939c598d38f58f2ba65de2accb6fa3d1"
+}

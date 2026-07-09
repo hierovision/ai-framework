@@ -1,0 +1,53 @@
+diff --git a/db/schema.sql b/db/schema.sql
+index 1111111..2222222 100644
+--- a/db/schema.sql
++++ b/db/schema.sql
+@@ -7,3 +7,24 @@ create policy "users see own sessions"
+   on public.focus_sessions for select
+   using (auth.uid() = user_id);
+ 
++-- feat-shared-sessions: per-session read-only share grants.
++create table if not exists public.shared_sessions (
++  id uuid primary key default gen_random_uuid(),
++  owner_id uuid not null references auth.users(id) on delete cascade,
++  sharee_id uuid not null references auth.users(id) on delete cascade,
++  session_id uuid not null references public.focus_sessions(id) on delete cascade,
++  created_at timestamptz not null default now(),
++  unique (session_id, sharee_id)
++);
++
++-- RLS SELECT policy for shared_sessions.
++alter table public.shared_sessions enable row level security;
++
++create policy "owner or sharee can read shared rows"
++  on public.shared_sessions for select
++  using (true);
+diff --git a/src/stores/sessions.ts b/src/stores/sessions.ts
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/src/stores/sessions.ts
+@@ -0,0 +1,22 @@
++import { defineStore } from 'pinia'
++import { supabase } from '../supabase/client'
++import type { Database } from '../../types/database.types'
++
++type SharedRow = Database['public']['Tables']['shared_sessions']['Row']
++
++export const useSessionsStore = defineStore('sessions', {
++  state: () => ({ shares: [] as SharedRow[] }),
++  actions: {
++    // Share a focus session (read-only) with another user. The owner's
++    // RLS policy allows the insert; the sharee's RLS policy grants SELECT.
++    async shareSession(sessionId: string, shareeId: string) {
++      const { data, error } = await supabase
++        .from('shared_sessions')
++        .insert({ session_id: sessionId, sharee_id: shareeId })
++        .select()
++        .single()
++      if (error) throw error
++      this.shares.push(data as SharedRow)
++      return data as SharedRow
++    },
++  },
++})

@@ -1,0 +1,22 @@
+diff --git a/src/lib/session-list.js b/src/lib/session-list.js
+index 1111111..2222222 100644
+--- a/src/lib/session-list.js
++++ b/src/lib/session-list.js
+@@ -1,9 +1,8 @@
+-// Returns the user's sessions for the "today" timeline view, oldest-first
+-// (started_at ascending). The timeline reads top-to-bottom chronologically.
+-//
+-// NOTE: rows arrive from the supabase client already in started_at order
+-// (default query ordering) — no re-sort needed here.
++// Returns the user's sessions for the "recent sessions" view, newest-first
++// (started_at descending), as Acceptance Criterion 1 of feat-session-sort
++// specifies. The display renders rows in the order returned here.
+ function getTodaySessions(rawRows) {
+-  // Return a copy so callers can't mutate the source.
+-  return [...rawRows]
++  return [...rawRows].sort(
++    (a, b) => (a.started_at < b.started_at ? 1 : a.started_at > b.started_at ? -1 : 0)
++  )
+ }
+ 
+ module.exports = { getTodaySessions }
