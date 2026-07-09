@@ -111,6 +111,21 @@ The key value comes from a CDP session (`CSS.getMatchedStylesForNode` +
 `CSS.getComputedStyleForNode` + `CSS.getInlineStylesForNode`) the harness
 opens; the agent never touches it directly.
 
+**Dependency resolution (do this before invoking).** `capture.mjs` does
+`await import('playwright')`, which ESM resolves from the script's own
+location. When the skill is installed globally (symlinked into
+`~/.config/opencode/skills/`), that location is NOT the project, so a
+project-local `playwright` will not be found and the harness exits
+without writing an artifact. Ensure `playwright` is resolvable from the
+run — the reliable options, in order: (a) run with the project's modules
+on the path, `NODE_PATH=<project>/node_modules node .../capture.mjs …`;
+(b) if the skill dir is writable, install `playwright` there once; (c)
+copy `capture.mjs` into the project and run it from the project root. If
+the harness errors with `Cannot find package 'playwright'`, this is the
+cause — it is a resolution gap, not a capture failure. When only a cached
+chromium (not the pinned build) exists, also set
+`CAPTURE_CHROMIUM_EXECUTABLE=<path/to/chrome>` (Step 4).
+
 ### Step 4 — Objective closure
 
 A capture pass closes on objective signals, never on "looks captured".
