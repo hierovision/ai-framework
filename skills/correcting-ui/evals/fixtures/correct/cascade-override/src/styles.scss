@@ -1,0 +1,10 @@
+/* Halcyon qty stepper — component styles. EDIT THIS if the matched-styles
+ * winner is the component's own rule; it is NOT here (winner is in theme.scss).
+ * Naive-from-screenshot edits land here and change nothing. */
+@use 'tokens.scss' as *;                          /* line 0 */
+
+.qty-stepper {                                   /* line 5 */
+  display: inline-flex;
+  gap: $spacing-md;
+  color: $text-primary;                           /* line 8 — OVERRIDDEN by theme */
+}

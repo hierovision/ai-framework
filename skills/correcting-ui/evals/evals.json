@@ -1,0 +1,174 @@
+{
+  "skill_name": "correcting-ui",
+  "notes": "Round 1 eval loop (2026-07-09) — durable record; /tmp reports are lost to cleanup between sessions so these notes ARE the regression net.\n\nWITH-SKILL subagents (fresh sessions, disk-read SKILL.md; skill symlinked/global install): cascade-override (id 2), regression-guard (id 4), route-to-design (id 5), adherence-trap (id 3) ALL closed exit 0 on the FIRST attempt — followed the workflow: gated on schema_version, read matched_styles.winner (targeted the .v-theme--light winner for the cascade, not the element own rule), snapped to the token ($spacing-md / $radius-lg / $text-primary), kept specificity flat, no new !important, scoped to the fix target (sibling + shared parent untouched), wrote the route-to-design handoff for the broad restyle (zero source edits), and DEFERRED vision honestly. [fix-verified]\n\nNO-SKILL BASELINE subagents (same prompts, no skill): cascade-override, regression-guard, route-to-design, adherence-trap, perceptual-residue ALSO ALL closed exit 0 — they read the fixture AGENTS.md + the matched-styles artifact and produced compliant corrections. HONEST FINDING (do not greenwash it): the with-skill vs no-skill DELTA is structurally SMALL for this skill BY ARCHITECTURE DESIGN — correcting-ui's load-bearing intelligence lives in (a) the capturing-ui-evidence matched-styles artifact (which the baseline can also read — it removes the guess for everyone) and (b) the project AGENTS.md + the existing tokenized source (the natural edit stays in tokens, so the magic-px/!important baits are not taken by any competent agent). The skill's marginal value is the EXECUTION DISCIPLINE (forced schema gate, adherence gate, regression guard, route-to-design boundary, vision deferral, handoff) — proven failable below — not fix-site discovery.\n\nTHE PROVEN DIFFERENTIATORS are the FAILABLE gates, not the with-skill/no-skill pass-rate: (1) pristine-baseline sweep — every scenario's `npm run test` exits NON-zero on the unedited defective fixture (all 6 confirmed exit 1); (2) curated wrong-fix sources are REJECTED — measurable-padding wrong.styles.scss (magic px) and cascade-override wrong.styles.scss (!important) and adherence-trap wrong-magicpx.styles.scss (magic px) + wrong-important.styles.scss (!important) all exit NON-zero via check-adherence.js; (3) the compare regression guard TRIPS — regression-guard after-bad-evidence.json (target delta achieved BUT .sidebar bbox shifted) exits NON-zero via compare-evidence.js (proving the guard catches what adherence alone cannot — wrong.styles.scss there is all-tokens and PASSES adherence); (4) route-to-design verify FAILS if src/styles.scss is edited OR route-to-design.txt missing; (5) perceptual-residue verify FAILS if vision-residue.txt missing (self-sign-off blocked). Each gate is a [fix-verified] assertion in the relevant scenario's expected_behavior. So: re-run with-skill vs no-skill for regression on the CLOSE behavior; re-run the FAILABLE sweep on every skill edit — that is the real regression net. The small pass-rate delta is a property of the architecture (intelligence in artifact + rules file), NOT a skill defect.\n\nREAL-BROWSER + VISION DEFERRAL — extends the capturing-ui-evidence / writing-e2e-tests deferral precedent: a real browser (Playwright/chromium runtime) AND a vision-capable model are NOT available in this eval harness, so the loop's re-capture is replaced by a CANNED re-capture (evidence/after-*-evidence.json) that represents the deterministic outcome of a correct/wrong fix, and the vision-critic pass is DEFERRED. The OBJECTIVE check is `npm run test` (scripts/verify-correct.js), which proves (a) the candidate's source edit adheres via the bundled check-adherence.js, (b) the candidate targeted the matched-styles WINNING rule, (c) the objective computed/geometry delta closes AND the regression guard holds via the bundled compare-evidence.js, and (d) the failable gates FAIL on the curated wrong-fix sources. The compare gates on schema_version and STOPS on drift (evidence-schema.md contract). Where a chromium IS reachable, realize the otherwise-deferred real re-capture via capturing-ui-evidence's harness + CAPTURE_CHROMIUM_EXECUTABLE; where a vision model IS reachable, send the perceptual residue (id 6) to vision-critic-fast for real instead of deferring — both documented, never silently skipped.\n\nRUN PROTOCOL: copy evals/fixtures/correct/<scenario>/ into a fresh temp working dir per run (agents must NEVER write into evals/fixtures/ source); set CORRECT_SKILL_DIR=<repo>/skills/correcting-ui when running `npm test`/the bundled scripts from the temp dir (the verify scripts resolve the skill via env, ~/.config symlink, or repo-relative path). Grade by repo state + verifier exit + transcript; never the author's own memory.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "the .info-card looks cramped — its content clips. captured evidence is in evidence/baseline-evidence.json (matched-styles map + computed CSS for .info-card and .info-card-aside). fix it. stack's vue-supabase, repo's the working dir. the captured padding is the $spacing-sm scale and the design wants the md scale.",
+      "expected_behavior": [
+        "Reads AGENTS.md — detects stack vue-supabase and loads the matching CSS-system reference (references/systems/vuetify-scss.md) before editing",
+        "Gates on schema_version (1.0) of evidence/baseline-evidence.json — stops if drift; does not guess the artifact's shape",
+        "Triangulates the FOUR sources: the screenshot intent (cramped/clips), the computed CSS (padding-* = 8px), the matched-styles map (winner .info-card at styles.scss line 6, NOT a guess), and the source — names a SOURCE RULE as the root cause, not a CSS-from-prose guess",
+        "Detects the CSS system (Vuetify + SCSS variables) from the rules file + the *.scss conventions + the $spacing-* tokens; edits adhering to it (snaps padding to $spacing-md, NOT a magic px)",
+        "Invokes the bundled scripts/check-adherence.js on the edited src/styles.scss vs src/baseline.styles.scss — exits 0 (no specificity raise, no new !important, no magic px, naming ok)",
+        "Invokes the bundled scripts/compare-evidence.js on baseline vs a correct re-capture — exits 0 (padding-* -> 16px delta achieved, .info-card-aside regression guard clean)",
+        "Where no real browser is available: runs `npm run test` and it exits 0; documents real re-capture as DEFERRED (not silently skipped)",
+        "Where a chromium IS reachable: realizes the deferred real re-capture via capturing-ui-evidence's harness + CAPTURE_CHROMIUM_EXECUTABLE and re-runs compare-evidence on the live artifact",
+        "Reports the handoff (files + rules changed, the objective before/after deltas, regression-guard clean, adherence green, vision verdict or deferral, manual validation steps, follow-ups) and STOPs; does NOT commit unless asked",
+        "[fix-verified] the failable adherence gate REJECTS a magic-px fix (src/wrong.styles.scss) — confirmed exit non-zero; the verifier only greens when the candidate snaps to $spacing-md"
+      ],
+      "files": [
+        "fixtures/correct/measurable-padding/AGENTS.md",
+        "fixtures/correct/measurable-padding/package.json",
+        "fixtures/correct/measurable-padding/tokens.json",
+        "fixtures/correct/measurable-padding/src/tokens.scss",
+        "fixtures/correct/measurable-padding/src/baseline.styles.scss",
+        "fixtures/correct/measurable-padding/src/styles.scss",
+        "fixtures/correct/measurable-padding/src/wrong.styles.scss",
+        "fixtures/correct/measurable-padding/evidence/baseline-evidence.json",
+        "fixtures/correct/measurable-padding/evidence/after-good-evidence.json",
+        "fixtures/correct/measurable-padding/scripts/verify-correct.js",
+        "fixtures/correct/measurable-padding/scripts/capture-deferred.js"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "the quantity-stepper text on the dashboard reads washed out / too light — should be the readable text color. captured evidence is in evidence/baseline-evidence.json. fix it. stack vue-supabase, repo's the working dir.",
+      "expected_behavior": [
+        "Gates on schema_version (1.0); reads the matched-styles map and finds the `color` WINNER is `.v-theme--light .qty-stepper` in src/theme.scss (line 9), with `.qty-stepper`'s own rule in the `overridden` chain — NOT the obvious element rule guessed from the screenshot",
+        "Targets the WINNER (edits src/theme.scss `.v-theme--light .qty-stepper`), NOT the overridden own rule in src/styles.scss — the discriminating move the matched-styles map exists for",
+        "Snaps the color to the $text-primary token; keeps specificity flat (still two class hooks — no raise), adds no new !important",
+        "Invokes check-adherence.js on the edited theme.scss vs baseline.theme.scss — exits 0",
+        "Invokes compare-evidence.js on baseline vs after-good-evidence.json --expect color=#1f1f1f — exits 0",
+        "[fix-verified] the compare-evidence.js run on evidence/after-bad-evidence.json (a naive fix at the OVERRIDDEN rule whose computed color stayed #6b6b6b) exits NON-zero — proving a naive-from-screenshot fix leaves the computed value unchanged, the discriminating failure the cascade map prevents",
+        "[fix-verified] the adherence gate REJECTS an !important force-win on the overridden rule (src/wrong.styles.scss) — exit non-zero; never win the cascade by weakening",
+        "Where no real browser is available: runs `npm run test` and it exits 0; documents real re-capture as DEFERRED",
+        "Reports the handoff naming the winning rule + the overridden chain, the objective delta, the deferred/realized real re-capture, manual validation steps, follow-ups; STOPs; does NOT commit unless asked"
+      ],
+      "files": [
+        "fixtures/correct/cascade-override/AGENTS.md",
+        "fixtures/correct/cascade-override/package.json",
+        "fixtures/correct/cascade-override/tokens.json",
+        "fixtures/correct/cascade-override/src/tokens.scss",
+        "fixtures/correct/cascade-override/src/baseline.styles.scss",
+        "fixtures/correct/cascade-override/src/styles.scss",
+        "fixtures/correct/cascade-override/src/baseline.theme.scss",
+        "fixtures/correct/cascade-override/src/theme.scss",
+        "fixtures/correct/cascade-override/src/wrong.styles.scss",
+        "fixtures/correct/cascade-override/evidence/baseline-evidence.json",
+        "fixtures/correct/cascade-override/evidence/after-good-evidence.json",
+        "fixtures/correct/cascade-override/evidence/after-bad-evidence.json",
+        "fixtures/correct/cascade-override/scripts/verify-correct.js",
+        "fixtures/correct/cascade-override/scripts/capture-deferred.js"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "make the .tag chip pill-ier — the captured border-radius is at the md radius scale (8px), design wants the lg scale (12px). evidence/baseline-evidence.json. fix it but don't hack the cascade to win. stack vue-supabase, repo's the working dir.",
+      "expected_behavior": [
+        "Reads matched-styles — winner is .tag at styles.scss line 6; a scoped correction proceeds (no plan needed — trivial-change exemption)",
+        "Snaps border-radius to the $radius-lg token; keeps specificity flat; adds no new !important",
+        "Invokes check-adherence.js on the edited src/styles.scss vs baseline.styles.scss — exits 0",
+        "Invokes compare-evidence.js baseline vs after-good-evidence.json --expect border-radius=12px — exits 0",
+        "[fix-verified] the adherence gate REJECTS a magic-px 'fix' (src/wrong-magicpx.styles.scss, border-radius 12px) — exit non-zero (the system has a $radius-lg token; a bare px defeats the scale and is not self-documenting)",
+        "[fix-verified] the adherence gate REJECTS a !important force-win (src/wrong-important.styles.scss) — exit non-zero (a 'win' that weakens the system is a blocker — route to design if force is needed)",
+        "Where no real browser is available: runs `npm run test` and it exits 0; documents real re-capture as DEFERRED",
+        "Reports handoff + STOPs; does NOT commit unless asked"
+      ],
+      "files": [
+        "fixtures/correct/adherence-trap/AGENTS.md",
+        "fixtures/correct/adherence-trap/package.json",
+        "fixtures/correct/adherence-trap/tokens.json",
+        "fixtures/correct/adherence-trap/src/tokens.scss",
+        "fixtures/correct/adherence-trap/src/baseline.styles.scss",
+        "fixtures/correct/adherence-trap/src/styles.scss",
+        "fixtures/correct/adherence-trap/src/wrong-magicpx.styles.scss",
+        "fixtures/correct/adherence-trap/src/wrong-important.styles.scss",
+        "fixtures/correct/adherence-trap/evidence/baseline-evidence.json",
+        "fixtures/correct/adherence-trap/evidence/after-good-evidence.json",
+        "fixtures/correct/adherence-trap/scripts/verify-correct.js",
+        "fixtures/correct/adherence-trap/scripts/capture-deferred.js"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "the .hero looks cramped — bump its padding. but make sure you don't knock the .sidebar next to it out of place. evidence/baseline-evidence.json has both captured. stack vue-supabase, repo's the working dir.",
+      "expected_behavior": [
+        "Triangulates: .hero is the fix target; .sidebar is a SIBLING whose bbox + computed must not shift (the regression guard)",
+        "Scopes the fix to .hero padding only — does NOT touch .sidebar or the shared .layout parent (edits there would shift the sibling)",
+        "Snaps .hero padding to $spacing-md; flat specificity; no new !important",
+        "Invokes check-adherence.js on the edited src/styles.scss — exits 0",
+        "Invokes compare-evidence.js baseline vs after-good-evidence.json --target css:.hero --expect padding-top=16px (and -bottom) — exits 0 (target delta achieved AND .sidebar bbox+computed byte-equal)",
+        "[fix-verified] the compare-evidence.js run on evidence/after-bad-evidence.json (a fix that hits the .hero target delta BUT shifts .sidebar's bbox) exits NON-zero — regression GUARD TRIPPED even though the target delta was achieved; not closure",
+        "[fix-verified] the wrong fix passes the adherence gate (every value a token) yet is caught ONLY by the regression guard — confirming adherence alone cannot catch a sibling shift (the teaching point)",
+        "Where no real browser is available: runs `npm run test` and it exits 0; documents real re-capture as DEFERRED",
+        "Reports handoff including the regression-guard result; STOPs; does NOT commit unless asked"
+      ],
+      "files": [
+        "fixtures/correct/regression-guard/AGENTS.md",
+        "fixtures/correct/regression-guard/package.json",
+        "fixtures/correct/regression-guard/tokens.json",
+        "fixtures/correct/regression-guard/src/tokens.scss",
+        "fixtures/correct/regression-guard/src/baseline.styles.scss",
+        "fixtures/correct/regression-guard/src/styles.scss",
+        "fixtures/correct/regression-guard/src/wrong.styles.scss",
+        "fixtures/correct/regression-guard/evidence/baseline-evidence.json",
+        "fixtures/correct/regression-guard/evidence/after-good-evidence.json",
+        "fixtures/correct/regression-guard/evidence/after-bad-evidence.json",
+        "fixtures/correct/regression-guard/scripts/verify-correct.js",
+        "fixtures/correct/regression-guard/scripts/capture-deferred.js"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "redesign the whole hero section — make it modern. the hero, the illustration block, the meta row, the action bar all need work. evidence/baseline-evidence.json. repo's the working dir, stack vue-supabase.",
+      "expected_behavior": [
+        "Recognizes the request is a broad, multi-surface visual RESTYLE, not a single correction — the implement-class boundary",
+        "Does NOT capture-and-fix; does NOT edit src/styles.scss (zero sprawl — source stays rule-identical to baseline.styles.scss)",
+        "Cites the boundary: no plan needed for a genuine single correction; a broad visual overhaul needs a plan first; routes to designing-architecture",
+        "Writes the route handoff as one line to route-to-design.txt naming designing-architecture (the project's closure artifact for this slice)",
+        "Records any out-of-scope urges as follow-ups; does not silently restyle",
+        "Where no real browser is available: runs `npm run test` and it exits 0 (source byte-identical + marker present); documents real re-capture as not-applicable (no edit to verify)",
+        "[fix-verified] `npm run test` FAILS if src/styles.scss was edited OR if route-to-design.txt is missing/wrong — confirming the route-to-design contract is failable"
+      ],
+      "files": [
+        "fixtures/correct/route-to-design/AGENTS.md",
+        "fixtures/correct/route-to-design/package.json",
+        "fixtures/correct/route-to-design/src/tokens.scss",
+        "fixtures/correct/route-to-design/src/baseline.styles.scss",
+        "fixtures/correct/route-to-design/src/styles.scss",
+        "fixtures/correct/route-to-design/scripts/verify-correct.js",
+        "fixtures/correct/route-to-design/scripts/capture-deferred.js"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "the .summary-list feels cramped — give it some room. evidence/baseline-evidence.json. i can't tell exactly what's off, it just feels tight. stack vue-supabase, repo's the working dir.",
+      "expected_behavior": [
+        "Decomposes the perceptual complaint ('feels cramped') into MEASURABLE proxies (the density knobs: gap, padding, line-height) — the spacing/density scale a 'cramped' judgement rides on",
+        "Applies a within-system density easing — snaps gap and padding up one scale step to $spacing-md and line-height to $line-comfortable; no magic px, no new !important, flat specificity",
+        "Invokes check-adherence.js on the edited src/styles.scss — exits 0",
+        "Invokes compare-evidence.js baseline vs after-good-evidence.json --expect gap=16px --expect padding-top=16px --expect line-height=1.7 — exits 0 (the proxies closed objectively)",
+        "Sends the genuinely perceptual RESIDUE ('does it breathe now?') to the vision-critic-fast role — referencing the ROLE not a model ID",
+        "Records the residue handoff as one line to vision-residue.txt naming vision-critic-fast + a DEFERRED status where no vision model is available — NEVER self-signs-off the residue",
+        "[fix-verified] a magic-px fix on the proxies (src/wrong.styles.scss) is REJECTED by the adherence gate — exit non-zero; the proxies are measurable and snap to tokens",
+        "[fix-verified] `npm run test` FAILS if vision-residue.txt is missing — confirming the perceptual residue is not silently self-signed-off",
+        "Where no real browser / no vision model is available: runs `npm run test` and it exits 0; documents real re-capture + vision-critic pass as DEFERRED (honest, not silent)",
+        "Reports handoff including the deferred vision verdict + manual (human-eye) validation steps; STOPs; does NOT commit unless asked"
+      ],
+      "files": [
+        "fixtures/correct/perceptual-residue/AGENTS.md",
+        "fixtures/correct/perceptual-residue/package.json",
+        "fixtures/correct/perceptual-residue/tokens.json",
+        "fixtures/correct/perceptual-residue/src/tokens.scss",
+        "fixtures/correct/perceptual-residue/src/baseline.styles.scss",
+        "fixtures/correct/perceptual-residue/src/styles.scss",
+        "fixtures/correct/perceptual-residue/src/wrong.styles.scss",
+        "fixtures/correct/perceptual-residue/evidence/baseline-evidence.json",
+        "fixtures/correct/perceptual-residue/evidence/after-good-evidence.json",
+        "fixtures/correct/perceptual-residue/scripts/verify-correct.js",
+        "fixtures/correct/perceptual-residue/scripts/capture-deferred.js"
+      ]
+    }
+  ]
+}

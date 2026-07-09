@@ -1,0 +1,14 @@
+/* Halcyon card surface — EDIT THIS FILE to correct the cramped .info-card.
+ * The verifier diffs your edit against baseline.styles.scss. */
+@use 'tokens.scss' as *;                          /* line 0 */
+
+.info-card {                                      /* line 5 */
+  padding: $spacing-sm;                           /* line 6 — the fixed line */
+  border-radius: $radius-md;
+  background-color: #ffffff;
+}
+
+.info-card-aside {                                /* a sibling — must NOT shift */
+  padding: $spacing-md;
+  border-radius: $radius-sm;
+}

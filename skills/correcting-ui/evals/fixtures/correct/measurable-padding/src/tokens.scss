@@ -1,0 +1,12 @@
+// Halcyon design tokens (SCSS variables). A correction snaps track values to
+// these instead of a magic px. The adherence checker reads tokens.json, which
+// maps each track property to the named tokens the SCSS defines here.
+$spacing-xs: 4px;
+$spacing-sm: 8px;
+$spacing-md: 16px;
+$spacing-lg: 24px;
+$radius-sm: 4px;
+$radius-md: 8px;
+$radius-lg: 12px;
+$font-body: 14px;
+$font-title: 18px;

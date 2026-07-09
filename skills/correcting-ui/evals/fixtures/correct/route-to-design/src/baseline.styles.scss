@@ -1,0 +1,25 @@
+/* Halcyon hero section — baseline. The request is to "redesign the whole
+ * hero — modernize it" across .hero, .hero-card, .hero-meta, .hero-actions.
+ * That is a broad multi-surface restyle, not a single correction. */
+@use 'tokens.scss' as *;
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.hero-card {
+  padding: $spacing-md;
+  border-radius: $radius-md;
+}
+
+.hero-meta {
+  display: flex;
+  gap: $spacing-sm;
+}
+
+.hero-actions {
+  display: flex;
+  gap: $spacing-sm;
+}

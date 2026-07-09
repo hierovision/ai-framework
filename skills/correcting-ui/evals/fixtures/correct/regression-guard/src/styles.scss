@@ -1,0 +1,20 @@
+/* Halcyon layout — EDIT THIS FILE. Fix .hero padding (sm -> md). Do NOT touch
+ * .sidebar or .layout — they are siblings/shared; shifting .sidebar is a
+ * regression the guard catches even when the target delta is achieved. */
+@use 'tokens.scss' as *;                          /* line 0 */
+
+.layout {                                         /* line 5 — shared parent; leave alone */
+  display: flex;
+  align-items: flex-start;
+  gap: $spacing-md;
+}
+
+.hero {                                           /* line 11 — the fix target */
+  padding: $spacing-sm;                         /* line 12 — the fixed line (sm -> md) */
+  border-radius: $radius-md;
+}
+
+.sidebar {                                        /* line 16 — a SIBLING; must NOT shift */
+  padding: $spacing-md;
+  border-radius: $radius-md;
+}

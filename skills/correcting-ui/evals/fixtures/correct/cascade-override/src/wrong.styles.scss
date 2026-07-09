@@ -1,0 +1,11 @@
+/* The naive-from-screenshot fix: edit the element's OWN rule and force it with
+ * !important to win the cascade. The adherence checker REJECTS this — a raw
+ * !important to win the cascade is the cardinal-rule violation. The correct
+ * fix targets the matched-styles winner (theme.scss) and snaps to a token. */
+@use 'tokens.scss' as *;
+
+.qty-stepper {
+  display: inline-flex;
+  gap: $spacing-md;
+  color: $text-primary !important;
+}

@@ -1,0 +1,10 @@
+/* Halcyon tag chip — baseline (border-radius at the md scale; design wants lg).
+ * .tag { border-radius: $radius-md } is the rule matched-styles pins (line 6).
+ * The candidate edits styles.scss; the verifier diffs it against this copy. */
+@use 'tokens.scss' as *;                          /* line 0 */
+
+.tag {                                            /* line 5 */
+  border-radius: $radius-md;                      /* line 6 — the fixed line */
+  padding: $spacing-xs $spacing-sm;
+  background-color: #f5f5f5;
+}

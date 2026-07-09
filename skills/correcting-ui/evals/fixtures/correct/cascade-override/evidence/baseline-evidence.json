@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "capture_meta": {
+    "mode": "component",
+    "target": "harness/index.html",
+    "route": null,
+    "viewports": ["1280x720"],
+    "selectors": ["css:.qty-stepper"],
+    "profile": "curated",
+    "name": "halcyon-cascade",
+    "auth_fixture_used": false,
+    "device_scale_factor": 1,
+    "animations_disabled": true,
+    "capture_clock": 0,
+    "inventory": "1 selector x 1 viewport, curated, 1 screenshot"
+  },
+  "entries": [
+    {
+      "selector_spec": "css:.qty-stepper",
+      "target_kind": "css",
+      "fragile": true,
+      "viewport": { "width": 1280, "height": 720 },
+      "bbox": { "x": 24, "y": 120, "width": 200, "height": 40 },
+      "screenshots": { "full": "full-1280.png", "clip": "clip-qty-stepper-1280.png" },
+      "profile": "curated",
+      "computed": {
+        "display": "inline-flex",
+        "gap": "16px",
+        "color": "#6b6b6b",
+        "font-size": "14px"
+      },
+      "matched_styles": {
+        "color": {
+          "winner": { "selector": ".v-theme--light .qty-stepper", "source_url": "theme.scss", "line": 9, "column": 2, "value": "$text-muted", "important": false, "origin": "author" },
+          "overridden": [ { "selector": ".qty-stepper", "source_url": "styles.scss", "line": 8, "column": 2, "value": "$text-primary", "important": false, "origin": "author" } ],
+          "inherited_or_initial": false
+        },
+        "display": {
+          "winner": { "selector": ".qty-stepper", "source_url": "styles.scss", "line": 6, "column": 2, "value": "inline-flex", "important": false, "origin": "author" },
+          "overridden": [],
+          "inherited_or_initial": false
+        },
+        "gap": {
+          "winner": { "selector": ".qty-stepper", "source_url": "styles.scss", "line": 7, "column": 2, "value": "$spacing-md", "important": false, "origin": "author" },
+          "overridden": [],
+          "inherited_or_initial": false
+        },
+        "font-size": { "winner": null, "overridden": [], "inherited_or_initial": true }
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+/* WRONG fix — hits the target (.hero padding -> $spacing-md) BUT ALSO bumps the
+ * shared `.layout` gap to $spacing-lg, which shifts the sibling `.sidebar`
+ * bbox to the right. The target delta is achieved; the regression guard
+ * catches the sibling shift — this is NOT closure. Adherence alone is GREEN
+ * here (every value is a token); only the regression guard catches it. */
+@use 'tokens.scss' as *;
+
+.layout {
+  display: flex;
+  align-items: flex-start;
+  gap: $spacing-lg;
+}
+
+.hero {
+  padding: $spacing-md;
+  border-radius: $radius-md;
+}
+
+.sidebar {
+  padding: $spacing-md;
+  border-radius: $radius-md;
+}

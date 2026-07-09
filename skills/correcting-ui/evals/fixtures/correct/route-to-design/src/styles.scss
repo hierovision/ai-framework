@@ -1,0 +1,26 @@
+/* Halcyon hero section — editable copy. The correct response to a "redesign
+ * the whole hero" request routes to designing-architecture and leaves this
+ * file byte-identical to baseline.styles.scss. EDITING THIS for a broad
+ * restyle is out of scope for correcting-ui. */
+@use 'tokens.scss' as *;
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.hero-card {
+  padding: $spacing-md;
+  border-radius: $radius-md;
+}
+
+.hero-meta {
+  display: flex;
+  gap: $spacing-sm;
+}
+
+.hero-actions {
+  display: flex;
+  gap: $spacing-sm;
+}

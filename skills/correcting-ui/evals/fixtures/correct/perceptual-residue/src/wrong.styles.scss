@@ -1,0 +1,12 @@
+/* WRONG — magic px on the density proxies. The proxies are measurable, so a
+ * magic px here both weakens the system (the spacing/line scales exist) AND
+ * would be caught by the adherence gate. The skill snaps to tokens instead. */
+@use 'tokens.scss' as *;
+
+.summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  line-height: 1.7;
+}

@@ -1,0 +1,10 @@
+/* WRONG fix B — !important force-win. Beats any competing rule by force; the
+ * adherence verifier rejects a new !important (never win the cascade by
+ * weakening). */
+@use 'tokens.scss' as *;
+
+.tag {
+  border-radius: $radius-lg !important;
+  padding: $spacing-xs $spacing-sm;
+  background-color: #f5f5f5;
+}

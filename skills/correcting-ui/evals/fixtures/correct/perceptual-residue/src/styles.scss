@@ -1,0 +1,14 @@
+/* Halcyon summary list — EDIT THIS FILE. "Feels cramped" — decompose into the
+ * density proxies (gap, padding, line-height) and ease each up one scale step
+ * to the md/comfortable tokens. The genuinely perceptual RESIDUE ("does it
+ * breathe now?") goes to the vision-critic-fast role — DEFERRED where no
+ * vision model is available; never self-signed-off. */
+@use 'tokens.scss' as *;                          /* line 0 */
+
+.summary-list {                                   /* line 5 — the fix target */
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;                               /* line 8 — cramped gap */
+  padding: $spacing-sm;                          /* line 9 — cramped padding */
+  line-height: $line-body;                       /* line 10 — body ratio */
+}

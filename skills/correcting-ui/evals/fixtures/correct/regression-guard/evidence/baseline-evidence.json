@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "capture_meta": {
+    "mode": "component",
+    "target": "harness/index.html",
+    "route": null,
+    "viewports": ["1280x720"],
+    "selectors": ["css:.hero", "css:.sidebar"],
+    "profile": "curated",
+    "name": "halcyon-regression",
+    "auth_fixture_used": false,
+    "device_scale_factor": 1,
+    "animations_disabled": true,
+    "capture_clock": 0,
+    "inventory": "2 selectors x 1 viewport, curated, 2 screenshots"
+  },
+  "entries": [
+    {
+      "selector_spec": "css:.hero",
+      "target_kind": "css",
+      "fragile": true,
+      "viewport": { "width": 1280, "height": 720 },
+      "bbox": { "x": 24, "y": 80, "width": 600, "height": 80 },
+      "screenshots": { "full": "full-1280.png", "clip": "clip-hero-1280.png" },
+      "profile": "curated",
+      "computed": {
+        "box-sizing": "border-box",
+        "display": "flex",
+        "width": "600px",
+        "height": "80px",
+        "padding-top": "8px",
+        "padding-right": "8px",
+        "padding-bottom": "8px",
+        "padding-left": "8px",
+        "border-radius": "8px"
+      },
+      "matched_styles": {
+        "padding-top": { "winner": { "selector": ".hero", "source_url": "styles.scss", "line": 12, "column": 2, "value": "$spacing-sm", "important": false, "origin": "author", "shorthand": "padding" }, "overridden": [], "inherited_or_initial": false },
+        "padding-bottom": { "winner": { "selector": ".hero", "source_url": "styles.scss", "line": 12, "column": 2, "value": "$spacing-sm", "important": false, "origin": "author", "shorthand": "padding" }, "overridden": [], "inherited_or_initial": false },
+        "border-radius": { "winner": { "selector": ".hero", "source_url": "styles.scss", "line": 13, "column": 2, "value": "$radius-md", "important": false, "origin": "author" }, "overridden": [], "inherited_or_initial": false },
+        "display": { "winner": { "selector": ".layout", "source_url": "styles.scss", "line": 6, "column": 2, "value": "flex", "important": false, "origin": "author" }, "overridden": [], "inherited_or_initial": false }
+      }
+    },
+    {
+      "selector_spec": "css:.sidebar",
+      "target_kind": "css",
+      "fragile": true,
+      "viewport": { "width": 1280, "height": 720 },
+      "bbox": { "x": 640, "y": 80, "width": 280, "height": 80 },
+      "screenshots": { "full": "full-1280.png", "clip": "clip-sidebar-1280.png" },
+      "profile": "curated",
+      "computed": {
+        "box-sizing": "border-box",
+        "width": "280px",
+        "height": "80px",
+        "padding-top": "16px",
+        "padding-right": "16px",
+        "padding-bottom": "16px",
+        "padding-left": "16px",
+        "border-radius": "8px"
+      },
+      "matched_styles": {
+        "padding-top": { "winner": { "selector": ".sidebar", "source_url": "styles.scss", "line": 17, "column": 2, "value": "$spacing-md", "important": false, "origin": "author", "shorthand": "padding" }, "overridden": [], "inherited_or_initial": false },
+        "border-radius": { "winner": { "selector": ".sidebar", "source_url": "styles.scss", "line": 18, "column": 2, "value": "$radius-md", "important": false, "origin": "author" }, "overridden": [], "inherited_or_initial": false }
+      }
+    }
+  ]
+}

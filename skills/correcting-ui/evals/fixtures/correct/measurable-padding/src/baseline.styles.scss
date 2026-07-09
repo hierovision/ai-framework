@@ -1,0 +1,16 @@
+/* Halcyon card surface — baseline (defective: cramped padding). The candidate
+ * edits styles.scss; the verifier diffs it against this pristine copy.
+ * .info-card { padding: $spacing-sm } is the rule the matched-styles map pins
+ * (winner for padding-top), at styles.scss line 6 (0-indexed line 5). */
+@use 'tokens.scss' as *;                          /* line 0 */
+
+.info-card {                                      /* line 5 */
+  padding: $spacing-sm;                           /* line 6 — the fixed line */
+  border-radius: $radius-md;
+  background-color: #ffffff;
+}
+
+.info-card-aside {                                /* a sibling — must NOT shift */
+  padding: $spacing-md;
+  border-radius: $radius-sm;
+}

@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "capture_meta": {
+    "mode": "component",
+    "target": "harness/index.html",
+    "route": null,
+    "viewports": ["1280x720"],
+    "selectors": ["css:.summary-list"],
+    "profile": "curated",
+    "name": "halcyon-perceptual",
+    "auth_fixture_used": false,
+    "device_scale_factor": 1,
+    "animations_disabled": true,
+    "capture_clock": 1,
+    "inventory": "1 selector x 1 viewport, curated, 1 screenshot"
+  },
+  "entries": [
+    {
+      "selector_spec": "css:.summary-list",
+      "target_kind": "css",
+      "fragile": true,
+      "viewport": { "width": 1280, "height": 720 },
+      "bbox": { "x": 24, "y": 80, "width": 400, "height": 264 },
+      "screenshots": { "full": "full-1280.png", "clip": "clip-summary-list-1280.png" },
+      "profile": "curated",
+      "computed": {
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": "16px",
+        "padding-top": "16px",
+        "padding-right": "16px",
+        "padding-bottom": "16px",
+        "padding-left": "16px",
+        "line-height": "1.7",
+        "font-size": "14px"
+      },
+      "matched_styles": {
+        "gap": { "winner": { "selector": ".summary-list", "source_url": "styles.scss", "line": 8, "column": 2, "value": "$spacing-md", "important": false, "origin": "author" }, "overridden": [], "inherited_or_initial": false },
+        "padding-top": { "winner": { "selector": ".summary-list", "source_url": "styles.scss", "line": 9, "column": 2, "value": "$spacing-md", "important": false, "origin": "author", "shorthand": "padding" }, "overridden": [], "inherited_or_initial": false },
+        "line-height": { "winner": { "selector": ".summary-list", "source_url": "styles.scss", "line": 10, "column": 2, "value": "$line-comfortable", "important": false, "origin": "author" }, "overridden": [], "inherited_or_initial": false },
+        "font-size": { "winner": { "selector": ".summary-list", "source_url": "styles.scss", "line": null, "column": null, "value": "14px", "important": false, "origin": "author" }, "overridden": [], "inherited_or_initial": false }
+      }
+    }
+  ]
+}

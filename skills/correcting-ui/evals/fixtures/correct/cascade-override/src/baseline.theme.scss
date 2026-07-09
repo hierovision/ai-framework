@@ -1,0 +1,12 @@
+/* Halcyon project theme — the cascade WINNER lives here. The candidate edits
+ * theme.scss; the verifier diffs it against baseline.theme.scss. The rule
+ * `.v-theme--light .qty-stepper` (two class hooks — higher specificity than the
+ * one-class `.qty-stepper`) wins the `color` cascade, so the computed value is
+ * the value declared HERE, not in the component's own rule. The matched-styles
+ * map names THIS rule as the winner; that is the deterministic lookup the loop
+ * uses instead of guessing from the screenshot. */
+@use 'tokens.scss' as *;                          /* line 0 */
+
+.v-theme--light .qty-stepper {                   /* line 8 — the WINNER (override) */
+  color: $text-muted;                             /* line 9 — set the muted value */
+}

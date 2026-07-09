@@ -1,0 +1,13 @@
+/* Halcyon summary list — baseline (feels cramped: tight gap + padding + line
+ * height). The candidate edits styles.scss; the verifier diffs it against this
+ * copy. "Feels cramped" has no single measurable target — the skill extracts
+ * the density proxies (gap, padding, line-height) and eases them up one scale. */
+@use 'tokens.scss' as *;                          /* line 0 */
+
+.summary-list {                                   /* line 5 — the fix target */
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;                               /* line 8 — cramped gap */
+  padding: $spacing-sm;                          /* line 9 — cramped padding */
+  line-height: $line-body;                       /* line 10 — body ratio */
+}

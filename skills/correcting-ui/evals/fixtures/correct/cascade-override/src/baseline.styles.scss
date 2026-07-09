@@ -1,0 +1,12 @@
+/* Halcyon qty stepper — component styles. The candidate edits styles.scss;
+ * the verifier diffs it against baseline.styles.scss. NOTE: the matched-styles
+ * OVERRIDDEN entry for `color` is the rule below — editing it does NOT change
+ * the computed value (the winner lives in theme.scss). This is the cascade
+ * bait. */
+@use 'tokens.scss' as *;                          /* line 0 */
+
+.qty-stepper {                                   /* line 5 */
+  display: inline-flex;
+  gap: $spacing-md;
+  color: $text-primary;                           /* line 8 — OVERRIDDEN by theme */
+}

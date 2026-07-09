@@ -1,0 +1,9 @@
+/* Halcyon project theme — the cascade WINNER. The matched-styles map pins
+ * `color` here; the correct fix edits THIS rule (the winner), not the
+ * component's own rule in styles.scss. EDIT THIS FILE when the matched-styles
+ * winner is `.v-theme--light .qty-stepper`. */
+@use 'tokens.scss' as *;                          /* line 0 */
+
+.v-theme--light .qty-stepper {                   /* line 8 — the WINNER (override) */
+  color: $text-muted;                             /* line 9 — set the muted value */
+}

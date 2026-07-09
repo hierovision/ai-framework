@@ -1,0 +1,9 @@
+/* WRONG fix A — magic px. Visual target closes but the system is weakened: a
+ * bare 12px defeats the radius scale and is not self-documenting. */
+@use 'tokens.scss' as *;
+
+.tag {
+  border-radius: 12px;
+  padding: $spacing-xs $spacing-sm;
+  background-color: #f5f5f5;
+}

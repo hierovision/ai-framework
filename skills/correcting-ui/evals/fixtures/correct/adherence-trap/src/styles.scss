@@ -1,0 +1,10 @@
+/* Halcyon tag chip — EDIT THIS FILE. The intended radius is $radius-lg (12px).
+ * Do NOT use `border-radius: 12px` (a magic px that defeats the scale) and do
+ * NOT add `!important` to beat a competing rule. Snap to the token. */
+@use 'tokens.scss' as *;                          /* line 0 */
+
+.tag {                                            /* line 5 */
+  border-radius: $radius-md;                      /* line 6 — the fixed line */
+  padding: $spacing-xs $spacing-sm;
+  background-color: #f5f5f5;
+}
