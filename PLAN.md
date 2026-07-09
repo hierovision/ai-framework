@@ -159,8 +159,9 @@ MiniMax M2.5 (Aug 2026), several Codex variants (Jul 23, 2026).
 3. **Phase 2 — Core loop skills** (triage → design → implement → test×3 →
    debug → review), each with evals + pt-stack references +
    `docs/adding-a-stack.md`.
-4. **Phase 3 — UI loop skills** (iterate/capture/audit×2) including bundled
-   Playwright capture scripts (screenshot + computed CSS extraction).
+4. **Phase 3 — UI loop skills** (see "Phase 3 Design" below): reactive
+   capture + correct first (`capturing-ui-evidence`, `correcting-ui`);
+   proactive visual audit + accessibility deferred to a follow-on.
 5. **Phase 4 — Cross-cutting** (councils, releasing) + agent templates +
    pt migration (pt's `.opencode` consumes the library; keep only
    project-specific rules locally).
@@ -241,3 +242,79 @@ workflows.
   skills accept stack references.
 - Projects declare their stack in their own rules file (`AGENTS.md` /
   `.opencode/agents.md`), which skills read at the selection step.
+
+## Phase 3 Design — UI Iteration Loop (decisions locked 2026-07-06)
+
+The perception-verified counterpart to the core loop. Parallel shape:
+
+| Core loop | UI loop |
+|---|---|
+| reproduce (run command) | capture (screenshot + computed CSS + bounding boxes) |
+| hypothesis + discriminating experiment | triangulate 4 sources → pin symptom to a source rule |
+| implement at root cause | edit styles adhering to the system in place |
+| verification exit codes | re-capture + compare computed-CSS / geometry deltas |
+| full suite still green | regression guard: other elements' boxes/computed unchanged |
+| (n/a) | perceptual acceptance: vision critic vs stated intent |
+
+Decisions:
+
+1. **Scope now: two reactive skills.** `capturing-ui-evidence` (the
+   Playwright harness, dependency) + `correcting-ui` (the diagnose-and-fix
+   brain). Proactive `auditing-visual-design` and `auditing-accessibility`
+   deferred to a follow-on phase.
+2. **Capture supports both modes, selected per invocation:** real running
+   app (dev-server URL + route, auth via the e2e auth-fixture pattern) and
+   isolated components (Storybook / component harness). The harness picks
+   based on the target the invocation names.
+3. **CSS system is a plugin dimension.** Seed
+   `references/systems/vuetify-scss.md` (the pt reality: theme tokens, SCSS
+   variables, prefer component props over raw CSS). BEM and Tailwind become
+   additional `references/systems/*.md`. System detected from the rules
+   file + config files (tailwind.config, vuetify theme, stylelint config).
+   Note: UI-loop references split into `systems/` (CSS methodology) and,
+   where needed, `stacks/` (framework capture specifics) — a second
+   reference axis beyond the core loop's single `stacks/`.
+4. **Objective-first closure; vision is the final perceptual acceptance
+   only.** The loop closes on measurable signals wherever the intent is
+   measurable — geometry (alignment = equal coords, overflow = child box ⊄
+   parent box, spacing = computed value == target), computed-CSS target
+   values, a regression guard (other elements' boxes/computed CSS
+   unchanged), and stylelint + convention checks (no specificity increase,
+   no new `!important`, naming matches the system). The vision critic
+   adjudicates only the genuinely perceptual residue and gives final
+   sign-off. Never closes on "looks better" alone.
+5. **Fixes snap to tokens (hybrid).** Honor a design-token / theme scale
+   when present (named token = self-documenting); otherwise reuse an
+   existing SCSS variable or introduce a well-named one — DRY and
+   self-documenting by construction, never a magic px.
+6. **Vision critic tiered** (Decision 4, repo-wide): `vision-critic-fast`
+   per iteration, `vision-critic-final` for sign-off. Zen-billed.
+
+Key lever for the stated pain (vision models fumbling CSS from text): the
+capture harness opens a **CDP session** and calls
+`CSS.getMatchedStylesForNode`, returning which authored selector at which
+source location set each property (and what overrode it). This collapses
+symptom→source mapping into a deterministic lookup. Division of labor:
+vision says *what looks wrong*; matched-styles says *which rule*; the
+prompt says *intended*. The model never guesses CSS from prose.
+
+`correcting-ui` is an implement-class skill (it edits source): trivial
+corrections proceed directly; a large restyle routes to
+designing-architecture first, and out-of-scope urges are recorded as
+follow-ups (implementing-features posture). Review of the CSS output is
+folded in as the second closure condition (stylelint + convention +
+regression), not a separate reviewing-code pass.
+
+Build-time constraints to carry into the handoffs:
+- **Real-browser deferral** (as with `writing-e2e-tests`): the eval
+  harness likely lacks a browser. Capture/compare scripts get structural
+  verification; real screenshot/computed-CSS runs are a documented
+  deferred validation. Fixtures ship a tiny static page + a
+  component-isolation stub Playwright *could* hit.
+- **Computed-CSS curation:** `getComputedStyle` yields ~300 longhands.
+  The harness captures a curated profile (box model, layout, typography,
+  color, positioning) and/or diffs against baseline, never dumps all 300.
+- **Evidence is structured + addressable:** capture writes a stable
+  artifact (screenshot path + JSON of computed profiles + bounding boxes
+  keyed by selector) that `correcting-ui` consumes and re-captures against
+  for the delta/regression comparison.
