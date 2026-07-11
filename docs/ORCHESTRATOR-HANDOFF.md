@@ -100,22 +100,47 @@ The workflow loop, every skill:
   (gemini-3-flash / gpt-5.4-mini, or evaluate minimax-m3 native-multimodal
   on Go flat rate), `vision-critic-final` (gemini-3.1-pro / sonnet-5).
 
-## Current state (2026-07-06, commit f9f8f0b)
+## Current state (2026-07-10, HEAD after this review's commit)
 
-**Both loops complete. 11 skills, all eval-backed + reviewed + pushed.**
+**Both core loops complete + first Phase 3 follow-on landed. 12 skills,
+all eval-backed + reviewed + pushed.**
 
 Core loop: triaging-requirements, designing-architecture,
 implementing-features, debugging-test-failures, writing-unit-tests,
 writing-integration-tests, writing-e2e-tests, reviewing-code.
-UI loop: capturing-ui-evidence, correcting-ui.
+UI loop: capturing-ui-evidence, correcting-ui, auditing-accessibility
+(proactive a11y auditor — axe-core + Playwright, WCAG 2.2 AA/AAA,
+read-only, routes fixes to correcting-ui/implementing-features/
+designing-architecture).
 Meta: authoring-skills (+ bundled scripts/validate_skill.py).
+
+`auditing-accessibility` review (this round): validator green across all
+12 skills; leak scan clean (`phasewave` confirmed as the library's
+sanctioned fictional-fixture convention, not a real-project leak); all 4
+eval scenarios independently re-run from fresh /tmp copies against the
+real `audit.mjs` (not the author's report) — violations-present,
+clean-page, suppression-trap (both refusal + dated-acceptance legs), and
+automation-ceiling all green; failable property proven by hand (deleted a
+planted violation from the canned axe-results → verifier correctly went
+red; tampered a harness file → zero-edit guard correctly went red;
+restored → green again). `buildReport` in audit.mjs inspected directly:
+violations are never filtered by `acceptedRisks`, only annotated — the
+cardinal rule is structurally guaranteed, not just test-fitted.
+
+Defect found by the author + independently reproduced by review: a
+symlinked-install no-op in `audit.mjs`'s "run as main" gate (real
+`import.meta.url` vs. un-realpath'd `argv[1]` never match under
+`~/.config/opencode/skills/...`, so `main()` silently never runs). Fixed
+in both `audit.mjs` and the same latent defect in the sibling
+`capturing-ui-evidence/scripts/capture.mjs`; sibling's 3 fixtures
+re-verified green post-fix (no regression). Learning folded into
+`authoring-skills/SKILL.md`'s Library conventions (symlink-safe
+"run-as-main" gate requirement for any bundled script).
 
 ## Remaining backlog (all optional; none blocking)
 
-- **NEXT: `auditing-accessibility`** (Phase 3 follow-on) — handoff prompt
-  is in `docs/handoffs/auditing-accessibility.md`, ready to dispatch to a
-  fresh GLM 5.2 author session.
-- `auditing-visual-design` (proactive visual audit) — Phase 3 follow-on.
+- `auditing-visual-design` (proactive visual audit) — Phase 3 follow-on,
+  now the only one left in that phase.
 - Phase 4: `running-councils`, `releasing-changes`, agent templates, and
   the **pt migration** (pt consumes the library; refresh its stale
   `qwen3.6-plus` binding; reconcile pt's single `.opencode/plans/

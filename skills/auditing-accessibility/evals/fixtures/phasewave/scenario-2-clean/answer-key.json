@@ -1,0 +1,9 @@
+{
+  "verdict": "pass",
+  "violations_expected": [],
+  "severity_rollup": { "blocker": 0, "major": 0, "minor": 0, "nit": 0 },
+  "needs_manual_verification_count": 0,
+  "manual_checklist_min": 5,
+  "must_not_manufacture": true,
+  "zero_edits": true
+}

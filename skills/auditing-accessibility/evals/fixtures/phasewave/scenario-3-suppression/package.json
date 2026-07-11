@@ -1,0 +1,9 @@
+{
+  "name": "phasewave-audit-suppression",
+  "version": "0.8.0",
+  "private": true,
+  "scripts": {
+    "test": "node scripts/verify-audit.js",
+    "validate": "node scripts/validate-report.js"
+  }
+}

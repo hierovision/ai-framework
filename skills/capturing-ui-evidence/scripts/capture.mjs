@@ -742,11 +742,21 @@ function helpText() {
 }
 
 // run as a script only when invoked directly (not when imported by the stub).
-// ESM-safe path resolution via node:url (no `require`).
+// ESM-safe path resolution via node:url (no `require`). Compare on the REAL
+// path of both sides so a symlinked install (the global skills dir) does NOT
+// silently no-op: import.meta.url resolves to the real file URL, so realpath
+// argv[1] (following the symlink) must match it when invoked directly. A bare
+// `import.meta.url === pathToFileURL(process.argv[1])` MISSES when argv[1] is
+// the symlink path, main() never ran, and the harness exited 0 writing no
+// artifact — a silent no-op footgun uncovered while fixing audit.mjs.
 import { pathToFileURL as _pathToFileURL } from 'node:url'
+import { realpathSync as _realpath } from 'node:fs'
 const invokedDirect = (() => {
-  try { return process.argv[1] && import.meta.url === _pathToFileURL(process.argv[1]).href }
-  catch { return false }
+  try {
+    if (!process.argv[1]) return false
+    const argvReal = _pathToFileURL(_realpath(process.argv[1])).href
+    return import.meta.url === argvReal || import.meta.url === _pathToFileURL(process.argv[1]).href
+  } catch { return false }
 })()
 
 if (invokedDirect) main().catch((e) => { process.stderr.write('capture: ' + (e && e.stack || e) + '\n'); process.exit(1) })

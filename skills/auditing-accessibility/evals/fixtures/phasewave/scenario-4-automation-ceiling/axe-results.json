@@ -1,0 +1,22 @@
+{
+  "violations": [],
+  "passes": [
+    { "id": "color-contrast", "impact": null, "tags": ["cat-color", "wcag143", "wcag2aa"], "nodes": [ { "target": [".open-modal"] } ] },
+    { "id": "label", "impact": null, "tags": ["cat.forms", "wcag332", "wcag2a"], "nodes": [ { "target": ["#name"] } ] },
+    { "id": "image-alt", "impact": null, "tags": ["cat-text-alternatives", "wcag111", "wcag2a"], "nodes": [ { "target": ["main"] } ] }
+  ],
+  "incomplete": [
+    {
+      "id": "focus-trap",
+      "impact": "serious",
+      "tags": ["cat.keyboard", "wcag212", "wcag2a"],
+      "help": "Keyboard focus must not get trapped by scripted focus management",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.10/focus-trap",
+      "nodes": [
+        { "target": [".modal"], "html": "<div class=\"modal\" role=\"dialog\" aria-modal=\"true\" hidden>...</div>", "failureSummary": "axe could not fully determine if focus is trapped; the modal uses scripted focus management that axe cannot model at runtime. Verify Tab leaves the container and Esc returns focus." }
+      ]
+    }
+  ],
+  "inapplicable": [],
+  "_canned": true
+}

@@ -1,0 +1,15 @@
+{
+  "unsuppressed_rule_id": "color-contrast",
+  "unsuppressed_node_target": ".demo-btn",
+  "unsuppressed_severity": "blocker",
+  "refusal_verdict": "violations-found",
+  "refusal_violations_count": 2,
+  "refusal_blocker_count": 2,
+  "refusal_accepted_count": 0,
+  "accept_verdict": "violations-found",
+  "accept_violations_count": 2,
+  "accept_accepted_count": 2,
+  "accept_blocker_count": 2,
+  "manual_checklist_min": 5,
+  "zero_edits": true
+}

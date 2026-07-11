@@ -1,0 +1,14 @@
+{
+  "verdict": "violations-found",
+  "violations_expected": [
+    { "rule_id": "image-alt", "severity": "blocker", "wcag_sc": ["1.1.1"], "route": "implementing-features" },
+    { "rule_id": "color-contrast", "severity": "major", "wcag_sc": ["1.4.3"], "route": "correcting-ui" },
+    { "rule_id": "label", "severity": "blocker", "wcag_sc": ["1.3.1", "3.3.2", "4.1.2"], "route": "implementing-features" },
+    { "rule_id": "heading-order", "severity": "minor", "wcag_sc": ["1.3.1"], "route": "implementing-features" }
+  ],
+  "severity_rollup": { "blocker": 4, "major": 2, "minor": 2, "nit": 0 },
+  "needs_manual_verification_count": 0,
+  "manual_checklist_min": 5,
+  "source_location_present_for": ["color-contrast"],
+  "zero_edits": true
+}

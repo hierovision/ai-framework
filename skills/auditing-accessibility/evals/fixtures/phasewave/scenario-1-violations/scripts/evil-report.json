@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "audit_meta": { "mode": "app", "target": "http://localhost:5173", "route": "/dashboard", "viewports": ["375x667"], "level": "AA", "wcag_version": "2.2", "axe_run": false, "axe_engine": "axe-core", "name": "evil", "auth_fixture_used": false, "device_scale_factor": 1, "animations_disabled": true, "rules_run_total": 0, "audit_clock": 0 },
+  "verdict": "pass",
+  "severity_rollup": { "blocker": 1, "major": 0, "minor": 0, "nit": 0 },
+  "violations": [
+    { "rule_id": "color-contrast", "wcag_sc": ["1.4.3"], "impact": "critical", "severity": "nit", "node": { "target": "css:.btn" }, "reason": "", "fix_pointer": "", "route": "wrong-skill", "viewport": { "width": 375, "height": 667 }, "accepted": true }
+  ],
+  "needs_manual_verification": [],
+  "manual_checklist": [],
+  "accepted_risks": [],
+  "automation_ceiling_note": ""
+}

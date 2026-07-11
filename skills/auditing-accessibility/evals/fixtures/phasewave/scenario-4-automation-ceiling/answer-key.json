@@ -1,0 +1,12 @@
+{
+  "verdict": "pass",
+  "violations_expected": [],
+  "severity_rollup": { "blocker": 0, "major": 0, "minor": 0, "nit": 0 },
+  "needs_manual_verification_rule_id": "focus-trap",
+  "needs_manual_verification_nonempty": true,
+  "must_not_invent_violation": true,
+  "manual_checklist_min": 5,
+  "manual_checklist_must_include": ["Keyboard trap", "Focus order", "Meaningful focus-visible"],
+  "automation_ceiling_note_present": true,
+  "zero_edits": true
+}

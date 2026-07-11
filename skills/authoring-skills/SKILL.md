@@ -237,6 +237,21 @@ These apply to every skill in this library, on top of the general guidance:
   `../producer-skill/references/format.md`) instead of duplicating the
   format. The library installs as a set, so the sibling resolves in
   both the repo and the symlinked global layout.
+- **A bundled script's "run as main" gate must survive a symlinked
+  install**: the common ESM pattern `import.meta.url ===
+  pathToFileURL(process.argv[1]).href` compares a REAL path
+  (`import.meta.url`) against an UN-REALPATH'D one when the skill is
+  invoked via its symlinked global location
+  (`~/.config/opencode/skills/<name>/scripts/x.mjs` → real file
+  elsewhere) — the strings differ, the gate is false, `main()` never
+  runs, and the script exits 0 having silently written nothing. Found
+  independently in `capturing-ui-evidence/scripts/capture.mjs` and
+  `auditing-accessibility/scripts/audit.mjs`; fix both sides:
+  `realpathSync(process.argv[1])` before comparing (fall back to the
+  un-realpath'd comparison too, so a copied-not-symlinked invocation
+  still matches). Any new bundled script with a "run directly vs.
+  imported as a module" gate must test this under a symlink, not just
+  a plain `node script.mjs` invocation.
 
 ## Improving an existing skill
 

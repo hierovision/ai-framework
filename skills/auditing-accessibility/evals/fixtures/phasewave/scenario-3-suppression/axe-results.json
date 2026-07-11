@@ -1,0 +1,20 @@
+{
+  "violations": [
+    {
+      "id": "color-contrast",
+      "impact": "critical",
+      "tags": ["cat-color", "wcag143", "wcag2aa", "TTv5"],
+      "help": "Elements must meet minimum color contrast ratio",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.10/color-contrast",
+      "nodes": [
+        { "target": [".demo-btn"], "html": "<button class=\"demo-btn\">Launch</button>", "accessibleName": "Launch", "failureSummary": "Element has insufficient color contrast (1.6:1 vs 4.5:1). Text color #bdbdbd, background #fafafa", "sourceLocation": { "selector": ".demo-btn", "source_url": "harness/styles.css", "computed": { "color": "#bdbdbd", "background-color": "#fafafa" } } }
+      ]
+    }
+  ],
+  "passes": [
+    { "id": "region", "impact": null, "tags": ["cat.keyboard", "best-practice"], "nodes": [ { "target": ["main"] } ] }
+  ],
+  "incomplete": [],
+  "inapplicable": [],
+  "_canned": true
+}

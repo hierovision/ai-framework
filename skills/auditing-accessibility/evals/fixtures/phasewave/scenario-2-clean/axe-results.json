@@ -1,0 +1,12 @@
+{
+  "violations": [],
+  "passes": [
+    { "id": "image-alt", "impact": null, "tags": ["cat-text-alternatives", "wcag111", "wcag2a"], "nodes": [ { "target": ["img"] } ] },
+    { "id": "label", "impact": null, "tags": ["cat.forms", "wcag332", "wcag2a"], "nodes": [ { "target": ["#search"] } ] },
+    { "id": "heading-order", "impact": null, "tags": ["cat.semantics", "wcag131", "wcag2a"], "nodes": [ { "target": ["h2"] } ] },
+    { "id": "color-contrast", "impact": null, "tags": ["cat-color", "wcag143", "wcag2aa"], "nodes": [ { "target": [".btn"] } ] }
+  ],
+  "incomplete": [],
+  "inapplicable": [],
+  "_canned": true
+}
