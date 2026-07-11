@@ -318,3 +318,101 @@ Build-time constraints to carry into the handoffs:
   artifact (screenshot path + JSON of computed profiles + bounding boxes
   keyed by selector) that `correcting-ui` consumes and re-captures against
   for the delta/regression comparison.
+
+## Core Loop Refinement — TDD-Aware Implement Sequencing (decisions locked 2026-07-11)
+
+Gap identified in review: `implementing-features` runs the plan's
+`## Verification` commands and fixes code until they pass, but nothing
+requires a test to exist — let alone fail — *before* the code does. Test
+authoring (the trio) is invoked "separately by the user," with no
+enforced order. This lets test-after silently substitute for test-first,
+and a coverage/quality check happens only if a separate `reviewing-code`
+pass catches it after the fact.
+
+**Goal:** the best parts of TDD without full micro-loop TDD. Core
+behavioral capture as failing tests directly from the plan's Acceptance
+Criteria, *before* implementation (the first step) — then implement to
+green — then a bounded coverage-and-quality gate near the end of the
+pass (not exhaustive upfront authoring, not silent test-after).
+
+**The load-bearing distinction — two kinds of "red," both kept:**
+
+| | Pre-implementation red (NEW) | Post-implementation meaningfulness proof (EXISTING) |
+|---|---|---|
+| When | Before the feature exists | After the feature exists |
+| How it goes red | Naturally — the behavior isn't there yet | Deliberately broken, then restored |
+| Proves | The test exercises the intended path, for real | The test can still detect a regression |
+| Risk it guards against | A test that never ran against pre-feature reality (test-after mirrors the implementation) | A test that passed for the wrong reason once code shaped around it |
+| The trap | Red for the *wrong* reason (a typo, bad import, broken fixture) — must confirm the failure names the missing/wrong behavior, not a harness defect | (unchanged from today) |
+
+Decisions:
+
+1. **`implementing-features` gains two new steps**, not a rewrite: a
+   **red-first step** immediately after plan-reconciliation and before any
+   source edit (author one test per testable Acceptance Criterion via the
+   matching test-trio skill, run it, confirm it fails **for the right
+   reason** — not a harness defect), and a **coverage-and-quality gate**
+   after the plan's Verification is green (see Decision 3 for its full,
+   two-part scope).
+2. **The test trio gains a mode, not a rewrite.** `writing-unit-tests` /
+   `writing-integration-tests` / `writing-e2e-tests` already accept plan
+   ACs as input; what's missing is branching the *meaningfulness proof*
+   step on whether code exists yet. Red-first mode: the natural
+   pre-implementation failure *is* the proof, gated on the "right reason"
+   check. Coverage-expansion / standalone mode: unchanged, today's
+   break→red→restore→green. The "invoked separately" language is
+   clarified, not reversed — the trio still never cascades into each
+   other; `implementing-features` orchestrating them at two named steps
+   is now a documented, intentional caller.
+3. **No plan-format.md schema change — locked, not a wait-and-see.**
+   Best-guess layer classification at red-first time is **correct by
+   design**, not a stopgap: a plan cannot know the true seam boundaries
+   until code exists, so demanding a precise per-AC layer tag at design
+   time would ask `designing-architecture` to know something it
+   structurally cannot yet know. The correction belongs downstream, where
+   the real implementation has revealed the truth — which is exactly what
+   the coverage-and-quality gate is for. Concretely, the gate now has
+   **two responsibilities, not one**:
+   - **Rebalance** — for each AC-test pair the red-first step produced,
+     re-examine it against the real implementation: did it land at the
+     wrong layer (a "unit" test that ended up mocking a real seam into
+     existence — vacant per the trio's own rule; an "e2e" test for
+     something that turned out to be pure logic — slow and brittle for no
+     reason)? If so, supersede the misplaced test, invoke the correct
+     trio skill to reauthor it at the right layer, and re-prove
+     meaningfulness there (break/restore). This is the testing-pyramid
+     correction: push each test down to the cheapest layer that still
+     meaningfully exercises the behavior, using the SAME right-layer
+     table the red-first step used to guess — now applied with the
+     benefit of real code to look at.
+   - **Expand** — unchanged from the original design: given the actual
+     implementation, is there a genuinely valuable gap the AC set didn't
+     reach? Expand with a citation, or explicitly declare none found;
+     silence is not an answer.
+   A red-first guess is never required to be right the first time; it is
+   required to be *correctable* the second time, with a named mechanism
+   for doing so.
+4. **`reviewing-code` gets a small, additive cross-reference**, not new
+   logic: when the new red evidence + coverage-gate outcome (including
+   any layer rebalancing) are present in the plan's `## History`, the
+   reviewer spot-checks them as evidence rather than re-deriving the
+   meaningfulness check from zero.
+5. **Bounded, not exhaustive.** The red-first step is ONE test (or a
+   minimal table-driven set) per AC, at a best-guess layer — core behavior
+   only, no invented edge cases yet, no requirement to get the layer
+   right. The coverage gate is a gate, not a license: rebalancing must
+   cite the specific misclassification it's correcting; expansion must
+   cite a real gap in the actual implementation (an error path, a
+   boundary the code special-cases) or explicitly declare none found.
+   Padding coverage for its own sake is refused exactly as the trio
+   already refuses it today ("a case that exercises no observable the AC
+   names is padding, not coverage").
+6. **Out of scope for this pass** (record as follow-ups if raised): no
+   change to `debugging-test-failures` (a red-for-the-wrong-reason test is
+   a test-authoring correction, not a regression to diagnose — no code
+   ever worked, so there's nothing to diagnose); no change to any UI-loop
+   skill (they already have their own objective-first disciplines); no new
+   bundled scripts (this is a workflow/prose change).
+
+See `docs/handoffs/tdd-sequencing.md` for the dispatchable author-session
+handoff implementing these decisions.

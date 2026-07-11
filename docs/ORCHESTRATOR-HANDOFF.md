@@ -137,10 +137,25 @@ re-verified green post-fix (no regression). Learning folded into
 `authoring-skills/SKILL.md`'s Library conventions (symlink-safe
 "run-as-main" gate requirement for any bundled script).
 
-## Remaining backlog (all optional; none blocking)
+## Remaining backlog
 
-- `auditing-visual-design` (proactive visual audit) — Phase 3 follow-on,
-  now the only one left in that phase.
+- **NEXT (not optional — a real gap, not a nice-to-have):** TDD-aware
+  implement sequencing. `implementing-features` currently runs the plan's
+  Verification commands and fixes code until green, with no requirement
+  that a test exist — let alone fail — before the code does; test
+  authoring (the trio) is invoked "separately," unordered. Decisions
+  locked in `PLAN.md` under "Core Loop Refinement — TDD-Aware Implement
+  Sequencing"; handoff prompt ready in
+  `docs/handoffs/tdd-sequencing.md` — dispatch to a fresh GLM 5.2 author
+  session. Touches `implementing-features` (two new steps: red-first AC
+  capture, coverage-and-quality gate), all three test-trio skills (a
+  meaningfulness-proof mode branch), and a small additive cross-reference
+  in `reviewing-code`. Review this one especially carefully at Step 4 of
+  the review protocol — a red-first proof that's secretly fabricated (the
+  agent claims a test went red pre-implementation but never actually ran
+  it that way) is exactly the kind of claim this library's review
+  discipline exists to catch, not take on faith.
+- `auditing-visual-design` (proactive visual audit) — Phase 3 follow-on.
 - Phase 4: `running-councils`, `releasing-changes`, agent templates, and
   the **pt migration** (pt consumes the library; refresh its stale
   `qwen3.6-plus` binding; reconcile pt's single `.opencode/plans/
