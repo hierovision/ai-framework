@@ -146,6 +146,25 @@ silently dropping the phrase "`module.exports`") — the actual file
 changes are unaffected and were independently verified; left as-is
 rather than force-pushing an amend.
 
+**Post-round finding (2026-07-12, caught by a later `validate_skill.py
+--all` sanity check, not by the 427cfea review itself):** the TDD-round
+description edits to `writing-e2e-tests`, `writing-integration-tests`,
+and `writing-unit-tests` each added a sentence duplicating a caller
+relationship ("implementing-features is a documented intentional
+caller...") that the body already stated in full, in multiple places.
+That pushed all three descriptions from 891/899/894 chars to
+1001/1010/1020 — over the 900-char headroom convention (still under the
+1024 hard cap, so the validator still reported `OK`, only a soft `warn`,
+which is why it slipped through the 427cfea review's "validator green"
+check). Fixed by deleting the duplicated sentence outright, not just
+compressing it — the information was never missing, only misplaced
+against the library's own "link, don't duplicate cross-skill contracts"
+convention. All three now sit at 870-887 chars, `validate_skill.py --all`
+is fully warn-free. No SKILL.md body content changed. This is a real gap
+in that round's review rigor (a `warn` is not the same as `OK` and
+should have been surfaced then), recorded here rather than left
+silent.
+
 `auditing-accessibility` review (prior round): validator green across all
 12 skills; leak scan clean (`phasewave` confirmed as the library's
 sanctioned fictional-fixture convention, not a real-project leak); all 4
