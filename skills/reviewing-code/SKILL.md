@@ -147,7 +147,16 @@ outrank taste — do not lead with nits):
    makes a failing test pass by adding `.skip`, deleting/commenting an
    assertion, widening a tolerance, guarding with try/catch, or mocking
    away the behaviour under test is a **blocker** — it hides a real
-   defect instead of fixing it. Cite the exact weakening.
+   defect instead of fixing it. Cite the exact weakening. When the
+   plan's `## History` carries `implementing-features`' red evidence
+   (Step 5) and coverage-gate outcome (Step 8 — rebalancing + expand/no-
+   gap), **spot-check those claims**: does the recorded red evidence
+   actually name the right failure (not a harness defect)? does the
+   coverage-gate reasoning hold up against the diff (a cited rebalance
+   or a cited gap, not padding)? Review what the record asserts against
+   what the diff shows, rather than re-deriving the meaningfulness check
+   from zero. See [implementing-features](../implementing-features/SKILL.md)
+   Steps 5 and 8 for the contract of those records.
 3. **Scope conformance** — from Step 3. An unrecorded out-of-scope hunk
    is a blocker; a noted deviation/follow-up is a minor.
 4. **Error / edge handling** — unhandled error paths the ACs imply, a

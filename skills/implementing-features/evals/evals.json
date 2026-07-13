@@ -1,69 +1,279 @@
 {
   "skill_name": "implementing-features",
-  "notes": "Run each prompt in a fresh agent session with the skill installed, against a writable copy of the fixture repo (copy evals/fixtures/phasewave/ into a fresh temp working dir per run — agents must never write into evals/fixtures/ source). Baseline: same prompt with the skill NOT installed. Grade by reading the resulting repo state + plan artifact + transcript; never grade the author's own memory. The fixture's package.json scripts (scripts/type-check.js, lint.js, test.js) actually execute and actually exit non-zero when the feature is absent or wrong — the verification feedback loop is REAL, not theatrical. Plan files for each scenario are pre-seeded in the fixture at .opencode/plans/<slug>.md. Eval 1 + Eval 2 share feat-offline-queue.md (the approved happy-path plan, exact plan-format.md contract). Eval 2's prompt adds an adjacent extra the plan's Excluded list names — tests scope discipline under prompt pressure, not feature mechanics. Eval 3 is a mechanical plan-reality mismatch: feat-offline-queue-rename.md lists the new file at src/outbox/queue.ts against the project's src/lib/<feature>.ts convention (AGENTS.md); the agent must correct the path, proceed, and add a dated History entry explaining the deviation — not silently follow the wrong path or stop. Eval 4 is a contract-breaking mismatch: feat-offline-queue-broken.md criterion 3 asserts replay survives a full browser close via the registered service worker, verified by `npm run test` in tests/offline-resume.test.ts — but neither the service worker file nor tests/offline-resume.test.ts appears in Files to Modify, and the plan's Schema/Type Impacts says `None.`; the agent must classify this as contract-breaking (criterion untestable as written, references infrastructure the plan does not add), STOP, report to the user, and route back to the design stage — not invent a service worker or silently drop the criterion. Assertions tagged [fix-verified] encode defects found and fixed during the eval loop — they are the regression net; do not remove without re-running the full loop.\n\nModel coverage: fresh subagents via the task tool — single tier in practice (Go-tier unless the harness varies). Cross-tier (Zen-tier) validation is deferred until the harness supports varying subagent model binding; this is a documented deferral, not a silent skip. Re-run on a Zen-tier model when the harness permits.\n\nLoop log 2026-07-05 (/tmp/opencode/implement-eval/):\n- Round 1: spawned 4 fresh subagents with the skill installed (symlink) and instructed to load it via `skill({name:\"implementing-features\"})`. The subagents reported the skill was not in their available-skills list (opencode snapshots the list at parent-session start; the install happened mid-parent-session — a harness limitation, NOT a skill defect). Round 1 therefore ran as baseline-like evidence (skill body absent from subagent context), even though the agents were primed toward a workflow. Reports: see /tmp/opencode/implement-eval/baseline-report.md. Round-1 outcomes: evals 1, 2, 4 already behaviourally correct (the plan + fixture carry enough contract structure); eval 3 misclassified the path-only mismatch as 'contract-breaking' but proceeded anyway at the correct path — the discriminative baseline gap.\n- Round 2: re-ran 4 fresh subagents with the skill body loaded from disk via `read` of SKILL.md + references/stacks/vue-supabase.md (the discovery mechanism isn't under test — the skill CONTENT is, and round 2 reproduces the proper with-skill condition). Reports: eval1-report.md, eval2-report.md, eval3-report.md, eval4-report.md. Round-2 outcomes: all four PASS. Eval 3 now correctly classifies the path-only mismatch as MECHANICAL (quoting the skill's classification rule 'A moved file is mechanical; a moved feature is contract-breaking'), proceeds at the corrected path, and records the deviation in History with reason.\n- No defects found in the skill body itself; no skill text edited between rounds 1 and 2 — the body worked first try in the with-skill condition. Per the design-skill precedent (speculative `[fix-verified]` tags removed — the tag reserves a slot for actual skill edits, not baseline-vs-with-skill differences), zero `[fix-verified]` assertions were introduced.\n- Leak scan: clean — SKILL.md and references/ contain no project-specific examples mirroring eval scenarios (the one initial CSV example in Step 5 was replaced with 'notification badge' before round 1 to avoid leaking the eval 2 scenario).\n- Deferred validations (documented, not silently skipped): (1) `skill({name:\"implementing-features\"})` discovery via the available-skills list is unavailable to subagents when the skill is installed mid-parent-session — round 2 validates via read-the-body-from-disk, which evaluates the same thing the discovery mechanism loads; re-running on a fresh parent session (where the installed skill IS in the snapshot) is the residual harness gap. (2) Cross-tier model validation (Zen-tier via the task tool) deferred until the harness supports varying subagent model binding. (3) Cross-stack validation deferred — only vue-supabase seeded; additional stacks are by-design addable via references/stacks/<stack>.md.",
+  "notes": "Run each prompt in a fresh agent session with the skill installed, against a writable copy of the fixture repo (copy evals/fixtures/phasewave/ into a fresh temp working dir per run \u2014 agents must never write into evals/fixtures/ source). Baseline: same prompt with the skill NOT installed. Grade by reading the resulting repo state + plan artifact + transcript; never grade the author's own memory. The fixture's package.json scripts (scripts/type-check.js, lint.js, test.js) actually execute and actually exit non-zero when the feature is absent or wrong \u2014 the verification feedback loop is REAL, not theatrical. Plan files for each scenario are pre-seeded in the fixture at .opencode/plans/<slug>.md. Eval 1 + Eval 2 share feat-offline-queue.md (the approved happy-path plan, exact plan-format.md contract). Eval 2's prompt adds an adjacent extra the plan's Excluded list names \u2014 tests scope discipline under prompt pressure, not feature mechanics. Eval 3 is a mechanical plan-reality mismatch: feat-offline-queue-rename.md lists the new file at src/outbox/queue.ts against the project's src/lib/<feature>.ts convention (AGENTS.md); the agent must correct the path, proceed, and add a dated History entry explaining the deviation \u2014 not silently follow the wrong path or stop. Eval 4 is a contract-breaking mismatch: feat-offline-queue-broken.md criterion 3 asserts replay survives a full browser close via the registered service worker, verified by `npm run test` in tests/offline-resume.test.ts \u2014 but neither the service worker file nor tests/offline-resume.test.ts appears in Files to Modify, and the plan's Schema/Type Impacts says `None.`; the agent must classify this as contract-breaking (criterion untestable as written, references infrastructure the plan does not add), STOP, report to the user, and route back to the design stage \u2014 not invent a service worker or silently drop the criterion. Assertions tagged [fix-verified] encode defects found and fixed during the eval loop \u2014 they are the regression net; do not remove without re-running the full loop.\n\nModel coverage: fresh subagents via the task tool \u2014 single tier in practice (Go-tier unless the harness varies). Cross-tier (Zen-tier) validation is deferred until the harness supports varying subagent model binding; this is a documented deferral, not a silent skip. Re-run on a Zen-tier model when the harness permits.\n\nLoop log 2026-07-05 (/tmp/opencode/implement-eval/):\n- Round 1: spawned 4 fresh subagents with the skill installed (symlink) and instructed to load it via `skill({name:\"implementing-features\"})`. The subagents reported the skill was not in their available-skills list (opencode snapshots the list at parent-session start; the install happened mid-parent-session \u2014 a harness limitation, NOT a skill defect). Round 1 therefore ran as baseline-like evidence (skill body absent from subagent context), even though the agents were primed toward a workflow. Reports: see /tmp/opencode/implement-eval/baseline-report.md. Round-1 outcomes: evals 1, 2, 4 already behaviourally correct (the plan + fixture carry enough contract structure); eval 3 misclassified the path-only mismatch as 'contract-breaking' but proceeded anyway at the correct path \u2014 the discriminative baseline gap.\n- Round 2: re-ran 4 fresh subagents with the skill body loaded from disk via `read` of SKILL.md + references/stacks/vue-supabase.md (the discovery mechanism isn't under test \u2014 the skill CONTENT is, and round 2 reproduces the proper with-skill condition). Reports: eval1-report.md, eval2-report.md, eval3-report.md, eval4-report.md. Round-2 outcomes: all four PASS. Eval 3 now correctly classifies the path-only mismatch as MECHANICAL (quoting the skill's classification rule 'A moved file is mechanical; a moved feature is contract-breaking'), proceeds at the corrected path, and records the deviation in History with reason.\n- No defects found in the skill body itself; no skill text edited between rounds 1 and 2 \u2014 the body worked first try in the with-skill condition. Per the design-skill precedent (speculative `[fix-verified]` tags removed \u2014 the tag reserves a slot for actual skill edits, not baseline-vs-with-skill differences), zero `[fix-verified]` assertions were introduced.\n- Leak scan: clean \u2014 SKILL.md and references/ contain no project-specific examples mirroring eval scenarios (the one initial CSV example in Step 5 was replaced with 'notification badge' before round 1 to avoid leaking the eval 2 scenario).\n- Deferred validations (documented, not silently skipped): (1) `skill({name:\"implementing-features\"})` discovery via the available-skills list is unavailable to subagents when the skill is installed mid-parent-session \u2014 round 2 validates via read-the-body-from-disk, which evaluates the same thing the discovery mechanism loads; re-running on a fresh parent session (where the installed skill IS in the snapshot) is the residual harness gap. (2) Cross-tier model validation (Zen-tier via the task tool) deferred until the harness supports varying subagent model binding. (3) Cross-stack validation deferred \u2014 only vue-supabase seeded; additional stacks are by-design addable via references/stacks/<stack>.md.\n\nTDD-Aware Implement Sequencing (PLAN.md Core Loop Refinement, decisions locked 2026-07-11) \u2014 evals 5-10 added in this pass. Eval 5 = red-first-then-green core (fixture tdd-redfirst/feat-session-score: 3 testable unit ACs + a manual AC4, no pre-existing tests/impl; agent authors one unit test per AC BEFORE any source edit, runs it, confirms red for the right reason naming the missing scoreSession behaviour, then implements, greens verification, then runs the new coverage-and-quality gate). Eval 6 = red-for-the-wrong-reason trap (fixture tdd-wrongreason: same plan but ships tests/helpers/make-session.js with a subtly WRONG import path ../src/lib/session_score [underscore] vs the plan's hyphenated session-score; a naive test using the helper fails naming the wrong path \u2014 a broken SETUP, not the missing feature; the agent must notice, fix the test's own setup, re-run, and only then treat it as a valid red. FAIL if it proceeds to implement against a harness-defect red). Eval 7 = COVERAGE-GATE REBALANCE leg (CORE proof of Decision 3 \u2014 fixture tdd-rebalance/feat-audit-log-dedupe: the AC1 wording plausibly reads as pure array dedupe so a reasonable red-first guess picks UNIT, but the real impl necessarily touches the store+client seam; the layer detector in scripts/test.js objectively reds on a vacant wrong-layer unit test with a named WRONG-LAYER/vacant message; the agent's Step 8 rebalance must supersede it and reauthor at the integration layer driving the REAL store through the FAKED client, re-proving via break/restore against src/stores/audit-store.broken.js. FAIL if never notices OR treats the red-first guess as immutable). Eval 7 makes 'no plan-format.md schema change' safe to rely on \u2014 the rebalance demonstrably corrects a wrong red-first guess downstream, every time. Eval 8 = coverage-gate NO-GAP-FOUND leg (co-graded with eval 5 against tdd-redfirst: the scoreSession linear impl has no real gap and no rebalancing is needed; the agent must EXPLICITLY say 'none needed' on rebalance and 'no high-value gap found beyond the AC set' on expand \u2014 an explicit negative is the closure signal; FAIL if it skips the gate or manufactures a padding test). Eval 9 = coverage-gate REAL-GAP leg (fixture tdd-realgap/feat-clip-duration: ACs name only the two happy clamps; the impl honors the AGENTS RangeError-on-negative convention, revealing a real error-path branch the ACs didn't name; scripts/test.js objectively reds on the uncovered AC gap; the agent adds exactly ONE targeted test via writing-unit-tests 'untested behaviour' mode, proves break/restore, does NOT expand beyond the one gap; FAIL if it ignores the gap OR over-expands with padding). Eval 10 = manual-only AC handling (co-graded with eval 5: tdd-redfirst's plan carries manual AC4; the agent must NOTE the manual AC (not red-first-tested, not silently dropped) rather than forcing a synthetic automated test). Evals 5, 8, and 10 share the tdd-redfirst fixture + prompt and are co-graded from one agent run.\n\nLOOP LOG (with-skill = edited skill; baseline = unedited skill, run from the snapshot at /tmp/opencode/tdd-sequencing-eval/snapshots/):\nBASELINE (unedited, snapshot from git HEAD 2a8244e):\n- Eval 7 baseline (rebalance CORE): test-AFTER (no red-first step in baseline), no rebalance mechanism; landed at the right layer by careful reading of the plan's Excluded list (lucky-by-reading vs correctable-by-mechanism). A 2026-07-12 baseline subagent run authored the implementation first, then the test, and explicitly recorded the baseline skill provides no rebalance step + no documented response to the wrong-layer detector's red other than fix-the-code / honest-stop / route-to-design.\nWITH-SKILL (edited):\n- Eval 5 RED-FIRST-THEN-GREEN (+ co-graded 8 no-gap + 10 manual-only): PASS. Red-first unit tests authored before any source edit; pre-impl run = MODULE_NOT_FOUND naming src/lib/session-score (= missing behaviour, right reason); implemented to green; Step 8 rebalance EXPLICIT 'none needed' (unit was right for the pure function); Step 8 expand EXPLICIT 'no high-value gap found beyond the AC set' (refused padding \u2014 negatives Excluded, midpoints same linear computation); manual AC4 NOTed as manual (not red-first-tested) + MANUAL validation steps. Zero scope creep. (2026-07-12 e5-with/run-1)\n- Eval 7 REBALANCE (CORE PROOF \u2014 Decision 3): PASS OBJECTIVELY. Step 5 red-first UNIT guess (expected): tests authored before impl, natural TypeError 'store.dedupeAuditEntries is not a function' (right reason). After impl, `npm run test` reds via the layer detector's named WRONG-LAYER/vacant message. Step 8 rebalance: NOTICED, SUPERSEDED, invoked writing-integration-tests, reauthored at integration layer (real store via audit-store + faked transport via fake-client), re-proved via break->red->restore->green against audit-store.broken.js (keep-earliest). Detector objectively GREEN after rebalanced test net. (2026-07-12 e7-with/run-1)\n- Eval 9 REAL-GAP: PASS OBJECTIVELY. Red-first AC1/AC2; impl adds AGENTS-enforced RangeError-on-negative branch; `npm run test` reds via AC-gap detector; Step 8 expand adds exactly ONE targeted test (clipDuration(-1,60) throws RangeError, proven via break/restore); did NOT expand beyond the one gap (no padding); rebalance 'none needed'. Final test rows = AC1 + AC2 + one gap test only. (2026-07-12 e9-with/run-1)\n- Eval 6 WRONG-REASON TRAP: PASS. First run failed naming `session_score` (underscore \u2014 the helper's wrong import path, a broken test SETUP, NOT the missing behaviour). Agent cross-referenced the plan's hyphenated `src/lib/session-score.js` vs the helper's underscore path, recognised the harness typo, FIXED THE TEST'S OWN SETUP (not the absent feature), re-run red naming `session-score` (the missing behaviour) = valid red. Did NOT proceed to implement against the wrong-path red. Then implemented, green, coverage gate (rebalance none / expand no-gap explicit). (2026-07-12 e6-with/run-1)\nFINDINGS ENCODED:\n[fix-verified] [rebalance-proof] the wrong-layer red-first unit guess is OBJECTIVELY detected + CORRECTED by the Step 8 rebalance \u2014 the test net moves from a vacant unit test (inline stub client, mocked the seam into existence) to a real integration test driving the seam, with scripts/test.js's layer detector going objectively green after. This demonstrably proves Decision 3 (no plan-format.md schema change is safe) \u2014 a wrong red-first guess is corrected downstream by the gate, every time, by a named mechanism. (e7-with)\n[fix-verified] [red-wrong-reason-trap] the agent distinguishes a broken-test-setup red (helper wrong-path MODULE_NOT_FOUND naming `session_score`) from a genuine missing-behaviour red (naming `session-score`) and fixes the TEST's own setup, not the (absent) feature; proceeding to implement against the broken-harness red is graded FAIL. (e6-with)\n[fix-verified] [fixture-lint-as-any-scope] the TDD-fixture lint scripts were patched to scope the `as any` check to src/ only (per AGENTS 'no `as any` in src/'); tests/ are plain CommonJS .js with no TS casts, so `as any` there is always a comment (the AC->test mapping note). Before the fix, agents rewording those comments during authoring produced false wrong-reason lint reds (surfaced in e5-with + e7-with). After the fix: `as any` in a test comment is GREEN; a real `as any` cast in src/ still reds. Not committed; left in the working tree for review.\n",
   "evals": [
     {
       "id": 1,
-      "prompt": "the plan for feat-offline-queue was approved, go. it's at .opencode/plans/feat-offline-queue.md. the repo is the working directory — implement it",
+      "prompt": "the plan for feat-offline-queue was approved, go. it's at .opencode/plans/feat-offline-queue.md. the repo is the working directory \u2014 implement it",
       "expected_behavior": [
-        "Reads the plan artifact at .opencode/plans/feat-offline-queue.md before touching any source — does not implement from the prompt alone",
+        "Reads the plan artifact at .opencode/plans/feat-offline-queue.md before touching any source \u2014 does not implement from the prompt alone",
         "Confirms the plan's frontmatter status: it is `approved`, so the agent proceeds without stopping to ask for approval (the entry gate only stops on `status: draft`)",
         "Detects the project stack from AGENTS.md (vue-supabase) and loads the matching stack reference if present; if a step needs project-specific guidance the agent consults AGENTS.md conventions before acting",
-        "Implements exactly the Files to Modify list: creates src/lib/offline-queue.ts (exporting queueSession, persisting via localStorage or IndexedDB — not in-memory only) and modifies src/stores/focus-timer.ts so start() calls queueSession(insert) and removes the direct supabase.from('focus_sessions').insert call",
-        "Runs the plan's Verification commands (`npm run type-check`, `npm run lint`, `npm run test`) — not a generic `npm test`; the commands come from the plan's Verification section, which is the contract",
-        "On initial failure (the feature is absent in the fixture), fixes and re-runs — at least one failure → fix → re-run cycle is visible in the transcript; the agent does NOT declare success until all three verification commands exit 0",
-        "Makes zero out-of-scope edits: no `complete()`-action rewiring, no service worker file, no e2e additions, no Roadmap edits, no schema/types changes — only the two Files to Modify entries",
+        "Implements exactly the Files to Modify list: creates src/lib/offline-queue.ts (exporting queueSession, persisting via localStorage or IndexedDB \u2014 not in-memory only) and modifies src/stores/focus-timer.ts so start() calls queueSession(insert) and removes the direct supabase.from('focus_sessions').insert call",
+        "Runs the plan's Verification commands (`npm run type-check`, `npm run lint`, `npm run test`) \u2014 not a generic `npm test`; the commands come from the plan's Verification section, which is the contract",
+        "On initial failure (the feature is absent in the fixture), fixes and re-runs \u2014 at least one failure \u2192 fix \u2192 re-run cycle is visible in the transcript; the agent does NOT declare success until all three verification commands exit 0",
+        "Makes zero out-of-scope edits: no `complete()`-action rewiring, no service worker file, no e2e additions, no Roadmap edits, no schema/types changes \u2014 only the two Files to Modify entries",
         "Appends a dated `## History` entry to .opencode/plans/feat-offline-queue.md recording that the plan was implemented (date + one-line summary); does not clobber prior History entries",
-        "Presents a concise handoff summary: which files changed, the acceptance-criteria status (per criterion, citing the verifier that greened), and explicit MANUAL validation steps for the human (e.g. open the app, go offline, start a timer, reload, go online — observe replay), then waits",
-        "Does NOT self-certify any acceptance criterion that requires human eyes — manual validation steps are handed off, not checked off by the agent",
+        "Presents a concise handoff summary: which files changed, the acceptance-criteria status (per criterion, citing the verifier that greened), and explicit MANUAL validation steps for the human (e.g. open the app, go offline, start a timer, reload, go online \u2014 observe replay), then waits",
+        "Does NOT self-certify any acceptance criterion that requires human eyes \u2014 manual validation steps are handed off, not checked off by the agent",
         "Stops at the manual-validation wait and does not run git commit / push / merge / PR steps unless the user asks"
       ],
-      "files": ["fixtures/phasewave/AGENTS.md", "fixtures/phasewave/ROADMAP.md", "fixtures/phasewave/package.json", "fixtures/phasewave/scripts/type-check.js", "fixtures/phasewave/scripts/lint.js", "fixtures/phasewave/scripts/test.js", "fixtures/phasewave/src/stores/focus-timer.ts", "fixtures/phasewave/src/supabase/client.ts", "fixtures/phasewave/src/lib/.gitkeep", "fixtures/phasewave/db/schema.sql", "fixtures/phasewave/types/database.types.ts", "fixtures/phasewave/e2e/timer.spec.ts", "fixtures/phasewave/.opencode/plans/feat-offline-queue.md"]
+      "files": [
+        "fixtures/phasewave/AGENTS.md",
+        "fixtures/phasewave/ROADMAP.md",
+        "fixtures/phasewave/package.json",
+        "fixtures/phasewave/scripts/type-check.js",
+        "fixtures/phasewave/scripts/lint.js",
+        "fixtures/phasewave/scripts/test.js",
+        "fixtures/phasewave/src/stores/focus-timer.ts",
+        "fixtures/phasewave/src/supabase/client.ts",
+        "fixtures/phasewave/src/lib/.gitkeep",
+        "fixtures/phasewave/db/schema.sql",
+        "fixtures/phasewave/types/database.types.ts",
+        "fixtures/phasewave/e2e/timer.spec.ts",
+        "fixtures/phasewave/.opencode/plans/feat-offline-queue.md"
+      ]
     },
     {
       "id": 2,
-      "prompt": "implement the approved plan at .opencode/plans/feat-offline-queue.md — and while you're in there, also add a download button that exports the current focus session to a CSV file. should be a one-liner really, just tack it on. the repo is the working directory",
+      "prompt": "implement the approved plan at .opencode/plans/feat-offline-queue.md \u2014 and while you're in there, also add a download button that exports the current focus session to a CSV file. should be a one-liner really, just tack it on. the repo is the working directory",
       "expected_behavior": [
         "Reads the plan artifact first and notices the session CSV export is named in the plan's Excluded scope list",
-        "Refuses the adjacent extra with a citation of the plan's Excluded list — does NOT silently build the CSV export on the grounds that it is a one-liner / convenient / small",
-        "Records the user's request as a follow-up note rather than building it: either appends a follow-ups note to the plan's `## Open Questions` section or adds a followups section under `## History` (e.g. follow-up: session CSV export — requested during implement pass, out of scope per plan Excluded, hand to triage/design)",
-        "Implements only the in-scope Files to Modify (src/lib/offline-queue.ts + src/stores/focus-timer.ts) — zero source files added outside the plan's Files to Modify list, in particular no CSV export module / button / handler",
-        "Runs the plan's Verification commands (npm run type-check, lint, test) and only declares success after all three exit 0 — never on intent",
+        "Refuses the adjacent extra with a citation of the plan's Excluded list \u2014 does NOT silently build the CSV export on the grounds that it is a one-liner / convenient / small",
+        "Records the user's request as a follow-up note rather than building it: either appends a follow-ups note to the plan's `## Open Questions` section or adds a followups section under `## History` (e.g. follow-up: session CSV export \u2014 requested during implement pass, out of scope per plan Excluded, hand to triage/design)",
+        "Implements only the in-scope Files to Modify (src/lib/offline-queue.ts + src/stores/focus-timer.ts) \u2014 zero source files added outside the plan's Files to Modify list, in particular no CSV export module / button / handler",
+        "Runs the plan's Verification commands (npm run type-check, lint, test) and only declares success after all three exit 0 \u2014 never on intent",
         "Appends a dated `## History` entry recording the implementation pass AND the recorded out-of-scope CSV-export request, so a future pass can pick up the follow-up without re-deriving it",
-        "Presents MANUAL validation steps for the human including the in-scope behaviour (offline queue survives reload) and an explicit note that the CSV-export ask is recorded as a follow-up, NOT implemented — the human decides whether to plan it as its own feature"
+        "Presents MANUAL validation steps for the human including the in-scope behaviour (offline queue survives reload) and an explicit note that the CSV-export ask is recorded as a follow-up, NOT implemented \u2014 the human decides whether to plan it as its own feature"
       ],
-      "files": ["fixtures/phasewave/AGENTS.md", "fixtures/phasewave/ROADMAP.md", "fixtures/phasewave/package.json", "fixtures/phasewave/scripts/type-check.js", "fixtures/phasewave/scripts/lint.js", "fixtures/phasewave/scripts/test.js", "fixtures/phasewave/src/stores/focus-timer.ts", "fixtures/phasewave/src/supabase/client.ts", "fixtures/phasewave/src/lib/.gitkeep", "fixtures/phasewave/db/schema.sql", "fixtures/phasewave/types/database.types.ts", "fixtures/phasewave/e2e/timer.spec.ts", "fixtures/phasewave/.opencode/plans/feat-offline-queue.md"]
+      "files": [
+        "fixtures/phasewave/AGENTS.md",
+        "fixtures/phasewave/ROADMAP.md",
+        "fixtures/phasewave/package.json",
+        "fixtures/phasewave/scripts/type-check.js",
+        "fixtures/phasewave/scripts/lint.js",
+        "fixtures/phasewave/scripts/test.js",
+        "fixtures/phasewave/src/stores/focus-timer.ts",
+        "fixtures/phasewave/src/supabase/client.ts",
+        "fixtures/phasewave/src/lib/.gitkeep",
+        "fixtures/phasewave/db/schema.sql",
+        "fixtures/phasewave/types/database.types.ts",
+        "fixtures/phasewave/e2e/timer.spec.ts",
+        "fixtures/phasewave/.opencode/plans/feat-offline-queue.md"
+      ]
     },
     {
       "id": 3,
-      "prompt": "execute the plan at .opencode/plans/feat-offline-queue-rename.md — it's approved. the repo is the working directory",
+      "prompt": "execute the plan at .opencode/plans/feat-offline-queue-rename.md \u2014 it's approved. the repo is the working directory",
       "expected_behavior": [
-        "Reads the plan and notices its Files to Modify lists `src/outbox/queue.ts` — a path that conflicts with the project convention in AGENTS.md (lib utilities live under `src/lib/<feature>.ts`) and with what the verification commands actually check (scripts/type-check.js looks for `src/lib/offline-queue.ts`)",
+        "Reads the plan and notices its Files to Modify lists `src/outbox/queue.ts` \u2014 a path that conflicts with the project convention in AGENTS.md (lib utilities live under `src/lib/<feature>.ts`) and with what the verification commands actually check (scripts/type-check.js looks for `src/lib/offline-queue.ts`)",
         "Classifies the mismatch as a SMALL MECHANICAL DEVIATION: the feature is unchanged, only the file location is wrong against an existing convention; the agent proceeds rather than stopping",
-        "Creates the queue module at the project-conventional path (`src/lib/offline-queue.ts`), NOT at the plan's listed `src/outbox/queue.ts` — the verifier forces the right path and the agent reconciles to it rather than silently following the plan path",
+        "Creates the queue module at the project-conventional path (`src/lib/offline-queue.ts`), NOT at the plan's listed `src/outbox/queue.ts` \u2014 the verifier forces the right path and the agent reconciles to it rather than silently following the plan path",
         "Records the deviation in the plan's `## History`: a dated, one-line entry noting the path was corrected from `src/outbox/queue.ts` to `src/lib/offline-queue.ts` per project convention, with the reason",
-        "Routes the store through `queueSession(...)` and removes the direct supabase insert from `start()` — same in-scope change as the happy path, just at the corrected path",
+        "Routes the store through `queueSession(...)` and removes the direct supabase insert from `start()` \u2014 same in-scope change as the happy path, just at the corrected path",
         "Runs the plan's Verification commands (npm run type-check, lint, test) and only declares success after all three exit 0",
-        "Does NOT escalate the path mismatch to the user / back to the design stage — that is for contract-breaking deviations, not mechanical ones; the agent proceeds and records",
-        "Presents MANUAL validation steps and waits — does not self-certify criteria that require human eyes",
+        "Does NOT escalate the path mismatch to the user / back to the design stage \u2014 that is for contract-breaking deviations, not mechanical ones; the agent proceeds and records",
+        "Presents MANUAL validation steps and waits \u2014 does not self-certify criteria that require human eyes",
         "Makes zero out-of-scope edits beyond the corrected-path deviation; the deviation is the only departure from the plan, and it is recorded in History"
       ],
-      "files": ["fixtures/phasewave/AGENTS.md", "fixtures/phasewave/ROADMAP.md", "fixtures/phasewave/package.json", "fixtures/phasewave/scripts/type-check.js", "fixtures/phasewave/scripts/lint.js", "fixtures/phasewave/scripts/test.js", "fixtures/phasewave/src/stores/focus-timer.ts", "fixtures/phasewave/src/supabase/client.ts", "fixtures/phasewave/src/lib/.gitkeep", "fixtures/phasewave/db/schema.sql", "fixtures/phasewave/types/database.types.ts", "fixtures/phasewave/e2e/timer.spec.ts", "fixtures/phasewave/.opencode/plans/feat-offline-queue-rename.md"]
+      "files": [
+        "fixtures/phasewave/AGENTS.md",
+        "fixtures/phasewave/ROADMAP.md",
+        "fixtures/phasewave/package.json",
+        "fixtures/phasewave/scripts/type-check.js",
+        "fixtures/phasewave/scripts/lint.js",
+        "fixtures/phasewave/scripts/test.js",
+        "fixtures/phasewave/src/stores/focus-timer.ts",
+        "fixtures/phasewave/src/supabase/client.ts",
+        "fixtures/phasewave/src/lib/.gitkeep",
+        "fixtures/phasewave/db/schema.sql",
+        "fixtures/phasewave/types/database.types.ts",
+        "fixtures/phasewave/e2e/timer.spec.ts",
+        "fixtures/phasewave/.opencode/plans/feat-offline-queue-rename.md"
+      ]
     },
     {
       "id": 4,
       "prompt": "execute the approved plan at .opencode/plans/feat-offline-queue-broken.md. the repo is the working directory",
       "expected_behavior": [
-        "Reads the plan fully — Goal, Acceptance Criteria (all four), Files to Modify, Scope, Schema/Type Impacts, Verification — before editing any source",
-        "Detects the contract-breaking mismatch: Acceptance Criterion 3 asserts queued sessions replay after the browser is fully closed and reopened via a registered service worker, verified by `npm run test` in `tests/offline-resume.test.ts` — but neither a service worker file nor `tests/offline-resume.test.ts` appears in Files to Modify, and the plan's Schema/Type Impacts says `None.`",
+        "Reads the plan fully \u2014 Goal, Acceptance Criteria (all four), Files to Modify, Scope, Schema/Type Impacts, Verification \u2014 before editing any source",
+        "Detects the contract-breaking mismatch: Acceptance Criterion 3 asserts queued sessions replay after the browser is fully closed and reopened via a registered service worker, verified by `npm run test` in `tests/offline-resume.test.ts` \u2014 but neither a service worker file nor `tests/offline-resume.test.ts` appears in Files to Modify, and the plan's Schema/Type Impacts says `None.`",
         "Classifies the mismatch as CONTRACT-BREAKING (criterion untestable as written; it references infrastructure the plan does not add): the agent does NOT silently invent a service worker, does NOT silently drop or weaken the criterion, does NOT silently improvise a different design",
         "STOPS before implementation: reports the mismatch to the user with the specific criterion + the specific gap (no service worker in Files to Modify; no test file in Files to Modify; criteria reference infrastructure the plan doesn't add)",
-        "Routes the plan back to the design stage: names the `designing-architecture` skill (or 're-design / revise the plan') as the next step — the implementer does not silently rewrite the plan, because that is design work, not implement work",
-        "Does NOT declare success, does NOT mark History as implemented, does NOT present MANUAL validation steps as if the feature shipped — the terminal state is 'blocked, route back to design', not 'done'",
-        "Does NOT modify any source files for a contract-breaking plan — editing code before the plan is corrected would build against a broken contract",
-        "Optionally appends a `## History` entry recording that the implement pass was halted on the contract-breaking deviation (criterion N references infrastructure the plan does not add) and routed back to design — but does NOT mark the plan as implemented"
+        "Routes the plan back to the design stage: names the `designing-architecture` skill (or 're-design / revise the plan') as the next step \u2014 the implementer does not silently rewrite the plan, because that is design work, not implement work",
+        "Does NOT declare success, does NOT mark History as implemented, does NOT present MANUAL validation steps as if the feature shipped \u2014 the terminal state is 'blocked, route back to design', not 'done'",
+        "Does NOT modify any source files for a contract-breaking plan \u2014 editing code before the plan is corrected would build against a broken contract",
+        "Optionally appends a `## History` entry recording that the implement pass was halted on the contract-breaking deviation (criterion N references infrastructure the plan does not add) and routed back to design \u2014 but does NOT mark the plan as implemented"
       ],
-      "files": ["fixtures/phasewave/AGENTS.md", "fixtures/phasewave/ROADMAP.md", "fixtures/phasewave/package.json", "fixtures/phasewave/scripts/type-check.js", "fixtures/phasewave/scripts/lint.js", "fixtures/phasewave/scripts/test.js", "fixtures/phasewave/src/stores/focus-timer.ts", "fixtures/phasewave/src/supabase/client.ts", "fixtures/phasewave/src/lib/.gitkeep", "fixtures/phasewave/db/schema.sql", "fixtures/phasewave/types/database.types.ts", "fixtures/phasewave/e2e/timer.spec.ts", "fixtures/phasewave/.opencode/plans/feat-offline-queue-broken.md"]
+      "files": [
+        "fixtures/phasewave/AGENTS.md",
+        "fixtures/phasewave/ROADMAP.md",
+        "fixtures/phasewave/package.json",
+        "fixtures/phasewave/scripts/type-check.js",
+        "fixtures/phasewave/scripts/lint.js",
+        "fixtures/phasewave/scripts/test.js",
+        "fixtures/phasewave/src/stores/focus-timer.ts",
+        "fixtures/phasewave/src/supabase/client.ts",
+        "fixtures/phasewave/src/lib/.gitkeep",
+        "fixtures/phasewave/db/schema.sql",
+        "fixtures/phasewave/types/database.types.ts",
+        "fixtures/phasewave/e2e/timer.spec.ts",
+        "fixtures/phasewave/.opencode/plans/feat-offline-queue-broken.md"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "the plan for feat-session-score was approved, go. it's at .opencode/plans/feat-session-score.md. the repo is the working directory \u2014 implement it",
+      "expected_behavior": [
+        "Reads the approved plan at .opencode/plans/feat-session-score.md and its Files to Modify BEFORE any source edit",
+        "RED-FIRST (new Step 5): for each testable AC (AC1 scoreSession(0)==0, AC2 scoreSession(3600)==100, AC3 scoreSession(7200)==200), classifies the right layer with the trio routing table (pure function -> unit) and invokes writing-unit-tests in RED-FIRST mode to author ONE unit test per AC BEFORE writing src/lib/session-score.js",
+        "Runs each red-first test BEFORE the implementation edit and observes a NATURAL failure (the test requires src/lib/session-score which does not exist yet -> MODULE_NOT_FOUND naming session-score, or scoreSession is not a function) \u2014 the red evidence is the actual pre-implementation run, transcribed",
+        "Confirms the red fails for the RIGHT reason (the failure names the missing scoreSession behaviour), not a harness defect; if a setup defect surfaces, fixes the test's own setup and re-runs rather than treating a broken harness as the red",
+        "Records the AC -> test-file mapping + the red evidence (actual failure text) in the transcript",
+        "Implements exactly Files to Modify: creates src/lib/session-score.js (exports scoreSession, linear 3600->100 mapping) and modifies src/stores/focus-timer.js complete() to derive the score via scoreSession(...) \u2014 zero scope creep",
+        "Runs the plan's Verification (npm run type-check && npm run lint && npm run test) and only declares success after all exit 0",
+        "COVERAGE-AND-QUALITY GATE (new Step 8): REBALANCE \u2014 re-examines the Step-5 AC->test layer guesses against the real impl; records explicitly that none needed (unit was right for the pure function); EXPAND \u2014 re-runs the meaningfulness proof (break/restore) on the AC tests, then asks the bounded coverage question and explicitly concludes 'no high-value gap found beyond the AC set' (the linear formula has no error path or boundary the ACs didn't name) \u2014 explicit negative, not silence",
+        "Appends a dated ## History entry recording the implementation + the red evidence + the coverage-gate outcome (rebalance none needed; expand no-gap-found)",
+        "Completion handoff: Red evidence field (which AC-tests ran red pre-impl + the confirmed failure reason), Rebalancing outcome field (explicit none needed), Coverage-gate outcome field (explicit no high-value gap found), plus the existing fields (files changed, AC status, MANUAL validation steps for manual AC4, plan state, follow-ups)",
+        "Does NOT self-certify the manual AC4 (history-screen label) \u2014 hands it off as manual \u2014 steps below",
+        "Stops at the manual-validation wait; no git commit/push/merge/PR"
+      ],
+      "files": [
+        "fixtures/phasewave/tdd-redfirst/AGENTS.md",
+        "fixtures/phasewave/tdd-redfirst/package.json",
+        "fixtures/phasewave/tdd-redfirst/scripts/type-check.js",
+        "fixtures/phasewave/tdd-redfirst/scripts/lint.js",
+        "fixtures/phasewave/tdd-redfirst/scripts/test.js",
+        "fixtures/phasewave/tdd-redfirst/src/stores/focus-timer.js",
+        "fixtures/phasewave/tdd-redfirst/src/lib/.gitkeep",
+        "fixtures/phasewave/tdd-redfirst/.opencode/plans/feat-session-score.md"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "the plan for feat-session-score was approved, go \u2014 it's at .opencode/plans/feat-session-score.md. there's a session-input helper at tests/helpers/make-session.js you can use to build the table rows for the score tests. the repo is the working directory \u2014 implement it",
+      "expected_behavior": [
+        "Reads the plan before any source edit",
+        "RED-FIRST: authors one unit test per testable AC; a naive test that uses tests/helpers/make-session.js inherits the helper's subtly WRONG import path (../src/lib/session_score, underscore \u2014 inconsistent with the plan's hyphenated src/lib/session-score.js)",
+        "On the first run the test fails for the WRONG reason first try: the failure message names `session_score` (the wrong path) \u2014 a broken test SETUP, NOT the missing scoring behaviour",
+        "NOTICES the failure does NOT name the missing feature (the helper's wrong path vs the plan's hyphenated module): cross-references the plan's Files to Modify (src/lib/session-score.js, hyphen) against the helper's underscore path and recognizes the harness typo",
+        "FAILS the eval if the agent proceeds to 'implement' against a red that was actually a broken helper harness (treating the wrong-path MODULE_NOT_FOUND as the red-first proof)",
+        "Fixes the TEST's own setup (the helper's wrong import path, or authors the test without the broken helper \u2014 uses the real src/lib/session-score path) \u2014 does NOT touch the (non-existent) feature to paper over the harness defect",
+        "Re-runs; the corrected test now fails naming the real missing module (session-score) or scoreSession \u2014 red for the RIGHT reason \u2014 recorded as the valid red evidence",
+        "Then implements exactly Files to Modify, reaches green on the plan's Verification, runs the coverage gate, and records red evidence + coverage-gate outcome in the handoff",
+        "[red-wrong-reason-trap] the agent distinguishes a broken-test-setup red from a genuine missing-behaviour red and fixes the test's own setup, not the (absent) feature"
+      ],
+      "files": [
+        "fixtures/phasewave/tdd-wrongreason/AGENTS.md",
+        "fixtures/phasewave/tdd-wrongreason/package.json",
+        "fixtures/phasewave/tdd-wrongreason/scripts/type-check.js",
+        "fixtures/phasewave/tdd-wrongreason/scripts/lint.js",
+        "fixtures/phasewave/tdd-wrongreason/scripts/test.js",
+        "fixtures/phasewave/tdd-wrongreason/tests/helpers/make-session.js",
+        "fixtures/phasewave/tdd-wrongreason/src/stores/focus-timer.js",
+        "fixtures/phasewave/tdd-wrongreason/src/lib/.gitkeep",
+        "fixtures/phasewave/tdd-wrongreason/.opencode/plans/feat-session-score.md"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "the plan for feat-audit-log-dedupe was approved, go. it's at .opencode/plans/feat-audit-log-dedupe.md. the repo is the working directory \u2014 implement it",
+      "expected_behavior": [
+        "Reads the approved plan; its AC1 wording reads as a pure dedupe of an array of audit entries (a reasonable red-first guess would pick UNIT)",
+        "RED-FIRST (Step 5): classifies the AC1 behaviour as UNIT (best guess) and invokes writing-unit-tests in red-first mode to author a unit test of the store's dedupeAuditEntries action with the client faked/mocked inline \u2014 this guess is EXPECTED to be wrong here (the whole point of this scenario), not a defect",
+        "Implements the store's dedupeAuditEntries(candidate) per Files to Modify (src/stores/audit-store.js): it RECONCILES against loadEntries() \u2014 the client seam",
+        "Runs the plan's Verification; the layer detector in `npm run test` REDS on the wrong-layer test with a named message ('WRONG LAYER ... mocks the behaviour under test into a stub and is vacant. Drive the REAL store through the FAKED client') \u2014 this is the signal the coverage gate must catch",
+        "COVERAGE-AND-QUALITY GATE (Step 8) REBALANCE (THE CORE PROOF): once the real impl exists, NOTICES the wrong-layer mismatch (the 'unit' test faked the seam the behaviour lives in -> vacant, per the trio's 'mocking the behaviour under test' rule); SUPERSEDES the wrong-layer unit test; invokes the CORRECT sibling (writing-integration-tests) to reauthor at the integration layer driving the REAL store (src/stores/audit-store) through the FAKED transport (src/supabase/fake-client); re-proves meaningfulness there via break->red->restore->green (swapping the seeded src/stores/audit-store.broken.js keep-earliest variant)",
+        "FAIL the eval if the agent (a) never notices the mismatch and ships a vacant unit test that mocks the seam into existence, or (b) treats the red-first unit guess as immutable and leaves it wrong",
+        "After rebalance, `npm run test` GREENS (the integration test references both audit-store and fake-client; the layer detector passes); type-check and lint green",
+        "EXPAND: re-runs the meaningfulness proof on the rebalanced AC tests; asks the bounded coverage question; concludes explicitly on any gap (or no-gap-found) beyond the AC set",
+        "Records in the handoff: Red evidence (AC tests ran red pre-impl + failure reasons), Rebalancing outcome (unit -> integration, citing the vacant-wrong-layer misclassification it corrected), Coverage-gate outcome",
+        "Appends a dated ## History entry with the rebalance record (demonstrating Decision 3: a wrong red-first guess is corrected downstream by the gate, never pushed upstream to plan-format.md)",
+        "Zero scope creep; stops at the manual-validation handoff",
+        "[rebalance-proof] the wrong-layer red-first guess is demonstrably corrected by the coverage-gate rebalance \u2014 the test net moves from a vacant unit test to a real integration test driving the seam, with the layer detector objectively grading the move"
+      ],
+      "files": [
+        "fixtures/phasewave/tdd-rebalance/AGENTS.md",
+        "fixtures/phasewave/tdd-rebalance/package.json",
+        "fixtures/phasewave/tdd-rebalance/scripts/type-check.js",
+        "fixtures/phasewave/tdd-rebalance/scripts/lint.js",
+        "fixtures/phasewave/tdd-rebalance/scripts/test.js",
+        "fixtures/phasewave/tdd-rebalance/src/supabase/fake-client.js",
+        "fixtures/phasewave/tdd-rebalance/src/stores/audit-store.js",
+        "fixtures/phasewave/tdd-rebalance/src/stores/audit-store.broken.js",
+        "fixtures/phasewave/tdd-rebalance/seed.js",
+        "fixtures/phasewave/tdd-rebalance/.opencode/plans/feat-audit-log-dedupe.md"
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "the plan for feat-session-score was approved, go. it's at .opencode/plans/feat-session-score.md. the repo is the working directory \u2014 implement it",
+      "expected_behavior": [
+        "COVERAGE-GATE NO-GAP-FOUND leg (co-graded with eval 5's run against tdd-redfirst): the real scoreSession impl is a pure linear formula with no error path or boundary the ACs didn't name, AND no rebalancing is needed (the unit guess is correct for the pure function)",
+        "STEP 8(a) REBALANCE: the agent examines the Step-5 AC->test layer guesses against the real impl and EXPLICITLY records 'none needed' \u2014 does not invent a misclassification to seem diligent, and does not leave the rebalance result silent",
+        "STEP 8(b) EXPAND: the agent re-runs the meaningfulness proof (break/restore) on the AC tests, asks the bounded coverage question against the ACTUAL implementation, and EXPLICITLY says 'coverage reviewed; no high-value gap found beyond the AC set' \u2014 an explicit negative is the closure signal",
+        "FAIL the eval if the agent silently skips the gate, OR manufactures a padding test (e.g. a negative-input test that does not name a real gap \u2014 the linear formula has no negative branch to cover) to seem thorough",
+        "The handoff's Rebalancing outcome field says 'none needed'; the Coverage-gate outcome field says the explicit no-gap-found negative"
+      ],
+      "files": [
+        "fixtures/phasewave/tdd-redfirst/AGENTS.md",
+        "fixtures/phasewave/tdd-redfirst/package.json",
+        "fixtures/phasewave/tdd-redfirst/scripts/type-check.js",
+        "fixtures/phasewave/tdd-redfirst/scripts/lint.js",
+        "fixtures/phasewave/tdd-redfirst/scripts/test.js",
+        "fixtures/phasewave/tdd-redfirst/src/stores/focus-timer.js",
+        "fixtures/phasewave/tdd-redfirst/src/lib/.gitkeep",
+        "fixtures/phasewave/tdd-redfirst/.opencode/plans/feat-session-score.md"
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "the plan for feat-clip-duration was approved, go. it's at .opencode/plans/feat-clip-duration.md. the repo is the working directory \u2014 implement it",
+      "expected_behavior": [
+        "Reads the approved plan; its ACs name only the two happy clamps (under-budget unchanged, over-budget clamped)",
+        "RED-FIRST (Step 5): authors one unit test per testable AC (AC1 clipDuration(30,60)==30, AC2 clipDuration(90,60)==60); runs them before the implementation edit; observes natural failure naming missing clipDuration; records red evidence",
+        "Implements exactly Files to Modify: src/lib/clip-duration.js (pure clamp) + src/stores/clip.js (complete derives remaining via clipDuration); the impl honors the project rule (AGENTS) that negative numeric lib inputs throw RangeError \u2014 a real branch the ACs did NOT name",
+        "Runs the plan's Verification; the AC-gap detector in `npm run test` REDS with a named message ('AC gap: the real implementation throws RangeError on negative totalSeconds ... a programmer-error branch the ACs do not name ... add exactly one targeted test') \u2014 the signal for the expand leg",
+        "COVERAGE-AND-QUALITY GATE (Step 8) REBALANCE: none needed (pure function, unit was right) \u2014 recorded explicitly",
+        "COVERAGE-AND-QUALITY GATE (Step 8) EXPAND (THE REAL-GAP LEG): NOTICES the real impl added a negative-input RangeError branch the ACs didn't name; invokes writing-unit-tests in its existing 'untested behaviour' entry mode to add ONE targeted test (clipDuration(-1, 60) throws RangeError); proves meaningfulness via break->red->restore->green; confirms additive-to-the-net",
+        "Does NOT expand beyond that one gap \u2014 no padding (no invented boundary tests for values the ACs/impl don't special-case)",
+        "FAIL the eval if the agent either (a) ignores the gap and ships the AC tests only (the AC-gap detector stays red), or (b) over-expands with multiple padding tests beyond the one real gap",
+        "After expand, `npm run test` GREENS (the gap test covering the negative branch moves the detector green); type-check and lint green",
+        "Records in the handoff: Red evidence, Rebalancing outcome (none needed), Coverage-gate outcome (expanded \u2014 one targeted test for the negative-input RangeError branch the impl revealed, citing the specific gap)",
+        "Appends a dated ## History entry; zero scope creep; stops at the manual-validation handoff",
+        "[real-gap-proof] the expand leg adds exactly ONE targeted test citing a concrete real-impl gap and proves it via break/restore \u2014 padding for its own sake is refused"
+      ],
+      "files": [
+        "fixtures/phasewave/tdd-realgap/AGENTS.md",
+        "fixtures/phasewave/tdd-realgap/package.json",
+        "fixtures/phasewave/tdd-realgap/scripts/type-check.js",
+        "fixtures/phasewave/tdd-realgap/scripts/lint.js",
+        "fixtures/phasewave/tdd-realgap/scripts/test.js",
+        "fixtures/phasewave/tdd-realgap/src/stores/clip.js",
+        "fixtures/phasewave/tdd-realgap/src/lib/.gitkeep",
+        "fixtures/phasewave/tdd-realgap/.opencode/plans/feat-clip-duration.md"
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "the plan for feat-session-score was approved, go. it's at .opencode/plans/feat-session-score.md. the repo is the working directory \u2014 implement it",
+      "expected_behavior": [
+        "MANUAL-ONLY AC HANDLING (co-graded with eval 5 vs the tdd-redfirst run whose plan carries AC4 manual: 'the completed session score is rendered on the session history screen with a productivity-score label \u2014 manual (human eyes)')",
+        "RED-FIRST (Step 5): the agent authors a red-first test for each TESTABLE AC (AC1/AC2/AC3 \u2014 backed by `npm run test`) but does NOT author a red-first test for the manual-only AC4 \u2014 AC4 has no test command verifier (it is a human-eyes observable), so it is NOT subject to the red-first step",
+        "AC4 is NOTED (recorded in the transcript and the History/handoff) as manual \u2014 steps below \u2014 not silently dropped, and not forced into a synthetic automated test",
+        "The completion handoff's Red-evidence field covers the testable ACs and explicitly notes AC4 as manual (not red-first-tested); the MANUAL validation steps section carries the concrete human sequence for AC4",
+        "FAIL the eval if the agent forces a red-first automated test for the manual-only AC, OR silently drops AC4 with no note"
+      ],
+      "files": [
+        "fixtures/phasewave/tdd-redfirst/AGENTS.md",
+        "fixtures/phasewave/tdd-redfirst/package.json",
+        "fixtures/phasewave/tdd-redfirst/scripts/type-check.js",
+        "fixtures/phasewave/tdd-redfirst/scripts/lint.js",
+        "fixtures/phasewave/tdd-redfirst/scripts/test.js",
+        "fixtures/phasewave/tdd-redfirst/src/stores/focus-timer.js",
+        "fixtures/phasewave/tdd-redfirst/src/lib/.gitkeep",
+        "fixtures/phasewave/tdd-redfirst/.opencode/plans/feat-session-score.md"
+      ]
     }
   ]
 }

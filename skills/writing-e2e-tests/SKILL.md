@@ -1,6 +1,6 @@
 ---
 name: writing-e2e-tests
-description: Author e2e tests for user journeys via Playwright — behaviour only observable as a user journey through the real UI. Selectors by role/accessible-name/testid (preference order), never bare CSS; condition waits, NEVER waitForTimeout; auth via a fixture not login-UI replay; one journey per spec; trace on failure. Use whenever the user says 'write e2e for X', 'add e2e for the checkout flow', or surfaces a journey needing a real browser — even without saying 'e2e'. Maps steps to ACs when a plan is in play; meaningfulness (red-on-broken) is a real-browser validation, deferred where no browser is available. Routes wrong-layer to siblings — isolated logic -> writing-unit-tests; a store+client/DB+policy seam -> writing-integration-tests. Not for diagnosing failing tests (debugging-test-failures), implementing features (implementing-features), or authoring plans (designing-architecture).
+description: Author e2e tests for user journeys via Playwright — behaviour only observable as a user journey through the real UI. Selectors by role/accessible-name/testid, never bare CSS; condition waits, NEVER waitForTimeout; auth via a fixture. Use whenever the user says 'write e2e for X', 'add e2e for the checkout flow', or surfaces a journey needing a real browser — even without saying 'e2e'. Maps steps to ACs when a plan is in play; meaningfulness is red-first pre-implementation (natural failure) or break->red->restore->green when code exists; either is a real-browser validation, deferred to a structural proxy without a browser. implementing-features is a documented intentional caller at its red-first and coverage-gate steps. Routes wrong-layer to siblings — isolated logic -> writing-unit-tests; a store+client/DB+policy seam -> writing-integration-tests. Not for diagnosing failing tests (debugging-test-failures), implementing features (implementing-features), or authoring plans (designing-architecture).
 ---
 
 # Writing E2E Tests
@@ -12,7 +12,11 @@ user-observable outcomes. A pass is **done** when the spec maps each AC
 to a step, uses role/accessible-name/testid selectors, waits on
 conditions (never timeouts), sets up auth via a fixture, runs the
 structural verifier green, and the handoff records the AC → step mapping
-plus the real-browser validation status.
+plus the real-browser validation status. **In red-first mode** (called
+pre-implementation) the journey does not exist yet, so the pass closes
+on "spec authored + proven red for the right reason + mode recorded",
+not on a green structural verifier — real-browser green is the caller's
+downstream job (`implementing-features` Step 7).
 
 This skill is the consumer of `designing-architecture`'s acceptance
 criteria — see
@@ -21,14 +25,28 @@ for the AC contract (link it, never duplicate it). It is the sibling of
 `writing-unit-tests` (isolated logic) and `writing-integration-tests`
 (seams); the right-layer check (Step 2) routes between the three.
 
-**Meaningfulness honesty.** A test never seen red proves nothing — but
-for e2e the red-on-broken proof needs a real browser. Where a browser is
-available, prove the spec goes red when the guarded UI behaviour breaks
-and green when it holds. Where no browser is available (CI sandbox,
-eval harness), the objective check is structural: the spec asserts on
-user-observable outcomes via awaited web-first assertions that *would*
-go red if the behaviour broke. Real-browser red-on-broken is a deferred
-validation, documented honestly — never silently skipped.
+**Meaningfulness honesty.** A test never seen red proves nothing — and
+for e2e the proof has **two independent axes** that must not be collapsed
+into one:
+
+- **When the test goes red** (the mode axis): **red-first** (called
+  pre-implementation — the natural failure IS the proof; confirm it
+  names the missing UI behaviour, not a harness defect) vs
+  **coverage-expansion/standalone** (code already exists — break the
+  guarded journey, restore, see green).
+- **Whether a browser is available to observe it** (the real-browser
+  axis): with a real browser, prove the spec goes red when the guarded
+  UI behaviour breaks and green when it holds; where no browser is
+  available (CI sandbox, eval harness), the objective check is
+  structural — the spec asserts on user-observable outcomes via awaited
+  web-first assertions that *would* go red if the behaviour broke.
+
+A red-first e2e spec *still* needs the real-browser-vs-structural-proxy
+distinction for *its* proof (layered under the red-first framing) —
+run the spec against the pre-feature fixture; a real browser observes a
+real red, a structural proxy observes the expected non-passing
+structural signal. Real-browser red is a deferred validation, documented
+honestly — never silently skipped, in either mode.
 
 ## The authoring pass
 
@@ -41,7 +59,7 @@ E2E-test Progress:
 - [ ] 3. Detect stack & load the matching stack reference
 - [ ] 4. Map ACs to journey steps (AC -> step; one journey per spec)
 - [ ] 5. Write the spec (role selectors, condition waits, auth fixture)
-- [ ] 6. Meaningfulness (real-browser red-on-broken, or structural proxy)
+- [ ] 6. Meaningfulness (mode-branched: red-first natural failure, or break->red->restore->green; and real-browser or structural proxy on either)
 - [ ] 7. Determinism + additive-to-the-net check
 - [ ] 8. Run the suite green; handoff; STOP
 ```
@@ -142,21 +160,55 @@ unit-layer observable — routed to writing-unit-tests").
   journey verifies the user sees the outcome; the lower layers verify
   the mechanics.
 
-### Step 6 — Meaningfulness (real-browser, or structural proxy)
+### Step 6 — Meaningfulness (mode-branched; real-browser or structural proxy)
 
-Prove the spec can fail. With a real browser: break the guarded UI
-behaviour (revert the feature, hide the indicator), run the spec,
-observe **RED**; restore, observe **GREEN**. A spec that has never been
-seen red may pass against a page that never rendered the outcome.
+Prove the spec can fail. The proof **branches on an explicit
+caller-stated mode**; the real-browser vs structural-proxy axis applies
+within either mode:
 
-Where no browser is available, the objective check is structural: the
-spec asserts on user-observable outcomes via awaited web-first
-assertions that *would* go red if the behaviour broke. Run the
-project's structural verifier if one exists (e.g. `npm run test`
-parsing the spec). Document real-browser red-on-broken as a deferred
-validation — honest deferral, not a silent skip. This is the
-authoring-side mirror of `debugging-test-failures` class 2: author so
-the spec genuinely guards observable behaviour, not a no-op.
+- **Red-first mode (pre-implementation).** A caller —
+  `implementing-features` at its Step 5, explicitly saying this is a
+  red-first call, or a user authoring ahead of an unbuilt journey — is
+  invoking this skill *before the UI behaviour exists*. There is nothing
+  to break yet, so the post-implementation break/restore does not apply.
+  The proof is: **run it; it MUST fail; the natural failure IS the
+  red**. Confirm it fails **for the right reason** — read the actual
+  failure and confirm it names the *missing UI behaviour* (a selector
+  that does not resolve because the element is absent; a navigation that
+  404s on a not-yet-built route). A failure from a broken test
+  **setup** — a typo, a bad auth-fixture import, a wrong base URL — is
+  red for the **wrong** reason: a trap, not a proof. Fix the spec's own
+  setup (not the feature, which does not exist yet) and re-run until it
+  names the missing UI behaviour. Once it does, the proof obligation is
+  **satisfied** — a spec born red-first does not need a later
+  break/restore to re-prove its authoring; it already went red against
+  real absence. This is not a `debugging-test-failures` scenario: no
+  working code ever existed to regress from, so word the trap
+  consistently with that skill's class 2 but do not invoke it.
+- **Coverage-expansion / standalone mode (post-implementation).** Code
+  already exists. With a real browser: break the guarded UI behaviour
+  (revert the feature, hide the indicator), run the spec, observe
+  **RED**; restore, observe **GREEN**. A spec that has never been seen
+  red may pass against a page that never rendered the outcome. The same
+  proof is reused by `implementing-features`' Step 8 coverage gate to
+  re-confirm Step-5 AC journey specs are still meaningful once real code
+  exists and to prove any coverage-expansion spec added at that gate.
+
+Either mode: where no browser is available, the objective check is
+structural — the spec asserts on user-observable outcomes via awaited
+web-first assertions that *would* go red if the behaviour broke. Run the
+project's structural verifier if one exists (e.g. `npm run test` parsing
+the spec). A red-first spec, run structurally against the pre-feature
+fixture, produces an expected non-passing structural signal (a missing
+selector, an unresolved assertion) — document real-browser red-first as
+the **same kind** of deferral already in place, not a new one.
+Real-browser red is a deferred validation — honest deferral, not a
+silent skip, in either mode. This is the authoring-side mirror of
+`debugging-test-failures` class 2: author so the spec genuinely guards
+observable behaviour, not a no-op.
+
+Record which mode ran in the handoff so an orchestrating caller can fold
+the evidence into its own records without re-deriving it.
 
 ### Step 7 — Determinism + additive-to-the-net check
 
@@ -176,15 +228,27 @@ the spec genuinely guards observable behaviour, not a no-op.
 Run the project's full verification suite from the rules file. Where a
 real browser is available, `npm run e2e` is the closure signal — exit
 0, never intent. Where the browser is deferred, run the structural
-verifier and document the real-browser validation as deferred.
+verifier and document the real-browser validation as deferred. **In
+red-first mode the suite is intentionally red** (the journey does not
+exist yet): closure is "spec authored + proven red for the right reason
++ mode recorded", not a green structural verifier — real-browser green
+is the caller's downstream job (`implementing-features` Step 7).
 
 Hand off, concisely: **spec files added**; **AC → step mapping**;
-**selector/wait discipline confirmed** (role selectors, no
-`waitForTimeout`, awaited assertions); **auth-fixture usage**; **suite
-status** (structural verifier exit 0; real-browser deferred or green);
-**follow-ups**. Then **STOP**. Do not commit, push, or open a PR unless
-the user asks. Do not move to unit/integration on your own — those are
-sibling skills the user invokes separately.
+**mode note — one line** (which meaningfulness mode ran: red-first
+pre-implementation, or coverage-expansion/standalone break→restore) and
+the real-browser-vs-structural-proxy status of its proof, so an
+orchestrating caller can fold the evidence in; **selector/wait
+discipline confirmed** (role selectors, no `waitForTimeout`, awaited
+assertions); **auth-fixture usage**; **suite status** (structural
+verifier exit 0; real-browser deferred or green); **follow-ups**. Then
+**STOP**. Do not commit, push, or open a PR unless the user asks. Do not
+move to unit/integration on your own — those are sibling skills the user
+invokes separately. This skill never cascades into its siblings on its
+own initiative; the one documented, intentional caller that
+orchestrates a trio skill is `implementing-features`, at its Step 5
+(red-first) and Step 8 (coverage gate) — that is a sibling skill driving
+the call, not this skill choosing to chain.
 
 ## When not to use this skill
 

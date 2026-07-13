@@ -181,6 +181,22 @@ defect in wording or structure this library uses in more than one skill
 same latent defect and fix them in the same change — an eval only ran
 against one skill, but the defect class rarely lives in just one.
 
+**Propagation completeness includes sibling fixtures, not just sibling
+skills.** When several new eval scenarios in the same authoring round
+share a boilerplate verifier pattern (e.g. a `type-check.js` regex
+checking a module's export shape, copy-pasted into scenario-A,
+scenario-B, scenario-C's `scripts/`), a fix discovered while iterating
+on one scenario (e.g. loosening the regex to accept both ESM `export`
+and CommonJS `module.exports`, because the fixture family's own
+convention is CommonJS) must be grepped across every sibling scenario's
+copy, not just the one(s) currently being iterated on — `grep -rn
+'<the exact pattern>' evals/fixtures/*/scripts/` before finishing the
+round. A fixture defect that regresses one scenario in five is easy to
+miss because the other four still pass; found during the
+`tdd-sequencing` round's independent review (one of four TDD scenario
+fixtures still carried the pre-fix ESM-only regex its three siblings had
+already been corrected to accept CommonJS too).
+
 **Encode every fix as an eval assertion before declaring stable.** When a
 test round finds a defect and you fix it, add an expected_behavior line
 that asserts the fixed behavior (tag it, e.g. `[fix-verified]`). The

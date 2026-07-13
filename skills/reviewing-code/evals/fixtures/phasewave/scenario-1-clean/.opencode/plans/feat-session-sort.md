@@ -65,3 +65,15 @@ None. `focus_sessions` schema and generated types are unchanged.
 ## History
 
 - 2026-07-02 plan drafted and approved.
+- 2026-07-11 implemented: `getTodaySessions` sorts by `started_at`
+  descending; `formatSessionList` renders order unchanged. Red evidence
+  (red-first, pre-implementation): the session-list test run before any
+  source edit failed with `getTodaySessions is not defined` (the sort
+  function was not yet written) — the failure names the missing
+  behaviour; the display test failed with `expected descending, got
+  ascending` (the list returned ascending because the sort was absent).
+  Coverage-gate outcome: rebalance — none needed (both AC tests landed
+  at the unit layer against pure list/display modules, the right layer);
+  expand — no high-value gap found beyond the AC set (the sort has no
+  error path or boundary the ACs didn't name). type-check + lint + test
+  green (all exit 0).

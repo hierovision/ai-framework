@@ -1,6 +1,6 @@
 ---
 name: writing-integration-tests
-description: Author integration tests for seams — behaviour that only exists where collaborators meet (store+client, DB+policy, outbox+replay). Real collaborators, faked transport at the outermost boundary; RLS isolation via the authenticated client, never a service-role bypass; seeded state per test. Use whenever the user says 'write integration tests for X', 'test the RLS policy', 'test the offline replay', or surfaces a seam gap — even without saying 'integration'. Each test is proven to fail (break the behaviour -> red, restore -> green; a test never seen red proves nothing) and maps to an AC when a plan is in play. Routes wrong-layer requests to siblings — isolated logic -> writing-unit-tests; a user journey via the real UI -> writing-e2e-tests. Not for diagnosing failing tests (debugging-test-failures), implementing features (implementing-features), or authoring plans (designing-architecture).
+description: Author integration tests for seams — behaviour that only exists where collaborators meet (store+client, DB+policy, outbox+replay). Real collaborators, faked transport at the edge; RLS via the authenticated client, never a service-role bypass; seeded state per test. Use whenever the user says 'write integration tests for X', 'test the RLS policy', 'test the offline replay', or surfaces a seam gap — even without saying 'integration'. Each test is proven to fail — red-first pre-implementation (natural failure names the missing seam) or break->red->restore->green when code exists — and maps to an AC when a plan is in play. implementing-features is a documented intentional caller at its red-first and coverage-gate steps. Routes wrong-layer to siblings — isolated logic -> writing-unit-tests; a user journey via the real UI -> writing-e2e-tests. Not for diagnosing failing tests (debugging-test-failures), implementing features (implementing-features), or authoring plans (designing-architecture).
 ---
 
 # Writing Integration Tests
@@ -12,6 +12,11 @@ transport at the outermost boundary. A pass is **done** when the new
 tests are green on the fixed collaborators, red on a broken variant,
 the full suite is green, no existing test was weakened, and the handoff
 carries the AC → test mapping plus the meaningfulness proof evidence.
+**In red-first mode** (called pre-implementation) the suite is
+intentionally red — the seam behaviour does not exist yet — so the pass
+closes on "authored, proven red for the right reason, mode recorded",
+not on a green suite; green is the caller's downstream job
+(`implementing-features` Step 7), not this pass's closure.
 
 This skill is the consumer of `designing-architecture`'s acceptance
 criteria — see
@@ -31,7 +36,7 @@ Integration-test Progress:
 - [ ] 3. Detect stack & load the matching stack reference
 - [ ] 4. Map ACs to seam assertions (AC -> test, before writing)
 - [ ] 5. Write the test (real collaborators, faked transport at the edge)
-- [ ] 6. Meaningfulness proof (break the seam -> red -> restore -> green)
+- [ ] 6. Meaningfulness proof (mode-branched: red-first natural failure, or break the seam -> red -> restore -> green)
 - [ ] 7. Determinism + additive-to-the-net check
 - [ ] 8. Run the full suite green; handoff; STOP
 ```
@@ -135,25 +140,57 @@ The discipline that keeps integration tests meaningful:
   count, refuse and explain: the outcome is verified *through* the
   observable, not by spying on the conversation between collaborators.
 
-### Step 6 — Meaningfulness proof (mandatory)
+### Step 6 — Meaningfulness proof (mandatory; mode-branched)
 
-After writing a test, prove it can fail. Break the guarded behaviour —
-swap in a seeded broken variant of the collaborator/policy (a leaky
-policy, a replay that drops mutations), or make a one-line breakage in
-the seam — run the test, observe **RED**; restore the real behaviour,
-observe **GREEN**. A new test that has never been seen red proves
-nothing: it may pass against a stub that enforces nothing, or vacuously.
-This is the authoring-side mirror of `debugging-test-failures` class 2
-("a test that can no longer fail is not a test") — author so that class
-2 never applies to your tests. On a security seam the proof is
-non-negotiable: an isolation test that passes on a leaky policy is a
-false guarantee.
+After writing a test, prove it can fail. The proof **branches on an
+explicit caller-stated mode** — the caller names the mode, this skill
+does not infer it:
+
+- **Red-first mode (pre-implementation).** A caller —
+  `implementing-features` at its Step 5, explicitly saying this is a
+  red-first call, or a user authoring ahead of an unwritten seam — is
+  invoking this skill *before the behaviour exists*. There is nothing to
+  break yet, so the post-implementation break/restore does not apply.
+  The proof is: **run it; it MUST fail; the natural failure IS the
+  red**. Confirm it fails **for the right reason** — read the actual
+  failure and confirm it names the *missing seam behaviour* (a `not
+  found` for an absent store action/replay path; an assertion expecting
+  only-B-rows and observing A-rows because the policy module is absent;
+  a reference to a collaborator that does not yet exist). A failure from
+  a broken test **setup** — a typo, a bad import, a wrong seed — is red
+  for the **wrong** reason: a trap, not a proof. Fix the test's own setup
+  (not the feature, which does not exist yet) and re-run until it names
+  the missing seam behaviour. Once it does, the proof obligation is
+  **satisfied** — a test born red-first does not need a later
+  break/restore to re-prove its authoring; it already went red against
+  real absence. This is not a `debugging-test-failures` scenario: no
+  working code ever existed to regress from, so word the trap
+  consistently with that skill's class 2 but do not invoke it.
+- **Coverage-expansion / standalone mode (post-implementation).** Code
+  already exists. Break the guarded behaviour — swap in a seeded broken
+  variant of the collaborator/policy (a leaky policy, a replay that
+  drops mutations), or make a one-line breakage in the seam — run the
+  test, observe **RED**; restore the real behaviour, observe **GREEN**.
+  A new test that has never been seen red proves nothing: it may pass
+  against a stub that enforces nothing, or vacuously. This is the
+  authoring-side mirror of `debugging-test-failures` class 2 ("a test
+  that can no longer fail is not a test") — author so that class 2 never
+  applies to your tests. On a security seam the proof is non-negotiable:
+  an isolation test that passes on a leaky policy is a false guarantee.
+  The same proof is reused by `implementing-features`' Step 8 coverage
+  gate to re-confirm Step-5 AC seam tests are still meaningful once real
+  code exists and to prove any coverage-expansion test added at that
+  gate.
+
+Either way, record which mode ran in the handoff so an orchestrating
+caller can fold the evidence into its own records without re-deriving it.
 
 If the project ships a meaningfulness verifier (e.g. `npm run
 meaningfulness`), run it — it independently confirms red-on-broken /
 green-on-fixed (and, on RLS fixtures, that no service-role bypass was
-used). Record the proof evidence in the handoff (which variant broke,
-which test went red, that the real collaborator was restored).
+used). Record the proof evidence in the handoff (which mode ran; which
+variant broke, which test went red, that the real collaborator was
+restored).
 
 ### Step 7 — Determinism + additive-to-the-net check
 
@@ -173,15 +210,28 @@ Run the project's full verification suite from the rules file — not
 just the new test file. A new integration test that passes in isolation
 but breaks a neighbour (shared state leak, policy swap not restored) is
 not done. Only when the full suite is green is the pass closed; success
-is exit codes, never intent.
+is exit codes, never intent. **In red-first mode the suite is
+intentionally red** (the seam behaviour does not exist yet): closure is
+"authored + proven red for the right reason + mode recorded", not a
+green suite — green is the caller's downstream job
+(`implementing-features` Step 7).
 
 Hand off, concisely: **test files added**; **AC → test mapping**;
-**meaningfulness proof evidence** (which broken variant turned which
+**mode note — one line** (which meaningfulness mode ran: red-first
+pre-implementation, or coverage-expansion/standalone break→restore)
+so an orchestrating caller can fold the evidence in; **meaningfulness
+proof evidence** (which mode ran; which broken variant turned which
 test red, that the real collaborator was restored, the objective
-verifier's exit code if one ran); **suite status**; **follow-ups**.
-Then **STOP**. Do not commit, push, or open a PR unless the user asks.
-Do not move to unit/e2e on your own — those are sibling skills the user
-invokes separately.
+verifier's exit code if one ran; in red-first mode, the actual
+pre-implementation failure text and confirmation it named the missing
+seam behaviour); **suite status**; **follow-ups**. Then **STOP**. Do
+not commit, push, or open a PR unless the user asks. Do not move to
+unit/e2e on your own — those are sibling skills the user invokes
+separately. This skill never cascades into its siblings on its own
+initiative; the one documented, intentional caller that orchestrates a
+trio skill is `implementing-features`, at its Step 5 (red-first) and
+Step 8 (coverage gate) — that is a sibling skill driving the call, not
+this skill choosing to chain.
 
 ## When not to use this skill
 

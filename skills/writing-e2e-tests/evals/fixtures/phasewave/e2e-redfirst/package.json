@@ -1,0 +1,11 @@
+{
+  "name": "phasewave-timer-journey",
+  "version": "0.8.0",
+  "private": true,
+  "scripts": {
+    "type-check": "node scripts/type-check.js",
+    "lint": "node scripts/lint.js",
+    "test": "node scripts/verify-spec.js",
+    "e2e": "node scripts/e2e-deferred.js"
+  }
+}

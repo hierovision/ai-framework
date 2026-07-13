@@ -112,6 +112,20 @@ if (!review) {
   if (SHOULD_HAVE_BLOCKER_OR_MAJOR && !hasFinding(blockerBody) && !hasFinding(majorBody)) {
     errors.push('expected at least one blocker/major finding; found none')
   }
+
+  // 2b. Spot-check cross-reference: the plan `## History` carries the
+  // implement pass's red evidence (red-first) + coverage-gate outcome
+  // (rebalance / expand-no-gap). The reviewer reads those records as
+  // evidence rather than re-deriving the meaningfulness check from zero.
+  // Assert REVIEW.md references at least one of those record markers
+  // (red evidence / red-first / coverage gate / rebalance / spot-check).
+  const spotTokens = ['red evidence', 'red-first', 'red first', 'coverage gate', 'coverage-gate', 'rebalance', 'spot-check', 'spot check']
+  const spotChecked = spotTokens.some((t) => review.toLowerCase().indexOf(t) >= 0)
+  if (!spotChecked) {
+    errors.push(
+      'the plan History carries red-evidence + coverage-gate records (see feat-session-sort.md ## History 2026-07-11 entry) but REVIEW.md does not reference or spot-check any of them (red evidence / red-first / coverage gate / rebalance / spot-check) — review the records as evidence rather than re-deriving the meaningfulness check from zero'
+    )
+  }
 }
 
 // 3. Read-only guard: every tracked file's hash must match the snapshot.

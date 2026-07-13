@@ -1,6 +1,6 @@
 ---
 name: writing-unit-tests
-description: Author unit tests for isolated logic — table-driven cases plus edge cases (empty, boundary, error) derived from the AC's observable behaviour, mocking true externals, never the behaviour under test. Use whenever the user says 'write unit tests for X', 'cover the plan's criteria', 'we have no tests for the store', or surfaces a gap for a pure function, Pinia store, composable, or utility — even without saying 'unit'. Each test is proven to fail (break the behaviour -> red, restore -> green; a test never seen red proves nothing) and maps to an AC when a plan is in play. Routes wrong-layer requests to siblings — behaviour at a store+client/DB+policy seam -> writing-integration-tests; a user journey via the real UI -> writing-e2e-tests. Not for diagnosing failing tests (debugging-test-failures), implementing features (implementing-features), or authoring plans (designing-architecture).
+description: Author unit tests for isolated logic — table-driven cases plus edge cases (empty/boundary/error) from the AC's observable behaviour, mocking true externals, never the behaviour under test. Use whenever the user says 'write unit tests for X', 'cover the plan's criteria', 'we have no tests for the store', or surfaces a pure-function/Pinia-store/composable/utility gap — even without saying 'unit'. Each test is proven to fail — red-first pre-implementation (natural failure names the missing behaviour, not a harness defect) or break->red->restore->green when code already exists — and maps to an AC when a plan is in play. implementing-features is a documented intentional caller at its red-first and coverage-gate steps. Routes wrong-layer to siblings — a store+client/DB+policy seam -> writing-integration-tests; a user journey via the real UI -> writing-e2e-tests. Not for diagnosing failing tests (debugging-test-failures), implementing features (implementing-features), or authoring plans (designing-architecture).
 ---
 
 # Writing Unit Tests
@@ -11,7 +11,11 @@ that assert observable behaviour, each proven to fail when that behaviour
 breaks. A pass is **done** when the new tests are green on the real
 module, red on a broken variant, the full suite is green, no existing
 test was weakened, and the handoff carries the AC → test mapping plus
-the meaningfulness proof evidence.
+the meaningfulness proof evidence. **In red-first mode** (called
+pre-implementation) the suite is intentionally red — the behaviour does
+not exist yet — so the pass closes on "authored, proven red for the
+right reason, mode recorded", not on a green suite; green is the caller's
+downstream job (`implementing-features` Step 7), not this pass's closure.
 
 This skill is the consumer of `designing-architecture`'s acceptance
 criteria — see
@@ -31,7 +35,7 @@ Unit-test Progress:
 - [ ] 3. Detect stack & load the matching stack reference
 - [ ] 4. Map ACs to test cases (AC -> test, before writing)
 - [ ] 5. Write the tests (table-driven, edge cases from the observable)
-- [ ] 6. Meaningfulness proof (break -> red -> restore -> green)
+- [ ] 6. Meaningfulness proof (mode-branched: red-first natural failure, or break -> red -> restore -> green)
 - [ ] 7. Determinism + additive-to-the-net check
 - [ ] 8. Run the full suite green; handoff; STOP
 ```
@@ -129,21 +133,52 @@ patients:
   store action is tested in-process; mounting the DOM for logic that
   does not render is an integration test in unit clothing (route it).
 
-### Step 6 — Meaningfulness proof (mandatory)
+### Step 6 — Meaningfulness proof (mandatory; mode-branched)
 
-After writing a test, prove it can fail. Break the guarded behaviour —
-swap in a seeded broken variant, or make a one-line breakage in the
-module under test — run the test, observe **RED**; restore the real
-behaviour, observe **GREEN**. A new test that has never been seen red
-proves nothing: it may pass for the wrong reason, or vacuously. This is
-the authoring-side mirror of `debugging-test-failures` class 2 ("a test
-that can no longer fail is not a test") — author so that class 2 never
-applies to your tests.
+After writing a test, prove it can fail. The proof **branches on an
+explicit caller-stated mode** — the caller names the mode, this skill
+does not infer it:
+
+- **Red-first mode (pre-implementation).** A caller —
+  `implementing-features` at its Step 5, explicitly saying this is a
+  red-first call, or a user authoring ahead of an unwritten module — is
+  invoking this skill *before the behaviour exists*. There is nothing to
+  break yet, so the post-implementation break/restore does not apply.
+  The proof is: **run it; it MUST fail; the natural failure IS the
+  red**. Confirm it fails **for the right reason** — read the actual
+  failure and confirm it names the *missing behaviour* (a `ReferenceError`
+  for a not-yet-written export; an assertion expecting `409` and observing
+  `200`). A failure from a broken test **setup** — a typo, a bad import
+  unrelated to the feature, a wrong fixture — is red for the **wrong**
+  reason: a trap, not a proof. Fix the test's own setup (not the feature,
+  which does not exist yet) and re-run until it names the missing
+  behaviour. Once it does, the proof obligation is **satisfied** — a
+  test born red-first does not need a later break/restore to re-prove its
+  authoring; it already went red against real absence. This is not a
+  `debugging-test-failures` scenario: no working code ever existed to
+  regress from, so word the trap consistently with that skill's class 2
+  but do not invoke it.
+- **Coverage-expansion / standalone mode (post-implementation).** Code
+  already exists. Break the guarded behaviour — swap in a seeded broken
+  variant, or make a one-line breakage in the module under test — run
+  the test, observe **RED**; restore, observe **GREEN**. A new test that
+  has never been seen red proves nothing: it may pass for the wrong
+  reason, or vacuously. This is the authoring-side mirror of
+  `debugging-test-failures` class 2 ("a test that can no longer fail is
+  not a test") — author so that class 2 never applies to your tests.
+  The same proof is reused by `implementing-features`' Step 8 coverage
+  gate to re-confirm Step-5 AC tests are still meaningful once real code
+  exists and to prove any coverage-expansion test added at that gate.
+
+Either way, record which mode ran in the handoff (below) so an
+orchestrating caller can fold the evidence into its own records without
+re-deriving it.
 
 If the project ships a meaningfulness verifier (e.g. `npm run
 meaningfulness`), run it — it independently confirms red-on-broken /
-green-on-fixed. Record the proof evidence in the handoff (which variant
-broke, which test went red, that the real module was restored).
+green-on-fixed (coverage-expansion mode). Record the proof evidence in
+the handoff (which mode ran; which variant broke, which test went red,
+that the real module was restored).
 
 ### Step 7 — Determinism + additive-to-the-net check
 
@@ -165,7 +200,11 @@ broke, which test went red, that the real module was restored).
 Run the project's full verification suite from the rules file — not just
 the new test file. A new test that passes in isolation but breaks a
 neighbour is not done. Only when the full suite is green is the pass
-closed; success is exit codes, never intent.
+closed; success is exit codes, never intent. **In red-first mode the
+suite is intentionally red** (the behaviour does not exist yet): closure
+is "authored + proven red for the right reason + mode recorded", not a
+green suite — green is the caller's downstream job
+(`implementing-features` Step 7).
 
 Hand off, concisely:
 
@@ -174,16 +213,25 @@ Hand off, concisely:
 - **AC → test mapping** — per criterion, the test (or rows) that verify
   it; criteria whose verifier is a higher-layer observable are noted and
   routed, not silently skipped.
+- **Mode note — one line**: which meaningfulness mode ran (red-first
+  pre-implementation, or coverage-expansion/standalone break→restore) so
+  an orchestrating caller can fold the evidence in without re-deriving it.
 - **Meaningfulness proof evidence** — which broken variant / breakage
   turned which test red; that the real module was restored; the
-  objective verifier's exit code if one ran.
+  objective verifier's exit code if one ran. In red-first mode: the
+  actual pre-implementation failure text and confirmation it named the
+  missing behaviour.
 - **Suite status** — the full command and its exit 0.
 - **Follow-ups** — any out-of-scope behaviour recorded for the next
   design/triage pass.
 
 Then **STOP**. Do not commit, push, or open a PR unless the user asks.
 Do not move to integration/e2e on your own — those are sibling skills
-the user invokes separately.
+the user invokes separately. This skill never cascades into its
+siblings on its own initiative; the one documented, intentional caller
+that orchestrates a trio skill is `implementing-features`, at its Step 5
+(red-first) and Step 8 (coverage gate) — that is a sibling skill
+driving the call, not this skill choosing to chain.
 
 ## When not to use this skill
 

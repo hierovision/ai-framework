@@ -10,11 +10,13 @@ the **consumer** side of `designing-architecture`'s plan format (see
 [plan-format.md in designing-architecture](../designing-architecture/references/plan-format.md)
 for the contract; the library installs as a set, so the sibling skill is
 always present). Implement what `Files to Modify` + `Included` scope
-say, run the plan's `Verification` commands until they exit 0, append a
-`## History` entry, then **stop** at a manual-validation handoff. The
-skill never declares success from intent — only from green verification
-exit codes — and never self-certifies an acceptance criterion that
-needs human eyes.
+say — but not before authoring a red-first test per Acceptance Criterion
+(Step 5) and not before a coverage-and-quality gate (Step 8) after
+verification is green — run the plan's `Verification` commands until
+they exit 0, append a `## History` entry, then **stop** at a manual-
+validation handoff. The skill never declares success from intent — only
+from green verification exit codes — and never self-certifies an
+acceptance criterion that needs human eyes.
 
 ## The implement pass
 
@@ -26,10 +28,12 @@ Implement Progress:
 - [ ] 2. Resolve scope contract: Files to Modify + Included + Excluded
 - [ ] 3. Detect stack & load the matching stack reference
 - [ ] 4. Reconcile plan vs the actual repo (deviation triage BEFORE edits)
-- [ ] 5. Implement exactly Files to Modify (scope discipline)
-- [ ] 6. Run the plan's Verification; fix + re-run until all exit 0
-- [ ] 7. Update the plan (History entry; status per the user's convention)
-- [ ] 8. Completion handoff summary + MANUAL validation steps; STOP
+- [ ] 5. RED — capture core behavior from Acceptance Criteria (one test per AC, before any edit; confirm red for the right reason)
+- [ ] 6. Implement exactly Files to Modify (scope discipline)
+- [ ] 7. Run the plan's Verification; fix + re-run until all exit 0
+- [ ] 8. Coverage-and-quality gate (rebalance layer guesses; re-prove meaningfulness; expand only on a real gap)
+- [ ] 9. Update the plan (History entry; status per the user's convention)
+- [ ] 10. Completion handoff summary + MANUAL validation steps; STOP
 ```
 
 ### Step 1 — Read the plan artifact
@@ -120,7 +124,79 @@ built?* A moved file does not; a different feature, schema, or
 criterion does. When in doubt, treat it as contract-breaking and stop —
 a stop is recoverable, a built-wrong-feature is not.
 
-### Step 5 — Implement exactly Files to Modify (scope discipline)
+### Step 5 — RED — capture core behavior from Acceptance Criteria
+
+After recon, before any source edit: author the behaviour the plan
+asks for as a failing test, *before* the behaviour exists. The whole
+point of this step is to capture each testable Acceptance Criterion as
+real red against real absence, so implementation goes green against a
+test that was proven to exercise the intended path — never a test
+written after the fact to mirror the implementation.
+
+For each **testable** AC (a verifier that names a test command — an
+observable behaviour backed by a runnable check), do this once:
+
+1. **Classify the right layer** using the identical routing table the
+   three trio skills define (see
+   [../writing-unit-tests/SKILL.md](../writing-unit-tests/SKILL.md)
+   Step 2 — the same table is duplicated across all three trio skills by
+   design; use it, do not restate it here). This classification is a
+   **best guess**: a plan cannot know the true seam boundaries before
+   code exists, so a wrong guess here is **expected and normal**, not a
+   defect — the Step 8 coverage gate corrects it once real code reveals
+   the seam. Do not treat a wrong red-first guess as something the plan
+   should have pre-tagged; there is nothing to fix upstream.
+2. **Invoke the matching trio skill** to author **one test** (or a
+   minimal table-driven set) **for that AC only**, explicitly telling it
+   this is a **red-first, pre-implementation call** (the trio's
+   meaningfulness proof branches on that mode). Bounded: one test per AC
+   here; no invented edge cases yet — the coverage gate's expand leg
+   owns those, once real code exists to reveal what's worth covering.
+3. **Run it. It MUST fail.** The behaviour does not exist yet, so the
+   natural failure IS the proof — and the proof obligation is to
+   **confirm it fails for the right reason**: read the actual failure
+   output and confirm it names the *missing/wrong behaviour* the AC
+   describes (a `ReferenceError` for a not-yet-written function; an
+   assertion expecting `409` and observing `200`; a `not found` for an
+   absent route/table).
+4. **Red for the wrong reason is a trap, not a proof.** A failure from a
+   broken test **setup** — a typo, a bad import unrelated to the feature,
+   a wrong fixture, a mismatched selector/field — does NOT name the
+   missing behaviour. When it happens, fix the **test's own setup**
+   (not the feature, which does not exist yet) and re-run until it fails
+   for the right reason. This is a test-authoring correction, not a
+   `debugging-test-failures` scenario — there is no working code to
+   regress from yet, so word the trap consistently with that skill's
+   class taxonomy without invoking it.
+5. **Record** the AC → test-file mapping, and for each, the confirmed
+   red evidence — the actual failure text that named the missing
+   behaviour. Folded into the plan `## History` at Step 9 and the
+   handoff at Step 10.
+
+Two honest-stop conditions here, both the **existing** postures, not new
+ones:
+
+- **An AC's verifier cannot produce a red-first test at all** (the
+  criterion is genuinely untestable as written — references
+  infrastructure the plan does not add): that is the **contract-breaking
+  deviation** path already defined in Step 4. STOP, report, route to
+  `designing-architecture`. Do not invent a workaround test.
+- **A red-first test cannot be made to fail for the right reason after
+  reasonable correction attempts** (every failure names a harness
+  defect, never the missing behaviour): treat it as the **N-attempts
+  non-convergence** path already defined in Step 7. STOP, report, hand
+  to `debugging-test-failures`. Do not proceed to implementation on an
+  unverified red — that silently turns red-first back into test-after and
+  gives up the proof this step exists to produce.
+
+This is the **pre-implementation red**: the natural absence IS the
+proof. It is distinct from the post-implementation break→red→restore→
+green the trio already does — Step 8 reuses *that* proof for
+re-confirmation and new coverage. Do not conflate them: a test born
+red-first does not need a break/restore to prove its authoring — it
+already went red against real absence.
+
+### Step 6 — Implement exactly Files to Modify (scope discipline)
 
 Edit only the files named in `Files to Modify`, and only the changes
 the per-file `what-changes` note plus `Included` scope describe. Treat
@@ -146,7 +222,7 @@ can read the diff and check it against the plan one-to-one. Every
 in-scope edit has a plan citation; every out-of-scope urge either got
 cited-and-refused or recorded as a follow-up. No silent expansion.
 
-### Step 6 — Run the plan's Verification (objective closure)
+### Step 7 — Run the plan's Verification (objective closure)
 
 Run the commands from the plan's `## Verification` section — not a
 generic `npm test`, and not a subset you chose yourself. The plan's
@@ -179,7 +255,57 @@ Two honest-stop conditions:
 Exit codes are the only success signal. Lint warnings you "didn't get
 to" still count as failing — fix them or report.
 
-### Step 7 — Update the plan artifact
+### Step 8 — Coverage-and-quality gate (rebalance + expand)
+
+Now real code exists. Two responsibilities, both **gates** — cite the
+specific misclassification or the concrete gap; padding for its own sake
+is refused with the trio's own "a case that exercises no observable the
+AC names is padding, not coverage" language.
+
+**(a) REBALANCE.** Step 5 classified each AC's test layer as a best
+guess. Re-examine each Step-5 AC→test pair against the **same**
+right-layer table, this time with the real implementation to look at:
+
+- Did a **unit** test end up mocking a real seam into existence (vacant,
+  per the trio's "mocking the behaviour under test" rule — the behaviour
+  only exists where two collaborators meet)?
+- Did an **e2e** test turn out to guard pure logic a unit test would
+  prove faster and more precisely?
+
+If a test landed at the wrong layer, **supersede** it: invoke the
+CORRECT trio skill to reauthor it at the right layer, and re-prove
+meaningfulness there via break → red → restore → green (the trio's
+post-implementation proof; this is the one place break/restore applies,
+because code now exists to break). This is the testing-pyramid
+correction: push each test down to the cheapest layer that still
+meaningfully exercises the behaviour. Record which AC-tests were
+rebalanced and why. A misclassified red-first guess corrected here is
+the system working as designed — not a defect to push upstream into the
+plan format (PLAN.md Decision 3: no per-AC layer tag at design time).
+
+**(b) EXPAND.** Re-run the existing meaningfulness proof (break/restore)
+on each (possibly rebalanced) Step-5 AC test to confirm it is **still**
+meaningful once real implementation exists — cheap insurance the
+implementation did not accidentally make a test vacuous. Then ask a
+**bounded** coverage question: given the **actual** implementation
+(branches, error paths, boundary conditions visible now but not obvious
+at design time), is there a genuinely valuable gap the AC set didn't
+reach?
+
+- **Yes** — invoke the matching trio skill in its **existing "untested
+  behaviour" entry mode** to add the test(s), prove meaningfulness via
+  the existing break/restore, confirm additive-to-the-net. One targeted
+  test per genuine gap; do not expand beyond the cited gaps.
+- **No** — **say so explicitly** in the handoff ("coverage reviewed; no
+  high-value gap found beyond the AC set"). An explicit negative is the
+  closure signal; silence/omission is not.
+
+Both legs must cite: rebalancing cites the **specific
+misclassification** being corrected; expansion cites a **concrete gap**
+in the real implementation (an error path, a boundary the code
+special-cases). Refusing to pad is a feature here, not a skipped step.
+
+### Step 9 — Update the plan artifact
 
 Once verification is green, **append** to the plan — do not rewrite
 prior sections, do not clobber the History:
@@ -189,7 +315,7 @@ prior sections, do not clobber the History:
   check + lint + test green"). If you recorded a mechanical deviation
   in Step 4, its one-line note also lives here.
 - Append a `### Follow-ups` block (under `## History`) for any
-  out-of-scope requests you recorded in Step 5, so the next design pass
+  out-of-scope requests you recorded in Step 6, so the next design pass
   can pick them up.
 - Flip the frontmatter `status` only per the user's stated convention —
   some projects keep plans `approved` throughout; others flip to
@@ -201,7 +327,7 @@ The plan is the audit trail. A future reader must be able to
 reconstruct "what was the plan, what did the implementer actually do,
 where did it diverge and why" from the plan file alone.
 
-### Step 8 — Completion handoff summary; STOP
+### Step 10 — Completion handoff summary; STOP
 
 Present a **concise** handoff to the user and wait:
 
@@ -214,6 +340,16 @@ Present a **concise** handoff to the user and wait:
   workflow like "go offline, start a timer, reload, come back online,
   watch the replay"): mark them `manual — steps below`. **Do not
   self-certify criteria that require human eyes.**
+- **Red evidence** — which Step-5 AC-tests were proven red
+  pre-implementation, and for each the confirmed failure reason (the
+  actual failure text that named the missing behaviour). A manual-only
+  AC is noted here as manual, not silently dropped.
+- **Rebalancing outcome** — any Step-8(a) AC-test moved to a different
+  layer and why, or an explicit "none needed" when the best-guess layers
+  held against the real implementation.
+- **Coverage-gate outcome** — Step-8(b) expanded (citing the specific
+  gap(s) the real implementation revealed) or an explicit "no
+  high-value gap found beyond the AC set". Silence is not an answer.
 - **MANUAL validation steps** — the concrete sequence the human should
   run to green the human-only criteria. Numbered, in the order the user
   would perform them, ending with "what you should observe".
@@ -265,6 +401,8 @@ was decided vs improvised.
 | Acceptance criterion untestable as written (references a file / service / table the plan does not add) | Contract-breaking: STOP, report, route to design |
 | Verifier cannot pass for any in-scope implementation | Contract-breaking (plan-omits-dependency): STOP, report, route to design |
 | N reasonable fix attempts do not converge | Honest-stop: STOP, report, hand to the debug stage (do not thrash) |
+| AC verifier cannot produce a red-first test (Step 5) | Contract-breaking (Step 4 path): STOP, report, route to design |
+| Red-first test never fails for the right reason (Step 5) | Honest-stop (Step 7 N-attempts path): STOP, report, hand to debugging-test-failures |
 
 A moved file is mechanical; a moved feature is contract-breaking.
 Recorded deviations are honest; silent ones are not. When in doubt,
@@ -284,7 +422,7 @@ stop — stops are recoverable, a built-wrong-feature is not.
   it only appends History / follow-ups (mechanical deviations and
   scope-creep requests) and (optionally) flips status per convention.
 - **Deep multi-session debugging** — a failure that resists N fix
-  attempts in Step 6 is a stop, not a thrash session. The debug stage
+  attempts in Step 7 is a stop, not a thrash session. The debug stage
   will own that; the implement pass's job is to converge, not to debug
   indefinitely.
 - **Pure research / explanation** ("what does this code do?",
