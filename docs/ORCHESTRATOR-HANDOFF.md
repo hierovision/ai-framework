@@ -100,21 +100,53 @@ The workflow loop, every skill:
   (gemini-3-flash / gpt-5.4-mini, or evaluate minimax-m3 native-multimodal
   on Go flat rate), `vision-critic-final` (gemini-3.1-pro / sonnet-5).
 
-## Current state (2026-07-10, HEAD after this review's commit)
+## Current state (2026-07-12, commit 427cfea)
 
-**Both core loops complete + first Phase 3 follow-on landed. 12 skills,
-all eval-backed + reviewed + pushed.**
+**Both core loops complete + TDD-aware sequencing landed + first Phase 3
+follow-on landed. 12 skills, all eval-backed + reviewed + pushed.**
 
 Core loop: triaging-requirements, designing-architecture,
-implementing-features, debugging-test-failures, writing-unit-tests,
-writing-integration-tests, writing-e2e-tests, reviewing-code.
+implementing-features (now with red-first AC capture + a
+coverage-and-quality gate — see below), debugging-test-failures,
+writing-unit-tests, writing-integration-tests, writing-e2e-tests (all
+three now mode-branched for red-first vs coverage-expansion),
+reviewing-code (now spot-checks the new red-evidence/coverage-gate
+records).
 UI loop: capturing-ui-evidence, correcting-ui, auditing-accessibility
 (proactive a11y auditor — axe-core + Playwright, WCAG 2.2 AA/AAA,
 read-only, routes fixes to correcting-ui/implementing-features/
 designing-architecture).
 Meta: authoring-skills (+ bundled scripts/validate_skill.py).
 
-`auditing-accessibility` review (this round): validator green across all
+**TDD-aware implement sequencing (this round, commit 427cfea):**
+`implementing-features` gained a red-first step (one test per testable
+AC, authored and run before any source edit, at a best-guess layer) and
+a coverage-and-quality gate (rebalance any AC-test that landed at the
+wrong layer once real code reveals the true seam; expand only on a
+cited real gap, never padding). Independently re-verified, not just
+read: built a deliberately wrong-layer unit test by hand against the
+`tdd-rebalance` fixture, confirmed the objective right-layer detector
+reds with its named message, rebalanced to the correct integration test
+by hand, confirmed genuine green, then confirmed the seeded broken
+variant still catches a real bug via break/restore — the
+best-guess-then-correct mechanic (`PLAN.md` Decision 3) is real, not
+asserted. Also reproduced the red-for-the-wrong-reason trap by hand
+(`tdd-wrongreason`), and independently exercised the trio's
+`*-redfirst` fixtures + `reviewing-code`'s new spot-check grader.
+Defect found + fixed: `tdd-wrongreason/scripts/type-check.js` still
+carried the pre-fix ESM-only export regex its two siblings had already
+been corrected to also accept CommonJS — a sibling-propagation gap
+*within* one eval round (not caught because the other three TDD
+scenarios still passed). Learning folded into `authoring-skills`:
+propagation completeness now explicitly covers sibling fixtures within
+a round, not just sibling skills. One cosmetic note: the commit message
+for 427cfea has a small corruption mid-message (backticks in a
+double-quoted `-m` string triggered shell command substitution,
+silently dropping the phrase "`module.exports`") — the actual file
+changes are unaffected and were independently verified; left as-is
+rather than force-pushing an amend.
+
+`auditing-accessibility` review (prior round): validator green across all
 12 skills; leak scan clean (`phasewave` confirmed as the library's
 sanctioned fictional-fixture convention, not a real-project leak); all 4
 eval scenarios independently re-run from fresh /tmp copies against the
@@ -139,23 +171,8 @@ re-verified green post-fix (no regression). Learning folded into
 
 ## Remaining backlog
 
-- **NEXT (not optional — a real gap, not a nice-to-have):** TDD-aware
-  implement sequencing. `implementing-features` currently runs the plan's
-  Verification commands and fixes code until green, with no requirement
-  that a test exist — let alone fail — before the code does; test
-  authoring (the trio) is invoked "separately," unordered. Decisions
-  locked in `PLAN.md` under "Core Loop Refinement — TDD-Aware Implement
-  Sequencing"; handoff prompt ready in
-  `docs/handoffs/tdd-sequencing.md` — dispatch to a fresh GLM 5.2 author
-  session. Touches `implementing-features` (two new steps: red-first AC
-  capture, coverage-and-quality gate), all three test-trio skills (a
-  meaningfulness-proof mode branch), and a small additive cross-reference
-  in `reviewing-code`. Review this one especially carefully at Step 4 of
-  the review protocol — a red-first proof that's secretly fabricated (the
-  agent claims a test went red pre-implementation but never actually ran
-  it that way) is exactly the kind of claim this library's review
-  discipline exists to catch, not take on faith.
-- `auditing-visual-design` (proactive visual audit) — Phase 3 follow-on.
+- `auditing-visual-design` (proactive visual audit) — Phase 3 follow-on,
+  now the only one left in that phase.
 - Phase 4: `running-councils`, `releasing-changes`, agent templates, and
   the **pt migration** (pt consumes the library; refresh its stale
   `qwen3.6-plus` binding; reconcile pt's single `.opencode/plans/
