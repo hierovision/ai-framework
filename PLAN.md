@@ -87,8 +87,8 @@ ai-framework/
 │   │  # ── UI iteration loop ──
 │   ├── iterating-on-ui/               # the loop orchestration itself
 │   ├── capturing-ui-evidence/         # Playwright screenshot + computed CSS scripts
-│   ├── auditing-visual-design/        # critique against design intent
 │   ├── auditing-accessibility/
+│   │   # auditing-visual-design SKIPPED (2026-07-12) — see Decisions log
 │   │
 │   │  # ── Cross-cutting ──
 │   ├── running-councils/              # multi-perspective review (ported from pt)
@@ -161,7 +161,9 @@ MiniMax M2.5 (Aug 2026), several Codex variants (Jul 23, 2026).
    `docs/adding-a-stack.md`.
 4. **Phase 3 — UI loop skills** (see "Phase 3 Design" below): reactive
    capture + correct first (`capturing-ui-evidence`, `correcting-ui`);
-   proactive visual audit + accessibility deferred to a follow-on.
+   proactive accessibility auditing as a follow-on (built). Proactive
+   visual-design auditing was scoped, assessed, and **skipped** — see
+   Decisions log 2026-07-12. Phase 3 is closed.
 5. **Phase 4 — Cross-cutting** (councils, releasing) + agent templates +
    pt migration (pt's `.opencode` consumes the library; keep only
    project-specific rules locally).
@@ -261,7 +263,9 @@ Decisions:
 1. **Scope now: two reactive skills.** `capturing-ui-evidence` (the
    Playwright harness, dependency) + `correcting-ui` (the diagnose-and-fix
    brain). Proactive `auditing-visual-design` and `auditing-accessibility`
-   deferred to a follow-on phase.
+   deferred to a follow-on phase. (`auditing-accessibility` built
+   2026-07-11; `auditing-visual-design` skipped 2026-07-12 — see
+   "Decision: auditing-visual-design skipped" below.)
 2. **Capture supports both modes, selected per invocation:** real running
    app (dev-server URL + route, auth via the e2e auth-fixture pattern) and
    isolated components (Storybook / component harness). The harness picks
@@ -416,3 +420,51 @@ Decisions:
 
 See `docs/handoffs/tdd-sequencing.md` for the dispatchable author-session
 handoff implementing these decisions.
+
+## Decision: auditing-visual-design skipped (2026-07-12)
+
+Phase 3's last placeholder (`auditing-visual-design` — "critique against
+design intent," a one-line aspiration from the Phase 0 scaffold, never
+designed further) is **skipped**, not silently dropped. Reasoning:
+
+`auditing-accessibility` earns its "proactive, unprompted scan" shape
+because a real, external, authoritative rule engine already exists (axe-
+core, mapping to WCAG success criteria) — roughly 30-40% of the job is
+genuinely mechanical, and the skill is explicit about the rest (the
+`manual_checklist`). Visual design quality has no equivalent universal
+rule set: "this spacing is inconsistent" or "this hierarchy doesn't read
+well" isn't checkable against a spec, only against a given project's own
+design system — and most projects don't have one specified precisely
+enough to serve as one.
+
+Splitting the idea in two exposes the actual value:
+
+- **The objectively-checkable slice** (computed spacing off a declared
+  token scale, a raw hex color where a theme token exists, a specificity/
+  `!important` violation) is real but narrow, and roughly 80% already
+  exists as `correcting-ui`'s adherence checker
+  (`check-adherence.js`) — the net-new work would be a thin proactive
+  wrapper that batch-runs it across more routes/selectors than one
+  reactive fix touches.
+- **The part that would make it feel like "auditing visual design" as
+  named** — actual critique of hierarchy, balance, polish — has no
+  objective backbone. Building it would mean either overreaching into
+  unanchored vision-model opinion (inverting this library's foundational
+  principle: "vision is the last-resort perceptual residue only, never
+  the first signal") or quietly shrinking to a design-token linter
+  wearing a bigger name.
+
+**Decision: do not build now.** Revisit only when a concrete need makes
+the objective backbone clear — e.g. a project ships a precise,
+machine-checkable design-token spec (not just a style guide) that a
+proactive scan could genuinely check against, the way WCAG serves
+`auditing-accessibility`. Until then this is speculative scope, not a
+demonstrated gap — unlike the TDD-sequencing fix above, which had a
+concrete failure mode and a provable closure condition before any skill
+body was touched. `iterating-on-ui` (the loop-orchestration skill) and
+`managing-database-changes` remain the same kind of un-actioned Phase 0
+placeholder and are not reopened here.
+
+Phase 3 (UI Iteration Loop) is **closed**: `capturing-ui-evidence`,
+`correcting-ui`, `auditing-accessibility` shipped; `auditing-visual-
+design` skipped by this decision.

@@ -171,13 +171,35 @@ re-verified green post-fix (no regression). Learning folded into
 
 ## Remaining backlog
 
-- `auditing-visual-design` (proactive visual audit) — Phase 3 follow-on,
-  now the only one left in that phase.
-- Phase 4: `running-councils`, `releasing-changes`, agent templates, and
-  the **pt migration** (pt consumes the library; refresh its stale
-  `qwen3.6-plus` binding; reconcile pt's single `.opencode/plans/
-  pending-task.md` with the library's slug-based plan artifacts).
-- Phase 5: benchmark harness to empirically confirm model-routing bindings.
+**Phase 3 (UI Iteration Loop) is closed.** `auditing-visual-design`
+(proactive visual-design critique) was scoped and **skipped** 2026-07-12
+— not deferred by default, a deliberate call: unlike `auditing-
+accessibility`, it has no objective rule engine to check against (no
+WCAG-equivalent for "good design"), so most of what it would report
+would be unanchored vision opinion, against this library's own
+objective-first-closure principle. See `PLAN.md`, "Decision:
+auditing-visual-design skipped." Revisit only if a project supplies a
+precise, machine-checkable design-token spec to audit against.
+
+- **NEXT — pick one of Phase 4's three independent items** (no forced
+  order between them):
+  - `running-councils` — multi-perspective review (port from pt:
+    security/performance/ux/architecture/product lenses), distinct from
+    `reviewing-code`'s single-reviewer discipline (noted, not absorbed,
+    in that skill's SKILL.md).
+  - `releasing-changes` — changelog, versioning, PR hygiene.
+  - **pt migration** — pt's `.opencode` consumes this library; refresh
+    its stale `qwen3.6-plus` binding; reconcile pt's single
+    `.opencode/plans/pending-task.md` with the library's slug-based plan
+    artifacts. Arguably highest-value of the three: it's the first real
+    dogfooding of the whole library against a live project, and would
+    surface integration gaps (like the symlink/dependency-resolution
+    issues already found) before a second consuming project ever exists.
+- Phase 5: benchmark harness to empirically confirm model-routing
+  bindings — lower priority until there's more than one Phase-5-worthy
+  routing decision to validate; the routing table is still mostly
+  evidence-backed-by-citation (2026-07-06), not yet empirically re-run
+  through this repo's own harness.
 
 ## Known open items carried forward
 
