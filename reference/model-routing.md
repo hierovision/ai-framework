@@ -128,9 +128,9 @@ stays Zen (gemini-3.1-pro / claude-sonnet-5) for sign-off.
 | Claude Opus 4.1 | 2026-08-05 | use opus-4-8 |
 | GLM 5 | 2026-05-14 (past) | use glm-5.2 |
 
-Known stale bindings in existing projects: `pt` uses `qwen3.6-plus`
-(still served, but `qwen3.7-plus` is newer and cheaper — refresh during
-Phase 4 migration).
+Known stale bindings in existing projects: none currently tracked. `pt`'s
+`qwen3.6-plus` binding (`build` agent + `council-ux` subagent) was refreshed
+to `qwen3.7-plus` as part of its skill-library adoption (2026-07-13).
 
 ## Update procedure
 

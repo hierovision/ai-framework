@@ -200,20 +200,65 @@ objective-first-closure principle. See `PLAN.md`, "Decision:
 auditing-visual-design skipped." Revisit only if a project supplies a
 precise, machine-checkable design-token spec to audit against.
 
-- **NEXT — pick one of Phase 4's three independent items** (no forced
-  order between them):
-  - `running-councils` — multi-perspective review (port from pt:
-    security/performance/ux/architecture/product lenses), distinct from
-    `reviewing-code`'s single-reviewer discipline (noted, not absorbed,
-    in that skill's SKILL.md).
-  - `releasing-changes` — changelog, versioning, PR hygiene.
-  - **pt migration** — pt's `.opencode` consumes this library; refresh
-    its stale `qwen3.6-plus` binding; reconcile pt's single
-    `.opencode/plans/pending-task.md` with the library's slug-based plan
-    artifacts. Arguably highest-value of the three: it's the first real
-    dogfooding of the whole library against a live project, and would
-    surface integration gaps (like the symlink/dependency-resolution
-    issues already found) before a second consuming project ever exists.
+**pt migration (2026-07-13) — tooling half done, app-quality half open.**
+This was the first real dogfooding of the library against a live project,
+via pt's actual pending PR #10 (`feature/enable-pwa`, open since March,
+85 files / 22 commits). What happened, split cleanly because it spans two
+different concerns:
+
+- *App-code review* (dogfooded `reviewing-code` against pt's own ad hoc
+  `pending-task.md` plan): all 10 of its fix items verified correct
+  against real source (not just the diff), verification re-run directly
+  (type-check/lint/485 tests), the new test proven meaningful by hand
+  (revert → red, restore → green). Verdict `approve-with-nits`, committed
+  to pt as `32cc2a0`. But a *broader* audit of that same open PR (it's had
+  two separate Copilot review rounds; `pending-task.md` only ever covered
+  the second) found **6 of the first round's 9 comments still
+  unaddressed**, including one confirmed-by-hand real bug: pt's auth
+  store never re-subscribes to `onAuthStateChange` after any
+  `initialize()` timeout (not just true offline — a slow-network timeout
+  while genuinely online hits the same code path), because the listener
+  registration lives inside the `try` block and any thrown timeout skips
+  straight past it. **This is still open in pt** — not a library
+  concern, but recorded here so it isn't lost: someone needs to route it
+  through `designing-architecture` → `implementing-features` in pt
+  before that PR is genuinely "high quality," independent of anything
+  below.
+- *Tooling adoption* (the part that's actually this library's backlog
+  item) — done, commit `6ecf9b6` on a new pt branch
+  `chore/adopt-ai-framework-skill-library` (based on `feature/enable-pwa`
+  since pt's `.opencode/` doesn't exist on `main` yet — deliberately kept
+  as its own branch, not bundled into the already-oversized app PR):
+  - pt's `build`/`design`/`triage` agents now defer to
+    `implementing-features`/`designing-architecture`/
+    `triaging-requirements` instead of reimplementing a thinner version
+    inline; `council` (no library equivalent — multi-perspective vs.
+    `reviewing-code`'s single-reviewer discipline) kept as-is, with a
+    cross-reference note added.
+  - Stale `qwen3.6-plus` refreshed to `qwen3.7-plus` (pt's `build` agent
+    + `council-ux` subagent) — closed out in `reference/model-routing.md`
+    below.
+  - `.opencode/plans/pending-task.md` (single-file convention) retired in
+    favor of the library's slug-based `.opencode/plans/<slug>.md`, with a
+    breadcrumb README. **Found and fixed a real defect in pt's own
+    setup while doing this**: `.opencode/plans` was entirely gitignored
+    — no plan had ever survived in history, which defeats
+    `reviewing-code`'s plan-conformance sweep (nothing for a future
+    reviewer to check a diff against). Un-ignored it; `todo.md` stays
+    ignored (unrelated, legitimate local scratch file).
+  - **Deliberately not done**: migrating pt's `REQUIREMENTS.md`/`todo.md`
+    content into `ROADMAP.md` — that's a real content-triage judgment
+    call (an actual `triaging-requirements` pass), not mechanical
+    rewiring; `triage.md` now points at the real skill so the next
+    invocation produces `ROADMAP.md` naturally.
+  - Not yet pushed/PR'd — pt changes are local-only pending the user's
+    go-ahead (push/PR wasn't part of what was asked).
+
+- **NEXT — pick one of Phase 4's remaining two independent items** (no
+  forced order between them): `running-councils` (multi-perspective
+  review, port from pt — now that pt's `council` is explicitly documented
+  as the reference implementation, this port has a concrete source to
+  work from) or `releasing-changes` (changelog, versioning, PR hygiene).
 - Phase 5: benchmark harness to empirically confirm model-routing
   bindings — lower priority until there's more than one Phase-5-worthy
   routing decision to validate; the routing table is still mostly
@@ -227,5 +272,7 @@ precise, machine-checkable design-token spec to audit against.
   project-local playwright may not resolve. Documented workaround in that
   SKILL.md; a robust in-harness fix (createRequire from cwd) is deferred
   to an authoring pass with re-verification.
-- pt's build agent expects one `pending-task.md`; the library emits
-  slug-based plans. Reconcile during the Phase 4 pt migration.
+- pt's `feature/enable-pwa` PR (#10) still has 6 unaddressed first-round
+  review comments, including a real auth-listener bug — see "pt
+  migration" above. Not a library concern; tracked here only so it isn't
+  lost between sessions.
