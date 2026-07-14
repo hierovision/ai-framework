@@ -150,7 +150,11 @@ the refined spec.
 
 - Creating issues from `ROADMAP.md` → `managing-github-issues`.
 - Ranking/triaging a raw backlog → `triaging-requirements`.
-- Implementing or fixing the code the issue describes → `implementing-features`.
+- Turning the refined AC into a build plan → `designing-architecture` (it
+  produces the approved plan artifact `implementing-features` requires). Do not
+  jump straight from AC to implementation.
+- Implementing or fixing the code the issue describes → `implementing-features`
+  (executes a plan produced by `designing-architecture`).
 - Writing the actual tests for the AC → `writing-unit-tests`,
   `writing-integration-tests`, `writing-e2e-tests` (referenced by the AC tags).
 
@@ -165,3 +169,6 @@ the refined spec.
   [../writing-unit-tests/SKILL.md](../writing-unit-tests/SKILL.md),
   [../writing-integration-tests/SKILL.md](../writing-integration-tests/SKILL.md),
   [../writing-e2e-tests/SKILL.md](../writing-e2e-tests/SKILL.md).
+- Downstream planning: [../designing-architecture/SKILL.md](../designing-architecture/SKILL.md)
+  — turns this issue's AC into an approved implementation plan that
+  `implementing-features` then executes.
