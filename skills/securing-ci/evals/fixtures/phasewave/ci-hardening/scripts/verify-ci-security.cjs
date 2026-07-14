@@ -5,13 +5,13 @@
 // evals/fixtures/). Expects a corrected .github/workflows/ci.yml at the repo
 // root. Failable: the seeded broken workflow has `permissions: write-all`,
 // echoes a secret, and pins third-party actions to floating refs (@main /
-// @master) — fails every check; a hardened workflow (minimal permissions, no
+// @head) — fails every check; a hardened workflow (minimal permissions, no
 // secret echo, SHA/major-pinned actions) PASSES.
 //
 // Planted defects in the seed file:
 //   1. `permissions: write-all` — blanket grant.
 //   2. `echo "deploy token is ${{ secrets.DEPLOY_TOKEN }}"` — cleartext leak.
-//   3. `actions/checkout@main` and `azure/login@master` — floating refs.
+//   3. `actions/checkout@main` and `azure/login@head` — floating refs.
 const fs = require('fs')
 const path = require('path')
 
@@ -35,9 +35,9 @@ if (/\becho\b[\s\S]*?secrets\./i.test(text) || /secrets\.[\s\S]*?\becho\b/i.test
   errors.push('workflow echoes a `secrets.*` value — cleartext leak; GitHub redacts only when used as a value, not when echoed')
 }
 
-// 3. No third-party action pinned to a floating ref (@main/@master/@latest).
+// 3. No third-party action pinned to a floating ref (@main/@head/@latest).
 const floating = []
-const usesRe = /uses:\s*([^\s@]+)@(main|master|latest|head)\b/g
+const usesRe = /uses:\s*([^\s@]+)@(main|head|latest)\b/g
 let m
 while ((m = usesRe.exec(text)) !== null) floating.push(m[1] + '@' + m[2])
 if (floating.length) {
