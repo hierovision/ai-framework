@@ -1,0 +1,15 @@
+# === Generated skill outputs (do not commit) ===
+
+# reviewing-code: review artifact written to the repo root
+REVIEW.md
+
+# Runtime-generated plans/agents when this library is consumed, or when the
+# free-tier council agent defs are dropped in (designing-architecture,
+# FREE-TIER-COUNCIL). Comment out if you intend to track example plans/defs.
+.opencode/
+
+# === OS / tooling noise ===
+.DS_Store
+*.log
+node_modules/
+dist/
