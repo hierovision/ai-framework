@@ -204,6 +204,11 @@ been added, merged into an existing row, or marked `skipped` with a
 one-line reason recorded in the roadmap. "I think that's everything" is not
 success; a counted, empty unresolved list across resolvable sources is.
 
+When the roadmap is current and the user wants a shared, assignable backlog,
+hand off to `managing-github-issues` to persist the open rows as GitHub issues
+(rank → persist). That skill reads this roadmap's open tables and writes issue
+numbers back into the `Sources` cells.
+
 An unreachable source (failed auth, repo not found, network) is not
 "resolved" — it stays in `Unresolved` as `≥1 source (<reason>)`. Finish
 the resolvable sources, still write ROADMAP.md, still surface the change
