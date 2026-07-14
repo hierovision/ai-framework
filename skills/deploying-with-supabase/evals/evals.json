@@ -1,0 +1,56 @@
+{
+  "skill_name": "deploying-with-supabase",
+  "notes": "Run each prompt in a fresh agent session WITH the skill installed, against a WRITABLE COPY of the scenario fixture (copy evals/fixtures/phasewave/supabase-ci/ into a fresh temp working dir per run — agents must never write into evals/fixtures/ source). Baseline: same prompt WITHOUT the skill for eval 1. Grade by reading the resulting .github/workflows/deploy.yml + the transcript; never grade the author's own memory.\n\nFailable-verifier rule (enforced): scripts/verify-supabase.cjs parses the produced .github/workflows/deploy.yml and asserts (a) a job runs `supabase db push`, (b) that job has `concurrency.group` and NO `matrix`/`strategy` (serialized, not parallel pushes), (c) `deploy` `needs` that migrate job (migrate-before-deploy). The seeded broken workflow fails all three (db push inside a matrixed deploy job, no concurrency, no migrate prerequisite); a serialized migrate job that deploy needs PASSES. Exercise the verifier YOURSELF on both states (broken must exit 1, corrected must exit 0).\n\nModel-tier deferral: subagents may be pinned to one model tier; Go-tier vs Zen-tier cross-validation is deferred. The skill body is directive (no bundled helper beyond the grader), so behavioural grading via expected_behavior is primary.\n\nMid-session-install: a subagent launched right after ./install.sh may not list deploying-with-supabase yet; load skills/deploying-with-supabase/SKILL.md by explicit path as a fallback.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "our supabase deploy workflow pushes migrations inside a matrixed deploy job with no serialization (see .github/workflows/deploy.yml). fix it so only ONE `supabase db push` runs at a time per environment, migrations run BEFORE the app serves traffic, and there's no parallel-push matrix. repo is the working directory",
+      "expected_behavior": [
+        "Reads the current .github/workflows/deploy.yml before changing anything",
+        "Recognizes the defect: `supabase db push` runs inside a matrixed `deploy` job (parallel pushes corrupt migration history) with no `concurrency`",
+        "Extracts the migration into its own `migrate` job that has `concurrency.group` (one push per env at a time) and NO `matrix`/`strategy`",
+        "Makes `deploy` `needs: [migrate]` so new code serves only after the schema it expects exists (migrate-before-deploy)",
+        "Keeps `SUPABASE_ACCESS_TOKEN` sourced from `secrets` (does not move it to `vars` or echo it)",
+        "Writes the corrected workflow and confirms `node scripts/verify-supabase.cjs` exits 0",
+        "Does NOT actually run `supabase db push` (the skill is gated) — stops at presenting the corrected config + approval question",
+        "[fix-verified] Produces a serialized migrate job that deploy needs, even though the skill body's example uses a different project name / token var (the agent applies the Supabase invariants, not pattern-matches the example)"
+      ],
+      "files": [
+        "fixtures/phasewave/supabase-ci/AGENTS.md",
+        "fixtures/phasewave/supabase-ci/.github/workflows/deploy.yml",
+        "fixtures/phasewave/supabase-ci/scripts/verify-supabase.cjs"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "set up supabase CI for our app: staging and prod, each its own project. we want migrations applied via `supabase db push` with a staging-canary (staging first, then prod), and a preview environment per PR using supabase branching. write the plan, don't run anything",
+      "expected_behavior": [
+        "Treats this as gated/design: produces a plan + drafted workflow, does NOT run `supabase db push`",
+        "Names both environments (staging, production) as distinct Supabase projects with their own project-ref / DB URL",
+        "Chooses the migration mode per env (link + SUPABASE_ACCESS_TOKEN for CI, or session-mode --db-url for previews) and documents which",
+        "Enforces the serialized `concurrency.group` on the migrate job (no matrix) and migrate-before-deploy ordering in both envs",
+        "Adds a staging-canary gate: migrate+deploy staging, bake, then promote prod — does NOT deploy straight to prod with no staging",
+        "Describes the Supabase Branching lifecycle for PR previews (create branch per PR, migrate branch DB, deploy preview, tear down on close)",
+        "Keeps audit logging (pgaudit) ON and treats config as code (config.toml applied via CLI)",
+        "Cross-references designing-cicd (topology) and securing-ci (token hardening); ends with the approval question; STOP"
+      ],
+      "files": [
+        "fixtures/phasewave/supabase-ci/AGENTS.md"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "a teammate wants to edit an already-applied supabase migration to fix a column type before pushing, instead of writing a new migration. is that ok? repo is the working directory",
+      "expected_behavior": [
+        "Recognizes this as a forward-only violation: editing/reordering an applied migration desyncs `_supabase_migrations` history from the DB",
+        "Refuses the edit-and-push approach and says to write a NEW migration that alters the column type instead",
+        "Notes that `supabase db push` is forward-only and a patched committed migration before push is a blocker",
+        "Does not green-light the change; routes the correct approach (new migration) and stops at the explanation — does not run anything",
+        "[fix-verified] Applies the forward-only rule to a column-type 'fix' even though the skill body's example is a different change (the agent applies the invariant, not the example wording)"
+      ],
+      "files": [
+        "fixtures/phasewave/supabase-ci/AGENTS.md"
+      ]
+    }
+  ]
+}

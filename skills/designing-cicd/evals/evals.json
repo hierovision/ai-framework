@@ -1,0 +1,57 @@
+{
+  "skill_name": "designing-cicd",
+  "notes": "Run each prompt in a fresh agent session WITH the skill installed, against a WRITABLE COPY of the scenario fixture (copy evals/fixtures/phasewave/cicd-migrate/ into a fresh temp working dir per run — agents must never write into evals/fixtures/ source). Baseline: same prompt WITHOUT the skill for eval 1 (highest-signal differentiator). Grade by reading the resulting .github/workflows/ci.yml + the transcript; never grade the author's own memory.\n\nFailable-verifier rule (enforced): scripts/verify-cicd.mjs parses the produced .github/workflows/ci.yml and asserts (a) a `migrate` job exists and `deploy` `needs` it (migrate-before-deploy), (b) a `concurrency.group` exists on the deploy path and `cancel-in-progress` is NOT `true` (prod queues, never cancels mid-flight), (c) `deploy` has `environment: production`. The seeded broken workflow fails all three; a corrected topology passes. Exercise the verifier YOURSELF on both states: broken fixture (must exit 1) and a hand-corrected workflow (must exit 0) — a grader that cannot fail proves nothing.\n\nModel-tier deferral: subagents in this harness may be pinned to one model tier; Go-tier vs Zen-tier cross-validation is deferred per this note. Re-run the with-skill set across both tiers when the harness allows. The skill body is directive (no bundled runnable helper beyond the grader), so behavioural grading via expected_behavior is the primary signal.\n\nMid-session-install: a subagent launched right after ./install.sh may not list designing-cicd yet (registry snapshot timing). Install >=1 prompt-render cycle before grading, or instruct the subagent to load skills/designing-cicd/SKILL.md by explicit path as a fallback.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "phasewave's CI deploys to prod but migrations run AFTER the deploy (see .github/workflows/ci.yml in the repo root). fix the topology so migrations run before the deploy that serves traffic, add concurrency so only one prod deploy runs at a time (queue it, don't cancel an in-flight one), and gate prod with a protected `production` environment. the repo is the working directory",
+      "expected_behavior": [
+        "Reads the current .github/workflows/ci.yml before changing anything (not from memory)",
+        "Recognizes the cardinal defect: `deploy` does not `needs` the `migrate` job (migrate-before-deploy violated) — and fixes the ordering so `deploy` `needs: [migrate]` (or migrate runs before deploy in the DAG)",
+        "Adds a `concurrency` block with a `group:` on the deploy path and sets `cancel-in-progress: false` (queue, not cancel) — never `true` for prod",
+        "Adds `environment: production` (with url) to the deploy job so GitHub can enforce protection rules",
+        "Keeps the test/build gate intact and does not put a matrix on the deploy job",
+        "Writes the corrected workflow to .github/workflows/ci.yml and confirms the objective grader `node scripts/verify-cicd.mjs` exits 0",
+        "Does NOT commit or push (the skill is design-only) — or, if it drafts the file in-tree, stops at presenting the topology + approval question",
+        "[fix-verified] Produces a topology where migrate runs before deploy AND prod has queueing concurrency AND a gated environment, even though the skill body's prose example uses a different project name (the agent applies the topology rules, not pattern-matches the example)"
+      ],
+      "files": [
+        "fixtures/phasewave/cicd-migrate/AGENTS.md",
+        "fixtures/phasewave/cicd-migrate/.github/workflows/ci.yml",
+        "fixtures/phasewave/cicd-migrate/scripts/verify-cicd.cjs"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "design the CI/CD topology for our new API service. we want: a validation gate that runs tests + build on every PR, and a prod deploy that fires only on merge to main behind a manual promotion button with required human review. no schema migrations yet. repo is the working directory; write the plan, don't implement it",
+      "expected_behavior": [
+        "Treats this as design-only: produces a topology/plan, does NOT write the workflow into .github/ or commit",
+        "Selects triggers correctly: `pull_request` for the validation gate (test+build) — explicitly NOT the prod deploy trigger (PR refs can't hold protected secrets)",
+        "Routes prod deploy through `workflow_dispatch` (manual promotion) and/or `workflow_run` after CI passed — names the `production` environment with required-reviewers protection",
+        "Adds `concurrency` appropriate to each: `cancel-in-progress: true` for the PR validation job (drop stale runs), `cancel-in-progress: false` (queue) for the prod deploy",
+        "Lists which jobs are required status checks so branch protection can match the DAG",
+        "Because there are no migrations yet, does NOT invent a migrate job — scopes to what was asked (no over-engineering)",
+        "Presents the trigger table + job DAG + gate rules and ends with the approval question; STOP",
+        "Cross-references the sibling skills that fill the gaps: implementing-features (to implement), and notes securing-ci for the token hardening"
+      ],
+      "files": [
+        "fixtures/phasewave/cicd-migrate/AGENTS.md"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "can you add GitHub Actions to run our unit tests on every pull request? just the tests, nothing else",
+      "expected_behavior": [
+        "Recognizes this is the narrow PR-validation slice, NOT a full release pipeline — scopes to a `pull_request`-triggered test (and build) job only",
+        "Does NOT invent a prod deploy, environment, or migration job that the user didn't ask for (resists scope creep)",
+        "Applies the right concurrency for a PR validation job: `cancel-in-progress: true` (drop stale runs on new pushes), and notes it should be a required status check",
+        "Does not add an `environment:` (PR validation needs no prod gate) and does not store anything in `secrets` it doesn't need",
+        "Stops at presenting the validation-job design / drafting the workflow and asking for approval — does not expand into release engineering unprompted",
+        "[fix-verified] Limits scope to the requested PR test gate even though the skill body is full of prod/deploy guidance (the agent applies the request boundary, not the skill's loudest examples)"
+      ],
+      "files": [
+        "fixtures/phasewave/cicd-migrate/AGENTS.md"
+      ]
+    }
+  ]
+}

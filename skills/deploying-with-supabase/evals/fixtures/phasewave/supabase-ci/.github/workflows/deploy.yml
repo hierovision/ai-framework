@@ -1,0 +1,19 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+env:
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        region: [us, eu]
+    steps:
+      - run: supabase link --project-ref abc123
+      - run: supabase db push
+      - run: ./deploy.sh

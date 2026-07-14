@@ -100,10 +100,11 @@ The workflow loop, every skill:
   (gemini-3-flash / gpt-5.4-mini, or evaluate minimax-m3 native-multimodal
   on Go flat rate), `vision-critic-final` (gemini-3.1-pro / sonnet-5).
 
-## Current state (2026-07-12, commit 427cfea)
+## Current state (2026-07-14, branch enhance/devops-skills)
 
 **Both core loops complete + TDD-aware sequencing landed + first Phase 3
-follow-on landed. 12 skills, all eval-backed + reviewed + pushed.**
+follow-on landed + the DevOps/release phase landed. 17 skills, all
+eval-backed + validator-clean.**
 
 Core loop: triaging-requirements, designing-architecture,
 implementing-features (now with red-first AC capture + a
@@ -117,6 +118,35 @@ UI loop: capturing-ui-evidence, correcting-ui, auditing-accessibility
 read-only, routes fixes to correcting-ui/implementing-features/
 designing-architecture).
 Meta: authoring-skills (+ bundled scripts/validate_skill.py).
+
+**DevOps / release phase (2026-07-14, branch enhance/devops-skills):** the
+library had zero release/operate coverage. Five DevOps skills added, each
+validator-clean with self-contained evals + a failable verifier:
+- `designing-cicd` (P0) — GitHub Actions topology, job DAG via `needs`,
+  `concurrency` (queue vs cancel), `environment` protection, secrets vs
+  vars, migrate-before-deploy golden path.
+- `deploying-with-supabase` (P0) — `supabase db push` forward-only, one
+  push at a time, migrations in CI, Branching, staging-canary, pgaudit.
+- `deploying-to-azure-swa` (P1) — preview-per-PR, push-promotion,
+  `static_web_app_url` for e2e, `skip_app_build` vs Oryx.
+- `securing-ci` (P1) — OIDC over PAT, env-scoped secrets, no secret echo,
+  minimal `permissions:`, SHA-pinned actions, required-check protection.
+- `validating-against-official-docs` (P2) — the meta-discipline: validate
+  an artifact against vendor docs and emit a cited adherence report.
+
+**Free-tier fallback + council (2026-07-14):** `reference/model-routing.md`
+gained a "Free-tier fallback + council" section (verified `-free` model IDs
+`hy3-free` / `deepseek-v4-flash-free` / `mimo-v2.5-free` via `opencode
+models`) and `docs/FREE-TIER-COUNCIL.md` carries the agent-def sketches +
+procedure. When `AI_FRAMEWORK_FREE_TIER=1`, single tasks run on one free
+model; planning & review run as a 3-model council (planner + devops/security
++ coding-feasibility) that surfaces disagreements. Paid rows untouched.
+
+Note on provenance: this phase was authored AND integrated in one free-tier
+(hy3-free) session per the `docs/handoffs/enhance-devops-skills.md` dispatch
+— the normal multi-session orchestrator/author split was collapsed because
+the task was to establish free-tier resilience itself. The validator was
+run after every skill and the full suite is clean (17/17).
 
 **TDD-aware implement sequencing (this round, commit 427cfea):**
 `implementing-features` gained a red-first step (one test per testable
@@ -259,6 +289,11 @@ different concerns:
   review, port from pt — now that pt's `council` is explicitly documented
   as the reference implementation, this port has a concrete source to
   work from) or `releasing-changes` (changelog, versioning, PR hygiene).
+  - Note: a **free-tier** council now exists (see `docs/FREE-TIER-COUNCIL.md`
+    + the model-routing "Free-tier fallback + council" section) — it is a
+    distinct, free-model variant (planner + devops/security + coding-
+    feasibility) for planning & review, NOT the full pt `council` port. The
+    pt-council port above remains a separate, higher-fidelity item.
 - Phase 5: benchmark harness to empirically confirm model-routing
   bindings — lower priority until there's more than one Phase-5-worthy
   routing decision to validate; the routing table is still mostly

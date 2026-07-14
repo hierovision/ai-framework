@@ -10,7 +10,10 @@ design → implement → verify → **review**. It consumes what an
 `implementing-features` pass hands off (a diff/changeset plus, when
 present, the plan artifact that authorized it) and produces a verdict
 with actionable findings. It is **read-only on the code**: it diagnoses,
-it never patches. A review is **done** when every changed hunk has been
+it never patches. CI/CD workflow changes are in scope too: the review
+checks a workflow against a `designing-cicd` plan and flags secret /
+supply-chain posture per `securing-ci` (those two are the producer and the
+security-discipline siblings). A review is **done** when every changed hunk has been
 assessed, findings are classified by severity, each finding cites a
 location + a concrete reason, and a verdict is issued. "Looks fine" is
 not a review — a finding a third party cannot act on is not a finding.
@@ -326,3 +329,8 @@ refused review. Reopen Step 4.
   [../writing-unit-tests/SKILL.md](../writing-unit-tests/SKILL.md),
   [../writing-integration-tests/SKILL.md](../writing-integration-tests/SKILL.md),
   [../writing-e2e-tests/SKILL.md](../writing-e2e-tests/SKILL.md).
+- CI/CD workflow changes are reviewed against the topology from
+  [../designing-cicd/SKILL.md](../designing-cicd/SKILL.md), and their
+  secret / supply-chain posture against
+  [../securing-ci/SKILL.md](../securing-ci/SKILL.md) — the producer and
+  security-discipline siblings of this review.

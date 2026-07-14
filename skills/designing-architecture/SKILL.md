@@ -205,6 +205,10 @@ it declares success from a written, verifiable, approved plan artifact.
   the plan directly; a full design pass is not needed.
 - **Ranking a backlog / reconciling many items** → that is triage; use
   the `triaging-requirements` skill.
+- **Designing a release/operate pipeline** (CI/CD topology, deploy,
+  migrations, CI security) → that is `designing-cicd` (and its siblings
+  `deploying-with-supabase`, `deploying-to-azure-swa`, `securing-ci`) —
+  this skill designs the feature; the DevOps skills design how it ships.
 - **The user has already approved and wants implementation** → hand off
   to the implement stage; this skill stops at approval.
 
