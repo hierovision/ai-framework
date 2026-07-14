@@ -86,10 +86,10 @@ owns the DAG; this step enforces the gate can't be bypassed).
 
 ### Step 8 — SHA-pin third-party actions
 
-A third-party action pinned to `@main` / `@master` / `@latest` runs
+A third-party action pinned to `@main` / `@head` / `@latest` runs
 **whatever the upstream publishes next** — a supply-chain risk. Pin to a
 **commit SHA** (`uses: owner/repo@<sha>` with a `# vX.Y.Z` comment) or, at
-minimum, a major tag. `@main` / `@master` / `@latest` is a **blocker**.
+minimum, a major tag. `@main` / `@head` / `@latest` is a **blocker**.
 First-party `actions/*` still gets pinned to a major or SHA.
 
 ### Step 9 — Present + STOP
