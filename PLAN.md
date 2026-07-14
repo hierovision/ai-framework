@@ -2,7 +2,7 @@
 
 Status: APPROVED DIRECTION — decisions locked 2026-07-03 (see Decisions)
 Date: 2026-07-03
-Repo: https://github.com/hierovision/ai-framework.git
+Repo: <https://github.com/hierovision/ai-framework.git>
 
 ## Vision
 
@@ -310,6 +310,7 @@ folded in as the second closure condition (stylelint + convention +
 regression), not a separate reviewing-code pass.
 
 Build-time constraints to carry into the handoffs:
+
 - **Real-browser deferral** (as with `writing-e2e-tests`): the eval
   harness likely lacks a browser. Capture/compare scripts get structural
   verification; real screenshot/computed-CSS runs are a documented
