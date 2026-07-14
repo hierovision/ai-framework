@@ -54,7 +54,7 @@ node skills/managing-github-issues/scripts/sync-issues.mjs \
 ```
 
 It prints one planned `gh issue create` per open row, each carrying
-`--label "roadmap-id:<id>,<category>"`, and a summary
+`--label "roadmap-id:<id>,<category-label>"`, and a summary
 `<N> to create, <M> already backed`. Verify the count matches the open rows and
 that Done/Skipped produced nothing. Detail the planned bodies by reading the
 script output or its reference.
@@ -144,11 +144,12 @@ for the full contract.
 ## Dedup-label contract
 
 Every issue carries `roadmap-id:<id>`, where `<id>` is the roadmap row's stable
-slug (e.g. `feat-transition-warning`). This label is the idempotency key: a
+slug (e.g. `feat-dark-mode`). This label is the idempotency key: a
 re-run detects the existing issue by label and skips creation instead of
 duplicating. Never reuse an id across issues. The category label
-(`feature` / `bug` / `tech-debt` / `chore`) is added alongside it; note the
-roadmap writes `debt` but the issue label is `tech-debt`.
+(`enhancement` / `bug` / `tech-debt` / `chore`) is added alongside it; note the
+roadmap writes `feature` but the issue label is `enhancement` (reusing
+GitHub's default), and writes `debt` but the issue label is `tech-debt`.
 
 ## Body-enrichment rule
 

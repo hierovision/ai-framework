@@ -41,7 +41,7 @@ function parseArgs(argv) {
     else if (t === "--project") a.project = argv[++i];
     else if (t === "--project-title") a.projectTitle = argv[++i];
     else if (t === "--help" || t === "-h") {
-      console.log("Usage: node sync-issues.mjs --roadmap <path> [--dry-run|--apply] [--repo owner/name] [--offline] [--check-cleanup|--apply-cleanup]");
+      console.log("Usage: node sync-issues.mjs --roadmap <path> [--dry-run|--apply] [--repo owner/name] [--offline] [--with-project] [--project <number>] [--project-title <title>] [--check-cleanup|--apply-cleanup]");
       process.exit(0);
     }
   }
@@ -226,7 +226,7 @@ function cleanupTmp() {
 // GitHub rejects `gh issue create` for labels that don't exist yet, so we
 // ensure every label we intend to use is present before issuing.
 const LABEL_COLORS = {
-  feature: "a2eeef",
+  enhancement: "a2eeef",
   bug: "d73a4a",
   "tech-debt": "bfd4f2",
   chore: "c5def5",

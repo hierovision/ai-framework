@@ -13,7 +13,8 @@
       ],
       "files": [
         "fixtures/sample-issue.md",
-        "fixtures/refined-body.md"
+        "fixtures/refined-body.md",
+        "fixtures/verify.mjs"
       ]
     },
     {
@@ -27,7 +28,8 @@
       ],
       "files": [
         "fixtures/sample-issue.md",
-        "fixtures/refined-body.md"
+        "fixtures/refined-body.md",
+        "fixtures/verify.mjs"
       ]
     },
     {
@@ -42,7 +44,8 @@
       "files": [
         "fixtures/sample-issue.md",
         "fixtures/refined-body.md",
-        "fixtures/bad-refined-body.md"
+        "fixtures/bad-refined-body.md",
+        "fixtures/verify.mjs"
       ]
     }
   ]

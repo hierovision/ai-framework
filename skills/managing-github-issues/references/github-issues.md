@@ -26,7 +26,7 @@ Every issue gets two kinds of labels:
 | Label | Applied to | Purpose |
 |---|---|---|
 | `roadmap-id:<id>` | every issue | dedup / idempotency key — never reuse an id |
-| `feature` | category `feature` | category |
+| `enhancement` | category `feature` | category (reuses GitHub's default `enhancement` label) |
 | `bug` | category `bug` | category |
 | `tech-debt` | category `debt` | category (roadmap writes `debt`; the issue label is `tech-debt`) |
 | `chore` | category `chore` | category |
@@ -43,13 +43,13 @@ count reach `0 to create` offline after a real run.
 gh issue create \
   --repo owner/repo \
   --title "<Title>" \
-  --label "roadmap-id:<id>,<category>" \
+  --label "roadmap-id:<id>,<category-label>" \
   --body-file /tmp/issue-body.md
 ```
 
 - `--repo` is inferred from the directory containing `ROADMAP.md` via
   `gh repo view --json nameWithOwner` (override with `--repo owner/name`).
-- `<category>` is one of `feature` / `bug` / `tech-debt` / `chore`.
+- `<category-label>` is one of `enhancement` / `bug` / `tech-debt` / `chore` (roadmap category `feature` maps to label `enhancement`; roadmap `debt` maps to `tech-debt`).
 - The script writes the body to a temp file and passes `--body-file` so
   markdown (checklists) survives shell quoting.
 
