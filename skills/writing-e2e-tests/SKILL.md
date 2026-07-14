@@ -25,6 +25,12 @@ for the AC contract (link it, never duplicate it). It is the sibling of
 `writing-unit-tests` (isolated logic) and `writing-integration-tests`
 (seams); the right-layer check (Step 2) routes between the three.
 
+**Where e2e runs is a release decision.** `designing-cicd` (and the deploy
+skills) decide *whether* e2e runs in CI and *against what* — notably the
+PR-preview URL a static-host deploy hands back (`deploying-to-azure-swa`
+captures `static_web_app_url` for exactly this). This skill writes the spec;
+it defers the deploy-time target to those skills.
+
 **Meaningfulness honesty.** A test never seen red proves nothing — and
 for e2e the proof has **two independent axes** that must not be collapsed
 into one:
@@ -282,3 +288,8 @@ the call, not this skill choosing to chain.
   red-on-broken proof) and class 4 (determinism: `waitForTimeout` as a
   flake suspect, shared-state isolation) are the patients this skill's
   discipline prevents.
+- *Where* e2e runs (and the PR-preview target it runs against) is a release
+  decision owned by [../designing-cicd/SKILL.md](../designing-cicd/SKILL.md)
+  and the deploy skills — `deploying-to-azure-swa` captures
+  `static_web_app_url` for exactly this. This skill writes the spec; it
+  defers the deploy-time target to them.

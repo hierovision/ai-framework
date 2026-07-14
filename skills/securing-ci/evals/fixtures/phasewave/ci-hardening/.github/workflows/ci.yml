@@ -1,0 +1,14 @@
+name: ci
+
+on: [push]
+
+permissions: write-all
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+      - uses: azure/login@head
+      - run: echo "deploy token is ${{ secrets.DEPLOY_TOKEN }}"
+      - run: ./build.sh

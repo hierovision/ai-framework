@@ -18,6 +18,7 @@ this file is the single place model IDs appear.
 - Provider notes (Zen vs Go)
 - Vision capability notes
 - Deprecation watch
+- Free-tier fallback + council
 - Update procedure
 
 ## Roles → bindings
@@ -131,6 +132,83 @@ stays Zen (gemini-3.1-pro / claude-sonnet-5) for sign-off.
 Known stale bindings in existing projects: none currently tracked. `pt`'s
 `qwen3.6-plus` binding (`build` agent + `council-ux` subagent) was refreshed
 to `qwen3.7-plus` as part of its skill-library adoption (2026-07-13).
+
+## Free-tier fallback + council
+
+Intent: when paid budget/credits run out, the library keeps working on
+**free-tier models** and runs a **multi-model council** for the two steps
+where a single weak model is riskiest — **planning** and **review**. This is
+an *additional* mode layered on top of the paid routing above; it never
+alters the paid rows. Status: protocol drafted 2026-07-14; models verified
+present in the catalog via `opencode models`.
+
+### Free-model roster
+
+All three are distinct free-tier catalog entries (verified 2026-07-14 via
+`opencode models` — the `-free` IDs are separate from `deepseek-v4-flash`
+and `mimo-v2.5`, which remain the paid/Go rows):
+
+| Role | Free model (catalog ID) | Maps to existing role row |
+|---|---|---|
+| `planner` (planning / design / architecture) | `hy3-free` | `planner` (glm-5.2 / claude-opus) |
+| `implementer` / `test-writer` / `debugger` (coding) | `deepseek-v4-flash-free` | `triager` / `debugger` (deepseek-v4-flash) |
+| `devops` / CI / cloud / security | `mimo-v2.5-free` | `triager` (mimo-v2.5) |
+
+### Activation + routing (free-tier mode)
+
+- **Toggle:** an explicit env flag `AI_FRAMEWORK_FREE_TIER=1` selects this
+  mode. Auto-activation when paid providers are exhausted is a future
+  hook; for now the toggle is the contract (keep it simple). The paid rows
+  above remain the default and are untouched.
+- **Single-task execution** uses the one mapped model (cheap, no council)
+  to conserve free quota:
+  - planning / design → `hy3-free`
+  - any coding (implement / test / debug) → `deepseek-v4-flash-free`
+  - devops / CI / cloud / security → `mimo-v2.5-free`
+- Skills reference **roles**, never these IDs (library convention). The
+  binding of a role to a free model in free-tier mode happens in the
+  harness/project config, not in skill bodies — this file is the single
+  home of the IDs.
+
+### Council structure (objectivity for planning & review)
+
+Free models are individually weaker, so run **planning** and **review** as
+a multi-model council and synthesize. The procedure and the agent-def
+sketches live in `docs/FREE-TIER-COUNCIL.md` (a project drops those defs
+into `.opencode/agents/`). Design:
+
+- **Planning council** (producing a plan/spec via `designing-architecture`,
+  `designing-cicd`, `deploying-with-supabase`, `deploying-to-azure-swa`,
+  `securing-ci`):
+  - A — `hy3-free`: primary planner.
+  - B — `mimo-v2.5-free`: devops/security critique (CI safety, secrets,
+    environments, migrate-before-deploy).
+  - C — `deepseek-v4-flash-free`: coding-feasibility critique (realizable?
+    are the ACs testable?).
+  - Synthesis: A writes the final plan folding in B/C; **surface
+    disagreements explicitly** (a finding one model overrides is named,
+    not silenced).
+- **Review council** (reviewing a diff/skill/workflow via `reviewing-code`,
+  `skill-reviewer`):
+  - A — `deepseek-v4-flash-free`: coding review.
+  - B — `mimo-v2.5-free`: devops/security review.
+  - C — `hy3-free`: plan/architecture coherence + synthesis.
+  - Output: per-member findings + consensus verdict + unresolved
+    disagreements flagged.
+
+Mechanism: the orchestrator spawns subagents (Task tool) with
+`subagent_type` bound to the free-council agent defs (each sets `model:` to
+the free ID), runs them (parallel where possible), then synthesizes. See
+`docs/FREE-TIER-COUNCIL.md` for the exact defs + a worked example.
+
+### Guardrails
+
+- Council only for **planning & review** (per above). Raw execution stays
+  single-model to conserve quota.
+- Always surface disagreements; never let one model silently override
+  another.
+- Free-tier mode coexists with the paid routing — the toggle selects
+  between them; the paid rows are not modified by enabling free-tier.
 
 ## Update procedure
 

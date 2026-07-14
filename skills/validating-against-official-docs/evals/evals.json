@@ -1,0 +1,56 @@
+{
+  "skill_name": "validating-against-official-docs",
+  "notes": "Run each prompt in a fresh agent session WITH the skill installed, against a WRITABLE COPY of the scenario fixture (copy evals/fixtures/phasewave/docs-adherence/ into a fresh temp working dir per run — agents must never write into evals/fixtures/ source). Baseline: same prompt WITHOUT the skill for eval 1 (highest-signal differentiator). Grade by reading the produced ADHERENCE.md + the transcript; never grade the author's own memory.\n\nFailable-verifier rule (enforced): scripts/verify-adherence.cjs checks the produced ADHERENCE.md at the repo root. It asserts (a) a `## Adheres` section exists, (b) a `## Gaps` (or Non-compliant/Findings) section exists and names all three planted violations from official-docs.md — no pull_request preview trigger, token in vars, missing skip_app_build — and (c) the report cites the authoritative doc (official-docs.md / URL / 'retrieved'). A 'looks fine' report with no Gaps section (or missing a planted gap) FAILS; a correct cited report with all three gaps PASSES. Exercise the verifier YOURSELF on both states (a bare 'all good' report must exit 1; a correct report exits 0).\n\nModel-tier deferral: subagents may be pinned to one model tier; Go-tier vs Zen-tier cross-validation is deferred. The skill body is directive (no bundled helper beyond the grader), so behavioural grading via expected_behavior is primary.\n\nMid-session-install: a subagent launched right after ./install.sh may not list validating-against-official-docs yet; load skills/validating-against-official-docs/SKILL.md by explicit path as a fallback.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "validate .github/workflows/deploy.yml against the authoritative Azure SWA docs in official-docs.md and emit an adherence report (ADHERENCE.md). cite what adheres and what gaps exist, with the doc-backed fix for each. repo is the working directory",
+      "expected_behavior": [
+        "Reads official-docs.md (the frozen authoritative source) and .github/workflows/deploy.yml before reporting",
+        "Extracts the binding rules from the doc (preview-per-PR needs a pull_request trigger; token via secrets not vars; Vite app needs skip_app_build: true)",
+        "Writes ADHERENCE.md with an `## Adheres` section (what the workflow gets right) AND a `## Gaps` section (what it violates)",
+        "Flags all three gaps the artifact has: no `pull_request` trigger (no preview env), token in `vars` (leak), no `skip_app_build` (Oryx would misbuild Vite)",
+        "Cites each gap to the doc (official-docs.md section) and gives the doc-backed fix for each",
+        "Adds a `## Confidence` note and a retrieval-date reference",
+        "Does NOT edit deploy.yml (the skill is read-only on the artifact) — stops at the report and routes fixes to the producing skill",
+        "[fix-verified] Flags the three planted gaps from the doc even though the skill body example is a different stack (the agent validates against the supplied doc's rules, not pattern-matches the skill's example)"
+      ],
+      "files": [
+        "fixtures/phasewave/docs-adherence/AGENTS.md",
+        "fixtures/phasewave/docs-adherence/official-docs.md",
+        "fixtures/phasewave/docs-adherence/.github/workflows/deploy.yml",
+        "fixtures/phasewave/docs-adherence/scripts/verify-adherence.cjs"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "a team claims their CI is 'fully secure'. validate that claim against GitHub's security-hardening docs and give me a cited adherence report. repo is the working directory — there's a .github/workflows/ci.yml to check",
+      "expected_behavior": [
+        "Identifies GitHub's 'Security hardening for GitHub Actions' as the authoritative source and would fetch/date it (or uses the project's frozen copy if present)",
+        "Extracts testable rules (OIDC vs PAT, minimal permissions, no secret echo, SHA-pinned actions, env-scoped secrets, required checks)",
+        "Compares the workflow against each rule and writes an adherence report with Adheres + Gaps + citations + confidence",
+        "Does not take the team's claim at face value — validates each asserted control against the doc and flags any unmet one as a gap",
+        "Is read-only on ci.yml (reports, does not edit); routes fixes to securing-ci",
+        "[fix-verified] Validates the 'fully secure' claim against the doc's rules rather than agreeing with the claim (the agent treats the claim as a hypothesis to test, not a fact)"
+      ],
+      "files": [
+        "fixtures/phasewave/docs-adherence/AGENTS.md"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "is our supabase `db push` usage still correct per the current supabase migrations docs? validate and report. repo is the working directory",
+      "expected_behavior": [
+        "Names Supabase's 'Database Migrations' doc as the authoritative source and would fetch/date it",
+        "Extracts the binding rules (forward-only; never edit an applied migration; serialize pushes; one push at a time) and compares the project's migration-in-CI usage against them",
+        "Emits a cited adherence report (Adheres / Gaps / Confidence) — does not just say 'yes, correct'",
+        "If a rule can't be checked from what's in the repo, marks that gap's confidence low and says it's unverifiable rather than guessing",
+        "Is read-only; routes any gap to deploying-with-supabase",
+        "[fix-verified] Validates against Supabase's migration rules (forward-only, serialized push) even though the skill body example is Azure (the agent applies the doc-validation discipline to the right stack)"
+      ],
+      "files": [
+        "fixtures/phasewave/docs-adherence/AGENTS.md"
+      ]
+    }
+  ]
+}
