@@ -1,49 +1,68 @@
 #!/usr/bin/env bash
-# Symlink every skill in this repo into the global opencode discovery path.
-# Idempotent: safe to re-run after adding skills. Use --uninstall to remove
-# only the links that point back into this repo.
+# Symlink skills and agents from this repo into the global opencode discovery
+# paths. Idempotent: safe to re-run. Use --uninstall to remove only the links
+# that point back into this repo.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_SRC="$REPO_DIR/skills"
-TARGET_DIR="${OPENCODE_SKILLS_DIR:-$HOME/.config/opencode/skills}"
+AGENTS_SRC="$REPO_DIR/agents"
+SKILLS_TARGET="${OPENCODE_SKILLS_DIR:-$HOME/.config/opencode/skills}"
+AGENTS_TARGET="${OPENCODE_AGENTS_DIR:-$HOME/.config/opencode/agents}"
 
 usage() {
   echo "Usage: $0 [--uninstall]"
-  echo "  Links skills/*/ into $TARGET_DIR"
-  echo "  Override target with OPENCODE_SKILLS_DIR."
+  echo "  Links skills/*/ and agents/*.md into the global opencode config:"
+  echo "    $SKILLS_TARGET"
+  echo "    $AGENTS_TARGET"
+  echo "  Override targets with OPENCODE_SKILLS_DIR / OPENCODE_AGENTS_DIR."
 }
 
-uninstall() {
+# Remove symlinks in $target that point under $src (this repo).
+uninstall_dir() {
+  local src="$1" target="$2"
+  [ -d "$target" ] || return 0
   local removed=0
-  [ -d "$TARGET_DIR" ] || { echo "Nothing installed at $TARGET_DIR"; return 0; }
-  for link in "$TARGET_DIR"/*; do
+  for link in "$target"/*; do
     [ -L "$link" ] || continue
     case "$(readlink "$link")" in
-      "$SKILLS_SRC"/*)
+      "$src"/*)
         rm "$link"
         echo "removed $(basename "$link")"
         removed=$((removed + 1))
         ;;
     esac
   done
-  echo "Uninstalled $removed skill link(s)."
+  echo "Uninstalled $removed link(s) from $target."
 }
 
-install() {
-  [ -d "$SKILLS_SRC" ] || { echo "No skills/ directory found at $SKILLS_SRC" >&2; exit 1; }
-  mkdir -p "$TARGET_DIR"
+uninstall() {
+  uninstall_dir "$SKILLS_SRC" "$SKILLS_TARGET"
+  uninstall_dir "$AGENTS_SRC" "$AGENTS_TARGET"
+}
+
+# Symlink each child of $src into $target.
+#   $1 = source dir, $2 = target dir, $3 = kind label,
+#   $4 = optional required file inside each child (skills need SKILL.md),
+#   $5 = optional extension filter (agents are *.md)
+link_children() {
+  local src="$1" target="$2" kind="$3" validate="${4:-}" ext="${5:-}"
+  [ -d "$src" ] || { echo "No $kind directory found at $src" >&2; exit 1; }
+  mkdir -p "$target"
   local linked=0 skipped=0
-  for skill_dir in "$SKILLS_SRC"/*/; do
-    [ -d "$skill_dir" ] || continue
+  for entry in "$src"/*; do
+    [ -e "$entry" ] || continue
     local name
-    name="$(basename "$skill_dir")"
-    if [ ! -f "$skill_dir/SKILL.md" ]; then
-      echo "skip $name (no SKILL.md)"
+    name="$(basename "$entry")"
+    if [ -n "$ext" ] && [ "${name##*.}" != "$ext" ]; then
+      continue
+    fi
+    if [ -n "$validate" ] && [ ! -f "$entry/$validate" ]; then
+      echo "skip $name (no $validate)"
       skipped=$((skipped + 1))
       continue
     fi
-    local dest="$TARGET_DIR/$name"
+    local dest="$target/$name"
     if [ -L "$dest" ]; then
       # Refresh existing symlink (may point at an old location)
       rm "$dest"
@@ -52,11 +71,16 @@ install() {
       skipped=$((skipped + 1))
       continue
     fi
-    ln -s "${skill_dir%/}" "$dest"
+    ln -s "$entry" "$dest"
     echo "linked $name"
     linked=$((linked + 1))
   done
-  echo "Installed $linked skill(s) into $TARGET_DIR ($skipped skipped)."
+  echo "Installed $linked $kind(s) into $target ($skipped skipped)."
+}
+
+install() {
+  link_children "$SKILLS_SRC" "$SKILLS_TARGET" "skill" "SKILL.md" ""
+  link_children "$AGENTS_SRC" "$AGENTS_TARGET" "agent" "" "md"
 }
 
 case "${1:-}" in
