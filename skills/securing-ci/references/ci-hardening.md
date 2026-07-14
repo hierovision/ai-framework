@@ -88,7 +88,7 @@ check isn't required — a finding.
 ```
 
 Pin to a commit SHA (with a `# vX.Y.Z` comment) or, at minimum, a major
-tag. `@main` / `@head` / `@latest` runs whatever upstream publishes next
+tag. `@main` / `@master` / `@latest` runs whatever upstream publishes next
 — **blocker**. First-party `actions/*` is pinned too.
 
 ## Common findings (red flags this skill catches)
@@ -97,7 +97,7 @@ tag. `@main` / `@head` / `@latest` runs whatever upstream publishes next
 |---|---|
 | `echo` of a `secrets.*` value (cleartext leak) | blocker |
 | `permissions: write-all` (blanket grant) | blocker |
-| Third-party action pinned to `@main`/`@head`/`@latest` | blocker |
+| Third-party action pinned to `@main`/`@master`/`@latest` | blocker |
 | Static PAT where OIDC is available | major |
 | Prod token in repo-wide secrets (not environment-scoped) | major |
 | Token broader than the step needs (admin vs deploy) | major |
