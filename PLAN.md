@@ -469,3 +469,37 @@ placeholder and are not reopened here.
 Phase 3 (UI Iteration Loop) is **closed**: `capturing-ui-evidence`,
 `correcting-ui`, `auditing-accessibility` shipped; `auditing-visual-
 design` skipped by this decision.
+
+---
+
+## Appendix A — Status & open items (2026-07-14)
+
+Single source of current library state. Updated as phases close.
+
+### Library state
+- **19 skills shipped** across all loops: build, test, release, and the
+  product/requirements loop (`triaging-requirements`,
+  `managing-github-issues`, `refining-issue-acceptance`).
+- **Both core loops are complete**: build (architecture → implement →
+  test trio → review) and test (unit / integration / e2e).
+- **DevOps/release phase done**: `designing-cicd`, `deploying-to-azure-swa`,
+  `deploying-with-supabase`, `securing-ci`, `validating-against-official-docs`.
+- **Free-tier council shipped**: default `hy3-free`, three paid models
+  opt-in (`glm-5.2`, `gpt-5.4`, `claude-opus-4-7`). Defined in
+  `agents/council.md` + `agents/council-*.md`; strategy in
+  `reference/model-routing.md`; walkthrough in `docs/FREE-TIER-COUNCIL.md`.
+  This closes the previously-deferred `running-councils` item.
+
+### pt (prompt-toolkit app) migration
+- App-code review completed: **approve-with-nits** committed in pt's repo.
+- 6 first-round review comments remain open in pt's PR #10, including an
+  auth-listener bug — tracked in pt, **not** a library concern. No further
+  library work until pt resolves them.
+
+### Still open / deferred
+- **`releasing-changes`** (changelog / versioning / PR hygiene skill) — the
+  only remaining Phase 0 placeholder not yet built.
+- **Phase 5 eval harness** (deep synthetic-eval runner) — lower priority,
+  not started. Deferred until a concrete need appears.
+- `iterating-on-ui` and `managing-database-changes` remain un-actioned
+  Phase 0 placeholders (see Phase 3 decision above).

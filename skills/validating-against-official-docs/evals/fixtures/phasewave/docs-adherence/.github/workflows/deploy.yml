@@ -1,3 +1,11 @@
+# DO NOT COPY — deliberately defective Azure SWA workflow used as a
+# planted-violation fixture for the `validating-against-official-docs` skill.
+# It intentionally violates three rules from official-docs.md:
+#   - no `pull_request` trigger        -> no preview-per-PR environment
+#   - SWA token placed in `vars`       -> secret leak in logs
+#   - Vite app without `skip_app_build` -> Oryx misbuilds
+# This file is NOT a reference config. See official-docs.md for the doc-backed
+# setup, and see AGENTS.md (this fixture) — it is meant to stay broken on disk.
 name: azure-swa
 
 on:

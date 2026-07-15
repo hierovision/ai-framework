@@ -1,0 +1,34 @@
+{
+  "skill_name": "managing-github-issues",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I have an established ROADMAP.md at skills/managing-github-issues/evals/fixtures/sample-roadmap.md. Dry-run a sync to GitHub issues — tell me exactly how many issues would be created and confirm none are for done or skipped items.",
+      "expected_behavior": [
+        "Reports exactly 6 planned creates (2 features + 1 bug + 1 debt + 2 chores)",
+        "Every planned create carries a `roadmap-id:<id>` dedup label plus a category label",
+        "Does NOT propose issues for Done or Skipped rows (done-old, skip-x excluded)",
+        "Runs offline / read-only by default (dry-run) and proposes no writes"
+      ],
+      "files": [
+        "fixtures/sample-roadmap.md",
+        "fixtures/sample-todo.md",
+        "fixtures/verify.mjs"
+      ],
+      "notes": "Self-check by running `node skills/managing-github-issues/evals/fixtures/verify.mjs` — exits 0 when the planned-create count is 6 and every open id carries its roadmap-id label. Real GitHub runs are network side-effects and out of eval scope."
+    },
+    {
+      "id": 2,
+      "prompt": "Prove the sync-issues.mjs pure helpers (parseRoadmap, findSourceFiles, findSectionHints, extractChecklist, buildBody, isBacked, priorityForScore, findOpenTableSourcesCol) behave correctly — run the unit suite.",
+      "expected_behavior": [
+        "node skills/managing-github-issues/evals/fixtures/unit.test.mjs exits 0",
+        "parseRoadmap extracts open-table rows with score/status/sourcesRaw",
+        "extractChecklist honors the path-containment guard (skips ../ escapes)",
+        "priorityForScore bands: >=6 High, >=3 Medium, else Low"
+      ],
+      "files": [
+        "fixtures/unit.test.mjs"
+      ]
+    }
+  ]
+}

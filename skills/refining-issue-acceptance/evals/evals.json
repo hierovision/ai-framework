@@ -1,0 +1,64 @@
+{
+  "skill_name": "refining-issue-acceptance",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Refine GitHub issue #42 in acme/widgets — it was synced from the roadmap and just has a source checklist, I need real acceptance criteria before I assign it.",
+      "expected_behavior": [
+        "Fetches issue #42 and reads its current body (Roadmap ID, Category, Score, source checklist)",
+        "Rewrites the description as a short user-facing summary with no code references",
+        "Writes acceptance criteria as observable behavior, each tagged [unit]/[integration]/[e2e]",
+        "Runs the script in --dry-run and confirms VALIDATION: PASS before asking to apply",
+        "Applies only after explicit user confirmation, editing the live issue via gh issue edit"
+      ],
+      "files": [
+        "fixtures/sample-issue.md",
+        "fixtures/refined-body.md",
+        "fixtures/verify.mjs"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "This issue is too vague to build: 'make the signup form better'. Turn it into a proper spec with testable acceptance criteria and a clear description.",
+      "expected_behavior": [
+        "Treats the plain issue (no source checklist) as valid input and still produces ACs",
+        "Writes behavioral ACs (e.g. inline errors on empty fields, no record created) rather than implementation steps",
+        "Classifies each AC by test type so the implementer knows which test proves it",
+        "Self-checks that no file/module/function names leak into the AC before dry-run"
+      ],
+      "files": [
+        "fixtures/sample-issue.md",
+        "fixtures/refined-body.md",
+        "fixtures/verify.mjs"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Add acceptance criteria to issue #42 and tighten the title. Don't push anything to GitHub until I've looked at the proposed body.",
+      "expected_behavior": [
+        "Defaults to --dry-run and prints the proposed title + refined body + validation result",
+        "Does NOT run --apply (no live edit) without explicit confirmation",
+        "Shows the before -> after so the user can review before consenting",
+        "On later --apply, refuses (non-zero) if the AC validation fails"
+      ],
+      "files": [
+        "fixtures/sample-issue.md",
+        "fixtures/refined-body.md",
+        "fixtures/bad-refined-body.md",
+        "fixtures/verify.mjs"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Prove the refine-issue.mjs validation helpers (findLeaks, analyzeAcs, validateRefined) behave correctly — run the unit suite.",
+      "expected_behavior": [
+        "node skills/refining-issue-acceptance/evals/fixtures/unit.test.mjs exits 0",
+        "findLeaks flags code context (class/const/src/import) but not plain prose ('export to CSV', 'import records', 'class roster', 'function room')",
+        "analyzeAcs/validateRefined enforce exactly one [unit]/[integration]/[e2e] tag per AC and detect leaks"
+      ],
+      "files": [
+        "fixtures/unit.test.mjs"
+      ]
+    }
+  ]
+}

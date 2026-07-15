@@ -3,12 +3,15 @@
 The free-tier model routing + council protocol for the ai-framework skill
 library. Companion to `reference/model-routing.md` (Section "Free-tier
 fallback + council") — that file is the single home of the model IDs; this
-doc is the **procedure + agent-def sketches** a project drops into its own
-`.opencode/agents/` to run the council.
+doc is the **procedure** for running the council on free models.
 
-When paid budget/credits run out, set `AI_FRAMEWORK_FREE_TIER=1` and run
-planning & review as a multi-model council. Single-task execution (coding,
-etc.) stays on one free model to conserve quota. Free models are
+The council **defaults to free models** for any council task (the `council-*`
+agents shipped in this repo are bound to free models). A **paid council is an
+opt-in workflow** the user chooses — bind the subagents to stronger models
+(see the `council-member` row in `reference/model-routing.md`). Separately,
+when the whole library must run on free models (paid budget exhausted), set
+`AI_FRAMEWORK_FREE_TIER=1` and every task uses a free model. Single-task
+execution stays on one free model to conserve quota. Free models are
 individually weaker, so the council exists only where one weak model is
 riskiest: **planning** and **review**.
 

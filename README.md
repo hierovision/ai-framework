@@ -16,15 +16,17 @@ phases.
 
 ## Install
 
-Symlinks every skill into `~/.config/opencode/skills/` so all projects
-discover them globally:
+Symlinks every skill into `~/.config/opencode/skills/` and every agent
+into `~/.config/opencode/agents/` so all projects discover them globally:
 
 ```bash
 ./install.sh
 ```
 
-Re-run after adding new skills. `git pull` alone updates the content of
-already-linked skills. Remove links with:
+Re-run after adding new skills or agents. `git pull` alone updates the
+content of already-linked skills/agents. Agent files are validated on
+install (frontmatter `name` must match the file and `model` must be set).
+Remove links with:
 
 ```bash
 ./install.sh --uninstall

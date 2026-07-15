@@ -33,7 +33,7 @@ this file is the single place model IDs appear.
 | `reviewer` | code review | glm-5.2 | claude-sonnet-5, gpt-5.4 |
 | `vision-critic-fast` | UI loop, routine passes | minimax-m3 (natively multimodal — evaluate for UI screenshots) | gemini-3-flash, gpt-5.4-mini |
 | `vision-critic-final` | UI loop, final review | — | gemini-3.1-pro, claude-sonnet-5 |
-| `council-member` | multi-perspective review | glm-5.2 + minimax-m3 + qwen3.7-max (mix families) | mix: claude + gpt + gemini |
+| `council-member` | multi-perspective review | free default: hy3-free + mimo-v2.5-free + deepseek-v4-flash-free (mix families) | paid opt-in: glm-5.2 + minimax-m3 + qwen3.7-max |
 | `skill-author` | authoring new skills via `authoring-skills` | **minimax-m3 (default)**, glm-5.2 (escalation) | qwen3.7-max (instruction-following), claude-sonnet-5 |
 | `skill-reviewer` | reviewing skill drafts, foundation work | — | **claude-opus-4-8 (default)**, claude-fable-5 (peak only) |
 
