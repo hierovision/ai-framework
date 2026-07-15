@@ -188,6 +188,16 @@ ones:
   to `debugging-test-failures`. Do not proceed to implementation on an
   unverified red — that silently turns red-first back into test-after and
   gives up the proof this step exists to produce.
+- **The verifier cannot run for environmental reasons** (the sandbox /
+  CI browser denies a capability the app needs — e.g. IndexedDB in
+  headless Chromium, or no reachable service): that is **neither a red
+  nor a plan defect**. Confirm it is infra, don't thrash — (a) run a
+  trivial spec that avoids the capability to prove the runner itself
+  works; (b) use a temporary `getByTestId(...)`.count()` / DOM dump to
+  prove the feature-under-test actually renders. Then report that leg as
+  **environment-blocked**, lean on the unit layer for the same AC, and
+  recommend a real-browser / CI run. Do not weaken the test to force
+  green.
 
 This is the **pre-implementation red**: the natural absence IS the
 proof. It is distinct from the post-implementation break→red→restore→
@@ -251,6 +261,13 @@ Two honest-stop conditions:
   contract-breaking deviation (Step 4): stop, report, route to design.
   Do not "win" the verifier by silently adding the missing dependency
   out of scope.
+- **A Verification command cannot run due to sandbox / infra limits on a
+  capability the app requires** (e.g. headless browser denies IndexedDB):
+  that leg is **environment-blocked**, not a plan defect and not a red.
+  Prove the runner works with a capability-free spec, confirm the
+  feature renders via a DOM dump / testid count, lean on the unit layer
+  for the same AC, and recommend a real-browser / CI run. Do not fake
+  green or weaken the net to force exit 0.
 
 Exit codes are the only success signal. Lint warnings you "didn't get
 to" still count as failing — fix them or report.
