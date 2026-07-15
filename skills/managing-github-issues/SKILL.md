@@ -170,6 +170,9 @@ extraction rule:
 ## When not to use this skill
 
 - Ranking or triaging a raw backlog → that is `triaging-requirements`.
+- Turning a created issue into a proper engineering spec → that is
+  `refining-issue-acceptance` (it upgrades the issue's source checklist into
+  observable, test-tagged acceptance criteria before design).
 - Editing an issue in GitHub and expecting the roadmap to update → this is a
   one-way sync (roadmap is source of truth).
 - Creating child sub-issues / parent-child hierarchy → one issue per row; the
@@ -189,3 +192,7 @@ extraction rule:
 - Upstream: [../triaging-requirements/SKILL.md](../triaging-requirements/SKILL.md)
   — the ranking half of the chain (rank → persist). This skill consumes its
   output.
+- Downstream spec refinement: [../refining-issue-acceptance/SKILL.md](../refining-issue-acceptance/SKILL.md)
+  — once an issue exists, turn its source checklist into observable,
+  test-tagged acceptance criteria. The full chain is
+  triage → issues → refine → design → implement → review.

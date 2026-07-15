@@ -1,7 +1,7 @@
 ---
 name: triage
 description: Consolidate, trim, and prioritize the project backlog.
-model: opencode/gpt-5.4-mini
+model: opencode/hy3-free
 mode: primary
 ---
 

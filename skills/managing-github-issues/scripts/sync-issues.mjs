@@ -15,14 +15,12 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { realpathSync } from "node:fs";
-import { dirname, resolve, join, basename, relative } from "node:path";
+import { dirname, resolve, join, basename, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
-const OPEN_COLUMNS = ["ID", "Title", "Category", "Impact", "Urgency", "Score", "Status", "Sources", "Notes"];
 const CATEGORY_LABEL = { feature: "enhancement", bug: "bug", debt: "tech-debt", chore: "chore" };
 
 // ---- args ----
@@ -76,7 +74,7 @@ function parseSourcesFrontmatter(fm) {
 }
 
 // ---- roadmap parse ----
-function parseRoadmap(body) {
+export function parseRoadmap(body) {
   const lines = body.split("\n");
   const items = [];
   let headerCols = null; // column index map when inside an open table
@@ -115,7 +113,7 @@ function parseRoadmap(body) {
   return items;
 }
 
-function findSourceFiles(sourcesRaw) {
+export function findSourceFiles(sourcesRaw) {
   if (!sourcesRaw) return [];
   const files = [];
   const re = /(\S+\.md)/g;
@@ -124,7 +122,7 @@ function findSourceFiles(sourcesRaw) {
   return files;
 }
 
-function findSectionHints(sourcesRaw) {
+export function findSectionHints(sourcesRaw) {
   if (!sourcesRaw) return [];
   const hints = [];
   const re = /\(([^):]+):/g;
@@ -134,13 +132,14 @@ function findSectionHints(sourcesRaw) {
 }
 
 // ---- body enrichment ----
-function extractChecklist(item, roadmapDir) {
+export function extractChecklist(item, roadmapDir) {
   const files = findSourceFiles(item.sourcesRaw);
   const hints = findSectionHints(item.sourcesRaw).map((h) => h.toLowerCase());
   const bullets = [];
 
   for (const f of files) {
     const p = resolve(roadmapDir, f);
+    if (!p.startsWith(resolve(roadmapDir) + sep)) continue; // containment guard
     if (!existsSync(p)) continue;
     const text = readFileSync(p, "utf8");
     const secs = text.split(/^(#{1,6})\s+(.+)$/m).slice(1); // [level, title, content, level, title, content, ...]
@@ -158,7 +157,7 @@ function extractChecklist(item, roadmapDir) {
   return bullets;
 }
 
-function buildBody(item, roadmapDir) {
+export function buildBody(item, roadmapDir) {
   const checklist = extractChecklist(item, roadmapDir);
   const lines = [];
   lines.push(`## ${item.title}`);
@@ -179,35 +178,70 @@ function buildBody(item, roadmapDir) {
   return lines.join("\n");
 }
 
-// ---- repo resolution ----
-function inferRepo(roadmapDir) {
-  try {
-    const out = execFileSync("gh", ["repo", "view", "--json", "nameWithOwner"], {
-      cwd: roadmapDir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
-    });
-    return JSON.parse(out).nameWithOwner;
-  } catch {
-    return null;
+// ---- safe gh runner with rate-limit backoff ----
+// Every `gh` call goes through runGh so rate-limit / transient transport
+// errors are retried with exponential backoff instead of failing silently
+// (a silent failure would otherwise skip dedup checks or create duplicates).
+function sleep(ms) { const end = Date.now() + ms; while (Date.now() < end) {} }
+
+function runGh(args, cwd) {
+  let lastErr;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return execFileSync("gh", args, { encoding: "utf8", cwd, stdio: ["ignore", "pipe", "ignore"] });
+    } catch (e) {
+      lastErr = e;
+      const msg = (e.stderr || e.message || "").toString();
+      const rateLimited = /rate limit|HTTP 403|secondary rate|abuse limit|please wait/i.test(msg);
+      if (rateLimited && attempt < 3) {
+        const delay = 2000 * Math.pow(2, attempt);
+        console.error(`  (rate limited; retrying in ${delay}ms)`);
+        sleep(delay);
+        continue;
+      }
+      throw e;
+    }
   }
+  throw lastErr;
 }
 
-function isBacked(item, repo) {
+function runGhSafe(args, cwd) {
+  try { return runGh(args, cwd); } catch { return null; }
+}
+
+// ---- repo resolution ----
+function inferRepo(roadmapDir) {
+  const out = runGhSafe(["repo", "view", "--json", "nameWithOwner"], roadmapDir);
+  if (!out) return null;
+  try { return JSON.parse(out).nameWithOwner; } catch { return null; }
+}
+
+export function isBacked(item, repo) {
   // Idempotency: a row is "backed" once its Sources cell carries owner/repo#n.
   // This is the written-back signal from a prior run and works offline.
   const re = new RegExp(`${repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}#\\d+`);
   return re.test(item.sourcesRaw || "");
 }
 
-function existingIssueNumber(item, repo) {
-  // Live confirmation via the dedup label (best-effort; network read).
-  try {
-    const out = execFileSync("gh", ["issue", "list", "--repo", repo, "--label", `roadmap-id:${item.id}`, "--state", "all", "--json", "number"], {
-      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
-    });
-    const arr = JSON.parse(out);
-    if (Array.isArray(arr) && arr.length) return arr[0].number;
-  } catch { /* offline or no gh — ignore */ }
-  return null;
+// One batched call: list all issues and index those carrying a `roadmap-id:`
+// label. Far cheaper than one API call per open row. For repos with more than
+// 1000 issues this single page may truncate; roadmap backlogs are normally
+// far smaller, and the write-back idempotency signal covers the rest.
+function existingIssueMap(repo) {
+  const out = runGhSafe(["issue", "list", "--repo", repo, "--state", "all", "--limit", "1000", "--json", "number,labels"]);
+  const map = new Map();
+  if (!out) return map;
+  let arr;
+  try { arr = JSON.parse(out); } catch { return map; }
+  if (!Array.isArray(arr)) return map;
+  for (const it of arr) {
+    for (const l of (it.labels || [])) {
+      const name = typeof l === "string" ? l : (l && l.name);
+      const m = /^roadmap-id:(.+)$/.exec(name || "");
+      if (m) { map.set(m[1], it.number); break; }
+    }
+  }
+  return map;
 }
 
 // ---- gh command builder ----
@@ -233,27 +267,27 @@ const LABEL_COLORS = {
   "roadmap-id": "ededed",
 };
 function existingLabelNames(repo) {
-  const out = execFileSync("gh", ["label", "list", "--repo", repo, "--limit", "200", "--json", "name"],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  try { return JSON.parse(out).map((l) => l.name); } catch { return []; }
+  const out = runGhSafe(["label", "list", "--repo", repo, "--limit", "200", "--json", "name"]);
+  if (!out) return new Set();
+  try { return new Set(JSON.parse(out).map((l) => l.name)); } catch { return new Set(); }
 }
-function ensureLabel(repo, name, color, description) {
-  if (existingLabelNames(repo).includes(name)) return;
+function ensureLabel(repo, name, color, description, existing) {
+  if (existing.has(name)) return;
   try {
-    execFileSync("gh", ["label", "create", name, "--repo", repo, "--color", color, "--description", description],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    runGh(["label", "create", name, "--repo", repo, "--color", color, "--description", description]);
     console.log(`  + created label "${name}"`);
   } catch (e) {
     console.error(`  WARN could not create label "${name}": ${e.message}`);
   }
 }
 function ensureAllLabels(repo, items) {
+  const existing = existingLabelNames(repo);
   const seen = new Set();
   for (const it of items) {
     const cat = CATEGORY_LABEL[it.category] || it.category;
-    if (!seen.has(cat)) { seen.add(cat); ensureLabel(repo, cat, LABEL_COLORS[cat] || "ededed", `Roadmap category: ${cat}`); }
+    if (!seen.has(cat)) { seen.add(cat); ensureLabel(repo, cat, LABEL_COLORS[cat] || "ededed", `Roadmap category: ${cat}`, existing); }
     const rid = `roadmap-id:${it.id}`;
-    if (!seen.has(rid)) { seen.add(rid); ensureLabel(repo, rid, LABEL_COLORS["roadmap-id"], `Roadmap item ${it.id}`); }
+    if (!seen.has(rid)) { seen.add(rid); ensureLabel(repo, rid, LABEL_COLORS["roadmap-id"], `Roadmap item ${it.id}`, existing); }
   }
 }
 
@@ -261,14 +295,14 @@ function ensureAllLabels(repo, items) {
 // Plain issues have no priority/rank field; a Project holds a `Priority`
 // single-select so the roadmap's score buckets are sortable in GitHub.
 const PROJECT_TITLE_SUFFIX = " Roadmap";
-function priorityForScore(score) {
+export function priorityForScore(score) {
   const s = Number(score) || 0;
   if (s >= 6) return "High";
   if (s >= 3) return "Medium";
   return "Low";
 }
-function ghJson(args) {
-  return JSON.parse(execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+function ghJson(args, cwd) {
+  return JSON.parse(runGh(args, cwd));
 }
 function ensureProject(owner, title) {
   const list = ghJson(["project", "list", "--owner", owner, "--format", "json"]);
@@ -343,15 +377,31 @@ function issueCreateCommand(item, repo, body) {
   return `gh issue create --repo ${repo} --title ${JSON.stringify(item.title)} --label ${JSON.stringify(labels)} --body-file ${tmp}`;
 }
 
-// ---- write-back ----
+// ---- write-back (header-driven, robust to column reordering) ----
+// Locate the Sources column of the open table by reading its header row, so
+// the writer matches the header-driven parser instead of a hard-coded index.
+export function findOpenTableSourcesCol(text) {
+  for (const ln of text.split("\n")) {
+    if (!ln.startsWith("|")) continue;
+    const cells = ln.split("|").slice(1, -1).map((c) => c.trim());
+    const isOpenHeader = cells[0] && cells[0].toLowerCase() === "id"
+      && cells.includes("Status") && cells.includes("Sources") && cells.includes("Score");
+    if (isOpenHeader) return cells.indexOf("Sources");
+  }
+  return -1;
+}
+
 function writeBackRef(roadmapPath, id, repoRef) {
   const text = readFileSync(roadmapPath, "utf8");
+  const idx = findOpenTableSourcesCol(text);
+  if (idx < 0) {
+    console.error(`  WARN could not locate the open-table Sources column; skipping write-back for ${id}`);
+    return;
+  }
   const out = text.split("\n").map((ln) => {
     if (!ln.startsWith("|")) return ln;
     const cells = ln.split("|").slice(1, -1).map((c) => c.trim());
     if (cells[0] !== id) return ln;
-    // open table: Sources is the 8th column (index 7)
-    const idx = 7;
     if (cells[idx] == null) return ln;
     if (cells[idx].includes(repoRef)) return ln;
     const newCell = cells[idx] ? `${cells[idx]}; ${repoRef}` : repoRef;
@@ -377,6 +427,7 @@ function doApplyCleanup(roadmapDir, sources) {
   const archiveRoot = join(roadmapDir, "archive", "roadmap-source");
   for (const src of sources) {
     const from = resolve(roadmapDir, src);
+    if (!from.startsWith(resolve(roadmapDir) + sep)) continue; // containment guard
     if (!existsSync(from)) { console.log(`  skip (missing): ${src}`); continue; }
     const to = resolve(roadmapDir, archivePathFor(roadmapDir, src));
     mkdirSync(dirname(to), { recursive: true });
@@ -426,12 +477,14 @@ function main() {
     process.exit(0);
   }
 
-  // Sync: enumerate planned creates.
+  // Sync: enumerate planned creates. Dedup is resolved once in a single
+  // batched call, then looked up per row (no per-row API call).
+  const issueMap = args.offline ? new Map() : existingIssueMap(repo);
   const toCreate = [];
   const backed = [];
   for (const it of items) {
     if (isBacked(it, repo)) { backed.push(it); continue; }
-    const liveN = args.offline ? null : existingIssueNumber(it, repo);
+    const liveN = issueMap.get(it.id) ?? null;
     if (liveN) {
       backed.push(it);
       console.log(`[SKIP] ${it.id} — issue #${liveN} already exists (label roadmap-id:${it.id})`);
@@ -455,10 +508,11 @@ function main() {
     console.log(`[${args.dryRun ? "DRY-RUN" : "CREATE"}] ${it.id} (${it.category}, score ${it.score})`);
     console.log(`  ${cmd}`);
     if (!args.dryRun) {
+      const bodyFile = issueBodyFile(it, bodyText);
       try {
-        const out = execFileSync("gh", ["issue", "create", "--repo", repo, "--title", it.title,
+        const out = runGh(["issue", "create", "--repo", repo, "--title", it.title,
           "--label", `roadmap-id:${it.id},${CATEGORY_LABEL[it.category] || it.category}`,
-          "--body", bodyText], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+          "--body-file", bodyFile]);
         const n = (out.match(/issues\/(\d+)/) || [])[1];
         if (n) {
           const repoRef = `${repo}#${n}`;

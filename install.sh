@@ -41,12 +41,29 @@ uninstall() {
   uninstall_dir "$AGENTS_SRC" "$AGENTS_TARGET"
 }
 
+# Validate an agent's frontmatter: it must carry a `name:` that matches the
+# file stem and a non-empty `model:` (so a broken agent is skipped, not linked
+# with a silent default). Consistency with skills, which validate SKILL.md.
+validate_agent_frontmatter() {
+  local file="$1"
+  local fm name model stem
+  fm="$(awk 'BEGIN{c=0} /^---/{c++; next} c==1{print}' "$file")"
+  name="$(printf '%s\n' "$fm" | awk -F': ' '/^name:/{print $2; exit}')"
+  model="$(printf '%s\n' "$fm" | awk -F': ' '/^model:/{print $2; exit}')"
+  stem="${file##*/}"; stem="${stem%.md}"
+  if [ -z "$name" ]; then echo "skip $(basename "$file") (no name in frontmatter)" >&2; return 1; fi
+  if [ "$name" != "$stem" ]; then echo "skip $(basename "$file") (name '$name' != file stem '$stem')" >&2; return 1; fi
+  if [ -z "$model" ]; then echo "skip $(basename "$file") (no model in frontmatter)" >&2; return 1; fi
+  return 0
+}
+
 # Symlink each child of $src into $target.
 #   $1 = source dir, $2 = target dir, $3 = kind label,
 #   $4 = optional required file inside each child (skills need SKILL.md),
-#   $5 = optional extension filter (agents are *.md)
+#   $5 = optional extension filter (agents are *.md),
+#   $6 = optional validator command (run per entry; non-zero -> skip)
 link_children() {
-  local src="$1" target="$2" kind="$3" validate="${4:-}" ext="${5:-}"
+  local src="$1" target="$2" kind="$3" reqfile="${4:-}" ext="${5:-}" validator="${6:-}"
   [ -d "$src" ] || { echo "No $kind directory found at $src" >&2; exit 1; }
   mkdir -p "$target"
   local linked=0 skipped=0
@@ -57,8 +74,12 @@ link_children() {
     if [ -n "$ext" ] && [ "${name##*.}" != "$ext" ]; then
       continue
     fi
-    if [ -n "$validate" ] && [ ! -f "$entry/$validate" ]; then
-      echo "skip $name (no $validate)"
+    if [ -n "$reqfile" ] && [ ! -f "$entry/$reqfile" ]; then
+      echo "skip $name (no $reqfile)"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    if [ -n "$validator" ] && ! "$validator" "$entry"; then
       skipped=$((skipped + 1))
       continue
     fi
@@ -79,8 +100,8 @@ link_children() {
 }
 
 install() {
-  link_children "$SKILLS_SRC" "$SKILLS_TARGET" "skill" "SKILL.md" ""
-  link_children "$AGENTS_SRC" "$AGENTS_TARGET" "agent" "" "md"
+  link_children "$SKILLS_SRC" "$SKILLS_TARGET" "skill" "SKILL.md" "" ""
+  link_children "$AGENTS_SRC" "$AGENTS_TARGET" "agent" "" "md" "validate_agent_frontmatter"
 }
 
 case "${1:-}" in

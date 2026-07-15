@@ -48,8 +48,8 @@ the result is Y>.
 Rules the script enforces:
 
 - A section headed `Acceptance Criteria` (case-insensitive) must exist.
-- At least one AC line must carry a test-type tag: `[unit]`, `[integration]`, or
-  `[e2e]` (case-insensitive).
+- Every AC line must carry exactly one test-type tag: `[unit]`, `[integration]`,
+  or `[e2e]` (case-insensitive).
 - The body must contain **no implementation-leak tokens** — see the denylist in
   the script (`scripts/refine-issue.mjs` → `LEAK_PATTERNS`). In short: no file
   paths (`src/...`, `app/...`), no source-file extensions attached to names

@@ -21,12 +21,11 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { realpathSync } from "node:fs";
-import { dirname, resolve, join } from "node:path";
+import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 // ---- args ----
 function parseArgs(argv) {
@@ -61,18 +60,26 @@ function parseArgs(argv) {
 
 // ---- validation ----
 // Implementation-leak denylist: file paths, source-file names, code declarations.
-// Conservative by design — catches obvious leaks without flagging plain prose.
+// Prudent by design — each pattern requires clear code *context* (a slash path,
+// a source extension, a declaration followed by `{`/`(`/`<`/`:`, or module
+// import/export syntax) so plain behavioral prose ("export to CSV",
+// "import records", "class roster", "function room") is NOT flagged.
 const LEAK_PATTERNS = [
-  /\b(src|app|components?|lib|pkg|api|utils?|services?|stores?|features?|modules?|routes?|handlers?|views?|models?)\/[\w./-]*/i,
-  /\b[\w-]+\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|rb|php|vue|svelte|css|scss)\b/i,
-  /\b(function|class|interface|struct|enum|namespace|trait|impl)\s+[A-Za-z_]\w*/,
-  /\b(import|export)\s+[{(*A-Za-z]/,
-  /\b(def|const|let|var|private|public|protected|static|async|fn)\s+[A-Za-z_]\w*\s*[=(:]/,
+  // A directory/file path with a slash: src/foo, app/components/Bar
+  /\b(?:src|app|components?|lib|pkg|api|utils?|services?|stores?|features?|modules?|routes?|handlers?|views?|models?)\/[\w./-]*/i,
+  // A source file with a known extension: Form.tsx, users.py
+  /\b[\w-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|rb|php|vue|svelte|css|scss)\b/i,
+  // A declaration immediately followed by code: Name then { ( ) [ ] < or :
+  /\b(?:function|class|interface|struct|enum|namespace|trait|impl)\s+[A-Za-z_]\w*\s*[{([:]/,
+  // Module import/export syntax: import {…}, import X from, export {…|default|const|…}
+  /\b(?:import|export)\b\s*(?:\{|\*|\bdefault\b|\bconst\b|\blet\b|\bvar\b|\bfunction\b|\bclass\b|\binterface\b|\btype\b|\benum\b|[\w$.-]+\s+from\b)/i,
+  // An assignment-style declaration: const/let/def Name = or :
+  /\b(?:def|const|let|var|private|public|protected|static|async|fn)\s+[A-Za-z_]\w*\s*[=(:]/,
 ];
 
 const TEST_TYPE_TAGS = ["unit", "integration", "e2e"];
 
-function findLeaks(text) {
+export function findLeaks(text) {
   const hits = [];
   for (const re of LEAK_PATTERNS) {
     const m = text.match(re);
@@ -81,34 +88,54 @@ function findLeaks(text) {
   return hits;
 }
 
-function countTaggedAcs(text) {
+// An AC line is a bold AC header (**AC1 — [e2e]**) or a list item that
+// carries a test-type tag. Detail/sub bullets without a tag are ignored so
+// they are not falsely required to carry a tag.
+function isAcLine(line) {
+  return /\*\*AC\d/i.test(line) || /^\s*[-*]\s+.*\[(unit|integration|e2e)\]/i.test(line);
+}
+
+function countTags(line) {
+  const m = line.match(/\[(unit|integration|e2e)\]/gi);
+  return m ? m.length : 0;
+}
+
+// Walk the Acceptance Criteria section and return, per AC line, how many
+// test-type tags it carries.
+export function analyzeAcs(text) {
   const lines = text.split("\n");
   let inAc = false;
-  let tagged = 0;
-  let total = 0;
+  const acTagCounts = [];
   for (const ln of lines) {
     if (/^#{1,6}\s+.*acceptance criteria/i.test(ln)) { inAc = true; continue; }
     if (inAc && /^#{1,6}\s+/.test(ln) && !/acceptance criteria/i.test(ln)) { inAc = false; }
     if (!inAc) continue;
-    const isAcLine = /(^|\s)(\*\*AC\d|[-*]\s+\*\*AC|AC\d|[*-]\s+\[)/i.test(ln);
-    if (!isAcLine) continue;
-    total++;
-    const hasTag = TEST_TYPE_TAGS.some((t) => new RegExp(`\\[${t}\\]`, "i").test(ln));
-    if (hasTag) tagged++;
+    if (isAcLine(ln)) acTagCounts.push(countTags(ln));
   }
-  return { tagged, total, hasSection: /acceptance criteria/i.test(text) };
+  return {
+    hasSection: /acceptance criteria/i.test(text),
+    acLines: acTagCounts,
+    total: acTagCounts.length,
+  };
 }
 
 // Returns { pass, violations: [{rule, detail}] }.
-function validateRefined(text) {
+export function validateRefined(text) {
   const violations = [];
-  const { tagged, hasSection } = countTaggedAcs(text);
+  const { acLines, hasSection } = analyzeAcs(text);
   if (!hasSection) {
     violations.push({ rule: "AC section", detail: "no 'Acceptance Criteria' section found" });
   }
-  if (tagged === 0) {
-    violations.push({ rule: "AC tags", detail: "no AC tagged with [unit]/[integration]/[e2e]" });
+  if (acLines.length === 0) {
+    violations.push({ rule: "AC presence", detail: "no acceptance criteria lines found" });
   }
+  acLines.forEach((n, i) => {
+    if (n === 0) {
+      violations.push({ rule: "AC tag", detail: `AC line ${i + 1} has no [unit]/[integration]/[e2e] tag` });
+    } else if (n > 1) {
+      violations.push({ rule: "AC tag", detail: `AC line ${i + 1} has ${n} test-type tags (exactly one required)` });
+    }
+  });
   const leaks = findLeaks(text);
   if (leaks.length) {
     violations.push({ rule: "implementation leak", detail: leaks.join(" | ") });

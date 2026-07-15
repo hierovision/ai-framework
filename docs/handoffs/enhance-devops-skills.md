@@ -22,8 +22,9 @@ other repo.
 
 # 0. Orientation — read these FIRST (in order)
 
-1. `docs/ORCHESTRATOR-HANDOFF.md` — how this library is maintained, the
-   validator command, and commit conventions.
+1. `skills/authoring-skills/SKILL.md` — how this library is maintained
+   (Library conventions, the validator command, commit conventions) and
+   `PLAN.md` — design, status, and open items.
 2. `reference/model-routing.md` — the single source of model IDs and the
    role→model binding table. You will EXTEND this file (Section 5).
 3. `skills/authoring-skills/SKILL.md` — THE skill to drive authoring of each
@@ -32,9 +33,10 @@ other repo.
    the plan-artifact voice/conventions to mirror.
 5. `skills/reviewing-code/SKILL.md`, `skills/writing-e2e-tests/SKILL.md` —
    examples of the library's tone (concise, checklist-driven, stops at a gate).
-6. Run the skill validator (command in ORCHESTRATOR-HANDOFF.md). The library
-   is currently **12 skills, validator-clean**. Preserve that invariant: after
-   adding skills, re-run and confirm still clean (target: 17 skills clean).
+6. Run the skill validator (`python3 skills/authoring-skills/scripts/validate_skill.py --all`,
+   command lives in `skills/authoring-skills/SKILL.md`). The library is currently
+   **19 skills, validator-clean**. Preserve that invariant: after adding skills,
+   re-run and confirm still clean.
 
 # 1. Why this exists (context for your decisions)
 
@@ -113,9 +115,8 @@ checklist-driven voice of `designing-architecture`.
    as needed. Keep `model-routing.md` the single home of model IDs (its own rule).
 8. Cross-reference new skills from `designing-architecture` / `reviewing-code` /
    `writing-e2e-tests` descriptions (light touch).
-9. Re-run the skill validator; ensure 12 → 17 skills still clean. Fix warnings.
-10. Update `docs/ORCHESTRATOR-HANDOFF.md` / `PLAN.md` roadmap (note new DevOps
-    coverage + free-tier council).
+9. Re-run the skill validator; ensure 12 → 19 skills still clean. Fix warnings.
+10. Update `PLAN.md` roadmap (note new DevOps coverage + free-tier council).
 11. Commit per repo style (one commit per skill, or a single
     "enhance: add DevOps skills + free-tier council" — match convention). Push
     only if authorized.
@@ -185,7 +186,7 @@ agent conventions. Keep it simple.
 - `reference/model-routing.md` documents the free-tier fallback (3 models +
   routing) and the planning/review council protocol.
 - Free-tier council is demonstrably used for planning & review when toggled.
-- Library still validator-clean (17 skills).
+- Library still validator-clean (19 skills).
 
 # 7. Open questions (resolve as you go)
 

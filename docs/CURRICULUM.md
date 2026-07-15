@@ -389,7 +389,8 @@ resolvable fixture paths, TOC on long references.
 ### 4.2 The orchestrator/reviewer process
 
 This isn't a skill — it's a documented **human+senior-session workflow**
-(`docs/ORCHESTRATOR-HANDOFF.md`): a mid-tier author session builds a skill
+(captured in `skills/authoring-skills/SKILL.md` Library conventions and
+`skills/reviewing-code/SKILL.md`): a mid-tier author session builds a skill
 and leaves it *uncommitted*; a separate high-tier session independently
 re-verifies it (never trusting the author's report — re-run the evals
 from a fresh copy, try to break the failable verifier by hand, read the
@@ -440,8 +441,8 @@ skills.
    contract.
 3. Read `capturing-ui-evidence` then `correcting-ui` back to back — the
    matched-styles map is the single cleverest idea in the library.
-4. Read `docs/ORCHESTRATOR-HANDOFF.md` and `PLAN.md` in full to see how
-   the meta-loop and the two working loops fit together.
+4. Read `skills/authoring-skills/SKILL.md` (Library conventions) and `PLAN.md`
+   in full to see how the meta-loop and the two working loops fit together.
 5. Skim `reference/model-routing.md` last — it's the one file expected to
    go stale, by design.
 

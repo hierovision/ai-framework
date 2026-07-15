@@ -1,7 +1,7 @@
 ---
 name: council-product
 description: Product and business logic analysis
-model: opencode/gpt-5.4-mini
+model: opencode/hy3-free
 mode: subagent
 hidden: true
 temperature: 0.4

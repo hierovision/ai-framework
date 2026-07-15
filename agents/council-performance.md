@@ -1,7 +1,7 @@
 ---
 name: council-performance
 description: Performance and scalability analysis
-model: opencode/gpt-5.4-mini
+model: opencode/deepseek-v4-flash-free
 mode: subagent
 hidden: true
 temperature: 0.3

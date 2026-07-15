@@ -268,6 +268,12 @@ These apply to every skill in this library, on top of the general guidance:
   still matches). Any new bundled script with a "run directly vs.
   imported as a module" gate must test this under a symlink, not just
   a plain `node script.mjs` invocation.
+- **Maintainer review discipline**: a separate session re-verifies each
+  skill before merge — run `python3 skills/authoring-skills/scripts/validate_skill.py --all`,
+  a leak scan, and exercise each bundled script/gate directly (re-run the
+  evals from a fresh copy, try to break the failable verifier by hand,
+  read the produced artifact). Never trust the author's report. The
+  single-reviewer posture itself lives in `skills/reviewing-code/SKILL.md`.
 
 ## Improving an existing skill
 

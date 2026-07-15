@@ -16,6 +16,19 @@
         "fixtures/verify.mjs"
       ],
       "notes": "Self-check by running `node skills/managing-github-issues/evals/fixtures/verify.mjs` — exits 0 when the planned-create count is 6 and every open id carries its roadmap-id label. Real GitHub runs are network side-effects and out of eval scope."
+    },
+    {
+      "id": 2,
+      "prompt": "Prove the sync-issues.mjs pure helpers (parseRoadmap, findSourceFiles, findSectionHints, extractChecklist, buildBody, isBacked, priorityForScore, findOpenTableSourcesCol) behave correctly — run the unit suite.",
+      "expected_behavior": [
+        "node skills/managing-github-issues/evals/fixtures/unit.test.mjs exits 0",
+        "parseRoadmap extracts open-table rows with score/status/sourcesRaw",
+        "extractChecklist honors the path-containment guard (skips ../ escapes)",
+        "priorityForScore bands: >=6 High, >=3 Medium, else Low"
+      ],
+      "files": [
+        "fixtures/unit.test.mjs"
+      ]
     }
   ]
 }

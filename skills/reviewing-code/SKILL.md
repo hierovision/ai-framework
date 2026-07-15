@@ -1,6 +1,6 @@
 ---
 name: reviewing-code
-description: Review a change (a diff, a branch, or an implement pass's output) against the plan that authorized it and against engineering quality, then issue a verdict with actionable findings — read-only on the code. Use whenever the user says "review this", "review the diff / PR / branch", "is this ready to merge", "check my changes against the plan", or at a handoff from an implement pass — even without saying "review". Routes fixes back to implementing-features and design defects to designing-architecture (same class-3 posture as the debugger); never edits source, never re-runs the design. Not for fixing the code (implementing-features), diagnosing a failing test (debugging-test-failures), writing tests (the test trio), or a multi-lens council review (that is the separate council capability in the pt project — a future port is out of scope).
+description: Review a change (a diff, a branch, or an implement pass's output) against the plan that authorized it and against engineering quality, then issue a verdict with actionable findings — read-only on the code. Use whenever the user says "review this", "review the diff / PR / branch", "is this ready to merge", "check my changes against the plan", or at a handoff from an implement pass — even without saying "review". Routes fixes back to implementing-features and design defects to designing-architecture (same class-3 posture as the debugger); never edits source, never re-runs the design. Not for fixing the code (implementing-features), diagnosing a failing test (debugging-test-failures), writing tests (the test trio), or a multi-lens council review (shipped as `agents/council.md`; defaults to free models, paid opt-in).
 ---
 
 # Reviewing Code
@@ -30,11 +30,11 @@ criterion: an out-of-scope edit with no `## History` deviation is the
 auditability breach the implement skill exists to prevent, and the
 review is where it is caught.
 
-Relationship to the council: a separate multi-perspective `council`
-capability in the pt project runs security/performance/ux/architecture/
-product lenses. This skill is the **single-reviewer** discipline — one
-reviewer, one verdict, against a plan. Note the relationship; do not
-absorb the council. A future porting of council is out of scope.
+Relationship to the council: `agents/council.md` (shipped) runs
+security/performance/ux/architecture/product lenses, **defaulting to free
+models with a paid-council opt-in**. This skill is the **single-reviewer**
+discipline — one reviewer, one verdict, against a plan. Note the
+relationship; do not absorb the council.
 
 ## The review pass
 
@@ -294,10 +294,11 @@ refused review. Reopen Step 4.
 - **Writing tests** — the test trio owns authoring. A review checks the
   tests are behaviour-asserting, meaningful, right-layer, additive; it
   does not author them.
-- **Multi-lens council review** — the pt project's `council` capability
+- **Multi-lens council review** — `agents/council.md`
   (security/performance/ux/architecture/product lenses) is a separate
-  multi-reviewer discipline. This skill is single-reviewer. A future
-  port of council is out of scope; note the relationship, do not absorb.
+  multi-reviewer discipline, **defaulting to free models with a paid
+  opt-in**. This skill is single-reviewer. Note the relationship, do not
+  absorb the council.
 - **Re-running the design** — a `blocked-on-design` review routes to
   `designing-architecture`; it does not rewrite the plan in a review pass.
 - **Ranking a backlog or producing a plan** — `triaging-requirements` or

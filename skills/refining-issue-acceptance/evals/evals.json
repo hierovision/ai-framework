@@ -47,6 +47,18 @@
         "fixtures/bad-refined-body.md",
         "fixtures/verify.mjs"
       ]
+    },
+    {
+      "id": 4,
+      "prompt": "Prove the refine-issue.mjs validation helpers (findLeaks, analyzeAcs, validateRefined) behave correctly — run the unit suite.",
+      "expected_behavior": [
+        "node skills/refining-issue-acceptance/evals/fixtures/unit.test.mjs exits 0",
+        "findLeaks flags code context (class/const/src/import) but not plain prose ('export to CSV', 'import records', 'class roster', 'function room')",
+        "analyzeAcs/validateRefined enforce exactly one [unit]/[integration]/[e2e] tag per AC and detect leaks"
+      ],
+      "files": [
+        "fixtures/unit.test.mjs"
+      ]
     }
   ]
 }

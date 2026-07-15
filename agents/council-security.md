@@ -1,7 +1,7 @@
 ---
 name: council-security
 description: Security and edge case analysis
-model: opencode-go/glm-5.2
+model: opencode/mimo-v2.5-free
 mode: subagent
 hidden: true
 temperature: 0.2

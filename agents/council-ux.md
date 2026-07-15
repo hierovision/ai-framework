@@ -1,7 +1,7 @@
 ---
 name: council-ux
 description: User experience and developer experience analysis
-model: opencode-go/qwen3.7-plus
+model: opencode/hy3-free
 mode: subagent
 hidden: true
 temperature: 0.5

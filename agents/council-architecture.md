@@ -1,7 +1,7 @@
 ---
 name: council-architecture
 description: Architecture and maintainability analysis
-model: opencode-go/glm-5.2
+model: opencode/hy3-free
 mode: subagent
 hidden: true
 temperature: 0.2
