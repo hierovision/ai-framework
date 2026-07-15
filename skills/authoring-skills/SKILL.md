@@ -282,6 +282,14 @@ evals, then test the existing skill to establish a baseline before editing.
 Preserve the skill's `name` (and directory name) unchanged. Diagnose before
 rewriting — read transcripts of the skill in use where available.
 
+When this library is consumed via symlinks (`~/.config/opencode/skills/*`
+→ this repo), editing a SKILL.md edits the **source repo**, not the
+consumer project. Decide per task: edit the source directly (and
+commit/PR in the skills repo) when the improvement is independent, or
+capture it as a handoff proposal when you are mid-feature-build and want
+to keep the feature branch scoped. Don't let framework tweaks ride along
+inside a feature PR unless they are required by that feature.
+
 ## Writing style essentials
 
 Imperative form. Third-person descriptions (they inject into the system
