@@ -93,6 +93,32 @@ Available stack references:
   composable testing, and the "no DOM unless the unit is a component
   contract" boundary.
 
+### Vue 3 + Pinia setup stores
+
+When the stack is `vue-supabase`, two Pinia access shapes routinely make a
+RED test fail for the **wrong reason** — a harness mistake that *looks*
+like the feature is absent. Both are the trap named in Step 6's red-first
+mode; name them so you fix the test, not chase a phantom feature:
+
+- **Ref unwrapping on the store instance.** In a setup store
+  (`defineStore('id', () => { const count = ref(0); return { count } })`),
+  returned refs are **unwrapped on the store instance** — read and write
+  `store.count`, never `store.count.value` (a primitive has no `.value`,
+  so you get `undefined` or a `Cannot create property 'value'` TypeError).
+  A composable that returns `storeToRefs(store)` (or the store's own
+  returned refs) gives **real refs**, so `timer.count.value` is correct
+  *there*. Using the wrong form throws a `.value` error that reads like a
+  missing-feature failure but is a wrong-access bug — fix the test's
+  access syntax and re-run; do not treat it as the feature's red.
+- **Internal helpers not in the store's `return`.** A setup store may
+  define helpers used only internally (called from another store method —
+  e.g. a `createDefault*` invoked on a "no row" / PGRST116 error branch)
+  that are **not** in the `return { ... }`. You cannot call them directly
+  from a test (`store.createDefaultPreferences` is `undefined`). Trigger
+  them through the **public method** that invokes them (e.g. call
+  `loadPreferences` with a mocked "row not found" response), then assert
+  the internal behaviour via its observable effect.
+
 ### Step 4 — Map ACs to test cases
 
 Before writing assertions, list the AC → test mapping. Each criterion
