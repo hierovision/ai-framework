@@ -1,0 +1,55 @@
+# CI — quality gates for PRs and merges to main.
+#
+# Per the library's own skills:
+#   - securing-ci: minimal `permissions:`, SHA-pinned third-party actions,
+#     no secrets echoed, no long-lived tokens.
+#   - designing-cicd: cheap test gate before anything ships (no deploy here).
+#
+# Gates run fully offline (no `gh`/network): the mandatory skill validator,
+# the two issue-script unit suites, and the offline eval verifiers. Skills
+# whose verifiers need a live agent/gh are NOT run here (kept hermetic).
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Least-privilege: read-only is all the gates need.
+permissions:
+  contents: read
+
+# Cancel a stale run when a newer commit lands on the same ref.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gates:
+    runs-on: ubuntu-latest
+    steps:
+      # SHA-pinned (supply-chain safety — see securing-ci skill).
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+
+      - name: Validate all skills (mandatory library rule)
+        run: python3 skills/authoring-skills/scripts/validate_skill.py --all
+
+      - name: Unit tests — issue scripts
+        run: |
+          node skills/managing-github-issues/evals/fixtures/unit.test.mjs
+          node skills/refining-issue-acceptance/evals/fixtures/unit.test.mjs
+
+      - name: Offline eval verifiers
+        run: |
+          node skills/managing-github-issues/evals/fixtures/verify.mjs
+          node skills/refining-issue-acceptance/evals/fixtures/verify.mjs
+
+      - name: Lint install.sh
+        run: bash -n install.sh
