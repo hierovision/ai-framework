@@ -188,16 +188,6 @@ ones:
   to `debugging-test-failures`. Do not proceed to implementation on an
   unverified red — that silently turns red-first back into test-after and
   gives up the proof this step exists to produce.
-- **The verifier cannot run for environmental reasons** (the sandbox /
-  CI browser denies a capability the app needs — e.g. IndexedDB in
-  headless Chromium, or no reachable service): that is **neither a red
-  nor a plan defect**. Confirm it is infra, don't thrash — (a) run a
-  trivial spec that avoids the capability to prove the runner itself
-  works; (b) use a temporary `getByTestId(...)`.count()` / DOM dump to
-  prove the feature-under-test actually renders. Then report that leg as
-  **environment-blocked**, lean on the unit layer for the same AC, and
-  recommend a real-browser / CI run. Do not weaken the test to force
-  green.
 
 This is the **pre-implementation red**: the natural absence IS the
 proof. It is distinct from the post-implementation break→red→restore→
@@ -247,6 +237,17 @@ The loop:
    green. Success is the exit codes, never intent — "I think it works"
    is not closure.
 
+A verifier that "flakes" only on navigation to one route — a click that
+never lands, a view that never mounts, assertions seeing the wrong page
+— is usually a **compile/runtime error in that route's lazily-imported
+component**, not infra. Before blaming the sandbox (IndexedDB, offline
+Supabase, headless quirks): capture the browser console during the
+failing step and look for `Failed to fetch dynamically imported module`
+/ a 500 on a `*.vue` module. That is a real defect in code you just
+wrote — fix it, don't work around it. Unit suites can stay fully green
+while an SFC carries a template/script error, because nothing imports
+the component in tests; the e2e layer is where it surfaces.
+
 Two honest-stop conditions:
 
 - **N reasonable fix attempts have not converged.** If a single
@@ -261,13 +262,6 @@ Two honest-stop conditions:
   contract-breaking deviation (Step 4): stop, report, route to design.
   Do not "win" the verifier by silently adding the missing dependency
   out of scope.
-- **A Verification command cannot run due to sandbox / infra limits on a
-  capability the app requires** (e.g. headless browser denies IndexedDB):
-  that leg is **environment-blocked**, not a plan defect and not a red.
-  Prove the runner works with a capability-free spec, confirm the
-  feature renders via a DOM dump / testid count, lean on the unit layer
-  for the same AC, and recommend a real-browser / CI run. Do not fake
-  green or weaken the net to force exit 0.
 
 Exit codes are the only success signal. Lint warnings you "didn't get
 to" still count as failing — fix them or report.
