@@ -1,6 +1,6 @@
 # Curriculum: The ai-framework Skill Loops
 
-> Grounded directly in the `SKILL.md` files in this repo (not just `PLAN.md`).
+> Grounded directly in the `SKILL.md` files in this repo.
 > Fourteen lessons, high level → deep. Work top to bottom; each module builds
 > on the last.
 
@@ -441,7 +441,7 @@ skills.
    contract.
 3. Read `capturing-ui-evidence` then `correcting-ui` back to back — the
    matched-styles map is the single cleverest idea in the library.
-4. Read `skills/authoring-skills/SKILL.md` (Library conventions) and `PLAN.md`
+4. Read `skills/authoring-skills/SKILL.md` (Library conventions)
    in full to see how the meta-loop and the two working loops fit together.
 5. Skim `reference/model-routing.md` last — it's the one file expected to
    go stale, by design.
@@ -471,10 +471,9 @@ between `designing-architecture`, `implementing-features`, and all three
 test-trio skills, so it's architecture-level work (per this library's own
 scope test).
 
-**Update (2026-07-11): designed and locked.** See `PLAN.md`'s "Core Loop
-Refinement — TDD-Aware Implement Sequencing" for the decisions and
-`docs/handoffs/tdd-sequencing.md` for the dispatchable author-session
-handoff. Shape: `implementing-features` gains a **red-first step** (one
+**Update (2026-07-11): designed and locked.** The TDD-aware implement
+sequencing decisions (red-first step + coverage-and-quality gate) are
+captured in `skills/implementing-features/SKILL.md`. Shape: `implementing-features` gains a **red-first step** (one
 test per testable AC, authored and run *before* any source edit, at a
 **best-guess** layer — proven right by a natural pre-implementation
 failure that must be confirmed to fail *for the right reason*, not a

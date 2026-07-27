@@ -1,7 +1,7 @@
 ---
 name: build
 description: Execute coding tasks from an approved plan. Build components, run tests, resolve specific todos.
-model: opencode-go/qwen3.7-plus
+model: opencode/deepseek-v4-flash-free
 mode: primary
 ---
 

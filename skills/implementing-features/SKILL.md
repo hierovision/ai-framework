@@ -292,7 +292,7 @@ correction: push each test down to the cheapest layer that still
 meaningfully exercises the behaviour. Record which AC-tests were
 rebalanced and why. A misclassified red-first guess corrected here is
 the system working as designed — not a defect to push upstream into the
-plan format (PLAN.md Decision 3: no per-AC layer tag at design time).
+plan format (this library's convention: no per-AC layer tag at design time).
 
 **(b) EXPAND.** Re-run the existing meaningfulness proof (break/restore)
 on each (possibly rebalanced) Step-5 AC test to confirm it is **still**

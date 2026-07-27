@@ -1,7 +1,7 @@
 ---
 name: design
 description: Architect multi-file features, plan database changes, produce implementation plans.
-model: opencode-go/glm-5.2
+model: opencode/ling-3.0-flash-free
 mode: primary
 ---
 

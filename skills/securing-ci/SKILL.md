@@ -1,6 +1,6 @@
 ---
 name: securing-ci
-description: Harden CI/CD pipelines for least-privilege and supply-chain safety — prefer OIDC over long-lived PATs, scope secrets to environments, never log secrets, minimize workflow `permissions:`, enforce branch protection on required checks, and SHA-pin third-party actions. Use whenever the user says "secure the CI", "harden github actions", "why is this token exposed", "pin third-party actions", "least-privilege CI", or surfaces a pipeline-credential/security concern — even without saying "security". Pairs with designing-cicd (the topology it hardens) and the Supabase/Azure deploy skills (their tokens); routes design-only review of a diff to reviewing-code. Not for the CI topology itself (designing-cicd), application code (implementing-features), or multi-lens council review (shipped as `agents/council.md`; defaults to free models, paid opt-in).
+description: Harden CI/CD pipelines for least-privilege and supply-chain safety — prefer OIDC over long-lived PATs, scope secrets to environments, never log secrets, minimize workflow `permissions:`, enforce branch protection on required checks, and SHA-pin third-party actions. Use whenever the user says "secure the CI", "harden github actions", "why is this token exposed", "pin third-party actions", "least-privilege CI", or surfaces a pipeline-credential/security concern — even without saying "security". Pairs with designing-cicd (the topology it hardens) and the Supabase/Azure deploy skills (their tokens); routes design-only review of a diff to reviewing-code. Not for the CI topology itself (designing-cicd), application code (implementing-features), or multi-lens council review (shipped as `agents/council.md`; defaults to free models, paid/Go escalation opt-in).
 ---
 
 # Securing CI
@@ -110,7 +110,7 @@ approves, then an `implementing-features` pass applies it (or a
   against this design's plan).
 - **Application code** — `implementing-features`.
 - **Multi-lens council review** — `agents/council.md` (shipped,
-  defaults to free models with a paid opt-in); this skill is
+   defaults to free models with a paid/Go-escalation opt-in); this skill is
   single-discipline security hardening.
 
 ## References
