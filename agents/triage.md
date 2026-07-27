@@ -1,7 +1,7 @@
 ---
 name: triage
 description: Consolidate, trim, and prioritize the project backlog.
-model: opencode/hy3-free
+model: opencode/ling-3.0-flash-free
 mode: primary
 ---
 

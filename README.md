@@ -11,9 +11,6 @@ Two feedback loops anchor the library:
 2. **UI iteration loop** — visual refinement verified by Playwright
    screenshots and computed CSS.
 
-See [PLAN.md](PLAN.md) for the full design, research foundation, and build
-phases.
-
 ## Install
 
 Symlinks every skill into `~/.config/opencode/skills/` and every agent

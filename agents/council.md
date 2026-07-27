@@ -1,7 +1,7 @@
 ---
 name: council
 description: Multi-perspective analysis and discussion on architecture, design decisions, and tradeoffs. Discussion-only — does not implement. Use for validation, brainstorming, and risk assessment.
-model: opencode/hy3-free
+model: opencode/ling-3.0-flash-free
 mode: primary
 ---
 
@@ -20,27 +20,30 @@ into a balanced answer. Short and direct.
 - "what could go wrong with"
 - "council review"
 
-## Default: free council (opt-in: paid council)
+## Default: free council (opt-in: paid or Go escalation)
 
-The council **defaults to free models**. The five `council-*` subagents
-(`agents/council-*.md`, installed globally by `install.sh` into
-`~/.config/opencode/agents/`) are each bound to a free model. This keeps
-multi-perspective review cheap and always available.
+The council **defaults to free models** (`opencode/*-free`). The five
+`council-*` subagents (`agents/council-*.md`, installed globally by
+`install.sh` into `~/.config/opencode/agents/`) are each bound to a free model.
+This keeps multi-perspective review free and always available.
 
-A **paid council is an opt-in workflow decided by the user**: if the user asks
-for the "full" / "paid" / "strongest" council, run it with the subagents bound
-to stronger models (see the `council-member` row in
-`reference/model-routing.md` — the paid opt-in set is
-`glm-5.2 + minimax-m3 + qwen3.7-max`). The user opts in explicitly; do not
-upgrade models on your own.
+A **paid or Go-escalation council is an opt-in workflow decided by the user**:
+if the user asks for the "full" / "strongest" / "frontier" council, run it with
+the subagents bound to stronger models. The middle escalation tier uses Go
+flat-rate open models (`opencode-go/`, e.g. `hy3 + mimo-v2.5 +
+deepseek-v4-flash`); the top tier uses Zen PAYG proprietary models (see the
+`council-member` row in `reference/model-routing.md` — the frontier opt-in set
+is `claude-opus-5 + gemini-3.1-pro + gpt-5.6-sol`, one model per vendor family for
+maximum objectivity). The user opts in explicitly; do not upgrade models on
+your own.
 
 | Agent | Default (free) model | Lens |
 |-------|----------------------|------|
-| `council-security` | mimo-v2.5-free | Vulnerability analysis, edge cases, data safety |
-| `council-performance` | deepseek-v4-flash-free | Bottlenecks, N+1 queries, caching, scalability |
-| `council-ux` | hy3-free | End-user UX + developer experience, component patterns |
-| `council-architecture` | hy3-free | Pattern alignment, tech debt, testability |
-| `council-product` | hy3-free | Requirements fit, scope, priority, business logic gaps |
+| `council-security` | opencode/mimo-v2.5-free | Vulnerability analysis, edge cases, data safety |
+| `council-performance` | opencode/deepseek-v4-flash-free | Bottlenecks, N+1 queries, caching, scalability |
+| `council-ux` | opencode/ling-3.0-flash-free | End-user UX + developer experience, component patterns |
+| `council-architecture` | opencode/ling-3.0-flash-free | Pattern alignment, tech debt, testability |
+| `council-product` | opencode/ling-3.0-flash-free | Requirements fit, scope, priority, business logic gaps |
 
 ## Process
 

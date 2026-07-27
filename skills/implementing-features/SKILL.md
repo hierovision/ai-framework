@@ -237,6 +237,17 @@ The loop:
    green. Success is the exit codes, never intent — "I think it works"
    is not closure.
 
+A verifier that "flakes" only on navigation to one route — a click that
+never lands, a view that never mounts, assertions seeing the wrong page
+— is usually a **compile/runtime error in that route's lazily-imported
+component**, not infra. Before blaming the sandbox (IndexedDB, offline
+Supabase, headless quirks): capture the browser console during the
+failing step and look for `Failed to fetch dynamically imported module`
+/ a 500 on a `*.vue` module. That is a real defect in code you just
+wrote — fix it, don't work around it. Unit suites can stay fully green
+while an SFC carries a template/script error, because nothing imports
+the component in tests; the e2e layer is where it surfaces.
+
 Two honest-stop conditions:
 
 - **N reasonable fix attempts have not converged.** If a single
@@ -281,7 +292,7 @@ correction: push each test down to the cheapest layer that still
 meaningfully exercises the behaviour. Record which AC-tests were
 rebalanced and why. A misclassified red-first guess corrected here is
 the system working as designed — not a defect to push upstream into the
-plan format (PLAN.md Decision 3: no per-AC layer tag at design time).
+plan format (this library's convention: no per-AC layer tag at design time).
 
 **(b) EXPAND.** Re-run the existing meaningfulness proof (break/restore)
 on each (possibly rebalanced) Step-5 AC test to confirm it is **still**

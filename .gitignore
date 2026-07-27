@@ -13,3 +13,7 @@ REVIEW.md
 *.log
 node_modules/
 dist/
+
+# === Deprecated docs (removed from the repo; never track) ===
+PLAN.md
+docs/handoffs/

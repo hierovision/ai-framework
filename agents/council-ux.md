@@ -1,7 +1,7 @@
 ---
 name: council-ux
 description: User experience and developer experience analysis
-model: opencode/hy3-free
+model: opencode/ling-3.0-flash-free
 mode: subagent
 hidden: true
 temperature: 0.5

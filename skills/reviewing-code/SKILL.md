@@ -1,6 +1,6 @@
 ---
 name: reviewing-code
-description: Review a change (a diff, a branch, or an implement pass's output) against the plan that authorized it and against engineering quality, then issue a verdict with actionable findings — read-only on the code. Use whenever the user says "review this", "review the diff / PR / branch", "is this ready to merge", "check my changes against the plan", or at a handoff from an implement pass — even without saying "review". Routes fixes back to implementing-features and design defects to designing-architecture (same class-3 posture as the debugger); never edits source, never re-runs the design. Not for fixing the code (implementing-features), diagnosing a failing test (debugging-test-failures), writing tests (the test trio), or a multi-lens council review (shipped as `agents/council.md`; defaults to free models, paid opt-in).
+description: Review a change (a diff, a branch, or an implement pass's output) against the plan that authorized it and against engineering quality, then issue a verdict with actionable findings — read-only on the code. Use whenever the user says "review this", "review the diff / PR / branch", "is this ready to merge", "check my changes against the plan", or at a handoff from an implement pass — even without saying "review". Routes fixes back to implementing-features and design defects to designing-architecture (same class-3 posture as the debugger); never edits source, never re-runs the design. Not for fixing the code (implementing-features), diagnosing a failing test (debugging-test-failures), writing tests (the test trio), or a multi-lens council review (shipped as `agents/council.md`; defaults to free models, paid/Go escalation opt-in).
 ---
 
 # Reviewing Code
@@ -31,8 +31,8 @@ auditability breach the implement skill exists to prevent, and the
 review is where it is caught.
 
 Relationship to the council: `agents/council.md` (shipped) runs
-security/performance/ux/architecture/product lenses, **defaulting to free
-models with a paid-council opt-in**. This skill is the **single-reviewer**
+  security/performance/ux/architecture/product lenses, **defaulting to free
+  models with a paid/Go-escalation opt-in**. This skill is the **single-reviewer**
 discipline — one reviewer, one verdict, against a plan. Note the
 relationship; do not absorb the council.
 
