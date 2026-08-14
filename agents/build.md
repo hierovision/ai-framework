@@ -31,8 +31,10 @@ AC layer, and hands off to `reviewing-code` for the final verdict.
 - Quality gate: run the project's type-check, lint, and test commands. For
   end-to-end changes, use condition waits (wait for a selector / role /
   accessible-name), never a fixed sleep.
-- Do not run git commit/push (or other non-read commands) unless explicitly
-  requested.
+- Git workflow per `reference/git-workflow.md`: all work on a branch
+  (`<type>/<name>` from the plan slug), commits are a natural part of
+  the pass, main is protected — push the branch + open a PR, never
+  merge without an explicit user request, never force-push.
 
 ## When to Delegate
 
