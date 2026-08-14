@@ -165,6 +165,15 @@ unit-layer observable — routed to writing-unit-tests").
   state, not a component's private fields, not the call sequence. The
   journey verifies the user sees the outcome; the lower layers verify
   the mechanics.
+- **Journeys must be console-clean.** Where the project's suite has a
+  default-on global console/pageerror net (a `test.beforeEach` fixture
+  collecting `page.on('console')` + `page.on('pageerror')` and failing
+  the test at the end), every journey is subject to it — never opt a
+  spec out silently. Messages must match a dated + justified allowlist
+  entry or fail; dev-mode framework warnings can be runtime defects, not
+  noise (the validating-ui Step-8 net in `implementing-features` runs
+  the same discipline on the changed flow; the console-net pointer here
+  keeps authoring aligned with it).
 
 ### Step 6 — Meaningfulness (mode-branched; real-browser or structural proxy)
 
@@ -196,7 +205,7 @@ within either mode:
   (revert the feature, hide the indicator), run the spec, observe
   **RED**; restore, observe **GREEN**. A spec that has never been seen
   red may pass against a page that never rendered the outcome. The same
-  proof is reused by `implementing-features`' Step 8 coverage gate to
+  proof is reused by `implementing-features`' Step 9 coverage gate to
   re-confirm Step-5 AC journey specs are still meaningful once real code
   exists and to prove any coverage-expansion spec added at that gate.
 
@@ -253,7 +262,7 @@ move to unit/integration on your own — those are sibling skills the user
 invokes separately. This skill never cascades into its siblings on its
 own initiative; the one documented, intentional caller that
 orchestrates a trio skill is `implementing-features`, at its Step 5
-(red-first) and Step 8 (coverage gate) — that is a sibling skill driving
+(red-first) and Step 9 (coverage gate) — that is a sibling skill driving
 the call, not this skill choosing to chain.
 
 ## When not to use this skill

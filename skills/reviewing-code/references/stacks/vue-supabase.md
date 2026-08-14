@@ -178,6 +178,21 @@ When the diff touches a Playwright spec (`e2e/*.spec.ts`):
   offline + RLS-scoped path; major.
 - **`as any` masking a generated-types gap.** Suppressing the type
   error to green type-check hides the real fix (regen the types). Major.
+- **A string template ref in a `v-for` used to call an exposed method.**
+  Vue 3 collects string refs in `v-for` into an **array**, so
+  `phaseFormEditRef.value?.stopPreview()` passes the optional chain (the
+  array is truthy) and throws `TypeError: ... is not a function` at
+  runtime — invisible to `vue-tsc` and lint (the
+  `ref<InstanceType<X> | null>` annotation is a lie Vue overwrites at
+  runtime). The fix pattern is a **function ref**
+  (`:ref="el => { ref = el as InstanceType<X> | null }"` — Vue nulls
+  them on unmount, no array semantics) or a typed ref array. When the
+  parent calls a child's exposed method via ref, the ref must bind to
+  the component instance. The unhandled error also aborts teardown code
+  after it (e.g. `handleDialogClosed` before `reset()`), leaving stale
+  state; the validating-ui Step-8 console net catches the runtime
+  symptom (`[Vue warn]: Unhandled error during execution of component
+  event handler/transition hook`).
 
 Each of these is a contract or security break dressed up as a small
 edit — the plan's `Files to Modify` + `Schema / Type Impacts` + the

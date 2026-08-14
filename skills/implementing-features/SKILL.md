@@ -11,12 +11,13 @@ the **consumer** side of `designing-architecture`'s plan format (see
 for the contract; the library installs as a set, so the sibling skill is
 always present). Implement what `Files to Modify` + `Included` scope
 say — but not before authoring a red-first test per Acceptance Criterion
-(Step 5) and not before a coverage-and-quality gate (Step 8) after
-verification is green — run the plan's `Verification` commands until
-they exit 0, append a `## History` entry, then **stop** at a manual-
-validation handoff. The skill never declares success from intent — only
-from green verification exit codes — and never self-certifies an
-acceptance criterion that needs human eyes.
+(Step 5), not before a runtime UI validation of the changed flow
+(Step 8, invoking `validating-ui`), and not before a coverage-and-
+quality gate (Step 9) after verification is green — run the plan's
+`Verification` commands until they exit 0, append a `## History` entry,
+then **stop** at a manual-validation handoff. The skill never declares
+success from intent — only from green verification exit codes — and
+never self-certifies an acceptance criterion that needs human eyes.
 
 ## The implement pass
 
@@ -31,9 +32,10 @@ Implement Progress:
 - [ ] 5. RED — capture core behavior from Acceptance Criteria (one test per AC, before any edit; confirm red for the right reason)
 - [ ] 6. Implement exactly Files to Modify (scope discipline)
 - [ ] 7. Run the plan's Verification; fix + re-run until all exit 0
-- [ ] 8. Coverage-and-quality gate (rebalance layer guesses; re-prove meaningfulness; expand only on a real gap)
-- [ ] 9. Update the plan (History entry; status per the user's convention)
-- [ ] 10. Completion handoff summary + MANUAL validation steps; STOP
+- [ ] 8. Runtime UI validation (invoke validating-ui; console net + UX review; bounded fix loop)
+- [ ] 9. Coverage-and-quality gate (rebalance layer guesses; re-prove meaningfulness; expand only on a real gap)
+- [ ] 10. Update the plan (History entry; status per the user's convention)
+- [ ] 11. Completion handoff summary + MANUAL validation steps; STOP
 ```
 
 ### Step 1 — Read the plan artifact
@@ -143,7 +145,7 @@ observable behaviour backed by a runnable check), do this once:
    design; use it, do not restate it here). This classification is a
    **best guess**: a plan cannot know the true seam boundaries before
    code exists, so a wrong guess here is **expected and normal**, not a
-   defect — the Step 8 coverage gate corrects it once real code reveals
+   defect — the Step 9 coverage gate corrects it once real code reveals
    the seam. Do not treat a wrong red-first guess as something the plan
    should have pre-tagged; there is nothing to fix upstream.
 2. **Invoke the matching trio skill** to author **one test** (or a
@@ -171,7 +173,7 @@ observable behaviour backed by a runnable check), do this once:
 5. **Record** the AC → test-file mapping, and for each, the confirmed
    red evidence — the actual failure text that named the missing
    behaviour. Folded into the plan `## History` at Step 9 and the
-   handoff at Step 10.
+   handoff at Step 11.
 
 Two honest-stop conditions here, both the **existing** postures, not new
 ones:
@@ -191,7 +193,7 @@ ones:
 
 This is the **pre-implementation red**: the natural absence IS the
 proof. It is distinct from the post-implementation break→red→restore→
-green the trio already does — Step 8 reuses *that* proof for
+green the trio already does — Step 9 reuses *that* proof for
 re-confirmation and new coverage. Do not conflate them: a test born
 red-first does not need a break/restore to prove its authoring — it
 already went red against real absence.
@@ -266,7 +268,45 @@ Two honest-stop conditions:
 Exit codes are the only success signal. Lint warnings you "didn't get
 to" still count as failing — fix them or report.
 
-### Step 8 — Coverage-and-quality gate (rebalance + expand)
+### Step 8 — Runtime UI validation (invoke validating-ui)
+
+The suite is green; now validate the changed flow through a real
+browser before the coverage gate. Invoke the `validating-ui` skill
+(sibling skill; the library installs as a set):
+
+1. It identifies the changed user flow, authors/adapts a journey module
+   (writing-e2e-tests doctrine: role/accessible-name/testid selectors,
+   condition waits, never `waitForTimeout`, auth via fixture), and runs
+   its bundled Playwright harness against the dev server.
+2. **Net discipline (R1):** console **errors AND warnings AND
+   pageerrors** block the run unless allowlisted (dated + justified
+   entries; project-owned allowlist; no blanket suppression). Dev-mode
+   framework warnings can carry runtime defects that production builds
+   strip — e.g. `[Vue warn]: Unhandled error during execution of
+   component event handler/transition hook` — so warnings are failures,
+   not noise. The report carries the offending message text.
+3. **Journey-completeness rule (R2):** a journey that opens a
+   dialog/form must exercise its close path (including closing with the
+   form in an open/edited state) or explicitly justify why the close
+   path is out of scope; teardown crashes live on close paths and are
+   proven red-first (R3). Harness evidence (console log, pageerrors,
+   screenshot, ariaSnapshot) lands in `.opencode/evidence/<plan-slug>/`.
+4. It invokes `council-ux` (subagent_type `council-ux`) with the **text**
+   evidence bundle — console log, pageerrors, ariaSnapshot, journey,
+   ACs — for correctness / appropriateness / accessibility findings.
+   council-ux is text-only; screenshots are archived for the human
+   handoff (the optional advisory vision pass is default off).
+5. **Bounded fix loop:** findings are fixed in scope, the harness
+   re-runs; **max 2 fix cycles**. Residual findings are recorded (plan
+   History follow-ups + the handoff), not silently dropped. A change
+   with **no visible UI** skips with an explicit "no visible UI" note —
+   the explicit negative is the closure signal.
+
+If the environment lacks a dev server / chromium, the run is recorded
+as DEFERRED (not skipped silently) and the pass proceeds — the handoff
+carries the deferral note.
+
+### Step 9 — Coverage-and-quality gate (rebalance + expand)
 
 Now real code exists. Two responsibilities, both **gates** — cite the
 specific misclassification or the concrete gap; padding for its own sake
@@ -316,7 +356,7 @@ misclassification** being corrected; expansion cites a **concrete gap**
 in the real implementation (an error path, a boundary the code
 special-cases). Refusing to pad is a feature here, not a skipped step.
 
-### Step 9 — Update the plan artifact
+### Step 10 — Update the plan artifact
 
 Once verification is green, **append** to the plan — do not rewrite
 prior sections, do not clobber the History:
@@ -338,7 +378,7 @@ The plan is the audit trail. A future reader must be able to
 reconstruct "what was the plan, what did the implementer actually do,
 where did it diverge and why" from the plan file alone.
 
-### Step 10 — Completion handoff summary; STOP
+### Step 11 — Completion handoff summary; STOP
 
 Present a **concise** handoff to the user and wait:
 
@@ -355,15 +395,22 @@ Present a **concise** handoff to the user and wait:
   pre-implementation, and for each the confirmed failure reason (the
   actual failure text that named the missing behaviour). A manual-only
   AC is noted here as manual, not silently dropped.
-- **Rebalancing outcome** — any Step-8(a) AC-test moved to a different
+- **Rebalancing outcome** — any Step-9(a) AC-test moved to a different
   layer and why, or an explicit "none needed" when the best-guess layers
   held against the real implementation.
-- **Coverage-gate outcome** — Step-8(b) expanded (citing the specific
+- **Coverage-gate outcome** — Step-9(b) expanded (citing the specific
   gap(s) the real implementation revealed) or an explicit "no
   high-value gap found beyond the AC set". Silence is not an answer.
+- **Runtime-validation outcome** — Step 8's net verdict (clean /
+  blocked with the offending messages), the council-ux findings (fixed
+  + residual), the evidence paths (`.opencode/evidence/<plan-slug>/`
+  — evidence.json, screenshot), or the explicit "no visible UI" /
+  DEFERRED note.
 - **MANUAL validation steps** — the concrete sequence the human should
   run to green the human-only criteria. Numbered, in the order the user
-  would perform them, ending with "what you should observe".
+  would perform them, ending with "what you should observe". The
+  archived screenshot from Step 8 is the visual reference for the
+  human-only UI criteria.
 - **Plan state** — the plan's path, the History entry you appended, the
   status (flipped or not).
 - **Follow-ups** — any recorded scope-creep requests, surfaced so the

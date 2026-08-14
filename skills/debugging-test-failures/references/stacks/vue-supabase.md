@@ -171,6 +171,13 @@ bugs but are actually a stale artifact:
   unhandled `error`.
 - **Mocking the store action under test.** Turns a real assertion into
   a tautology — cardinal-rule weakening, not a fix.
+- **`[Vue warn]: Unhandled error during execution of component event
+  handler / transition hook`** (console-visible defect class). These
+  dev-mode warnings are runtime defects production builds strip; they
+  fire on close/teardown paths only when the journey closes what it
+  opens. Run the Step-1 scripted-browser repro (pageerror/console
+  listeners, walk the flow including the close) before hypothesizing —
+  the stack trace + state dump is ground truth in one run.
 
 Each of these is a class-4 or class-1 trap dressed up as "the test is
 flaky" or "the data disappeared" — the discriminating experiment (a

@@ -52,6 +52,22 @@ summary; the failure output is the evidence. Two branches:
   real defect of class 4 (environment/nondeterminism); diagnose it,
   do not dismiss it.
 
+**Console-visible defects: scripted-browser repro first.** When the
+failure output names a console error / warning / pageerror (or the
+symptom is "errors in the console that should not be present"), run a
+**standalone Playwright script** before hypothesizing: library API
+(`chromium.launch`, not the test runner), `storageState` from the
+project auth fixture, `page.on('pageerror')` + `page.on('console')`
+listeners, walk the exact user flow, print the captures. This produced
+ground truth in one run (stack + state dump) where component-harness
+reproduction was misdirecting — dev-mode framework warnings can be
+runtime defects that production builds strip, and teardown/close-path
+crashes fire only when the journey actually closes what it opens
+(validating-ui's journey-completeness rule is the same principle).
+Capture the browser console during the failing step and look for
+`Failed to fetch dynamically imported module` / a 500 on a lazily-
+imported module — a real defect in the changed code, not infra.
+
 ### Step 2 — Detect stack & load the matching stack reference
 
 Identify the project stack from the rules file (`AGENTS.md` /

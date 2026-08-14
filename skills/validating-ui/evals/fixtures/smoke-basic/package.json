@@ -1,0 +1,15 @@
+{
+  "name": "validating-ui-eval-smoke-basic",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node ../../../scripts/verify-smoke.js --all",
+    "test:green": "node ../../../scripts/verify-smoke.js green",
+    "test:allowlisted": "node ../../../scripts/verify-smoke.js allowlisted",
+    "test:error": "node ../../../scripts/verify-smoke.js error",
+    "test:warning": "node ../../../scripts/verify-smoke.js warning",
+    "test:pageerror": "node ../../../scripts/verify-smoke.js pageerror",
+    "test:bad-evidence": "node ../../../scripts/verify-smoke.js bad-evidence",
+    "test:usage": "node ../../../scripts/verify-smoke.js usage"
+  }
+}

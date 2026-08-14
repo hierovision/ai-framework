@@ -192,7 +192,7 @@ does not infer it:
   reason, or vacuously. This is the authoring-side mirror of
   `debugging-test-failures` class 2 ("a test that can no longer fail is
   not a test") — author so that class 2 never applies to your tests.
-  The same proof is reused by `implementing-features`' Step 8 coverage
+  The same proof is reused by `implementing-features`' Step 9 coverage
   gate to re-confirm Step-5 AC tests are still meaningful once real code
   exists and to prove any coverage-expansion test added at that gate.
 
@@ -256,7 +256,7 @@ Do not move to integration/e2e on your own — those are sibling skills
 the user invokes separately. This skill never cascades into its
 siblings on its own initiative; the one documented, intentional caller
 that orchestrates a trio skill is `implementing-features`, at its Step 5
-(red-first) and Step 8 (coverage gate) — that is a sibling skill
+(red-first) and Step 9 (coverage gate) — that is a sibling skill
 driving the call, not this skill choosing to chain.
 
 ## When not to use this skill

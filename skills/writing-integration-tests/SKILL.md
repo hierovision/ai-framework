@@ -177,7 +177,7 @@ does not infer it:
   that can no longer fail is not a test") — author so that class 2 never
   applies to your tests. On a security seam the proof is non-negotiable:
   an isolation test that passes on a leaky policy is a false guarantee.
-  The same proof is reused by `implementing-features`' Step 8 coverage
+  The same proof is reused by `implementing-features`' Step 9 coverage
   gate to re-confirm Step-5 AC seam tests are still meaningful once real
   code exists and to prove any coverage-expansion test added at that
   gate.
@@ -230,7 +230,7 @@ unit/e2e on your own — those are sibling skills the user invokes
 separately. This skill never cascades into its siblings on its own
 initiative; the one documented, intentional caller that orchestrates a
 trio skill is `implementing-features`, at its Step 5 (red-first) and
-Step 8 (coverage gate) — that is a sibling skill driving the call, not
+Step 9 (coverage gate) — that is a sibling skill driving the call, not
 this skill choosing to chain.
 
 ## When not to use this skill

@@ -152,14 +152,14 @@ outrank taste — do not lead with nits):
    away the behaviour under test is a **blocker** — it hides a real
    defect instead of fixing it. Cite the exact weakening. When the
    plan's `## History` carries `implementing-features`' red evidence
-   (Step 5) and coverage-gate outcome (Step 8 — rebalancing + expand/no-
+   (Step 5) and coverage-gate outcome (Step 9 — rebalancing + expand/no-
    gap), **spot-check those claims**: does the recorded red evidence
    actually name the right failure (not a harness defect)? does the
    coverage-gate reasoning hold up against the diff (a cited rebalance
    or a cited gap, not padding)? Review what the record asserts against
    what the diff shows, rather than re-deriving the meaningfulness check
    from zero. See [implementing-features](../implementing-features/SKILL.md)
-   Steps 5 and 8 for the contract of those records.
+   Steps 5 and 9 for the contract of those records.
 3. **Scope conformance** — from Step 3. An unrecorded out-of-scope hunk
    is a blocker; a noted deviation/follow-up is a minor.
 4. **Error / edge handling** — unhandled error paths the ACs imply, a
@@ -173,6 +173,18 @@ outrank taste — do not lead with nits):
    reference. Security holes are blockers.
 6. **Readability / maintainability** — naming, dead code, small
    duplication, clarity. These are minors/nits; they never lead.
+7. **Component-instance refs** — when a parent calls an exposed method
+   via a component-instance ref (template ref / view ref / ref
+   attribute), verify the ref's **runtime shape**: some frameworks
+   collect string refs in loops into **arrays**, so
+   `ref.value?.method()` passes the optional chain and throws
+   `TypeError: ... is not a function` at runtime while compiling clean.
+   Prefer function/callback refs or typed ref arrays; the ref must bind
+   to the component instance, not a collection. (Vue-specific
+   manifestation: the vue-supabase stack reference.) This class is
+   invisible to type-check and lint, so the review is its prevention
+   net; the validating-ui Step-8 console net catches the runtime
+   symptom.
 
 ### Step 5 — Classify findings by severity (the backbone)
 

@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-08-14T00:00:00.000Z",
+  "target": "http://localhost:9999",
+  "journey": "journey.mjs",
+  "allowlist_path": null,
+  "console_errors": [],
+  "console_warnings": [],
+  "page_errors": [],
+  "screenshots": { "full": null, "clip": null },
+  "aria_snapshot": null,
+  "journey_error": null,
+  "net_clean": false,
+  "allowlisted": [],
+  "this_artifact_was_deliberately_malformed": true
+}

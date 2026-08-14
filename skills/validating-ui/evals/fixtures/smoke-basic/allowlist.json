@@ -1,0 +1,10 @@
+{
+  "_discipline": "Entries must be dated + justified. Substring match on the message. No blanket console.error suppression.",
+  "entries": [
+    {
+      "pattern": "Benign library hint",
+      "date": "2026-08-14",
+      "reason": "Self-check fixture: canned message the fake browser emits for the allowlisted state"
+    }
+  ]
+}

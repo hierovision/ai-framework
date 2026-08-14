@@ -53,7 +53,7 @@ triage → design → implement → verify(unit/integration/e2e) → review → 
   └──────────────────── failures/gaps route back ────────────────┘
 ```
 
-Six skills, each owned by exactly one stage, each **read-only or
+Seven skills, each owned by exactly one stage, each **read-only or
 write-only on a narrow surface** so a human reviewer can always tell who
 did what:
 
@@ -62,6 +62,7 @@ did what:
 | `triaging-requirements` | backlog (text/files/Jira/GitHub) | `ROADMAP.md` | a fully-resolved roadmap |
 | `designing-architecture` | one roadmap item | `<plans_dir>/<slug>.md` | user approval |
 | `implementing-features` | one approved plan | source files in `Files to Modify` | a manual-validation handoff |
+| `validating-ui` | a changed flow (in-loop, Step 8) | `.opencode/evidence/<plan-slug>/` only | net verdict + UX review findings |
 | `writing-unit-tests` / `-integration-tests` / `-e2e-tests` | plan ACs or an untested behavior | new test/spec files | full suite green |
 | `debugging-test-failures` | a failing command | a root-cause fix | full suite green, or an honest escalation |
 | `reviewing-code` | a diff + the plan | `REVIEW.md` only | a verdict |
@@ -121,9 +122,13 @@ trail depends on this contract holding. Reads the plan's `status:`
 repo (a moved file is a **mechanical deviation** you note in `##
 History`; a different feature/schema is a **contract-breaking deviation**
 — STOP, route back to design), then edits **only** `Files to Modify`, runs
-the plan's own `## Verification` commands until they all exit 0, appends a
-`## History` entry, and stops at a **manual-validation handoff** — it
-never self-certifies a criterion that needs human eyes.
+the plan's own `## Verification` commands until they all exit 0, validates
+the changed flow's runtime UI in-loop (Step 8 — `validating-ui`: console
+errors/warnings/pageerrors block unless allowlisted, UX-subagent review,
+bounded fix loop), passes the coverage-and-quality gate (Step 9 —
+rebalance + expand), appends a `## History` entry, and stops at a
+**manual-validation handoff** — it never self-certifies a criterion that
+needs human eyes.
 
 Scope discipline is the heart of this skill: three named pressures (a
 "helpful" user extra, "ugly" neighboring code, an "incomplete" plan) all

@@ -186,3 +186,13 @@ when. Clobbering defeats that.
   stable across revisions.
 - If the rules file is absent and no other plan directory is in use,
   write to `.opencode/plans/<slug>.md` and create the directory.
+- **Git status: plans are runtime/session artifacts, not committed.**
+  The library's `.gitignore` ignores `.opencode/` ("Runtime-generated
+  plans/agents when this library is consumed — do not commit"), and
+  consumer repos should follow suit: a plan is a working contract that
+  exists on disk for the session (design → implement → review), and the
+  durable residue — what changed, why, deviations — lives in the commit
+  message / handoff summary / PR body, not in a plan file in history.
+  Projects that deliberately want the full contract in history can
+  opt in by commenting out the `.opencode/` ignore entry; if they do,
+  plans are committed, never ignored.
