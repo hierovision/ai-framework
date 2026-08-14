@@ -43,6 +43,12 @@ Implement Progress:
 The skill starts only when given a plan artifact path. Read it before
 touching any source — the prompt alone is not the spec; the plan is.
 
+Git setup first (per `reference/git-workflow.md`): confirm the working
+tree is on the plan's branch — `<type>/<name>` derived from the slug
+(e.g. `fix-activity-image-delete` → `fix/activity-image-delete`),
+created from a current `main` if it does not exist. Never work on
+`main`; main is protected (only PRs merge).
+
 - **No plan path given** and the work is multi-file or schema-touching
   → route to `designing-architecture` and stop. This skill does not
   reverse-engineer a plan from a prompt; the design stage exists for
@@ -413,6 +419,10 @@ Present a **concise** handoff to the user and wait:
   human-only UI criteria.
 - **Plan state** — the plan's path, the History entry you appended, the
   status (flipped or not).
+- **PR ready** — the branch pushed (`<type>/<slug>`), the PR URL/title,
+  and the note that merging is user-initiated (main is protected; only
+  PRs merge). Commits on the branch are part of the pass and need no
+  request; the merge is the gated action.
 - **Follow-ups** — any recorded scope-creep requests, surfaced so the
   user can decide whether to hand them to triage / design.
 

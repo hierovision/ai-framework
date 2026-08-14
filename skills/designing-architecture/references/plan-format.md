@@ -196,3 +196,8 @@ when. Clobbering defeats that.
   Projects that deliberately want the full contract in history can
   opt in by commenting out the `.opencode/` ignore entry; if they do,
   plans are committed, never ignored.
+- **Branch derivation** (per `reference/git-workflow.md`): the
+  implement branch is `<type>/<name>` from this slug — type from the
+  leading token (`feat-*`, `fix-*`, `refactor-*`, `docs-*`, `chore-*`;
+  default `feat`), name = slug minus the prefix. Keep the slug stable
+  so the branch name stays derivable across revisions.

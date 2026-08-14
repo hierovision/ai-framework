@@ -127,8 +127,10 @@ the changed flow's runtime UI in-loop (Step 8 — `validating-ui`: console
 errors/warnings/pageerrors block unless allowlisted, UX-subagent review,
 bounded fix loop), passes the coverage-and-quality gate (Step 9 —
 rebalance + expand), appends a `## History` entry, and stops at a
-**manual-validation handoff** — it never self-certifies a criterion that
-needs human eyes.
+**manual-validation handoff** on a feature branch with a PR ready
+(branch name derives from the plan slug; main is protected — only PRs
+merge, user-initiated; per `reference/git-workflow.md`) — it
+never self-certifies a criterion that needs human eyes.
 
 Scope discipline is the heart of this skill: three named pressures (a
 "helpful" user extra, "ugly" neighboring code, an "incomplete" plan) all

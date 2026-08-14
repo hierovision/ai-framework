@@ -55,7 +55,9 @@ Review Progress:
 
 A review starts from a **diff/changeset** plus, when present, the plan
 artifact that authorized it. Resolve the diff first; do not review from
-prose.
+prose. The review unit is the PR: implement passes deliver a branch +
+PR per `reference/git-workflow.md`, and this review is the gate that
+precedes the (user-initiated) merge to protected `main`.
 
 - **Staged diff** → `git diff --staged` (or the harness equivalent).
 - **A branch range** → `git diff <base>...HEAD` the user named; if the
