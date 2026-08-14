@@ -7,15 +7,18 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_SRC="$REPO_DIR/skills"
 AGENTS_SRC="$REPO_DIR/agents"
+REFERENCE_SRC="$REPO_DIR/reference"
 SKILLS_TARGET="${OPENCODE_SKILLS_DIR:-$HOME/.config/opencode/skills}"
 AGENTS_TARGET="${OPENCODE_AGENTS_DIR:-$HOME/.config/opencode/agents}"
+REFERENCE_TARGET="${OPENCODE_REFERENCE_DIR:-$HOME/.config/opencode/reference}"
 
 usage() {
   echo "Usage: $0 [--uninstall]"
-  echo "  Links skills/*/ and agents/*.md into the global opencode config:"
+  echo "  Links skills/*/, agents/*.md and reference/ into the global opencode config:"
   echo "    $SKILLS_TARGET"
   echo "    $AGENTS_TARGET"
-  echo "  Override targets with OPENCODE_SKILLS_DIR / OPENCODE_AGENTS_DIR."
+  echo "    $REFERENCE_TARGET"
+  echo "  Override targets with OPENCODE_SKILLS_DIR / OPENCODE_AGENTS_DIR / OPENCODE_REFERENCE_DIR."
 }
 
 # Remove symlinks in $target that point under $src (this repo).
@@ -39,6 +42,7 @@ uninstall_dir() {
 uninstall() {
   uninstall_dir "$SKILLS_SRC" "$SKILLS_TARGET"
   uninstall_dir "$AGENTS_SRC" "$AGENTS_TARGET"
+  uninstall_dir "$REPO_DIR" "$REFERENCE_TARGET"
 }
 
 # Validate an agent's frontmatter: it must carry a `name:` that matches the
@@ -102,6 +106,22 @@ link_children() {
 install() {
   link_children "$SKILLS_SRC" "$SKILLS_TARGET" "skill" "SKILL.md" "" ""
   link_children "$AGENTS_SRC" "$AGENTS_TARGET" "agent" "" "md" "validate_agent_frontmatter"
+  # reference/ is a flat dir of library policy docs, linked wholesale.
+  if [ ! -d "$REFERENCE_SRC" ]; then
+    echo "No reference directory found at $REFERENCE_SRC" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$REFERENCE_TARGET")"
+  if [ -L "$REFERENCE_TARGET" ]; then
+    rm "$REFERENCE_TARGET"
+    ln -s "$REFERENCE_SRC" "$REFERENCE_TARGET"
+    echo "linked reference"
+  elif [ -e "$REFERENCE_TARGET" ]; then
+    echo "skip reference (non-symlink already exists at $REFERENCE_TARGET)" >&2
+  else
+    ln -s "$REFERENCE_SRC" "$REFERENCE_TARGET"
+    echo "linked reference"
+  fi
 }
 
 case "${1:-}" in
