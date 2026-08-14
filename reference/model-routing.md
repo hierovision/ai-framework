@@ -11,17 +11,29 @@ this file is the single place model IDs appear.
   Go flat-rate and Zen PAYG are escalation only** (per the established
   cost-conscious pattern).
 - Review cadence: monthly, or when a deprecation notice lands
-- Status: catalog + pricing current as of 2026-07-25; the escalation rows are
+- Status: catalog + pricing current as of 2026-07-25; **catalog re-checked
+  2026-08-14** (see "Catalog re-check — 2026-08-14"): `ling-3.0-flash-free`
+  and `north-mini-code-free` are **removed** from the free roster (rebound to
+  `nemotron-3-ultra-free`), `hy3-free` is back in the catalog, and new
+  candidates exist (`glm-5.3`, `qwen3.8-max`, `gpt-5.6-luna` on Go;
+  `gemini-3.7-flash` on Zen). The escalation rows are
   **evidence-backed** (Benchmark evidence) and the `skill-author` /
   `skill-reviewer` / `vision-critic-*` rows are partly **empirically
   confirmed** by six authoring rounds in this repo. **Free generalist
   `ling-3.0-flash-free` validated 2026-07-26** via a clean, no-tool head-to-head
-  eval (see "Free-tier caveats").
+  eval (see "Free-tier caveats"); **removed from the catalog by 2026-08-14**,
+  so `nemotron-3-ultra-free` now holds the free generalist seats.
+  **`deepseek-v4-flash-free` upgraded 2026-08-02** — the underlying build is
+  now the official DeepSeek-V4-Flash-0731 (agentic re-post-training); the
+  `planner` free default and the `council-architecture` lens move to it (see
+  "Official-release refresh — 2026-08-02").
 
 ## Contents
 
 - Roles → bindings
 - Benchmark evidence (2026-07-06) + Catalog refresh (2026-07-25)
+- Official-release refresh (2026-08-02) + Catalog re-check (2026-08-14)
+- Hard exclusions
 - Per-role benchmark rationale
 - Provider notes (Free / Go / Zen)
 - Vision capability notes
@@ -39,17 +51,17 @@ cost, not benchmark rank — see Free-tier caveats).
 
 | Role | Used by (loop stage) | Free default (`opencode/*-free`) | Escalation — Go flat-rate | Escalation — Zen PAYG | Bench basis (escalation) |
 |---|---|---|---|---|---|
-| `planner` | design, architecture | ling-3.0-flash-free | glm-5.2 | claude-opus-5 (peak: claude-fable-5) | Thinkbench autonomous loop 92%/0.976; SWE-bench Verified tier |
+| `planner` | design, architecture | deepseek-v4-flash-free (alt nemotron-3-ultra-free) | glm-5.3 (alt glm-5.2; hardest: gpt-5.6-luna) | claude-opus-5 (peak: claude-fable-5) | Thinkbench autonomous loop 92%/0.976; SWE-bench Verified tier |
 | `implementer` | implement (backend/frontend) | deepseek-v4-flash-free | kimi-k2.7-code (alt qwen3.7-plus) | claude-sonnet-5 (alt gpt-5.4) | MCPMark tool-use 81.1 (best of all); SWE-bench Verified |
-| `triager` | triage, bulk edits, summaries | ling-3.0-flash-free (alt deepseek-v4-flash-free) | hy3 | gpt-5.4-mini / claude-haiku-4-5 | generalist reasoning (no free bench) |
+| `triager` | triage, bulk edits, summaries | nemotron-3-ultra-free (alt deepseek-v4-flash-free) | hy3 | gpt-5.4-mini / claude-haiku-4-5 | generalist reasoning (no free bench) |
 | `test-writer` | unit/integration/e2e authoring | deepseek-v4-flash-free | kimi-k2.7-code (alt qwen3.7-plus) | claude-sonnet-5 | MCPMark + SWE-bench Verified |
-| `debugger` | test-failure analysis | deepseek-v4-flash-free (alt ling-3.0-flash-free) | glm-5.2 | claude-sonnet-5, gpt-5.4 | Thinkbench + SWE-bench Verified |
-| `reviewer` | code review | deepseek-v4-flash-free (alt ling-3.0-flash-free) | glm-5.2 | claude-sonnet-5, gpt-5.4 | SWE-bench Verified (defect catch) |
+| `debugger` | test-failure analysis | deepseek-v4-flash-free (alt nemotron-3-ultra-free) | glm-5.3 (alt glm-5.2) | claude-sonnet-5, gpt-5.4 | Thinkbench + SWE-bench Verified |
+| `reviewer` | code review | deepseek-v4-flash-free (alt nemotron-3-ultra-free) | glm-5.3 (alt glm-5.2) | claude-sonnet-5, gpt-5.4 | SWE-bench Verified (defect catch) |
 | `vision-critic-fast` | UI loop, routine passes | — (no free multimodal) | minimax-m3 (native multimodal) | gemini-3-flash (alt gpt-5.4-mini) | native image-in; vision bench (gemini) |
 | `vision-critic-final` | UI loop, final review | — | — | gemini-3.1-pro (alt claude-sonnet-5) | vision quality (gemini-3.1-pro) |
-| `council-member` | multi-perspective review | ling-3.0-flash-free + mimo-v2.5-free + deepseek-v4-flash-free (free, mix families) | hy3 + mimo-v2.5 + deepseek-v4-flash (Go, mix families) | claude-opus-5 + gemini-3.1-pro + gpt-5.6-sol (frontier, max diversity) | family diversity + per-lens competence |
-| `skill-author` | authoring new skills | ling-3.0-flash-free | minimax-m3 (alt glm-5.2, qwen3.7-max) | claude-sonnet-5 (qwen3.7-max is Go-only IF leader) | IFBench 79.1; Thinkbench existing-code parity |
-| `skill-reviewer` | reviewing skill drafts | ling-3.0-flash-free (alt deepseek-v4-flash-free) | glm-5.2 | claude-opus-5 (peak: claude-fable-5) | SWE-bench Verified (highest reasoning) |
+| `council-member` | multi-perspective review | nemotron-3-ultra-free + mimo-v2.5-free + deepseek-v4-flash-free (free, mix families) | hy3 + mimo-v2.5 + deepseek-v4-flash (Go, mix families) | claude-opus-5 + gemini-3.1-pro + gpt-5.6-sol (frontier, max diversity) | family diversity + per-lens competence |
+| `skill-author` | authoring new skills | nemotron-3-ultra-free (alt deepseek-v4-flash-free) | minimax-m3 (alt glm-5.2, qwen3.7-max) | claude-sonnet-5 (qwen3.7-max is Go-only IF leader) | IFBench 79.1; Thinkbench existing-code parity |
+| `skill-reviewer` | reviewing skill drafts | nemotron-3-ultra-free (alt deepseek-v4-flash-free) | glm-5.3 (alt glm-5.2) | claude-opus-5 (peak: claude-fable-5) | SWE-bench Verified (highest reasoning) |
 
 ## Benchmark evidence (2026-07-06)
 
@@ -113,9 +125,101 @@ Go flat-rate: `https://opencode.ai/zen/go/v1/models`). Material changes:
   `gemini-3.5-flash`, `gemini-3.5-flash-lite`. Escalation rows now use
   `claude-opus-5` (≥ opus-4-8 88.6) and `gpt-5.6-sol` (≥ gpt-5.5 88.7).
 - **New Go models (escalation tier):** `kimi-k3` (successor to k2.7-code),
-  `qwen3.7-max`, `qwen3.7-plus`, `grok-4.5`, and **`hy3` / `hy3-preview` are
+  `qwen3.7-max`, `qwen3.7-plus`, `grok-4.5` (later **hard-excluded** — see
+  Hard exclusions), and **`hy3` / `hy3-preview` are
   now Go flat-rate models** (usable as a Go-escalation generalist). Note
   **`qwen3.7-*` is Go-only** — bind it as a Go escalation, never as a Zen one.
+
+### Official-release refresh — 2026-08-02 (this update)
+
+DeepSeek shipped the official V4-Flash release (`DeepSeek-V4-Flash-0731`,
+public beta, 2026-07-31), superseding the preview with a **re-post-trained
+checkpoint** (same 284B / 13B-active architecture) aimed squarely at
+agentic/tool-orchestration work. The free catalog ID
+`deepseek-v4-flash-free` serves this build (assumption: the opencode free
+endpoint points the ID at the current official model). **The free tier's
+coding model is now also its strongest engineering-reasoning model**, so the
+free default for the `planner` (design) role moves from
+`ling-3.0-flash-free` to `deepseek-v4-flash-free` (ling stays as the
+reliability alt), and the `council-architecture` lens moves to it too. See
+Per-role rationale.
+
+Agentic benchmarks (vendor-stated — DeepSeek harness, minimal mode, max
+effort; no independent reproduction as of 2026-07-31; the GLM-5.2 / Opus-4.8
+columns are DeepSeek-harness figures, so read the cross-model rows as
+directional, not settled):
+
+| Benchmark | Flash-0731 | Flash-preview | Pro-preview | GLM-5.2 | Opus-4.8 |
+|---|---|---|---|---|---|
+| Terminal Bench 2.1 | 82.7 | 61.8 | 72.1 | 81.0 | 85.0 |
+| DeepSWE | 54.4 | 7.3 | 12.8 | 46.2 | 58.0 |
+| Toolathlon-Verified | 70.3 | 49.7 | 55.9 | 59.9 | 76.2 |
+| DSBench-FullStack | 68.7 | 37.0 | 41.8 | 61.8 | 71.6 |
+| DSBench-Hard | 59.6 | 25.8 | 31.1 | 54.5 | 71.7 |
+| NL2Repo | 54.2 | 39.4 | 38.5 | 48.9 | 69.7 |
+| Cybergym | 76.7 | 38.7 | 52.7 | — | 83.1 |
+| AutomationBench Public | 25.1 | 10.8 | 12.8 | 12.9 | 27.2 |
+
+Preview-era engineering / reasoning (official technical report, Max mode):
+SWE-bench Verified 79.0 (Pro-Max 80.6) · LiveCodeBench 91.6 · GPQA Diamond
+88.1 · MMLU-Pro 86.4. Semi-independent: Artificial Analysis Intelligence
+Index ≈ 50 (median 17) for 0731 — directional corroboration of general
+strength, not of the specific agent scores above.
+
+Read with the standing caveat (benchmarks are a tier filter, not a ranking):
+the controlled within-family jump (preview → official) and the preview
+report's engineering scores are the solid signal; the GLM-5.2 comparisons
+are cross-harness and directional only.
+
+### Catalog re-check — 2026-08-14 (this update)
+
+Re-fetched both catalogs (`https://opencode.ai/zen/v1/models` and
+`https://opencode.ai/zen/go/v1/models`; full audit in
+`reference/catalog-check-2026-08-14.md`). Material changes:
+
+- **`ling-3.0-flash-free` removed from the catalog** (absent from Zen and
+  Go on 2026-08-14). This was the validated free generalist (2026-07-26
+  head-to-head) holding the `triager`, `skill-author`, `skill-reviewer`
+  defaults, the `planner` no-tool alt, and the council chairman / UX /
+  product seats. All those seats rebind to **`nemotron-3-ultra-free`**
+  (catalog-verified, prior validation: 10/10 planning rigor in the 07-26
+  eval; caveat: intermittent streaming errors observed under load — see
+  Free-tier caveats). `north-mini-code-free` (named as a validated alt) is
+  also gone. Re-run the head-to-head (Update procedure step 4) before any
+  further free-generalist changes; `nemotron-3.5-lightning-free`,
+  `muse-spark-1.2`, `big-pickle`, and `hy3-free` are the new candidates.
+- **`hy3-free` is back in the Zen catalog** (the 07-25 removal record is
+  stale; re-added by 08-14). Not rebound — the seat went to nemotron —
+  but it belongs in the re-validation pool as the pre-ling generalist.
+- **New Go models:** `glm-5.3` (successor to glm-5.2 — planner / debugger /
+  reviewer escalation moves to it; glm-5.2 stays as the alt until 5.3 is
+  independently benched), `qwen3.8-max` (successor to qwen3.7-max — watch
+  for the skill-author IF escalation), **`gpt-5.6-luna`** (frontier-grade
+  generalist now on the flat rate — the strongest Go option for hardest
+  planner/reviewer work), `mimo-v2.5-pro`, `mimo-v2-pro`, `mimo-v2-omni`.
+- **New Zen models:** `gemini-3.7-flash` (vision-critic-fast candidate —
+  bench before switching), `gpt-5.4-pro`, `gpt-5.5-pro`, `gpt-5.3-codex`;
+  `glm-5.2/5.1/5` and `deepseek-v4-pro` are now also on Zen. `grok-4.6` /
+  `grok-build-0.1` are **hard-excluded** — see Hard exclusions.
+- **GLM is no longer Go-only:** glm-5.2/5.1/5 now also appear on Zen (the
+  07-25 "Go escalation" framing still holds for the escalation row, but Zen
+  binding is now technically possible if ever needed).
+
+### Hard exclusions
+
+Never bind, recommend, or escalate to these models in any tier, for any
+persona or workflow. This is a user directive, dated 2026-08-14.
+
+| Excluded ID | Tier(s) | Reason |
+|---|---|---|
+| `grok-4.5` | Go, Zen | user directive (2026-08-14): grok family excluded from everything |
+| `grok-4.6` | Zen | same |
+| `grok-build-0.1` | Zen | same |
+
+The exclusion supersedes any earlier mention (e.g. the 07-25 "New Go
+models" record above is historical only). When a new grok-* ID appears in a
+catalog fetch, treat it as excluded automatically — do not add it to any
+table, roster, or watch list.
 
 ### Free-tier caveats (read before relying on free defaults)
 
@@ -131,8 +235,14 @@ a 5-min TTL cache that violates the "revoke immediately" requirement).
 rotate, per-request `revoked_at` check, hash + index specifics) but exhibited
 intermittent streaming errors under heavier/other agent contexts; `ling` had
 **zero failures observed** across all probes and is the reliable default. So
-`ling-3.0-flash-free` is the free generalist default; `nemotron-3-ultra-free`
-is the strong alt when you need peak planning rigor. For risk-bearing tasks
+`ling-3.0-flash-free` was the free generalist default, with
+`nemotron-3-ultra-free` the strong alt for peak planning rigor. **Since
+2026-08-14** `ling-3.0-flash-free` is gone from the catalog, so
+`nemotron-3-ultra-free` now holds the generalist seats — its streaming
+caveat is the standing reliability risk, and re-validating it (plus
+`nemotron-3.5-lightning-free`, `hy3-free`, `muse-spark-1.2`, `big-pickle`)
+via the head-to-head eval is the prescribed next step (Update procedure
+step 4). For risk-bearing tasks
 you may still escalate to the Go or Zen tier.
 
 **Rationale for the 2026-07-25 changes (this update):**
@@ -162,7 +272,18 @@ Each agent persona escalates to the model the objective evidence favours for
   *existing-code* work, where GLM 5.2's 92% Thinkbench full-pass (0.976
   mean) is the strongest documented open result; on existing-code it is
   statistically tied with M3 (0.999–1.000). Escalates to `claude-opus-5`
-  (≥ 88.6 Verified) for hardest architecture.
+  (≥ 88.6 Verified) for hardest architecture. **Free default (2026-08-02,**
+  **superseded 2026-08-14 on the alt only):** `deepseek-v4-flash-free` — the
+  0731 official build was re-post-trained for
+  agentic work and now matches/exceeds GLM-5.2 on DeepSeek-harness agent
+  benchmarks (Terminal Bench 2.1 82.7 vs 81.0, DeepSWE 54.4 vs 46.2), and
+  planning in practice is tool-heavy (codebase research, grepping, artifact
+  writes) — exactly the 0731 gains' home turf. `nemotron-3-ultra-free` now
+  holds the no-tool generalist alt (ling was removed 2026-08-14); re-run the
+  2026-07-26 head-to-head before any further switch (see Update procedure
+  step 4). **Go escalation (2026-08-14):** `glm-5.3` (successor to 5.2),
+  with `gpt-5.6-luna` — frontier-grade at flat rate — for the hardest
+  architecture.
 - **implementer / test-writer** — heavy file + tool orchestration favours
   the best *tool-use* score: Kimi K2.7 Code at MCPMark 81.1 (above Opus 4.8
   76.4) and ~30% more token-efficient. Escalates to `claude-sonnet-5`
@@ -179,12 +300,21 @@ Each agent persona escalates to the model the objective evidence favours for
   Zen `gemini-3.1-pro` (strongest vision) for sign-off. No free multimodal
   exists, so vision defaults to the Go escalation (M3).
 - **council-member** — objectivity comes from *family diversity*, not raw
-  score: the free default mixes ling / mimo / deepseek (three families);
+  score: the free default mixes nemotron / mimo / deepseek (three families;
+  ling's seat passed to nemotron on 2026-08-14 after ling was removed from
+  the catalog);
   the frontier opt-in mixes Anthropic / Google / OpenAI (Opus-5 / Gemini-3.1-
-  pro / GPT-5.6) for maximal independent perspective.
+  pro / GPT-5.6) for maximal independent perspective. The
+  `council-architecture` lens (engineering analysis: patterns, tech debt,
+  testability) moved to `deepseek-v4-flash-free` on 2026-08-02 — the
+  strongest free engineering-reasoning model — rebalancing the default
+  council to 2 ling / 2 deepseek / 1 mimo while keeping all three families
+  represented. (Since 2026-08-14 the 2 ling seats are nemotron: council =
+  3 nemotron / 2 deepseek / 1 mimo — three families still represented.)
 - **skill-author** — scaffolded/existing-code authoring → MiniMax M3
   (existing-code parity 0.999–1.000 with GLM, 3.7× cheaper); IFBench leader
-  `qwen3.7-max` (79.1, Go-only) is the instruction-following escalation.
+  `qwen3.7-max` (79.1, Go-only) is the instruction-following escalation
+  (watch `qwen3.8-max`, its Go successor, for the next bench round).
 - **skill-reviewer** — needs top reasoning; `glm-5.2` (Go escalation, 92%
   loop) is a competent cheap reviewer, escalating to `claude-opus-5` /
   `fable-5` (95.0) for peak skill-foundation review.
@@ -221,24 +351,32 @@ judgment specifically** (M3's multimodal wins are on SVG-Bench / BrowseComp,
 not UI critique); evaluate in the `correcting-ui` eval loop before relying on
 it. `vision-critic-final` stays Zen (`gemini-3.1-pro` / `claude-sonnet-5`)
 for sign-off. Cheaper Zen vision alternatives for fast passes:
-`gemini-3.5-flash` / `gemini-3.6-flash`.
+`gemini-3.5-flash` / `gemini-3.6-flash`; `gemini-3.7-flash` (newest flash,
+2026-08-14) is the upgrade candidate — bench its vision judgment before
+switching.
 
-## Deprecation watch (from Zen docs, 2026-07-03; refreshed 2026-07-25)
+## Deprecation watch (from Zen docs, 2026-07-03; refreshed 2026-07-25; re-checked 2026-08-14)
 
 | Model | Deprecation date | Action |
 |---|---|---|
-| `hy3-free` (free tier) | 2026-07-25 (removed from catalog) | use `opencode/ling-3.0-flash-free` (free) or escalate |
+| `hy3-free` (free tier) | 2026-07-25 removed; **re-added by 2026-08-14** | re-validate before use; do not rebind until the head-to-head re-run |
+| `ling-3.0-flash-free` (free tier) | **2026-08-14 (removed from catalog)** | use `nemotron-3-ultra-free` (free) or escalate |
+| `north-mini-code-free` (free tier) | **2026-08-14 (removed from catalog)** | use `nemotron-3-ultra-free` (free) or escalate |
 | GPT 5.2/5.1/5 Codex variants | 2026-07-23 | avoid in new bindings |
-| Kimi K2.5 | 2026-08-05 | use kimi-k2.7-code (or kimi-k3) |
-| MiniMax M2.5 | 2026-08-05 | use minimax-m3 / m2.7 |
-| Claude Opus 4.1 | 2026-08-05 | use opus-4-8 (or opus-5) |
-| GLM 5 | 2026-05-14 (past) | use glm-5.2 |
+| Kimi K2.5 | 2026-08-05 (due; still listed 2026-08-14) | use kimi-k2.7-code (or kimi-k3) |
+| MiniMax M2.5 | 2026-08-05 (due; still listed 2026-08-14) | use minimax-m3 / m2.7 |
+| Claude Opus 4.1 | 2026-08-05 (past) | use opus-4-8 (or opus-5) |
+| GLM 5 | 2026-05-14 (past) | use glm-5.2 (or glm-5.3) |
 
-New and safe to bind (2026-07-25): `claude-opus-5`, `claude-fable-5`,
-`gpt-5.6-*`, `gemini-3.5/3.6-flash`, `kimi-k3`, `qwen3.7-max/plus`,
-`grok-4.5`, `hy3` / `hy3-preview` (Go flat-rate), and the free roster
-`ling-3.0-flash-free` (validated free generalist; `nemotron-3-ultra-free`,
-  `north-mini-code-free`, `laguna-s-2.1-free` also competent — see caveats).
+New and safe to bind (2026-07-25; refreshed 2026-08-14): `claude-opus-5`,
+`claude-fable-5`, `gpt-5.6-*` (`gpt-5.6-luna` also on Go flat-rate),
+`gemini-3.5/3.6-flash` (and `gemini-3.7-flash`, newest), `kimi-k3`,
+`qwen3.7-max/plus` (Go-only), `qwen3.8-max` (Go, watch for benches), `hy3` /
+`hy3-preview` (Go flat-rate), `glm-5.3` (Go), and the free roster
+`nemotron-3-ultra-free` (current free generalist; `nemotron-3.5-lightning-free`,
+  `muse-spark-1.2`, `big-pickle`, `laguna-s-2.1-free` also in the catalog —
+  see caveats; validate before binding). **Grok family is hard-excluded** —
+  see Hard exclusions.
 
 Known stale bindings in existing projects: none currently tracked. `pt`'s
 `qwen3.6-plus` binding (`build` agent + `council-ux` subagent) was refreshed
@@ -252,13 +390,16 @@ mode and the multi-model council that runs on free models for the two steps
 where a single weak model is riskiest — **planning** and **review**. It never
 alters the escalation rows. Status: protocol drafted 2026-07-14; models
 re-verified 2026-07-25 (the `-free` IDs are separate catalog entries from
-`deepseek-v4-flash` and `mimo-v2.5`, which remain the Go escalation rows).
+`deepseek-v4-flash` and `mimo-v2.5`, which remain the Go escalation rows);
+free roster re-verified 2026-08-14 (ling removed → nemotron holds the
+generalist seats).
 
 ### Free-model roster
 
 | Role | Free model (catalog ID) | Maps to existing role row |
 |---|---|---|
-| `planner` / chairman / generalist | `opencode/ling-3.0-flash-free` | `planner` (glm-5.2 / claude-opus) |
+| `planner` (single-task) | `opencode/deepseek-v4-flash-free` (alt `opencode/nemotron-3-ultra-free`) | `planner` (glm-5.3 / claude-opus) |
+| `chairman` / council planner seat | `opencode/nemotron-3-ultra-free` | `planner` (glm-5.3 / claude-opus) |
 | `implementer` / `test-writer` / `debugger` (coding) | `opencode/deepseek-v4-flash-free` | `implementer` (kimi-k2.7-code) |
 | `devops` / CI / cloud / security | `opencode/mimo-v2.5-free` | `triager` (mimo-v2.5) |
 
@@ -269,7 +410,8 @@ re-verified 2026-07-25 (the `-free` IDs are separate catalog entries from
   uses a free model even when Go/Zen keys are present.
 - **Single-task execution** uses the one mapped free model (no council) to
   conserve free quota:
-  - planning / design → `opencode/ling-3.0-flash-free`
+  - planning / design → `opencode/deepseek-v4-flash-free` (nemotron alt for
+    no-tool generalist planning)
   - any coding (implement / test / debug) → `opencode/deepseek-v4-flash-free`
   - devops / CI / cloud / security → `opencode/mimo-v2.5-free`
 - Skills reference **roles**, never these IDs (library convention). The
@@ -287,7 +429,10 @@ live in `docs/FREE-TIER-COUNCIL.md` (a project drops those defs into
 - **Planning council** (producing a plan/spec via `designing-architecture`,
   `designing-cicd`, `deploying-with-supabase`, `deploying-to-azure-swa`,
   `securing-ci`):
-  - A — `opencode/ling-3.0-flash-free`: primary planner.
+  - A — `opencode/nemotron-3-ultra-free`: primary planner (kept off
+    deepseek for family diversity even though single-task planning defaults
+    to deepseek — the council optimizes diversity over single-model peak;
+    ling held this seat until its 2026-08-14 catalog removal).
   - B — `opencode/mimo-v2.5-free`: devops/security critique (CI safety, secrets,
     environments, migrate-before-deploy).
   - C — `opencode/deepseek-v4-flash-free`: coding-feasibility critique
@@ -299,7 +444,7 @@ live in `docs/FREE-TIER-COUNCIL.md` (a project drops those defs into
   `skill-reviewer`):
   - A — `opencode/deepseek-v4-flash-free`: coding review.
   - B — `opencode/mimo-v2.5-free`: devops/security review.
-  - C — `opencode/ling-3.0-flash-free`: plan/architecture coherence +
+  - C — `opencode/nemotron-3-ultra-free`: plan/architecture coherence +
     synthesis.
   - Output: per-member findings + consensus verdict + unresolved
     disagreements flagged.

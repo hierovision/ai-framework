@@ -27,12 +27,35 @@ where one weak model is riskiest: **planning** and **review**.
 > free models. See Free-tier caveats in `reference/model-routing.md` for
 > detail; for risk-bearing planning or skill review you may still escalate to
 > the Go/Zen tier.
+>
+> **2026-08-02 — V4-Flash official release (0731):** the free coder
+> `deepseek-v4-flash-free` now serves the official re-post-trained build
+> (agentic gains: Terminal Bench 2.1 82.7, Toolathlon 70.3, DeepSWE 54.4 —
+> vendor-stated; see `reference/model-routing.md`). It is now the strongest
+> free engineering-reasoning model, so **single-task planning** (the `design`
+> agent) defaults to it. The **council planner seat stays on
+> `ling-3.0-flash-free`** — deliberately: the council's objectivity comes from
+> family diversity (ling / mimo / deepseek), not single-model peak, and two of
+> three seats on deepseek would erode that independence.
+>
+> **2026-08-14 — catalog re-check (official catalogs):**
+> `ling-3.0-flash-free` and `north-mini-code-free` are **gone from both
+> catalogs** (see `reference/catalog-check-2026-08-14.md`). Every ling seat
+> (council planner seat, UX lens, product lens, single-task planner alt,
+> triage) rebinds to **`nemotron-3-ultra-free`** — the only catalog-verified
+> free generalist with prior validation (10/10 planning in the 07-26
+> head-to-head; streaming-error caveat stands until the re-run). Council
+> family mix is now **nemotron / mimo / deepseek** — three families still
+> represented. `hy3-free` is back in the catalog (re-validate before use);
+> `nemotron-3.5-lightning-free`, `muse-spark-1.2`, `big-pickle` are new free
+> IDs awaiting the head-to-head re-run (Update procedure step 4).
 
 ## Model IDs (verified 2026-07-25 via catalog fetch)
 
 | Role | Free model | Paid/Go row it stands in for |
 |---|---|---|
-| planner / chairman / generalist | `opencode/ling-3.0-flash-free` | `planner` (glm-5.2 / claude-opus) |
+| planner (single-task) | `opencode/deepseek-v4-flash-free` (alt `opencode/nemotron-3-ultra-free`) | `planner` (glm-5.3 / claude-opus) |
+| chairman / council planner seat / generalist | `opencode/nemotron-3-ultra-free` | `planner` (glm-5.3 / claude-opus) |
 | coder (implement / test / debug) | `opencode/deepseek-v4-flash-free` | `implementer` (kimi-k2.7-code) |
 | devops / security | `opencode/mimo-v2.5-free` | `triager` (mimo-v2.5) |
 
@@ -51,7 +74,7 @@ matching `subagent_type`.
 ```markdown
 ---
 name: free-council-planner
-model: opencode/ling-3.0-flash-free
+model: opencode/nemotron-3-ultra-free
 tools: [read, glob, grep, write]
 ---
 
@@ -114,7 +137,7 @@ Be concrete: cite the AC or step and the feasibility gap. Do NOT edit anything
 1. Orchestrator receives the planning request; loads the relevant skill
    (e.g. `designing-cicd`).
 2. Spawn **three** subagents in parallel:
-    - `free-council-planner` (`opencode/ling-3.0-flash-free`) — drafts the plan.
+    - `free-council-planner` (`opencode/nemotron-3-ultra-free`) — drafts the plan.
     - `free-council-devops` (`opencode/mimo-v2.5-free`) — devops/security critique.
     - `free-council-coder` (`opencode/deepseek-v4-flash-free`) — coding-
       feasibility critique.
@@ -129,7 +152,7 @@ Be concrete: cite the AC or step and the feasibility gap. Do NOT edit anything
 2. Spawn three subagents in parallel with the diff in context:
     - `free-council-coder` (`opencode/deepseek-v4-flash-free`) — coding review.
     - `free-council-devops` (`opencode/mimo-v2.5-free`) — devops/security review.
-    - `free-council-planner` (`opencode/ling-3.0-flash-free`) — plan/architecture
+    - `free-council-planner` (`opencode/nemotron-3-ultra-free`) — plan/architecture
       coherence + synthesis.
 3. Output: per-member findings + a consensus verdict + any unresolved
    disagreements flagged. A disagreement is reported, not averaged away.

@@ -9,6 +9,12 @@ mode: primary
 
 Short, direct, clear. No fluff.
 
+## Communication
+
+Standard technical English per `reference/technical-english.md` — plain,
+precise, filler-free. No emoji in artifacts; handoffs say done → verified →
+blocked → next.
+
 ## Process
 
 Follow the **`implementing-features`** skill for the full process (red-first
