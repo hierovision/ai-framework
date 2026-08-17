@@ -23,6 +23,7 @@ Design Progress:
 - [ ] 3. Detect stack & load the matching stack reference
 - [ ] 4. Research the codebase
 - [ ] 5. Extract goal, acceptance criteria, boundaries (ask if vague)
+- [ ] 5b. UX consult: council-ux on user-facing items (explicit skip note if none)
 - [ ] 6. Draft the plan artifact (full format in references/plan-format.md)
 - [ ] 7. Self-check: every criterion is verifiable
 - [ ] 8. Present summary + approval question; STOP
@@ -145,6 +146,40 @@ When you do ask (feature-identity ambiguity), two situations:
 
 The cost of one clarifying question on a feature-identity split is below
 the cost of an implementable plan built on the wrong feature.
+
+### Step 5b — Consult council-ux on user-facing items
+
+Run the UX consult **only when the item changes user-facing behavior** —
+a screen, form, dialog, or flow, or a change to existing UI. A pure-
+backend or internal-logic item gets the explicit skip instead: record
+`no user-facing UI — council-ux consult skipped` in the plan's History
+and proceed. The explicit negative is the closure signal; do not invent
+UI to review.
+
+For a user-facing item, invoke `council-ux` (subagent_type `council-ux`)
+**before drafting**, so concerns land in the plan, not in revisions:
+
+- **Brief**: the goal, the draft acceptance criteria, the Included /
+  Excluded scope, and the Step 4 codebase context — the components and
+  patterns the feature will reuse.
+- **Review areas**: loading / empty / error states, keyboard
+  accessibility, color contrast, mobile responsiveness, form validation
+  UX, error message clarity, onboarding friction, component / library
+  consistency.
+- **Contract**: text-only input — there is no UI to screenshot at plan
+  time and council-ux is a text-only model; it judges the planned
+  experience from the brief. Output is 3–5 concerns, advisory.
+
+Fold each concern into the plan: a new or refined acceptance criterion
+(with a concrete verifier), an Open Question (with a proposed default),
+the Approach paragraph, or an Excluded entry. A concern with no
+verifiable plan-time resolution is recorded as a residual follow-up for
+the runtime validation handoff (`validating-ui`), never silently
+dropped. One consult round — no plan-time fix loop.
+
+Record the consult in `## History` (one line, dated): `UX consult via
+council-ux; N concerns — folded into ACs / Open Questions / Excluded /
+deferred to runtime validation`.
 
 ### Step 6 — Draft the plan artifact
 
