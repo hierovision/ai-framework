@@ -22,11 +22,18 @@ this file is the single place model IDs appear.
   confirmed** by six authoring rounds in this repo. **Free generalist
   `ling-3.0-flash-free` validated 2026-07-26** via a clean, no-tool head-to-head
   eval (see "Free-tier caveats"); **removed from the catalog by 2026-08-14**,
-  so `nemotron-3-ultra-free` now holds the free generalist seats.
+  so   `nemotron-3-ultra-free` now holds the free generalist seats.
   **`deepseek-v4-flash-free` upgraded 2026-08-02** — the underlying build is
   now the official DeepSeek-V4-Flash-0731 (agentic re-post-training); the
   `planner` free default and the `council-architecture` lens move to it (see
   "Official-release refresh — 2026-08-02").
+- **Routing re-optimized 2026-08-25** (see "Routing update — 2026-08-25"
+  under the bindings table and `model-check-2026-08-25.md`): kimi-k3 takes
+  the implementer/test-writer Go escalations, triager Go moves to glm-5.3
+  and Zen to gpt-5.6-luna, the council Go mix is upgraded, glm-5.3's
+  "until independently benched" caveat is discharged, and the "hardest:
+  gpt-5.6-luna" planner annotation is dropped. Free defaults and agent
+  bindings unchanged.
 
 ## Contents
 
@@ -51,17 +58,52 @@ cost, not benchmark rank — see Free-tier caveats).
 
 | Role | Used by (loop stage) | Free default (`opencode/*-free`) | Escalation — Go flat-rate | Escalation — Zen PAYG | Bench basis (escalation) |
 |---|---|---|---|---|---|
-| `planner` | design, architecture | deepseek-v4-flash-free (alt nemotron-3-ultra-free) | glm-5.3 (alt glm-5.2; hardest: gpt-5.6-luna) | claude-opus-5 (peak: claude-fable-5) | Thinkbench autonomous loop 92%/0.976; SWE-bench Verified tier |
-| `implementer` | implement (backend/frontend) | deepseek-v4-flash-free | kimi-k2.7-code (alt qwen3.7-plus) | claude-sonnet-5 (alt gpt-5.4) | MCPMark tool-use 81.1 (best of all); SWE-bench Verified |
-| `triager` | triage, bulk edits, summaries | nemotron-3-ultra-free (alt deepseek-v4-flash-free) | hy3 | gpt-5.4-mini / claude-haiku-4-5 | generalist reasoning (no free bench) |
-| `test-writer` | unit/integration/e2e authoring | deepseek-v4-flash-free | kimi-k2.7-code (alt qwen3.7-plus) | claude-sonnet-5 | MCPMark + SWE-bench Verified |
+| `planner` | design, architecture | deepseek-v4-flash-free (alt nemotron-3-ultra-free) | glm-5.3 (alt kimi-k3) | claude-opus-5 (peak: claude-fable-5) | AA Intelligence Index 60 (indep. 2026-08-25); Thinkbench autonomous loop 92%/0.976 |
+| `implementer` | implement (backend/frontend) | deepseek-v4-flash-free | kimi-k3 (alt kimi-k2.7-code) | claude-sonnet-5 (alt gpt-5.4) | AA Intelligence Index 60 vs K2.7 43 (indep. 2026-08-25); MCPMark 81.1 (K2.7 legacy) |
+| `triager` | triage, bulk edits, summaries | nemotron-3-ultra-free (alt deepseek-v4-flash-free) | glm-5.3 (alt deepseek-v4-pro) | gpt-5.6-luna (alt gpt-5.4-mini) | AA 60 / luna 52 at $0.05/task + 141 t/s (indep. 2026-08-25) |
+| `test-writer` | unit/integration/e2e authoring | deepseek-v4-flash-free | kimi-k3 (alt kimi-k2.7-code) | claude-sonnet-5 | AA 60 (indep. 2026-08-25); MCPMark + SWE-bench Verified |
 | `debugger` | test-failure analysis | deepseek-v4-flash-free (alt nemotron-3-ultra-free) | glm-5.3 (alt glm-5.2) | claude-sonnet-5, gpt-5.4 | Thinkbench + SWE-bench Verified |
 | `reviewer` | code review | deepseek-v4-flash-free (alt nemotron-3-ultra-free) | glm-5.3 (alt glm-5.2) | claude-sonnet-5, gpt-5.4 | SWE-bench Verified (defect catch) |
 | `vision-critic-fast` | UI loop, routine passes | — (no free multimodal) | minimax-m3 (native multimodal) | gemini-3-flash (alt gpt-5.4-mini) | native image-in; vision bench (gemini) |
 | `vision-critic-final` | UI loop, final review | — | — | gemini-3.1-pro (alt claude-sonnet-5) | vision quality (gemini-3.1-pro) |
-| `council-member` | multi-perspective review | nemotron-3-ultra-free + mimo-v2.5-free + deepseek-v4-flash-free (free, mix families) | hy3 + mimo-v2.5 + deepseek-v4-flash (Go, mix families) | claude-opus-5 + gemini-3.1-pro + gpt-5.6-sol (frontier, max diversity) | family diversity + per-lens competence |
+| `council-member` | multi-perspective review | nemotron-3-ultra-free + mimo-v2.5-free + deepseek-v4-flash-free (free, mix families) | kimi-k3 + glm-5.3 + deepseek-v4-flash (Go, mix families) | claude-opus-5 + gemini-3.1-pro + gpt-5.6-sol (frontier, max diversity) | family diversity + per-lens competence |
 | `skill-author` | authoring new skills | nemotron-3-ultra-free (alt deepseek-v4-flash-free) | minimax-m3 (alt glm-5.2, qwen3.7-max) | claude-sonnet-5 (qwen3.7-max is Go-only IF leader) | IFBench 79.1; Thinkbench existing-code parity |
 | `skill-reviewer` | reviewing skill drafts | nemotron-3-ultra-free (alt deepseek-v4-flash-free) | glm-5.3 (alt glm-5.2) | claude-opus-5 (peak: claude-fable-5) | SWE-bench Verified (highest reasoning) |
+
+### Routing update — 2026-08-25
+
+Full-sweep pass via the `optimizing-model-routing` skill; evidence and
+per-role analysis in [model-check-2026-08-25.md](model-check-2026-08-25.md).
+All previously bound IDs remain catalog-valid (no stale bindings).
+New evidence: Artificial Analysis Intelligence Index v4.1.1 (independent
+harness, retrieved 2026-08-25).
+
+- `implementer` / `test-writer` Go: kimi-k2.7-code → **kimi-k3** (AA 60
+  vs 43; K2.7 stays alt pending a K3 MCPMark run).
+- `triager` Go: hy3 → **glm-5.3** (AA 60 vs 42 — hy3 held the seat from
+  the ling-era persona default with no bench behind it); Zen: gpt-5.4-mini
+  / claude-haiku-4-5 → **gpt-5.6-luna** (AA 52 at $0.05/task, 141 t/s —
+  the bulk-triage profile; gpt-5.4-mini stays alt).
+- `council-member` Go mix: hy3 + mimo-v2.5 + deepseek-v4-flash →
+  **kimi-k3 + glm-5.3 + deepseek-v4-flash** (42/38/52 → 60/60/52; three
+  families preserved).
+- `planner` Go: glm-5.3 confirmed — its 2026-08-14 "until independently
+  benched" caveat is discharged (AA 60); alt moves glm-5.2 → kimi-k3. The
+  "hardest: gpt-5.6-luna" annotation is **dropped** (AA 52, below its
+  Go-tier peers; luna's strengths are cost/speed, now reflected in the
+  triager Zen seat). Hardest planner work escalates to Zen claude-opus-5.
+- Free defaults and all `agents/*.md` bindings: **unchanged** — the
+  prescribed free-generalist head-to-head re-run (new candidates
+  muse-spark-1.2-contributor-free, x-preview-f-free, ox-alpha-free,
+  big-pickle, nemotron-3.5-lightning-free, hy3-free, laguna-s-2.1-free)
+  is still pending and gates any free-seat change.
+- Watch list: kimi-k3 and deepseek-v4-flash-vision-exp are Go-tier
+  multimodal candidates for `vision-critic-fast` (no vision-quality
+  evidence yet — bench before switching); qwen3.8-max (AA 58) replaces
+  qwen3.7-max as the skill-author IF-escalation watch.
+- Grok family scores 61 on AA — still hard-excluded (user directive
+  2026-08-14); recorded so the exclusion is visibly applied, not
+  overlooked.
 
 ## Benchmark evidence (2026-07-06)
 
