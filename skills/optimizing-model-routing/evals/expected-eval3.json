@@ -1,0 +1,11 @@
+{
+  "bindings": {
+    "agents/design.md": "opencode/vortex-2-flash-free",
+    "agents/build.md": "opencode/vortex-2-flash-free",
+    "agents/triage.md": "opencode/atlas-mini-free",
+    "agents/council.md": "opencode/quill-2-free",
+    "agents/council-ux.md": "opencode/atlas-mini-free",
+    "agents/council-security.md": "opencode/vortex-2-flash-free"
+  },
+  "forbidden": ["banjax", "atlas-2.9", "quill-1-free"]
+}
