@@ -165,6 +165,40 @@ harness**: turn 1 expects the agent to stop at the gate and ask the
 right questions; turn 2 resumes the same session with answers and
 expects the answers recorded in the output artifact. Grade both turns.
 
+#### The protocol is wired, not just described
+
+The fresh-agent assertions above are executed automatically by
+`skills/authoring-skills/scripts/run_behavioral_eval.py`, gated in the
+scheduled CI workflow `.github/workflows/eval-behavioral.yml` (weekly on
+GitHub Free, plus `workflow_dispatch`). The runner:
+
+- loads every skill's `evals/evals.json`, launches a fresh agent per eval,
+  and fails the build when any `expected_behavior` substring is missing;
+- writes one `kind=eval` run-log record per eval via RM-001's
+  `log_run.py` (single source of truth — it does **not** redefine the
+  schema), so `eval_pass=false` is observable out-of-band;
+- supports `--limit` / `--skill` subset sharding to stay within GitHub
+  Free's 2,000 min/month.
+
+The hermetic per-PR gate (`ci.yml`) stays unchanged — behavioral evals
+live only in the separate scheduled workflow. A broken eval is caught
+red there, not on every PR.
+
+#### Additive eval markers (`evals.json`)
+
+Two OPTIONAL markers extend the eval protocol (backward-compatible; files
+without them default to included / Go-tier):
+
+- `deferred: true` on an eval — excluded from the default run because it
+  needs a real browser / harness unavailable in the headless gate (e.g.
+  `writing-e2e-tests`). The runner's `--list` omits it; re-run explicitly
+  with `--include-deferred` when the harness allows. A documented deferral
+  is honest; a silent skip looks like coverage.
+- `default_model_tier` — top-level on `evals.json` (or per-eval override)
+  selects the tier the runner pins. CI defaults to the free (`*-free`) tier
+  only; Go and Zen PAYG tiers are excluded from scheduled CI and must be
+  marked `deferred` for developer-local paid runs.
+
 ### Step 7: Iterate on observed behavior
 
 Generalize from feedback — the skill will run against prompts far outside

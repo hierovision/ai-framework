@@ -4,15 +4,22 @@
 REVIEW.md
 
 # Runtime-generated plans/agents when this library is consumed, or when the
-# free-tier council agent defs are dropped in (designing-architecture,
+# free-tier council agent defs dropped in (designing-architecture,
 # FREE-TIER-COUNCIL). Comment out if you intend to track example plans/defs.
 .opencode/
+
+# === Run telemetry (observing-runs / RM-001) — never commit ===
+# JSONL run logs are git-ignored so per-run telemetry is never committed;
+# aggregates persist out-of-band (RM-003/009/011), raw lines are pruned.
+logs/
 
 # === OS / tooling noise ===
 .DS_Store
 *.log
 node_modules/
 dist/
+__pycache__/
+*.pyc
 
 # === Deprecated docs (removed from the repo; never track) ===
 PLAN.md

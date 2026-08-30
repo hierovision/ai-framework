@@ -1,0 +1,64 @@
+# Behavioral Eval gate — scheduled (GitHub Free, private repo).
+#
+# Per the library's own skills:
+#   - securing-ci: least-privilege `permissions:`, SHA-pinned actions, no secret echo.
+#   - designing-cicd: expensive live-agent job on a weekly schedule, separate from
+#     the hermetic per-PR gate in ci.yml.
+#
+# Free-tier adherence (verified against official docs — see plan rm-002):
+#   - GitHub Free private repos: 2,000 runner min/month. A nightly full run of ~63
+#     evals would exceed that, so this runs WEEKLY (`0 6 * * 1`) + manual dispatch.
+#   - `permissions: contents: read` — read-only is all the runner needs.
+#   - Model access uses a REPOSITORY-level secret (org-level secrets are NOT
+#     available to private Free repos). Consumed via ${{ secrets.* }}, never echoed.
+#   - Run logs uploaded as an artifact with `retention-days: 30` (within GitHub
+#     Free's 90-day max; auto-expires — local prune per RM-001).
+#   - `concurrency` prevents overlapping weekly runs.
+#   - `--limit` / `--skill` subset sharding keeps a full run inside the minute budget.
+#   - AI_FRAMEWORK_FREE_TIER=1 forces the free (*-free) tier only — no Go/Zen paid usage.
+name: Behavioral Eval (weekly)
+
+on:
+  schedule:
+    # Weekly Monday 06:06 UTC — NOT nightly (stays within 2,000 min/month).
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+# Least-privilege: read-only is all the eval runner needs.
+permissions:
+  contents: read
+
+# One weekly run at a time; cancel a stale one if re-dispatched.
+concurrency:
+  group: eval-behavioral-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  behavioral-eval:
+    runs-on: ubuntu-latest
+    steps:
+      # SHA-pinned (supply-chain safety — see securing-ci skill).
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+
+      - name: Setup Python
+        run: |
+          python3 --version
+          pip3 install --quiet pyyaml
+
+      - name: Run behavioral evals (fresh agent per eval)
+        env:
+          # Repository-level secret ONLY (org-level secrets are unavailable on
+          # GitHub Free private repos). Consumed by the runner; never echoed.
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          AI_FRAMEWORK_FREE_TIER: 1
+        run: |
+          python3 skills/authoring-skills/scripts/run_behavioral_eval.py
+
+      - name: Upload run logs (30-day retention)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: observe-run-logs
+          path: logs/
+          retention-days: 30

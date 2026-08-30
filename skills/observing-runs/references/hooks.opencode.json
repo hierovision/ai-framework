@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "SkillInvocationEnd": [
+      {
+        "type": "command",
+        "command": "python3 ${skill_dir}/scripts/log_run.py --record '{\"kind\":\"skill\",\"skill\":\"${skill_name}\",\"agent\":null,\"model\":${model_tier},\"tokens_in\":${tokens_in},\"tokens_out\":${tokens_out},\"duration_ms\":${duration_ms},\"outcome\":\"${outcome}\",\"eval_pass\":null,\"detail\":${detail}}'",
+        "timeout_ms": 5000
+      }
+    ],
+    "AgentSessionEnd": [
+      {
+        "type": "command",
+        "command": "python3 ${skill_dir}/scripts/log_run.py --record '{\"kind\":\"agent\",\"skill\":null,\"agent\":\"${agent_name}\",\"model\":${model_tier},\"tokens_in\":${tokens_in},\"tokens_out\":${tokens_out},\"duration_ms\":${duration_ms},\"outcome\":\"${outcome}\",\"eval_pass\":null,\"detail\":${detail}}'",
+        "timeout_ms": 5000
+      }
+    ]
+  }
+}

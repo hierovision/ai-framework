@@ -1,0 +1,24 @@
+{
+  "skill_name": "observing-runs",
+  "notes": "Run each prompt in a fresh agent session WITH the skill installed, against a WRITABLE COPY of the scenario fixture (copy evals/fixtures/observing-runs/<scenario>/ into a fresh temp working dir per run — agents must never write into evals/fixtures/ source). Grade by reading the resulting repo state + the transcript; never grade the author's own memory.\n\nROI guardrail is the discriminating signal: a correct agent records the run via log_run.py (well-formed JSONL, all twelve schema fields present, one line) AND states that logs must never be fed back into the agent's live prompt (out-of-context). A wrong agent either hand-rolls JSON (redefining field names, violating the single-source-of-truth rule) or suggests logging per sub-step / feeding logs into context.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I just ran a behavioral eval of the writing-unit-tests skill. record that run using the observing-runs skill's log_run.py helper: model tier go, tokens_in 812, tokens_out 305, duration_ms 142000, outcome success, eval_pass true. the working dir has the skill at skills/observing-runs/. afterwards, in one sentence, tell me the ROI guardrail for run logs.",
+      "expected_behavior": [
+        "Records the run by CALLING skills/observing-runs/scripts/log_run.py (not hand-writing a JSONL file with redefined field names) — honors the single source of truth",
+        "Passes kind=eval, skill=writing-unit-tests, model=go, tokens_in=812, tokens_out=305, duration_ms=142000, outcome=success, eval_pass=true",
+        "Produces exactly one JSONL line in logs/run-<date>.jsonl whose parsed object contains all twelve schema fields (ts, run_id, kind, skill, agent, model, tokens_in, tokens_out, duration_ms, outcome, eval_pass, detail)",
+        "Does NOT log any raw prompt, raw output, or tool-call transcript in detail (detail is failure-only and capped at 512 chars)",
+        "States the ROI guardrail: run logs must never be read back into the agent's own live prompt / context window (out-of-context, append-only, per-run)",
+        "Does NOT suggest per-internal-sub-step logging (one record per tool call) — emission is once per run only"
+      ],
+      "files": [
+        "../scripts/log_run.py",
+        "../references/schema.md",
+        "../SKILL.md",
+        "fixtures/observing-runs/emit-record/README.md"
+      ]
+    }
+  ]
+}
