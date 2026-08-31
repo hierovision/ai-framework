@@ -12,28 +12,25 @@ this file is the single place model IDs appear.
   cost-conscious pattern).
 - Review cadence: monthly, or when a deprecation notice lands
 - Status: catalog + pricing current as of 2026-07-25; **catalog re-checked
-  2026-08-14** (see "Catalog re-check — 2026-08-14"): `ling-3.0-flash-free`
-  and `north-mini-code-free` are **removed** from the free roster (rebound to
-  `nemotron-3-ultra-free`), `hy3-free` is back in the catalog, and new
-  candidates exist (`glm-5.3`, `qwen3.8-max`, `gpt-5.6-luna` on Go;
-  `gemini-3.7-flash` on Zen). The escalation rows are
-  **evidence-backed** (Benchmark evidence) and the `skill-author` /
-  `skill-reviewer` / `vision-critic-*` rows are partly **empirically
-  confirmed** by six authoring rounds in this repo. **Free generalist
-  `ling-3.0-flash-free` validated 2026-07-26** via a clean, no-tool head-to-head
-  eval (see "Free-tier caveats"); **removed from the catalog by 2026-08-14**,
-  so   `nemotron-3-ultra-free` now holds the free generalist seats.
-  **`deepseek-v4-flash-free` upgraded 2026-08-02** — the underlying build is
-  now the official DeepSeek-V4-Flash-0731 (agentic re-post-training); the
-  `planner` free default and the `council-architecture` lens move to it (see
-  "Official-release refresh — 2026-08-02").
-- **Routing re-optimized 2026-08-25** (see "Routing update — 2026-08-25"
-  under the bindings table and `model-check-2026-08-25.md`): kimi-k3 takes
-  the implementer/test-writer Go escalations, triager Go moves to glm-5.3
-  and Zen to gpt-5.6-luna, the council Go mix is upgraded, glm-5.3's
-  "until independently benched" caveat is discharged, and the "hardest:
-  gpt-5.6-luna" planner annotation is dropped. Free defaults and agent
-  bindings unchanged.
+  2026-08-30** (see "Catalog re-check — 2026-08-30"): both catalogs live-fetched
+  2026-08-30; `ling-3.0-flash-free` and `north-mini-code-free` remain removed
+  from the free roster (rebound to `nemotron-3-ultra-free`); `hy3-free` is
+  absent from the free catalog (only `hy3`/`hy3-preview` on Go); new candidates
+  confirmed (`glm-5.3`, `qwen3.8-max`, `gpt-5.6-luna` on Go; `gemini-3.7-flash`
+  on Zen; `ling-3.0-flash-fin-free`, `muse-spark-1.2-contributor-free`,
+  `nemotron-3.5-lightning-free`, `laguna-s-2.1-free`, `big-pickle` on free).
+  The escalation rows remain **evidence-backed** (Benchmark evidence) and the
+  `skill-author` / `skill-reviewer` / `vision-critic-*` rows remain partly
+  **empirically confirmed** by six authoring rounds in this repo.
+  **`deepseek-v4-flash-free` confirmed 2026-08-30** — independent Ante harness
+  reproduces Terminal-Bench 2.1 82.7% (2026-08-09), AA Intelligence Index 50.
+- **Routing re-optimized 2026-08-30** (see "Routing update — 2026-08-30"
+  under the bindings table and `model-check-2026-08-30.md`): full-sweep pass;
+  all bindings catalog-valid and evidence-backed; **no binding changes**.
+  Independent evidence reinforced: KingBench 3 91.25% (GLM-5.3, indep.),
+  AA 60 (Kimi K3, GLM-5.3), Ante TB 2.1 82.7% (DeepSeek V4 Flash 0731),
+  MCPMark Verified 81.1% (Kimi K2.7 Code). Free generalist re-validation
+  (head-to-head per Update procedure step 4) still pending.
 
 ## Contents
 
@@ -104,6 +101,24 @@ harness, retrieved 2026-08-25).
 - Grok family scores 61 on AA — still hard-excluded (user directive
   2026-08-14); recorded so the exclusion is visibly applied, not
   overlooked.
+
+### Routing update — 2026-08-30
+
+Full-sweep pass via the `optimizing-model-routing` skill; evidence and
+per-role analysis in [model-check-2026-08-30.md](model-check-2026-08-30.md).
+All previously bound IDs remain catalog-valid (no stale bindings).
+Live catalog fetch 2026-08-30; independent evidence reinforced:
+Artificial Analysis Intelligence Index v4.1.1 (retrieved 2026-08-06);
+KingBench 3 91.25% (GLM-5.3, independent); Ante harness Terminal-Bench
+2.1 82.7% (DeepSeek V4 Flash 0731, independent, 2026-08-09);
+MCPMark Verified 81.1% (Kimi K2.7 Code, BenchLM, 2026-08-29).
+**No binding changes** — all current bindings remain optimal per
+objective evidence. Free generalist re-validation (head-to-head per
+Update procedure step 4) still pending for current free roster.
+Watch list updates: `gemini-3.7-flash` (vision-critic-fast candidate,
+bench before switching); `qwen3.8-max` (skill-author IF watch);
+`deepseek-v4-flash-vision-exp` (Go multimodal candidate, bench before
+switching). Grok family remains hard-excluded (user directive 2026-08-14).
 
 ## Benchmark evidence (2026-07-06)
 
@@ -246,6 +261,33 @@ Re-fetched both catalogs (`https://opencode.ai/zen/v1/models` and
 - **GLM is no longer Go-only:** glm-5.2/5.1/5 now also appear on Zen (the
   07-25 "Go escalation" framing still holds for the escalation row, but Zen
   binding is now technically possible if ever needed).
+
+### Catalog re-check — 2026-08-30 (this update)
+
+Re-fetched both catalogs (`https://opencode.ai/zen/v1/models` and
+`https://opencode.ai/zen/go/v1/models`; live fetch 2026-08-30). Material
+changes:
+
+- **`ling-3.0-flash-free` remains removed** from the catalog (absent from
+  Zen and Go on 2026-08-30). The validated free generalist is gone;
+  `nemotron-3-ultra-free` continues to hold the generalist seats.
+- **`north-mini-code-free` remains removed** from the catalog.
+- **`hy3-free` is absent from the free catalog** — only `hy3` and
+  `hy3-preview` exist on Go flat-rate. The 2026-08-14 "re-added" note is
+  stale; no free `hy3-free` exists as of 2026-08-30.
+- **Free tier new/present IDs:** `ling-3.0-flash-fin-free` (different ID
+  from removed `ling-3.0-flash-free`), `muse-spark-1.2-contributor-free`,
+  `nemotron-3.5-lightning-free`, `laguna-s-2.1-free`, `big-pickle`
+  (Zen, not free). None independently benched; head-to-head re-run
+  (Update procedure step 4) required before binding.
+- **Go tier confirmed:** `glm-5.3`, `qwen3.8-max`, `gpt-5.6-luna`,
+  `kimi-k3`, `deepseek-v4-flash-vision-exp`, `hy3`, `hy3-preview`,
+  `mimo-v2.5-pro`, `mimo-v2-pro`, `mimo-v2-omni` all catalog-verified.
+- **Zen tier confirmed:** `gemini-3.7-flash`, `gpt-5.4-pro`, `gpt-5.5-pro`,
+  `gpt-5.3-codex`, `glm-5.2/5.1/5`, `deepseek-v4-pro`, `grok-4.6`,
+  `grok-build-0.1` (hard-excluded) all catalog-verified.
+- **Grok family** (`grok-4.5` Go, `grok-4.6` Zen, `grok-build-0.1` Zen)
+  present in catalogs but **hard-excluded** per user directive 2026-08-14.
 
 ### Hard exclusions
 
@@ -397,28 +439,28 @@ for sign-off. Cheaper Zen vision alternatives for fast passes:
 2026-08-14) is the upgrade candidate — bench its vision judgment before
 switching.
 
-## Deprecation watch (from Zen docs, 2026-07-03; refreshed 2026-07-25; re-checked 2026-08-14)
+## Deprecation watch (from Zen docs, 2026-07-03; refreshed 2026-07-25; re-checked 2026-08-30)
 
 | Model | Deprecation date | Action |
 |---|---|---|
-| `hy3-free` (free tier) | 2026-07-25 removed; **re-added by 2026-08-14** | re-validate before use; do not rebind until the head-to-head re-run |
+| `hy3-free` (free tier) | **absent from free catalog 2026-08-30** (only `hy3`/`hy3-preview` on Go) | do not bind; re-validate if re-added |
 | `ling-3.0-flash-free` (free tier) | **2026-08-14 (removed from catalog)** | use `nemotron-3-ultra-free` (free) or escalate |
 | `north-mini-code-free` (free tier) | **2026-08-14 (removed from catalog)** | use `nemotron-3-ultra-free` (free) or escalate |
 | GPT 5.2/5.1/5 Codex variants | 2026-07-23 | avoid in new bindings |
-| Kimi K2.5 | 2026-08-05 (due; still listed 2026-08-14) | use kimi-k2.7-code (or kimi-k3) |
-| MiniMax M2.5 | 2026-08-05 (due; still listed 2026-08-14) | use minimax-m3 / m2.7 |
+| Kimi K2.5 | 2026-08-05 (due; still listed 2026-08-30) | use kimi-k2.7-code (or kimi-k3) |
+| MiniMax M2.5 | 2026-08-05 (due; still listed 2026-08-30) | use minimax-m3 / m2.7 |
 | Claude Opus 4.1 | 2026-08-05 (past) | use opus-4-8 (or opus-5) |
 | GLM 5 | 2026-05-14 (past) | use glm-5.2 (or glm-5.3) |
 
-New and safe to bind (2026-07-25; refreshed 2026-08-14): `claude-opus-5`,
+New and safe to bind (2026-07-25; refreshed 2026-08-30): `claude-opus-5`,
 `claude-fable-5`, `gpt-5.6-*` (`gpt-5.6-luna` also on Go flat-rate),
 `gemini-3.5/3.6-flash` (and `gemini-3.7-flash`, newest), `kimi-k3`,
 `qwen3.7-max/plus` (Go-only), `qwen3.8-max` (Go, watch for benches), `hy3` /
 `hy3-preview` (Go flat-rate), `glm-5.3` (Go), and the free roster
 `nemotron-3-ultra-free` (current free generalist; `nemotron-3.5-lightning-free`,
-  `muse-spark-1.2`, `big-pickle`, `laguna-s-2.1-free` also in the catalog —
-  see caveats; validate before binding). **Grok family is hard-excluded** —
-  see Hard exclusions.
+  `muse-spark-1.2-contributor-free`, `ling-3.0-flash-fin-free`, `big-pickle`,
+  `laguna-s-2.1-free` also in the catalog — see caveats; validate before
+  binding). **Grok family is hard-excluded** — see Hard exclusions.
 
 Known stale bindings in existing projects: none currently tracked. `pt`'s
 `qwen3.6-plus` binding (`build` agent + `council-ux` subagent) was refreshed
@@ -433,8 +475,9 @@ where a single weak model is riskiest — **planning** and **review**. It never
 alters the escalation rows. Status: protocol drafted 2026-07-14; models
 re-verified 2026-07-25 (the `-free` IDs are separate catalog entries from
 `deepseek-v4-flash` and `mimo-v2.5`, which remain the Go escalation rows);
-free roster re-verified 2026-08-14 (ling removed → nemotron holds the
-generalist seats).
+free roster re-verified 2026-08-30 (ling removed → nemotron holds the
+generalist seats; `ling-3.0-flash-fin-free`, `muse-spark-1.2-contributor-free`,
+`nemotron-3.5-lightning-free`, `laguna-s-2.1-free` also present).
 
 ### Free-model roster
 

@@ -1,0 +1,21 @@
+{
+  "bindings": {
+    "agents/design.md": "opencode/deepseek-v4-flash-free",
+    "agents/build.md": "opencode/deepseek-v4-flash-free",
+    "agents/triage.md": "opencode/nemotron-3-ultra-free",
+    "agents/council-architecture.md": "opencode/deepseek-v4-flash-free",
+    "agents/council-security.md": "opencode/mimo-v2.5-free",
+    "agents/council-performance.md": "opencode/deepseek-v4-flash-free",
+    "agents/council-ux.md": "opencode/nemotron-3-ultra-free",
+    "agents/council-product.md": "opencode/nemotron-3-ultra-free",
+    "agents/council.md": "opencode/nemotron-3-ultra-free"
+  },
+  "forbidden": [
+    "grok-4.5",
+    "grok-4.6",
+    "grok-build-0.1",
+    "ling-3.0-flash-free",
+    "north-mini-code-free",
+    "hy3-free"
+  ]
+}
