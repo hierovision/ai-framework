@@ -1,7 +1,7 @@
 ---
 name: build
 description: Execute coding tasks from an approved plan. Build components, run tests, resolve specific todos.
-model: opencode/deepseek-v4-flash-free
+model: opencode/nemotron-3-ultra-free
 mode: primary
 ---
 

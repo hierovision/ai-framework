@@ -1,7 +1,7 @@
 ---
 name: council-architecture
 description: Architecture and maintainability analysis
-model: opencode/deepseek-v4-flash-free
+model: opencode/nemotron-3-ultra-free
 mode: subagent
 hidden: true
 temperature: 0.2

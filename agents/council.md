@@ -46,9 +46,9 @@ your own.
 | Agent | Default (free) model | Lens |
 |-------|----------------------|------|
 | `council-security` | opencode/mimo-v2.5-free | Vulnerability analysis, edge cases, data safety |
-| `council-performance` | opencode/deepseek-v4-flash-free | Bottlenecks, N+1 queries, caching, scalability |
+| `council-performance` | opencode/nemotron-3-ultra-free | Bottlenecks, N+1 queries, caching, scalability |
 | `council-ux` | opencode/nemotron-3-ultra-free | End-user UX + developer experience, component patterns |
-| `council-architecture` | opencode/deepseek-v4-flash-free | Pattern alignment, tech debt, testability |
+| `council-architecture` | opencode/nemotron-3-ultra-free | Pattern alignment, tech debt, testability |
 | `council-product` | opencode/nemotron-3-ultra-free | Requirements fit, scope, priority, business logic gaps |
 
 ## Process

@@ -22,9 +22,12 @@ Reading rules that keep the ranking honest:
   can swing scores double-digit points; saturated, contamination-prone
   suites overstate small gaps. A few points of separation is noise —
   treat it as a tie and break it on objectivity or reliability.
-- **Capability facts are hard gates, not scores.** Native image input,
-  context length, catalog membership: a model lacking a required
-  capability cannot hold the seat at any benchmark number.
+- **Capability facts and liveness are hard gates, not scores.** Native image input,
+  context length, catalog membership, docs-listed status (free tier),
+  and live routing (actually routes in a live opencode session): a model
+  lacking a required capability or failing liveness cannot hold the seat
+  at any benchmark number. Non-live IDs never enter ranking or
+  benchmark comparison.
 - **Match the benchmark to the work.** Prefer the benchmark that measures
   the role's actual task (autonomous loop for planners, tool-use for
   implementers, instruction-following for skill authors) over a generic
