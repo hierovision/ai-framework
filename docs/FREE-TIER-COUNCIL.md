@@ -49,14 +49,24 @@ where one weak model is riskiest: **planning** and **review**.
 > represented. `hy3-free` is back in the catalog (re-validate before use);
 > `nemotron-3.5-lightning-free`, `muse-spark-1.2`, `big-pickle` are new free
 > IDs awaiting the head-to-head re-run (Update procedure step 4).
+>
+> **2026-09-02 — liveness failure:** `deepseek-v4-flash-free` appears in the
+> Zen catalog API (`/zen/v1/models`) but returns an error when actually
+> selected in an opencode session. The catalog is not authoritative for
+> routability — `https://opencode.ai/docs/zen/#endpoints` (authoritative free
+> list, which omits this ID) is. All `deepseek-v4-flash-free` seats rebind to
+> `nemotron-3-ultra-free` (verified live + docs-documented). Council free mix
+> third seat: `muse-spark-1.2-contributor-free` (preserves 3-family diversity:
+> nemotron / mimo / muse-spark). See `reference/model-routing.md` Routing
+> update 2026-09-02.
 
 ## Model IDs (verified 2026-07-25 via catalog fetch)
 
 | Role | Free model | Paid/Go row it stands in for |
 |---|---|---|
-| planner (single-task) | `opencode/deepseek-v4-flash-free` (alt `opencode/nemotron-3-ultra-free`) | `planner` (glm-5.3 / claude-opus) |
+| planner (single-task) | `opencode/nemotron-3-ultra-free` | `planner` (glm-5.3 / claude-opus) |
 | chairman / council planner seat / generalist | `opencode/nemotron-3-ultra-free` | `planner` (glm-5.3 / claude-opus) |
-| coder (implement / test / debug) | `opencode/deepseek-v4-flash-free` | `implementer` (kimi-k2.7-code) |
+| coder (implement / test / debug) | `opencode/nemotron-3-ultra-free` | `implementer` (kimi-k2.7-code) |
 | devops / security | `opencode/mimo-v2.5-free` | `triager` (mimo-v2.5) |
 
 The `-free` IDs are **distinct catalog entries** from `deepseek-v4-flash`
@@ -116,7 +126,7 @@ anything — return findings as a list. Flag uncertainty rather than guessing.
 ```markdown
 ---
 name: free-council-coder
-model: opencode/deepseek-v4-flash-free
+model: opencode/nemotron-3-ultra-free
 tools: [read, glob, grep]
 ---
 
@@ -137,20 +147,20 @@ Be concrete: cite the AC or step and the feasibility gap. Do NOT edit anything
 1. Orchestrator receives the planning request; loads the relevant skill
    (e.g. `designing-cicd`).
 2. Spawn **three** subagents in parallel:
-    - `free-council-planner` (`opencode/nemotron-3-ultra-free`) — drafts the plan.
-    - `free-council-devops` (`opencode/mimo-v2.5-free`) — devops/security critique.
-    - `free-council-coder` (`opencode/deepseek-v4-flash-free`) — coding-
-      feasibility critique.
+     - `free-council-planner` (`opencode/nemotron-3-ultra-free`) — drafts the plan.
+     - `free-council-devops` (`opencode/mimo-v2.5-free`) — devops/security critique.
+     - `free-council-coder` (`opencode/nemotron-3-ultra-free`) — coding-
+       feasibility critique.
 3. Planner folds B/C findings into a FINAL plan; disagreements go to Open
-   Questions (never silenced).
+    Questions (never silenced).
 4. Orchestrator presents the synthesized plan + the surfaced disagreements;
-   stops at approval (the skill's own gate).
+    stops at approval (the skill's own gate).
 
 ### Review council (reviewing a diff / skill / workflow)
 
 1. Orchestrator receives the diff; loads `reviewing-code`.
 2. Spawn three subagents in parallel with the diff in context:
-    - `free-council-coder` (`opencode/deepseek-v4-flash-free`) — coding review.
+     - `free-council-coder` (`opencode/nemotron-3-ultra-free`) — coding review.
     - `free-council-devops` (`opencode/mimo-v2.5-free`) — devops/security review.
     - `free-council-planner` (`opencode/nemotron-3-ultra-free`) — plan/architecture
       coherence + synthesis.
@@ -160,7 +170,7 @@ Be concrete: cite the AC or step and the feasibility gap. Do NOT edit anything
 ### Guardrails
 
 - Council ONLY for planning & review. Raw coding/test/debug execution stays
-  single-model (`opencode/deepseek-v4-flash-free`) to conserve free quota.
+   single-model (`opencode/nemotron-3-ultra-free`) to conserve free quota.
 - Always surface disagreements; one model must not silently override another.
 - Free-tier mode coexists with escalation routing via the `AI_FRAMEWORK_FREE_TIER`
   toggle; enabling it does not modify the escalation rows in

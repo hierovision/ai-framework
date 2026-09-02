@@ -21,9 +21,9 @@ Copy this checklist and check off items as you complete them.
 Routing Progress:
 - [ ] 1. Scope the pass (all roles, or one named role)
 - [ ] 2. Read current state
-- [ ] 3. Gather catalogs (live fetch; local snapshot override)
+- [ ] 3. Gather catalogs + liveness (live fetch; docs + routing probe)
 - [ ] 4. Identify + verify objective benchmarks
-- [ ] 5. Rank candidates per role (free first; Go/Zen escalation)
+- [ ] 5. Rank candidates per role (free first; Go/Zen escalation — live candidates only)
 - [ ] 6. Write the dated audit artifact
 - [ ] 7. Present table + evidence + Questionable/Uncertain; STOP for approval
 - [ ] 8. On approval: apply, verify, commit, PR
@@ -45,17 +45,24 @@ exclusions**, and the deprecation watch — and every `model:` line in
 - **Hard exclusions win over any score.** An excluded family is dropped
   from candidacy regardless of benchmark results, even the best ever
   reported.
-- **A bound ID missing from the catalog is a stale binding.** It can only
-  be flagged and rebound, never re-proposed.
+- **A bound ID missing from the catalog OR failing liveness is a stale binding.** A stale binding is any ID that is not catalog-listed, not docs-listed (free tier), or fails to route in a live opencode session (see Step 3). It can only be flagged and rebound, never re-proposed.
 
-### Step 3 — Gather catalogs
+### Step 3 — Gather catalogs + liveness
 
-Production default: fetch both live catalogs (the endpoints recorded in
-the repo's model-routing.md update procedure). Offline / snapshot mode: a
-local snapshot directory containing `zen-catalog.json`, `go-catalog.json`,
-and `benchmarks.md` — use it when the user points at one or fetching
-fails. State which mode ran; never silently mix snapshot and live data.
-Every candidate must be catalog-verified before ranking; record the
+Production default: fetch both live catalogs **and** the docs free list
+(`https://opencode.ai/docs/zen/#endpoints` — authoritative for free-tier;
+see `reference/model-routing.md` Update procedure). Cross-check catalog
+vs docs; any divergence is a catalog-vs-availability mismatch → record in
+Questionable/Uncertain and exclude the ID from candidacy. Then
+liveness-probe every remaining candidate (minimal routing test in a live
+opencode session: select an agent bound to that model / send a trivial
+prompt and verify no routing error). **Only live-verified IDs are
+candidates** — catalog membership alone never makes a model a candidate.
+Offline / snapshot mode: a local snapshot directory containing
+`zen-catalog.json`, `go-catalog.json`, and `benchmarks.md` — use it when
+the user points at one or fetching fails. State which mode ran; never
+silently mix snapshot and live data. Every candidate must be
+catalog-verified **and** live-verified before ranking; record the
 retrieval date for the artifact.
 
 ### Step 4 — Identify + verify objective benchmarks
@@ -71,14 +78,16 @@ into a decision.
 
 ### Step 5 — Rank candidates per role
 
-Per role in scope, rank on the role's dominant trait per the reference
-map, deciding on the most objective evidence available and tie-breaking
-upward in objectivity (an independent result beats a cross-checked one
-beats a vendor claim). Free-first: propose a free model wherever a
-catalog-valid free model qualifies; Go and Zen rows are escalation picks.
-Capability requirements (e.g. native image input for vision seats) are
-hard gates, not scores — a text-only model cannot hold a vision seat at
-any benchmark number.
+Per role in scope, rank **only over live candidates** (Step 3) on the
+role's dominant trait per the reference map, deciding on the most
+objective evidence available and tie-breaking upward in objectivity (an
+independent result beats a cross-checked one beats a vendor claim).
+Free-first: propose a free model wherever a live, docs-listed free model
+qualifies; Go and Zen rows are escalation picks. **Liveness is a hard
+gate, like capability** — a non-live ID is not a candidate at any
+benchmark score and never enters ranking. Capability requirements (e.g.
+native image input for vision seats) are hard gates, not scores — a
+text-only model cannot hold a vision seat at any benchmark number.
 
 ### Step 6 — Write the dated audit artifact
 
