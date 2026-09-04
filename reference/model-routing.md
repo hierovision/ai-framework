@@ -28,14 +28,14 @@ Go-tier live probes (per the Go/Zen escalation gate, Update procedure step 2b) r
 - `opencode-go/deepseek-v4-pro`: **FAILS** — same restriction → removed as the `triager` Go alt.
 - `council-member` Go mix: `kimi-k3 + glm-5.3 + deepseek-v4-flash` → **`kimi-k3 + glm-5.3 + minimax-m3`** (all three probe-verified live 2026-09-04; families: Moonshot / Z.ai / MiniMax).
 - `triager` Go alt: `deepseek-v4-pro` → **`kimi-k3`** (probe-verified live 2026-09-04).
-- `opencode-go/omen-alpha`: **LIVE** (probe 2026-09-04) but unbenched and undocumented (not in the docs endpoints/pricing tables) → Watch list only, not bound. See `reference/model-check-2026-09-04.md`.
+- `opencode-go/omen-alpha`: **LIVE** (probe 2026-09-04) but unbenched and undocumented (not in the docs endpoints/pricing tables) → Watch list only, not bound.
 - Note: the deepseek **Zen** (PAYG, `opencode/`) variants were not probed this pass (out of scope; no Zen row currently binds deepseek).
 
 ### Routing update — 2026-09-04 (follow-up probes)
 
 - `opencode/deepseek-v4-flash` on Zen PAYG: **LIVE** (trivial-prompt probe 2026-09-04, negligible cost). Divergence now fully mapped: free variant dead (not docs-listed, routing error) → Go variant geo-restricted (China opt-in) → Zen variant live. No row binds deepseek on Zen, so no binding change; the Go removals stand.
 - `omen-alpha` re-check 2026-09-04: Go catalog unchanged, still absent from docs endpoints/pricing, still zero benchmark evidence and undisclosed family → stays on the watch list, not bound.
-- `council-architecture` seat validation 2026-09-04 (`reference/eval-2026-09-04.md`): muse-spark passes all pre-registered criteria on 3 prompts, converges with independent nemotron/mimo findings. Validates the seat it holds; the full head-to-head bar for *additional* muse-spark seats stays open.
+- `council-architecture` seat validation 2026-09-04: muse-spark passes all pre-registered criteria on 3 prompts (lens adherence, concreteness, form, tradeoff-naming), converges with independent nemotron/mimo findings on shared scenarios. Validates the seat it holds; the full head-to-head bar for *additional* muse-spark seats stays open.
 
 ### Routing update — 2026-09-03
 
@@ -88,7 +88,7 @@ The exclusion supersedes any earlier mention. When a new grok-* ID appears in a 
 
 The free generalist was validated 2026-07-26 by a clean, no-tool head-to-head eval. Since 2026-08-14 `ling-3.0-flash-free` is gone from the catalog, `nemotron-3-ultra-free` now holds the generalist seats — its streaming caveat is the standing reliability risk. For risk-bearing tasks you may still escalate to Go or Zen tier. Free by default; escalation is opt-in.
 
-**Known monoculture risk (2026-09-03):** 3 of 5 free council seats bind to `nemotron-3-ultra-free` (chairman, performance, product). This is the best achievable diversity with the current free model set (nemotron, mimo, muse-spark — 3 families, 5 seats). A systematic nemotron blind spot will propagate through 3 lenses unchallenged. The security lens (mimo) and architecture lens (muse-spark) provide partial independence. Accept this risk until a 4th free family is validated or muse-spark receives a head-to-head eval confirming it can hold additional seats. 2026-09-04 seat validation passed for the architecture seat it holds (see `reference/eval-2026-09-04.md`); the head-to-head bar for further seats stays open. Review date: next catalog check.
+**Known monoculture risk (2026-09-03):** 3 of 5 free council seats bind to `nemotron-3-ultra-free` (chairman, performance, product). This is the best achievable diversity with the current free model set (nemotron, mimo, muse-spark — 3 families, 5 seats). A systematic nemotron blind spot will propagate through 3 lenses unchallenged. The security lens (mimo) and architecture lens (muse-spark) provide partial independence. Accept this risk until a 4th free family is validated or muse-spark receives a head-to-head eval confirming it can hold additional seats. 2026-09-04 seat validation passed for the architecture seat it holds (3-prompt checklist + cross-family convergence); the head-to-head bar for further seats stays open. Review date: next catalog check.
 
 ## Provider notes
 

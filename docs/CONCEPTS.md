@@ -378,7 +378,7 @@ flowchart TB
     end
     subgraph L4["Layer 4 — volatile facts (change monthly; isolated + dated)"]
         V1["reference/model-routing.md<br/>(model IDs, pricing, deprecations)"]
-        V2["model-check-YYYY-MM-DD.md audits"]
+        V2["dated Routing update sections<br/>(decision trail, never rewritten)"]
     end
     W1 --> D1 & D2 & D3 & D4
     W1 --> C1
@@ -436,7 +436,7 @@ flowchart TB
         B --> C["3. Fetch both live catalogs<br/>(date recorded; snapshot mode is stated, never mixed)"]
         C --> D["4. Verify benchmarks<br/>per objectivity hierarchy"]
         D --> E["5. Rank per role on its dominant trait<br/>capability facts are hard gates, not scores"]
-        E --> F["6. Write dated audit artifact<br/>model-check-YYYY-MM-DD.md"]
+        E --> F["6. Capture the evidence<br/>table + Q/U; write no files"]
         F --> G["7. Present table + Questionable/Uncertain<br/>STOP for approval"]
         G -->|approved| H["8. Apply bindings + agents model lines<br/>verify + commit + PR"]
         G -->|changes requested| E
