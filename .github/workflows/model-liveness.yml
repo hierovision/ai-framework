@@ -1,0 +1,47 @@
+# Model-liveness drift canary.
+#
+# Runs `scripts/model-liveness-check.py` ("model doctor"): fetches the live
+# Zen + Go catalogs and the docs free list, and verifies every model ID the
+# repo binds (`agents/*.md`, `reference/model-routing.md`) or documents
+# (`agents/council.md`, `docs/FREE-TIER-COUNCIL.md`) is actually routable
+# where it claims to be. This is the automated form of the check that
+# caught the 2026-09-02 `deepseek-v4-flash-free` failure (catalog-listed
+# but not docs-listed, hence not routable).
+#
+# Kept separate from CI on purpose: CI is fully offline/hermetic; this job
+# needs network. Scheduled + manual only — never on the merge path, so a
+# transient fetch failure can never block a PR (re-run via dispatch).
+#
+# Per the library's own skills:
+#   - securing-ci: minimal `permissions:`, SHA-pinned third-party actions,
+#     no secrets (there are none to leak here).
+#   - designing-cicd: scheduled canary + manual dispatch, no deploy.
+name: Model liveness
+
+on:
+  schedule:
+    # Weekly, Monday 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+# Least-privilege: read-only is all the canary needs.
+permissions:
+  contents: read
+
+# Cancel a stale run when a newer trigger fires on the same ref.
+concurrency:
+  group: model-liveness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift-canary:
+    runs-on: ubuntu-latest
+    steps:
+      # SHA-pinned (supply-chain safety — see securing-ci skill).
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+
+      # stdlib-only script: runner python3 is all it needs (no setup step,
+      # no third-party deps to pin).
+      - name: Run model-liveness drift canary
+        run: python3 scripts/model-liveness-check.py

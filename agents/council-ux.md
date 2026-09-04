@@ -1,7 +1,7 @@
 ---
 name: council-ux
 description: User experience and developer experience analysis
-model: opencode/nemotron-3-ultra-free
+model: opencode/mimo-v2.5-free
 mode: subagent
 hidden: true
 temperature: 0.5

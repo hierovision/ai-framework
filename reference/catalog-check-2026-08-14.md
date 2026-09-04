@@ -1,5 +1,7 @@
 # Catalog Check + Model Right-Sizing — 2026-08-14
 
+> **SUPERSEDED by 2026-09-03 remediation** — see `reference/model-routing.md` Routing update 2026-09-03. This file contains stale data (e.g., `deepseek-v4-flash-free` marked as ✓) and should not be used for routing decisions.
+
 Validation of `reference/model-routing.md` + the `agents/*.md` bindings and
 `docs/FREE-TIER-COUNCIL.md` against the **official opencode catalogs**,
 followed by a right-sizing evaluation per persona/workflow.

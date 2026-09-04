@@ -58,6 +58,13 @@ liveness-probe every remaining candidate (minimal routing test in a live
 opencode session: select an agent bound to that model / send a trivial
 prompt and verify no routing error). **Only live-verified IDs are
 candidates** — catalog membership alone never makes a model a candidate.
+
+**Go/Zen escalation gate:** for any model proposed for a Go or Zen
+escalation row, run a live routing probe on its tier (select an agent
+bound to that model on Go/Zen, invoke with a trivial prompt, confirm no
+routing error). Record the probe date + result in the routing update
+note. Non-live escalation IDs are excluded from the row.
+
 Offline / snapshot mode: a local snapshot directory containing
 `zen-catalog.json`, `go-catalog.json`, and `benchmarks.md` — use it when
 the user points at one or fetching fails. State which mode ran; never

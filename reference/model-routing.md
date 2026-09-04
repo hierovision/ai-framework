@@ -9,15 +9,36 @@ this file is the single place model IDs appear.
 |---|---|---|---|---|
 | `planner` | nemotron-3-ultra-free | glm-5.3 (alt kimi-k3) | claude-opus-5 (peak: claude-fable-5) | AA Intelligence Index 60; Thinkbench autonomous loop 92%/0.976 |
 | `implementer` | nemotron-3-ultra-free | kimi-k3 (alt kimi-k2.7-code) | claude-sonnet-5 (alt gpt-5.4) | AA 60 vs K2.7 43; MCPMark 81.1 (K2.7 legacy) |
-| `triager` | nemotron-3-ultra-free | glm-5.3 (alt deepseek-v4-pro) | gpt-5.6-luna (alt gpt-5.4-mini) | AA 60 / luna 52 at $0.05/task + 141 t/s |
+| `triager` | nemotron-3-ultra-free | glm-5.3 (alt kimi-k3) | gpt-5.6-luna (alt gpt-5.4-mini) | AA 60 / luna 52 at $0.05/task + 141 t/s |
 | `test-writer` | nemotron-3-ultra-free | kimi-k3 (alt kimi-k2.7-code) | claude-sonnet-5 | AA 60; MCPMark + SWE-bench Verified |
 | `debugger` | nemotron-3-ultra-free | glm-5.3 (alt glm-5.2) | claude-sonnet-5, gpt-5.4 | Thinkbench + SWE-bench Verified |
 | `reviewer` | nemotron-3-ultra-free | glm-5.3 (alt glm-5.2) | claude-sonnet-5, gpt-5.4 | SWE-bench Verified (defect catch) |
 | `vision-critic-fast` | — (no free multimodal) | minimax-m3 (native multimodal) | gemini-3-flash (alt gpt-5.4-mini) | native image-in; vision bench (gemini) |
 | `vision-critic-final` | — | — | gemini-3.1-pro (alt claude-sonnet-5) | vision quality (gemini-3.1-pro) |
-| `council-member` | nemotron-3-ultra-free + mimo-v2.5-free + muse-spark-1.2-contributor-free | kimi-k3 + glm-5.3 + deepseek-v4-flash (Go, mix families) | claude-opus-5 + gemini-3.1-pro + gpt-5.6-sol (frontier, max diversity) | family diversity + per-lens competence |
+| `council-member` | nemotron-3-ultra-free + mimo-v2.5-free + muse-spark-1.2-contributor-free | kimi-k3 + glm-5.3 + minimax-m3 (Go, mix families) | claude-opus-5 + gemini-3.1-pro + gpt-5.6-sol (frontier, max diversity) | family diversity + per-lens competence |
 | `skill-author` | nemotron-3-ultra-free | minimax-m3 (alt glm-5.2, qwen3.7-max) | claude-sonnet-5 (qwen3.7-max is Go-only IF leader) | IFBench 79.1; Thinkbench existing-code parity |
 | `skill-reviewer` | nemotron-3-ultra-free | glm-5.3 (alt glm-5.2) | claude-opus-5 (peak: claude-fable-5) | SWE-bench Verified (highest reasoning) |
+
+### Routing update — 2026-09-04
+
+Process hardening: `scripts/model-liveness-check.py` ("model doctor") automates the liveness/drift check from this pass — bound and documented IDs vs live catalogs + docs free list, exit 1 on drift; `.github/workflows/model-liveness.yml` runs it weekly + on demand (kept out of CI, which stays hermetic). The Update procedure now opens with it.
+
+Go-tier live probes (per the Go/Zen escalation gate, Update procedure step 2b) resolved the 2026-09-03 open item:
+- `opencode-go/deepseek-v4-flash`: **FAILS** — "only available hosted in China and requires explicit opt in" (probe 2026-09-04). Not routable by default → removed from the `council-member` Go mix.
+- `opencode-go/deepseek-v4-pro`: **FAILS** — same restriction → removed as the `triager` Go alt.
+- `council-member` Go mix: `kimi-k3 + glm-5.3 + deepseek-v4-flash` → **`kimi-k3 + glm-5.3 + minimax-m3`** (all three probe-verified live 2026-09-04; families: Moonshot / Z.ai / MiniMax).
+- `triager` Go alt: `deepseek-v4-pro` → **`kimi-k3`** (probe-verified live 2026-09-04).
+- `opencode-go/omen-alpha`: **LIVE** (probe 2026-09-04) but unbenched and undocumented (not in the docs endpoints/pricing tables) → Watch list only, not bound. See `reference/model-check-2026-09-04.md`.
+- Note: the deepseek **Zen** (PAYG, `opencode/`) variants were not probed this pass (out of scope; no Zen row currently binds deepseek).
+
+### Routing update — 2026-09-03
+
+Council rebalance to address monoculture and wire the 3rd family:
+- `council-architecture`: `nemotron-3-ultra-free` → `muse-spark-1.2-contributor-free` (diversity seat; architecture lens most sensitive to family-level pattern bias)
+- `council-ux`: `nemotron-3-ultra-free` → `mimo-v2.5-free` (validated security lens strength; mimo now holds 2 seats)
+- Council fallback tightened: removed `general` subagent fallback in `agents/council.md`; degraded council now aborts with explicit error
+- Go-tier `deepseek-v4-flash` in council-member Go escalation row: **verification required** — probe live routability on Go tier before next routing pass; if unverified, replace with `kimi-k3` (verified Go)
+- Known monoculture risk: 3 of 5 free council seats remain on `nemotron-3-ultra-free` (chairman, performance, product). This is the best achievable 3-family split (nemotron×3, mimo×2, muse-spark×1) with current free model set. Documented in Free-tier caveats.
 
 ## Routing update — 2026-09-02
 
@@ -40,6 +61,7 @@ Full-sweep pass via the `optimizing-model-routing` skill. All previously bound I
 
 - SWE-bench Verified: directionally useful for tier filtering, not model ranking
 - Thinkbench autonomous coding loop: GLM 5.2 92% full-pass / 0.976 mean; on existing-code tasks both GLM and M3 score 0.999–1.000 (indistinguishable)
+- KingBench 3 (independent, 2026-08-14): GLM-5.3 91.25% — beats Fable 5 (82.5%), Opus 5 (77.5%), Kimi K3 (77.5%). Strongest independent reasoning signal for the GLM-5.3 Go rows; single-benchmark, watch for Thinkbench/MCPMark reproduction
 - IFBench (instruction-following): Qwen3.7 Max 79.1 (leads); DeepSeek V4 Pro 77.0
 - MCPMark Verified: Kimi K2.7 Code 81.1 > Opus 4.8 76.4; K2.7 ~30% more token-efficient
 - Multimodal: MiniMax M3 is natively multimodal (image/video in) on Go's flat rate — the only cheap open model that reads a screenshot without a bolt-on
@@ -60,6 +82,8 @@ The exclusion supersedes any earlier mention. When a new grok-* ID appears in a 
 
 The free generalist was validated 2026-07-26 by a clean, no-tool head-to-head eval. Since 2026-08-14 `ling-3.0-flash-free` is gone from the catalog, `nemotron-3-ultra-free` now holds the generalist seats — its streaming caveat is the standing reliability risk. For risk-bearing tasks you may still escalate to Go or Zen tier. Free by default; escalation is opt-in.
 
+**Known monoculture risk (2026-09-03):** 3 of 5 free council seats bind to `nemotron-3-ultra-free` (chairman, performance, product). This is the best achievable diversity with the current free model set (nemotron, mimo, muse-spark — 3 families, 5 seats). A systematic nemotron blind spot will propagate through 3 lenses unchallenged. The security lens (mimo) and architecture lens (muse-spark) provide partial independence. Accept this risk until a 4th free family is validated or muse-spark receives a head-to-head eval confirming it can hold additional seats. Review date: next catalog check.
+
 ## Provider notes
 
 - **Free tier** ($0): `opencode/*-free` catalog entries (subset of Zen catalog) **that are docs-listed and live-verified**. Default tier — used for every role where a live free model exists. No financial consequence.
@@ -79,11 +103,14 @@ The UI iteration loop requires a model that can read screenshots. Tiered strateg
 
 ## Update procedure
 
+0. Run the model-doctor canary first: `python3 scripts/model-liveness-check.py` (bound + documented IDs vs live catalogs and the docs free list). Investigate any drift before the full pass — a red canary means the current bindings are already stale.
+
 1. Fetch current catalogs:
    - https://opencode.ai/zen/v1/models
    - https://opencode.ai/zen/go/v1/models
    - Docs pages for pricing/deprecations — **`https://opencode.ai/docs/zen/#endpoints` is authoritative for free-tier availability** (the API catalog can list IDs that are not actually routable; see 2026-09-02 `deepseek-v4-flash-free` failure).
 2. **Candidate gate — liveness (hard gate, before any evaluation or ranking):** catalog membership alone does not make a model a candidate. A model is a candidate **only if** it is BOTH catalog-listed **and** live-verified: for free tier, docs-listed at `https://opencode.ai/docs/zen/#endpoints` **and** actually routes in a live opencode session (minimal probe: select the agent bound to that model and verify no routing error); for Go/Zen, actually routes in a live session on its tier. Cross-check catalog vs docs; any divergence → Questionable/Uncertain and the ID is excluded from ranking/evaluation. Non-live IDs never enter benchmark comparison or ranking at any score.
+2b. **Go/Zen escalation gate:** for any model added to a Go or Zen escalation row, run a live routing probe (select an agent bound to that model on its tier, invoke with a trivial prompt, confirm no routing error). Record the probe date + result in the routing update note. Non-live escalation IDs are excluded from the row.
 3. Update the core routing table and bench basis per-role rationale (ranking only over **live candidates** from step 2).
 4. If a bound model is deprecated or beaten on price/quality, update the role row and note it in the commit message.
 5. Bump the retrieval date at the top of the file.
@@ -93,7 +120,7 @@ The UI iteration loop requires a model that can read screenshots. Tiered strateg
 
 - **Toggle:** `AI_FRAMEWORK_FREE_TIER=1` selects free-tier mode. The escalation rows above remain the default-capable path; with the toggle on, every task uses a free model even when Go/Zen keys are present.
 - Skills reference **roles**, never these IDs (library convention). The binding of a role to a free model in free-tier mode happens in the harness/project config, not in skill bodies — this file is the single home of the IDs.
-- **Council** runs on free models for planning & review (per `docs/FREE-TIER-COUNCIL.md`). Planning council (A: nemotron-3-ultra-free, B: mimo-v2.5-free, C: muse-spark-1.2-contributor-free) and review council (A: muse-spark-1.2-contributor-free, B: mimo-v2.5-free, C: nemotron-3-ultra-free) synthesize findings with explicit disagreement surface.
+- **Council** runs on free models for planning & review (per `docs/FREE-TIER-COUNCIL.md`). The 5 council lenses bind to: security=mimo-v2.5-free, performance=nemotron-3-ultra-free, ux=mimo-v2.5-free, architecture=muse-spark-1.2-contributor-free, product=nemotron-3-ultra-free. Chairman binds to nemotron-3-ultra-free. Family diversity: nemotron×3, mimo×2, muse-spark×1.
 - Council only for **planning & review** (per above). Raw execution stays single-model to conserve free quota.
 - Always surface disagreements; never let one model silently override another.
 - Free-tier mode coexists with the escalation routing — the toggle selects between them; the escalation rows are not modified by enabling free-tier.
