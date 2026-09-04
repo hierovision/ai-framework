@@ -19,48 +19,6 @@ this file is the single place model IDs appear.
 | `skill-author` | nemotron-3-ultra-free | minimax-m3 (alt glm-5.2, qwen3.7-max) | claude-sonnet-5 (qwen3.7-max is Go-only IF leader) | IFBench 79.1; Thinkbench existing-code parity |
 | `skill-reviewer` | nemotron-3-ultra-free | glm-5.3 (alt glm-5.2) | claude-opus-5 (peak: claude-fable-5) | SWE-bench Verified (highest reasoning) |
 
-### Routing update — 2026-09-04
-
-Process hardening: `scripts/model-liveness-check.py` ("model doctor") automates the liveness/drift check from this pass — bound and documented IDs vs live catalogs + docs free list, exit 1 on drift; `.github/workflows/model-liveness.yml` runs it weekly + on demand (kept out of CI, which stays hermetic). The Update procedure now opens with it.
-
-Go-tier live probes (per the Go/Zen escalation gate, Update procedure step 2b) resolved the 2026-09-03 open item:
-- `opencode-go/deepseek-v4-flash`: **FAILS** — "only available hosted in China and requires explicit opt in" (probe 2026-09-04). Not routable by default → removed from the `council-member` Go mix.
-- `opencode-go/deepseek-v4-pro`: **FAILS** — same restriction → removed as the `triager` Go alt.
-- `council-member` Go mix: `kimi-k3 + glm-5.3 + deepseek-v4-flash` → **`kimi-k3 + glm-5.3 + minimax-m3`** (all three probe-verified live 2026-09-04; families: Moonshot / Z.ai / MiniMax).
-- `triager` Go alt: `deepseek-v4-pro` → **`kimi-k3`** (probe-verified live 2026-09-04).
-- `opencode-go/omen-alpha`: **LIVE** (probe 2026-09-04) but unbenched and undocumented (not in the docs endpoints/pricing tables) → Watch list only, not bound.
-- Note: the deepseek **Zen** (PAYG, `opencode/`) variants were not probed this pass (out of scope; no Zen row currently binds deepseek).
-
-### Routing update — 2026-09-04 (follow-up probes)
-
-- `opencode/deepseek-v4-flash` on Zen PAYG: **LIVE** (trivial-prompt probe 2026-09-04, negligible cost). Divergence now fully mapped: free variant dead (not docs-listed, routing error) → Go variant geo-restricted (China opt-in) → Zen variant live. No row binds deepseek on Zen, so no binding change; the Go removals stand.
-- `omen-alpha` re-check 2026-09-04: Go catalog unchanged, still absent from docs endpoints/pricing, still zero benchmark evidence and undisclosed family → stays on the watch list, not bound.
-- `council-architecture` seat validation 2026-09-04: muse-spark passes all pre-registered criteria on 3 prompts (lens adherence, concreteness, form, tradeoff-naming), converges with independent nemotron/mimo findings on shared scenarios. Validates the seat it holds; the full head-to-head bar for *additional* muse-spark seats stays open.
-
-### Routing update — 2026-09-03
-
-Council rebalance to address monoculture and wire the 3rd family:
-- `council-architecture`: `nemotron-3-ultra-free` → `muse-spark-1.2-contributor-free` (diversity seat; architecture lens most sensitive to family-level pattern bias)
-- `council-ux`: `nemotron-3-ultra-free` → `mimo-v2.5-free` (validated security lens strength; mimo now holds 2 seats)
-- Council fallback tightened: removed `general` subagent fallback in `agents/council.md`; degraded council now aborts with explicit error
-- Go-tier `deepseek-v4-flash` in council-member Go escalation row: **verification required** — probe live routability on Go tier before next routing pass; if unverified, replace with `kimi-k3` (verified Go)
-- Known monoculture risk: 3 of 5 free council seats remain on `nemotron-3-ultra-free` (chairman, performance, product). This is the best achievable 3-family split (nemotron×3, mimo×2, muse-spark×1) with current free model set. Documented in Free-tier caveats.
-
-## Routing update — 2026-09-02
-
-Liveness failure: `deepseek-v4-flash-free` appears in `https://opencode.ai/zen/v1/models` but returns an error when actually routed to in an opencode session (confirmed by user). The API catalog is not authoritative for routability — `https://opencode.ai/docs/zen/#endpoints` (which omits this ID from its free-model list) is the correct source for what is actually available. All free seats previously on `deepseek-v4-flash-free` rebind to `nemotron-3-ultra-free` (catalog-verified + docs-documented). Council free mix third seat: `deepseek-v4-flash-free` → `muse-spark-1.2-contributor-free` to preserve 3-family diversity (nemotron / mimo / muse-spark). Alt references to the dead ID removed.
-
-## Routing update — 2026-08-25
-
-Full-sweep pass via the `optimizing-model-routing` skill. All previously bound IDs remain catalog-valid (no stale bindings). Key changes:
-
-- `implementer`/`test-writer` Go: kimi-k2.7-code → **kimi-k3** (AA 60 vs 43)
-- `triager` Go: hy3 → **glm-5.3** (AA 60 vs 42); Zen: gpt-5.6-luna (AA 52 at $0.05/task, 141 t/s)
-- `council-member` Go mix: hy3 + mimo-v2.5 + deepseek-v4-flash → **kimi-k3 + glm-5.3 + deepseek-v4-flash** (42/38/52 → 60/60/52)
-- Free defaults and all `agents/*.md` bindings: **unchanged**
-- Watch list: kimi-k3 and deepseek-v4-flash-vision-exp are Go-tier multimodal candidates for `vision-critic-fast`; qwen3.8-max (AA 58) replaces qwen3.7-max as skill-author IF escalation watch
-- Grok family scores 61 on AA — hard-excluded (user directive 2026-08-14)
-
 ## Benchmark evidence principles
 
 **Read benchmarks as a tier filter, not a ranking.** The most decision-relevant numbers are the independent autonomous-loop test (Thinkbench) and instruction-following (IFBench), plus this repo's own authoring rounds. Harness choice alone swings scores 10–20 points.
@@ -115,8 +73,8 @@ The UI iteration loop requires a model that can read screenshots. Tiered strateg
    - https://opencode.ai/zen/v1/models
    - https://opencode.ai/zen/go/v1/models
    - Docs pages for pricing/deprecations — **`https://opencode.ai/docs/zen/#endpoints` is authoritative for free-tier availability** (the API catalog can list IDs that are not actually routable; see 2026-09-02 `deepseek-v4-flash-free` failure).
-2. **Candidate gate — liveness (hard gate, before any evaluation or ranking):** catalog membership alone does not make a model a candidate. A model is a candidate **only if** it is BOTH catalog-listed **and** live-verified: for free tier, docs-listed at `https://opencode.ai/docs/zen/#endpoints` **and** actually routes in a live opencode session (minimal probe: select the agent bound to that model and verify no routing error); for Go/Zen, actually routes in a live session on its tier. Cross-check catalog vs docs; any divergence → Questionable/Uncertain and the ID is excluded from ranking/evaluation. Non-live IDs never enter benchmark comparison or ranking at any score.
-2b. **Go/Zen escalation gate:** for any model added to a Go or Zen escalation row, run a live routing probe (select an agent bound to that model on its tier, invoke with a trivial prompt, confirm no routing error). Record the probe date + result in the routing update note. Non-live escalation IDs are excluded from the row.
+2. **Candidate gate — liveness (hard gate, before any evaluation or ranking):** catalog membership alone does not make a model a candidate. A model is a candidate **only if** it is BOTH catalog-listed **and** live-verified: for free tier, docs-listed at `https://opencode.ai/docs/zen/#endpoints` **and** actually routes in a live opencode session (minimal probe: select the agent bound to that model and verify clean routing — no error and no opt-in, consent, or region gate); for Go/Zen, actually routes in a live session on its tier. Cross-check catalog vs docs; any divergence → Questionable/Uncertain and the ID is excluded from ranking/evaluation. Non-live IDs never enter benchmark comparison or ranking at any score. Access restrictions fail the gate the same way errors do: a model routable only behind an explicit opt-in, consent gate, or region lock (e.g. geo-hosted serving requiring user opt-in) is **not live**. Never opt in on the user's behalf — that would enroll them in the gated serving and its data terms without consent. Exclude the ID, name the gate in Questionable/Uncertain, and move on. Gates lift without notice, so every pass re-probes from scratch: a rehabilitated model re-enters candidacy on its own, with no record to reconcile.
+2b. **Go/Zen escalation gate:** for any model added to a Go or Zen escalation row, run a live routing probe (select an agent bound to that model on its tier, invoke with a trivial prompt, confirm clean routing with no error and no opt-in/consent gate). Record the probe result in the commit message and PR description. Non-live escalation IDs are excluded from the row.
 3. Update the core routing table and bench basis per-role rationale (ranking only over **live candidates** from step 2).
 4. If a bound model is deprecated or beaten on price/quality, update the role row and note it in the commit message.
 5. Bump the retrieval date at the top of the file.

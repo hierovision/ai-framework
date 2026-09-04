@@ -6,7 +6,7 @@
       "id": 1,
       "prompt": "the model bindings in this library feel stale. run the model-routing optimization pass over the repo — find the objectively best free and escalation models per role from the catalogs and benchmark evidence, show me the findings, and wait for my approval before changing any bindings. you're offline: use the catalog snapshots in reference/catalog-snapshot/ instead of fetching live. this is a plain working copy, not a git checkout — skip any branch/commit/PR steps.",
       "expected_behavior": [
-        "Turn 1: reads reference/model-routing.md in full (bindings table, hard exclusions, deprecation watch) and every agents/*.md model: line BEFORE proposing anything",
+        "Turn 1: reads reference/model-routing.md in full (bindings table, hard exclusions) and every agents/*.md model: line BEFORE proposing anything",
         "Turn 1: uses the catalog snapshots as the candidacy gate — proposes only catalog-present IDs, and flags atlas-2.9-free (bound in agents/triage.md) as removed from the catalog and therefore a forced rebind",
         "Turn 1: drops the banjax family from candidacy entirely, citing the hard exclusion, despite banjax-ultra's top self-reported 96.2 — the exclusion wins over any score",
         "Turn 1: ranks per role on the objectivity hierarchy — decisions cite the independently reproduced AgentLoop scores (and cross-checked ToolMark for tool-use), while vendor-only numbers (banjax-ultra 96.2, quill-2.5 84.0) never decide a binding",
@@ -16,7 +16,7 @@
         "Turn 1: presents a Questionable/Uncertain section that includes at minimum: banjax-ultra's self-reported-only score (excluded anyway), quill-2.5's vendor-only 84.0, quill-2-free's streaming reliability caveat, the vision tier change, and the forced atlas-2.9-free rebind",
         "Turn 1: presents the table + evidence + Questionable/Uncertain with full coverage (sources, current bindings, per-role analysis, proposed bindings) and makes ZERO changes to agents/*.md and reference/model-routing.md — stops at an explicit approval question",
         "Turn 2: applies exactly the approved table — agents/design.md rebinds to opencode/vortex-2-flash-free and agents/triage.md to opencode/vortex-2-flash-free (forced stale rebind; general reasoning 62.8 + zero-failure reliability beat the noise-sized IF edge); build/council/council-ux/council-security stay unchanged (restraint: only evidenced changes land)",
-        "Turn 2: appends the dated Routing update section to model-routing.md without rewriting history, updates the deprecation watch for atlas-2.9-free, and records what landed (including the modification) in the Routing update note",
+        "Turn 2: updates the role rows in model-routing.md without rewriting git history and records what landed (including the modification) in the commit message / PR description",
         "Turn 2: self-runs scripts/verify_rebind.py with a generated expectation file and reports exit 0; the grader's canonical run (evals/expected-eval1.json) also exits 0"
       ],
       "files": ["fixtures/miniframework/AGENTS.md", "fixtures/miniframework/reference/model-routing.md", "fixtures/miniframework/agents/design.md", "fixtures/miniframework/agents/build.md", "fixtures/miniframework/agents/triage.md", "fixtures/miniframework/agents/council.md", "fixtures/miniframework/agents/council-ux.md", "fixtures/miniframework/agents/council-security.md", "fixtures/miniframework/reference/catalog-snapshot/zen-catalog.json", "fixtures/miniframework/reference/catalog-snapshot/go-catalog.json", "fixtures/miniframework/reference/catalog-snapshot/benchmarks.md"]
@@ -39,7 +39,7 @@
       "expected_behavior": [
         "Turn 1: identical expectations to eval 1 turn 1 (full-sweep presentation + STOP + zero binding edits)",
         "Turn 2: honors the user's modification exactly — agents/triage.md binds opencode/atlas-mini-free (NOT the proposed free generalist) while every other approved change lands as presented",
-        "Turn 2: the model-routing.md Routing update section records the modified binding (atlas-mini-free) as what was applied, not the original proposal — the record matches reality",
+        "Turn 2: the commit message / PR description records the modified binding (atlas-mini-free) as what was applied, not the original proposal — the record matches reality",
         "Turn 2: does not silently keep the quill-2-free proposal anywhere in the final state — the applied record and the files agree",
         "Turn 2: self-runs scripts/verify_rebind.py with a generated expectation file reflecting the MODIFIED table and reports exit 0; the grader's canonical run (evals/expected-eval3.json) also exits 0"
       ],

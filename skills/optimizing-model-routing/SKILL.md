@@ -38,9 +38,8 @@ never mistaken for a clean bill of health on the rest.
 
 ### Step 2 — Read current state
 
-Read `reference/model-routing.md` in full — the bindings table, **hard
-exclusions**, and the deprecation watch — and every `model:` line in
-`agents/*.md`. Two absolute rules from this step:
+Read `reference/model-routing.md` in full — the bindings table and **hard
+exclusions** — and every `model:` line in `agents/*.md`. Two absolute rules from this step:
 
 - **Hard exclusions win over any score.** An excluded family is dropped
   from candidacy regardless of benchmark results, even the best ever
@@ -56,8 +55,14 @@ vs docs; any divergence is a catalog-vs-availability mismatch → record in
 Questionable/Uncertain and exclude the ID from candidacy. Then
 liveness-probe every remaining candidate (minimal routing test in a live
 opencode session: select an agent bound to that model / send a trivial
-prompt and verify no routing error). **Only live-verified IDs are
+prompt and verify clean routing — no error and no opt-in, consent, or
+region gate). **Only live-verified IDs are
 candidates** — catalog membership alone never makes a model a candidate.
+Access restrictions fail the gate: a model routable only behind an
+explicit opt-in, consent gate, or region lock is **not live** — never opt
+in on the user's behalf; exclude the ID, name the gate in
+Questionable/Uncertain. Gates lift without notice: every pass re-probes
+from scratch, and a rehabilitated model re-enters candidacy automatically.
 
 **Go/Zen escalation gate:** for any model proposed for a Go or Zen
 escalation row, run a live routing probe on its tier (select an agent
@@ -100,10 +105,9 @@ text-only model cannot hold a vision seat at any benchmark number.
 
 Assemble the pass record as the Step 7 presentation itself — table,
 evidence summary, and Questionable/Uncertain, each entry carrying
-source + date + independence status. The durable home of the
-*decision* is the dated `### Routing update — YYYY-MM-DD` section
-appended to `reference/model-routing.md` on approval (Step 8), plus
-the PR description. Write no files before approval.
+source + date + independence status. On approval, the *decision* is
+recorded in the commit message and PR description (Step 8). Write no
+files before approval.
 
 ### Step 7 — Present; STOP
 
@@ -128,11 +132,11 @@ Apply exactly the approved table — a user modification to the proposal is
 part of the approval, not an argument to relitigate:
 
 1. Update `agents/*.md` `model:` lines (free defaults) and the role rows
-   in `reference/model-routing.md` (escalations), appending the dated
-   `### Routing update — YYYY-MM-DD` section recording the evidence
-   basis and what actually landed (including user modifications).
-   Revise-don't-clobber: never rewrite history; update the deprecation
-   watch rows for any ID this pass retires.
+   in `reference/model-routing.md` (escalations). Record the evidence
+   basis and what actually landed (including user modifications) in the
+   commit message and PR description — model-routing.md carries current
+   state only, no in-file changelog. Revise-don't-clobber: never rewrite
+   git history.
 2. Generate the expectation JSON from the **approved** table
    (`bindings` + `forbidden` ids: excluded families and removed catalog
    ids) and run, resolved against this skill's own directory — not the
