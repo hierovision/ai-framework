@@ -418,22 +418,25 @@ flowchart TB
 
 Every skill body says things like "escalate to the `planner` role" —
 never a model name. All bindings live in one dated file,
-`reference/model-routing.md`:
+`reference/model-routing.md`. The stable part — which roles exist and
+which skills use them — is safe to memorize:
 
-| Role | Used by | Go default | Zen escalation |
-|---|---|---|---|
-| `planner` | designing-architecture | glm-5.3 (alt glm-5.2) | claude-opus-5 |
-| `implementer` | implementing-features | kimi-k2.7-code | claude-sonnet-5 |
-| `test-writer` | the test trio | kimi-k2.7-code | claude-sonnet-5 |
-| `debugger` | debugging-test-failures | glm-5.3 | claude-sonnet-5 |
-| `reviewer` | reviewing-code | glm-5.3 | claude-sonnet-5 |
-| `vision-critic-fast/-final` | UI loop | minimax-m3 / — | gemini-3-flash / gemini-3.1-pro |
-| `skill-author` | authoring-skills | minimax-m3 (glm-5.2 escalation) | qwen3.7-max |
-| `skill-reviewer` | the orchestrator process | — | claude-opus-5 |
+| Role | Used by |
+|---|---|
+| `planner` | designing-architecture |
+| `implementer` | implementing-features |
+| `test-writer` | the test trio |
+| `debugger` | debugging-test-failures |
+| `reviewer` | reviewing-code |
+| `vision-critic-fast` / `vision-critic-final` | UI loop |
+| `council-member` | the council agents |
+| `skill-author` | authoring-skills |
+| `skill-reviewer` | the orchestrator process |
 
-This is *why* GLM 5.2 built `auditing-accessibility`: it's the documented
-`skill-author` escalation tier for greenfield-ish, contract-consuming
-skills.
+Which model each role binds to — free, Go, or Zen — changes with every
+catalog cycle, so never memorize it; read the routing file when you need
+the current binding. This curriculum itself carries no model IDs: when a
+model is added, removed, or rebound, this file needs zero changes.
 
 ---
 

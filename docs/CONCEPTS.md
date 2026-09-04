@@ -392,8 +392,8 @@ The mechanism that does the real work sits between Layer 1 and Layer 4:
 **skills
 reference roles, never model IDs.** A skill body says "escalate to the
 `planner` role"; `reference/model-routing.md` is the single file in the
-framework where a concrete model ID appears. When `ling-3.0-flash-free`
-vanished from the provider catalog on 2026-08-14, the fix was a dated
+framework where a concrete model ID appears. When a bound free generalist
+vanished from the provider catalog (2026-08-14), the fix was a dated
 rebind in that one file plus the `model:` lines of the thin agents — zero
 skill bodies changed. The alternative — model names baked into twenty
 skill files — would have gone silently stale everywhere at once.
@@ -636,11 +636,11 @@ register, and a recommendation. The design bet is stated explicitly:
 > families buys independent perspective; a single model reviewing itself
 > does not.
 
-The default council mixes three model families (nemotron / mimo /
-muse-spark) deliberately — even where one family's model scores higher, two
-seats on one family would weaken the independence that is the whole point. The
-opt-in frontier council mixes Anthropic / Google / OpenAI for the same
-reason. And disagreements are **surfaced, never silenced**: a finding one
+The default council seats deliberately span multiple model families —
+even where one family's model scores higher, two seats on one family would
+weaken the independence that is the whole point; the concrete family mix at
+any moment lives in `reference/model-routing.md`, not here. And
+disagreements are **surfaced, never silenced**: a finding one
 member overrides is named in the synthesis, not dropped.
 
 ```mermaid
