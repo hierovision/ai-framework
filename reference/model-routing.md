@@ -21,6 +21,8 @@ this file is the single place model IDs appear.
 
 ### Routing update — 2026-09-04
 
+Process hardening: `scripts/model-liveness-check.py` ("model doctor") automates the liveness/drift check from this pass — bound and documented IDs vs live catalogs + docs free list, exit 1 on drift; `.github/workflows/model-liveness.yml` runs it weekly + on demand (kept out of CI, which stays hermetic). The Update procedure now opens with it.
+
 Go-tier live probes (per the Go/Zen escalation gate, Update procedure step 2b) resolved the 2026-09-03 open item:
 - `opencode-go/deepseek-v4-flash`: **FAILS** — "only available hosted in China and requires explicit opt in" (probe 2026-09-04). Not routable by default → removed from the `council-member` Go mix.
 - `opencode-go/deepseek-v4-pro`: **FAILS** — same restriction → removed as the `triager` Go alt.
@@ -99,6 +101,8 @@ The UI iteration loop requires a model that can read screenshots. Tiered strateg
 **No free multimodal model exists**, so vision defaults to the Go escalation (M3).
 
 ## Update procedure
+
+0. Run the model-doctor canary first: `python3 scripts/model-liveness-check.py` (bound + documented IDs vs live catalogs and the docs free list). Investigate any drift before the full pass — a red canary means the current bindings are already stale.
 
 1. Fetch current catalogs:
    - https://opencode.ai/zen/v1/models
