@@ -61,6 +61,7 @@ Full-sweep pass via the `optimizing-model-routing` skill. All previously bound I
 
 - SWE-bench Verified: directionally useful for tier filtering, not model ranking
 - Thinkbench autonomous coding loop: GLM 5.2 92% full-pass / 0.976 mean; on existing-code tasks both GLM and M3 score 0.999–1.000 (indistinguishable)
+- KingBench 3 (independent, 2026-08-14): GLM-5.3 91.25% — beats Fable 5 (82.5%), Opus 5 (77.5%), Kimi K3 (77.5%). Strongest independent reasoning signal for the GLM-5.3 Go rows; single-benchmark, watch for Thinkbench/MCPMark reproduction
 - IFBench (instruction-following): Qwen3.7 Max 79.1 (leads); DeepSeek V4 Pro 77.0
 - MCPMark Verified: Kimi K2.7 Code 81.1 > Opus 4.8 76.4; K2.7 ~30% more token-efficient
 - Multimodal: MiniMax M3 is natively multimodal (image/video in) on Go's flat rate — the only cheap open model that reads a screenshot without a bolt-on
