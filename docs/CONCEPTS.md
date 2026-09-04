@@ -637,7 +637,7 @@ register, and a recommendation. The design bet is stated explicitly:
 > does not.
 
 The default council mixes three model families (nemotron / mimo /
-deepseek) deliberately — even where one family's model scores higher, two
+muse-spark) deliberately — even where one family's model scores higher, two
 seats on one family would weaken the independence that is the whole point. The
 opt-in frontier council mixes Anthropic / Google / OpenAI for the same
 reason. And disagreements are **surfaced, never silenced**: a finding one

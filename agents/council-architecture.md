@@ -1,7 +1,7 @@
 ---
 name: council-architecture
 description: Architecture and maintainability analysis
-model: opencode/nemotron-3-ultra-free
+model: opencode/muse-spark-1.2-contributor-free
 mode: subagent
 hidden: true
 temperature: 0.2
