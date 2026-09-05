@@ -13,16 +13,11 @@ and checks the target repo:
 1. every listed agent file exists and its `model:` frontmatter line
    equals the expected id exactly;
 2. no forbidden substring (excluded families, removed catalog ids)
-   appears anywhere in any agents/*.md file;
-3. a reference/model-check-*.md audit artifact exists and contains the
-   required `## Sources` and `## Proposed bindings` sections;
-4. reference/model-routing.md gained a dated
-   `### Routing update - YYYY-MM-DD` section (revise-don't-clobber
-   marker; the fixture must not contain one before the pass).
+   appears anywhere in any agents/*.md file.
 
 Exit 0 = all checks pass. Exit 1 = one or more failures, each printed.
 The verifier is designed to fail on an untouched stale fixture (wrong
-bindings, no artifact, no update marker) — a green run means the pass
+bindings, forbidden id present) — a green run means the pass
 actually landed.
 
 Usage:
@@ -80,36 +75,10 @@ def main() -> int:
                     "(excluded family or removed catalog id)"
                 )
 
-    # 3. the dated audit artifact exists with its required sections.
-    artifacts = sorted(
-        glob.glob(os.path.join(repo, "reference", "model-check-*.md"))
-    )
-    if not artifacts:
-        errors.append("reference/model-check-*.md: audit artifact missing")
-    else:
-        with open(artifacts[-1], "r", encoding="utf-8") as fh:
-            artifact = fh.read()
-        for section in ("## Sources", "## Proposed bindings"):
-            if section not in artifact:
-                errors.append(
-                    f"{os.path.relpath(artifacts[-1], repo)}: "
-                    f"missing required section '{section}'"
-                )
-
-    # 4. model-routing.md gained a dated routing-update marker.
+    # 3. model-routing.md exists (bindings live here; history in git).
     routing = os.path.join(repo, "reference", "model-routing.md")
     if not os.path.isfile(routing):
         errors.append("reference/model-routing.md: file missing")
-    else:
-        with open(routing, "r", encoding="utf-8") as fh:
-            routing_text = fh.read()
-        if not re.search(
-            r"### Routing update [—-] \d{4}-\d{2}-\d{2}", routing_text
-        ):
-            errors.append(
-                "reference/model-routing.md: no dated "
-                "'### Routing update — YYYY-MM-DD' section appended"
-            )
 
     if errors:
         print(f"FAIL: {len(errors)} problem(s) in {repo}")
@@ -118,7 +87,7 @@ def main() -> int:
         return 1
 
     print(f"OK: {len(bindings)} agent binding(s), "
-          f"{len(forbidden)} forbidden id(s), artifact + update marker verified")
+          f"{len(forbidden)} forbidden id(s) verified")
     return 0
 
 

@@ -376,9 +376,9 @@ flowchart TB
     subgraph L3["Layer 3 — stack specifics (change per project)"]
         S1["references/stacks/*.md<br/>(vue-supabase, github, jira, tailwind…)"]
     end
-    subgraph L4["Layer 4 — volatile facts (change monthly; isolated + dated)"]
+    subgraph L4["Layer 4 — volatile facts (change monthly; current-state only)"]
         V1["reference/model-routing.md<br/>(model IDs, pricing, deprecations)"]
-        V2["model-check-YYYY-MM-DD.md audits"]
+        V2["git history + PR descriptions<br/>(decision trail)"]
     end
     W1 --> D1 & D2 & D3 & D4
     W1 --> C1
@@ -400,16 +400,12 @@ skill files — would have gone silently stale everywhere at once.
 
 Two supporting decisions:
 
-- **Volatile facts are dated, not deleted.** The routing file is a running
-  record: every catalog re-check appends a dated `### Routing update`
-  section, retired IDs move to a deprecation watch, and replaced claims
-  are marked historical rather than rewritten. Any binding's *why* is
-  readable, including what it replaced and when.
+- **Volatile facts are current-state only, never changelogged.** The routing file holds today's bindings and nothing else: no update history, no retired-ID watch tables, no recorded rationales. History lives in git log and PR descriptions, which timestamp for free. A fact that can change — liveness, geo gates, availability — is either re-verified every pass by a standing rule or it does not enter the file. That is what keeps the outer layer cheap: there is nothing in it to go stale except today's truth.
 - **The churn survival test.** This is not theoretical: across catalog
   events on 2026-07-25, 2026-08-02, 2026-08-14, and 2026-08-30 (models
   removed, re-added, deprecated, tier-migrated), the process artifacts —
   skill bodies, plan format, disciplines — needed zero changes. All churn
-  landed in the isolated outer layer, each with a dated rationale. The design
+  landed in the isolated outer layer, each recorded in its commit and PR. The design
   goal is exact: **the most volatile inputs must be the cheapest to
   change.**
 
@@ -432,11 +428,11 @@ verifiable application, never self-certified.
 flowchart TB
     subgraph PASS["the routing pass"]
         direction TB
-        A["1. Scope: all roles or one"] --> B["2. Read current bindings<br/>+ hard exclusions + deprecation watch"]
+        A["1. Scope: all roles or one"] --> B["2. Read current bindings<br/>+ hard exclusions"]
         B --> C["3. Fetch both live catalogs<br/>(date recorded; snapshot mode is stated, never mixed)"]
         C --> D["4. Verify benchmarks<br/>per objectivity hierarchy"]
         D --> E["5. Rank per role on its dominant trait<br/>capability facts are hard gates, not scores"]
-        E --> F["6. Write dated audit artifact<br/>model-check-YYYY-MM-DD.md"]
+        E --> F["6. Capture the evidence<br/>table + Q/U; write no files"]
         F --> G["7. Present table + Questionable/Uncertain<br/>STOP for approval"]
         G -->|approved| H["8. Apply bindings + agents model lines<br/>verify + commit + PR"]
         G -->|changes requested| E

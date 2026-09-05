@@ -24,7 +24,7 @@ Routing Progress:
 - [ ] 3. Gather catalogs + liveness (live fetch; docs + routing probe)
 - [ ] 4. Identify + verify objective benchmarks
 - [ ] 5. Rank candidates per role (free first; Go/Zen escalation — live candidates only)
-- [ ] 6. Write the dated audit artifact
+- [ ] 6. Capture the evidence (table + Questionable/Uncertain; write no files)
 - [ ] 7. Present table + evidence + Questionable/Uncertain; STOP for approval
 - [ ] 8. On approval: apply, verify, commit, PR
 ```
@@ -38,9 +38,8 @@ never mistaken for a clean bill of health on the rest.
 
 ### Step 2 — Read current state
 
-Read `reference/model-routing.md` in full — the bindings table, **hard
-exclusions**, and the deprecation watch — and every `model:` line in
-`agents/*.md`. Two absolute rules from this step:
+Read `reference/model-routing.md` in full — the bindings table and **hard
+exclusions** — and every `model:` line in `agents/*.md`. Two absolute rules from this step:
 
 - **Hard exclusions win over any score.** An excluded family is dropped
   from candidacy regardless of benchmark results, even the best ever
@@ -56,8 +55,14 @@ vs docs; any divergence is a catalog-vs-availability mismatch → record in
 Questionable/Uncertain and exclude the ID from candidacy. Then
 liveness-probe every remaining candidate (minimal routing test in a live
 opencode session: select an agent bound to that model / send a trivial
-prompt and verify no routing error). **Only live-verified IDs are
+prompt and verify clean routing — no error and no opt-in, consent, or
+region gate). **Only live-verified IDs are
 candidates** — catalog membership alone never makes a model a candidate.
+Access restrictions fail the gate: a model routable only behind an
+explicit opt-in, consent gate, or region lock is **not live** — never opt
+in on the user's behalf; exclude the ID, name the gate in
+Questionable/Uncertain. Gates lift without notice: every pass re-probes
+from scratch, and a rehabilitated model re-enters candidacy automatically.
 
 **Go/Zen escalation gate:** for any model proposed for a Go or Zen
 escalation row, run a live routing probe on its tier (select an agent
@@ -70,7 +75,7 @@ Offline / snapshot mode: a local snapshot directory containing
 the user points at one or fetching fails. State which mode ran; never
 silently mix snapshot and live data. Every candidate must be
 catalog-verified **and** live-verified before ranking; record the
-retrieval date for the artifact.
+retrieval date for the presentation and the routing update note.
 
 ### Step 4 — Identify + verify objective benchmarks
 
@@ -96,12 +101,13 @@ benchmark score and never enters ranking. Capability requirements (e.g.
 native image input for vision seats) are hard gates, not scores — a
 text-only model cannot hold a vision seat at any benchmark number.
 
-### Step 6 — Write the dated audit artifact
+### Step 6 — Capture the evidence
 
-Write `reference/model-check-YYYY-MM-DD.md` per
-[references/audit-format.md](references/audit-format.md) — read it now.
-The artifact is the durable evidence record; what you present to the user
-is a summary of it. It is the only file written before approval.
+Assemble the pass record as the Step 7 presentation itself — table,
+evidence summary, and Questionable/Uncertain, each entry carrying
+source + date + independence status. On approval, the *decision* is
+recorded in the commit message and PR description (Step 8). Write no
+files before approval.
 
 ### Step 7 — Present; STOP
 
@@ -126,23 +132,22 @@ Apply exactly the approved table — a user modification to the proposal is
 part of the approval, not an argument to relitigate:
 
 1. Update `agents/*.md` `model:` lines (free defaults) and the role rows
-   in `reference/model-routing.md` (escalations), appending the dated
-   `### Routing update — YYYY-MM-DD` section per the audit format.
-   Revise-don't-clobber: never rewrite history; update the deprecation
-   watch rows for any ID this pass retires; fill the artifact's Applied
-   section with what actually landed (including user modifications).
+   in `reference/model-routing.md` (escalations). Record the evidence
+   basis and what actually landed (including user modifications) in the
+   commit message and PR description — model-routing.md carries current
+   state only, no in-file changelog. Revise-don't-clobber: never rewrite
+   git history.
 2. Generate the expectation JSON from the **approved** table
    (`bindings` + `forbidden` ids: excluded families and removed catalog
    ids) and run, resolved against this skill's own directory — not the
    project's:
    `python3 scripts/verify_rebind.py --repo <repo-root> --expect <file>`.
    Exit 0 is required; fix and re-run on failure.
-3. On a git checkout: branch `chore/model-rebind-<date>`, one commit
-   (artifact + updates), push, open the PR, report the URL — the user
+3. On a git checkout: branch `chore/model-rebind`, one commit
+   (updates), push, open the PR, report the URL — the user
    merges. In a non-git working copy (eval / fixture): apply + verify
    only.
-4. On rejection: discard the audit artifact, change no binding, report
-   what the user should reconsider.
+4. On rejection: change no binding, report what the user should reconsider.
 
 ## When not to use this skill
 
@@ -161,8 +166,5 @@ part of the approval, not an argument to relitigate:
   hierarchy (independently reproduced > multi-source cross-checked >
   vendor self-reported), the role → dominant-trait map, capability gates,
   and how to derive the skill → role map. Read at Step 4.
-- [references/audit-format.md](references/audit-format.md) — the dated
-  model-check artifact contract and the model-routing.md update marker.
-  Read at Step 6.
 - [scripts/verify_rebind.py](scripts/verify_rebind.py) — execute at
   Step 8 with a generated expectation JSON; exit 0 gates the pass.
