@@ -14,6 +14,7 @@ import tempfile
 SCRIPT = os.path.join(os.path.dirname(__file__), "query_runs.py")
 
 # Fixture records (two skills; alpha has 2 eval rows, beta 1 skill row).
+# gamma has unknown tokens/duration (None) — missing != zero.
 FIXTURE_LINES = [
     {"ts": "2026-01-01T00:00:00Z", "run_id": "a1", "kind": "eval", "skill": "alpha",
      "model": "go", "tokens_in": 100, "tokens_out": 50, "duration_ms": 1000,
@@ -23,6 +24,9 @@ FIXTURE_LINES = [
      "outcome": "failure", "eval_pass": False, "detail": "boom"},
     {"ts": "2026-01-01T00:02:00Z", "run_id": "b1", "kind": "skill", "skill": "beta",
      "model": None, "tokens_in": 200, "tokens_out": 0, "duration_ms": 500,
+     "outcome": "success", "eval_pass": None, "detail": None},
+    {"ts": "2026-01-01T00:03:00Z", "run_id": "g1", "kind": "skill", "skill": "gamma",
+     "model": None, "tokens_in": None, "tokens_out": None, "duration_ms": None,
      "outcome": "success", "eval_pass": None, "detail": None},
 ]
 
@@ -74,6 +78,33 @@ def main():
                 print(f"FAIL  {k}: expected {EXPECTED[k]}, got {result[k]}")
             else:
                 print(f"PASS  {k} = {EXPECTED[k]}")
+
+        # missing != zero: gamma has no known tokens/duration
+        got_gamma = by_skill.get("gamma")
+        if got_gamma is None:
+            failed += 1
+            print("FAIL  gamma row missing")
+        else:
+            if got_gamma["runs"] != 1:
+                failed += 1
+                print(f"FAIL  gamma runs: expected 1, got {got_gamma['runs']}")
+            else:
+                print("PASS  gamma runs = 1")
+            if got_gamma["tokens_total"] != 0:
+                failed += 1
+                print(f"FAIL  gamma tokens_total: expected 0, got {got_gamma['tokens_total']}")
+            else:
+                print("PASS  gamma tokens_total = 0 (sums known only)")
+            if got_gamma["cost_per_task"] is not None:
+                failed += 1
+                print(f"FAIL  gamma cost_per_task: expected None, got {got_gamma['cost_per_task']}")
+            else:
+                print("PASS  gamma cost_per_task = None (missing != 0)")
+            if got_gamma["mean_duration_ms"] is not None:
+                failed += 1
+                print(f"FAIL  gamma mean_duration_ms: expected None, got {got_gamma['mean_duration_ms']}")
+            else:
+                print("PASS  gamma mean_duration_ms = None (missing != 0)")
     finally:
         shutil.rmtree(d)
 

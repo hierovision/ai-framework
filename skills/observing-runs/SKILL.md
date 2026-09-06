@@ -24,9 +24,9 @@ Logging is **strictly out-of-context at runtime**:
 - `detail` is **failure-only and capped at 512 chars** — never raw prompt,
   output, or transcript.
 
-This keeps logging cost <1% of a run's tokens (one `log_run.py` tool call
-≈ 80–160 tokens vs thousands per task) and eliminable entirely via
-hook-based emission.
+This keeps logging cost <2% AND <200 tokens/run (one `log_run.py` tool call
+≈ 80–160 tokens vs thousands per task; hard gate measured on the RM-002
+weekly baseline) and eliminable entirely via hook-based emission.
 
 ## The contract
 
@@ -75,10 +75,14 @@ is a no-op. Aggregates persist (RM-003/009/011); raw lines don't.
 ## Hook-based emission (preferred, zero agent tokens)
 
 A hook fires outside the agent's generation and costs the agent **zero
-tokens**. Reference config: [references/hooks.opencode.json](references/hooks.opencode.json).
-Verify the hook event model against current opencode docs before enabling
-auto-instrumentation; fall back to convention-based logging if hooks are
-unavailable.
+tokens**. Validated 2026-09-06: opencode hooks are TypeScript plugins
+(`session.idle`, `tool.execute.before/after` — see
+https://opencode.ai/docs/plugins/), not a `hooks` JSON key. Reference
+plugin: [references/observe.plugin.js](references/observe.plugin.js);
+[references/hooks.opencode.json](references/hooks.opencode.json) records the
+prior fictional snippet as superseded. Token attribution is unavailable to
+the plugin (fields stay null when unknown); convention-based logging remains
+the default.
 
 ## What gets logged (narrow event set)
 

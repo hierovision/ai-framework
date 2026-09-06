@@ -49,27 +49,39 @@ def _iter_records(logs_dir):
 
 
 def aggregate(logs_dir):
-    """Return a dict of aggregate stats."""
-    per_skill = {}  # skill -> {runs, tokens, dur_sum}
+    """Return a dict of aggregate stats.
+
+    Missing != zero: tokens_in/out and duration_ms default None when unknown.
+    Totals sum known components only; cost_per_task divides by runs with any
+    known token component (None when no run has known tokens); mean_duration
+    divides by runs with known duration (None when none known).
+    """
+    per_skill = {}  # skill -> {runs, tokens, tokens_known_runs, dur_sum, dur_known_runs}
     eval_rows = 0
     eval_pass = 0
 
     def skill_bucket(key):
         b = per_skill.get(key)
         if b is None:
-            b = {"runs": 0, "tokens": 0, "dur_sum": 0}
+            b = {"runs": 0, "tokens": 0, "tokens_known_runs": 0,
+                 "dur_sum": 0, "dur_known_runs": 0}
             per_skill[key] = b
         return b
 
     for rec in _iter_records(logs_dir):
         kind = rec.get("kind")
         skill = rec.get("skill") or "(none)"
-        tokens = (rec.get("tokens_in") or 0) + (rec.get("tokens_out") or 0)
-        dur = rec.get("duration_ms") or 0
+        ti = rec.get("tokens_in")
+        to = rec.get("tokens_out")
+        dur = rec.get("duration_ms")
         b = skill_bucket(skill)
         b["runs"] += 1
-        b["tokens"] += tokens
-        b["dur_sum"] += dur
+        if isinstance(ti, int) or isinstance(to, int):
+            b["tokens"] += (ti if isinstance(ti, int) else 0) + (to if isinstance(to, int) else 0)
+            b["tokens_known_runs"] += 1
+        if isinstance(dur, int):
+            b["dur_sum"] += dur
+            b["dur_known_runs"] += 1
 
         if kind == "eval":
             eval_rows += 1
@@ -82,8 +94,8 @@ def aggregate(logs_dir):
             "skill": skill,
             "runs": b["runs"],
             "tokens_total": b["tokens"],
-            "cost_per_task": (b["tokens"] / b["runs"]) if b["runs"] else 0,
-            "mean_duration_ms": (b["dur_sum"] / b["runs"]) if b["runs"] else 0,
+            "cost_per_task": (b["tokens"] / b["tokens_known_runs"]) if b["tokens_known_runs"] else None,
+            "mean_duration_ms": (b["dur_sum"] / b["dur_known_runs"]) if b["dur_known_runs"] else None,
         })
 
     result = {

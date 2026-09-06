@@ -25,9 +25,9 @@ field names elsewhere.
 | `skill` | string \| null | no | null | attribution / slice |
 | `agent` | string \| null | no | null | attribution / slice |
 | `model` | string \| null | no | null | attribution / slice |
-| `tokens_in` | int | no | 0 | cost / ROI (RM-009) |
-| `tokens_out` | int | no | 0 | cost / ROI (RM-009) |
-| `duration_ms` | int | no | 0 | speed / latency |
+| `tokens_in` | int \| null | no | null | cost / ROI (RM-009); null when unknown, never 0-by-default |
+| `tokens_out` | int \| null | no | null | cost / ROI (RM-009); null when unknown, never 0-by-default |
+| `duration_ms` | int \| null | no | null | speed / latency; null when unknown, never 0-by-default |
 | `outcome` | enum `success`\|`failure`\|`error`\|`stopped` | **yes** | — | quality / regression |
 | `eval_pass` | bool \| null | no | null | eval-kind pass/fail (drift) |
 | `detail` | string \| null | no | null | **failure-only**, capped 512 chars |
@@ -64,8 +64,14 @@ or an eval prompt) — not from inside the run per tool call. Two ways:
    bounded but non-zero; prefer hooks when available.
 
 `log_run.py` accepts caller-supplied `tokens_in/out` and `duration_ms`
-(the caller measures what the runtime exposes); fields default to `0`
-when unknown and are **never fabricated**.
+(the caller measures what the runtime exposes); fields default to `null`
+when unknown and are **never fabricated** (missing != zero).
+`query_runs.py` sums known components only; cost/task divides by runs with
+known tokens (None when none known).
+
+Overhead gate (closure 2026-09-06): convention-based logging must stay
+<2% AND <200 tokens/run, measured on the RM-002 weekly baseline. If either
+bound is exceeded, mandate hook-based emission before broad adoption.
 
 ## Out-of-band consumers (logs are read, not write-only)
 
@@ -92,7 +98,12 @@ demand, never per agent turn:
 
 ## Hooks snippet
 
-See [hooks.opencode.json](hooks.opencode.json) for a reference
-opencode hook config that emits a record per run boundary. Verify the
-hook event model against current opencode docs before enabling
-auto-instrumentation.
+Validated 2026-09-06 against https://opencode.ai/docs/plugins/ and
+https://opencode.ai/docs/config/ and https://opencode.ai/docs/cli/: opencode
+has no `hooks` key and no SkillInvocationEnd/AgentSessionEnd events; hooks
+are TypeScript plugins (`session.idle`, `tool.execute.before/after`, etc.).
+[hooks.opencode.json](hooks.opencode.json) records this finding; the
+doc-backed run-boundary example is [observe.plugin.js](observe.plugin.js)
+(`session.idle` -> `log_run.py`, tokens/duration null when unknown).
+Convention-based logging remains the default; hook-based emission is
+aspirational until per-skill token attribution exists.

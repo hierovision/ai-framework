@@ -1,18 +1,3 @@
 {
-  "hooks": {
-    "SkillInvocationEnd": [
-      {
-        "type": "command",
-        "command": "python3 ${skill_dir}/scripts/log_run.py --record '{\"kind\":\"skill\",\"skill\":\"${skill_name}\",\"agent\":null,\"model\":${model_tier},\"tokens_in\":${tokens_in},\"tokens_out\":${tokens_out},\"duration_ms\":${duration_ms},\"outcome\":\"${outcome}\",\"eval_pass\":null,\"detail\":${detail}}'",
-        "timeout_ms": 5000
-      }
-    ],
-    "AgentSessionEnd": [
-      {
-        "type": "command",
-        "command": "python3 ${skill_dir}/scripts/log_run.py --record '{\"kind\":\"agent\",\"skill\":null,\"agent\":\"${agent_name}\",\"model\":${model_tier},\"tokens_in\":${tokens_in},\"tokens_out\":${tokens_out},\"duration_ms\":${duration_ms},\"outcome\":\"${outcome}\",\"eval_pass\":null,\"detail\":${detail}}'",
-        "timeout_ms": 5000
-      }
-    ]
-  }
+  "$comment": "NOT a valid opencode.json hooks config. opencode has no `hooks` key (see https://opencode.ai/docs/config/, retrieved 2026-09-06); hooks are TypeScript plugins (see https://opencode.ai/docs/plugins/, retrieved 2026-09-06) with events session.created/deleted/idle, tool.execute.before/after, etc. There is no SkillInvocationEnd or AgentSessionEnd event and no ${skill_name}/${tokens_in} template vars. The prior content of this file was fictional and has been replaced. For the doc-backed run-boundary plugin, see observe.plugin.js in this directory (session.idle -> log_run.py, tokens/duration null when unknown). Convention-based `log_run.py --record` remains the default; hook-based emission is aspirational until per-skill token attribution exists."
 }

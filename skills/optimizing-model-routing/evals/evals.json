@@ -4,6 +4,7 @@
   "evals": [
     {
       "id": 1,
+      "deferred": true,
       "prompt": "the model bindings in this library feel stale. run the model-routing optimization pass over the repo — find the objectively best free and escalation models per role from the catalogs and benchmark evidence, show me the findings, and wait for my approval before changing any bindings. you're offline: use the catalog snapshots in reference/catalog-snapshot/ instead of fetching live. this is a plain working copy, not a git checkout — skip any branch/commit/PR steps.",
       "expected_behavior": [
         "Turn 1: reads reference/model-routing.md in full (bindings table, hard exclusions) and every agents/*.md model: line BEFORE proposing anything",
@@ -23,6 +24,7 @@
     },
     {
       "id": 2,
+      "deferred": true,
       "prompt": "quick check — just the planner seat. is quill-2-free still the right free model for the design/planning work in this library, or should it rebind? offline: use reference/catalog-snapshot/. don't change anything yet, just show me the evidence.",
       "expected_behavior": [
         "Scopes the pass to the planner role only — the analysis and table cover planner (and the skills using it per the Used-by column) and no other role's bindings are proposed as changed",
@@ -35,6 +37,7 @@
     },
     {
       "id": 3,
+      "deferred": true,
       "prompt": "the model bindings in this library feel stale. run the model-routing optimization pass over the repo — find the objectively best free and escalation models per role from the catalogs and benchmark evidence, show me the findings, and wait for my approval before changing any bindings. you're offline: use the catalog snapshots in reference/catalog-snapshot/ instead of fetching live. this is a plain working copy, not a git checkout — skip any branch/commit/PR steps. [turn 2 resumes with: approved with one modification — the free seats are getting too concentrated on one model family; bind atlas-mini-free on the triage seat instead of the proposal there, apply everything else exactly as presented, then run the verifier with an expectation file reflecting the modified table and report the exit code.]",
       "expected_behavior": [
         "Turn 1: identical expectations to eval 1 turn 1 (full-sweep presentation + STOP + zero binding edits)",

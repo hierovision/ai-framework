@@ -104,6 +104,12 @@ Available stack references:
   Read when the project is Vue 3 + Pinia + Supabase (Postgres + Auth +
   RLS) with offline / PWA. Applies generated-types handling, RLS-aware
   edits, offline-outbox wiring, and e2e selector/condition conventions.
+- skills-library → [references/stacks/skills-library.md](references/stacks/skills-library.md)
+  Read when the project is this skills/agents Python+Node library itself
+  (repo-root `skills/*/SKILL.md`, `scripts/*.py`, `evals/evals.json`).
+  Applies symlink-safe Python gates, `py_compile` discipline, JSONL
+  single-source-of-truth + missing-is-null, and doc-backed opencode
+  CLI/plugin usage.
 
 ### Step 4 — Reconcile plan vs the actual repo (BEFORE editing)
 
@@ -508,6 +514,12 @@ stop — stops are recoverable, a built-wrong-feature is not.
   over fixed timeouts, Vuetify semantic variables over raw CSS, and
   following existing store/composable patterns. Read at Step 3 when the
   project's rules file declares stack `vue-supabase`.
+- [references/stacks/skills-library.md](references/stacks/skills-library.md)
+  — implementation-time concerns for this skills/agents Python+Node
+  library: symlink-safe Python gates, `py_compile` (never `bash -n`),
+  JSONL single-source-of-truth + missing-is-null, doc-backed opencode
+  CLI/plugin usage. Read at Step 3 when the rules file declares stack
+  `skills-library` (or the repo is this library itself).
 - The plan artifact contract is defined upstream in
   [../designing-architecture/references/plan-format.md](../designing-architecture/references/plan-format.md)
   — frontmatter, section order, section schemas, and the acceptance-

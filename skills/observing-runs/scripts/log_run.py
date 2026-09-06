@@ -32,6 +32,8 @@ DEFAULT_LOGS_DIR = os.environ.get("OBSERVE_LOG_DIR", os.path.join(REPO_ROOT, "lo
 REQUIRED_FIELDS = ("kind", "outcome")
 
 # Field -> type (or tuple of allowed types). Used for validation + defaults.
+# Missing != zero (closure 2026-09-06): tokens_in/out and duration_ms are
+# caller-supplied, default None when unknown, never fabricated as 0.
 FIELD_TYPES = {
     "ts": str,
     "run_id": str,
@@ -39,9 +41,9 @@ FIELD_TYPES = {
     "skill": (str, type(None)),
     "agent": (str, type(None)),
     "model": (str, type(None)),
-    "tokens_in": int,
-    "tokens_out": int,
-    "duration_ms": int,
+    "tokens_in": (int, type(None)),
+    "tokens_out": (int, type(None)),
+    "duration_ms": (int, type(None)),
     "outcome": str,
     "eval_pass": (bool, type(None)),
     "detail": (str, type(None)),
@@ -90,9 +92,9 @@ def build_record(rec):
     out.setdefault("skill", None)
     out.setdefault("agent", None)
     out.setdefault("model", None)
-    out.setdefault("tokens_in", 0)
-    out.setdefault("tokens_out", 0)
-    out.setdefault("duration_ms", 0)
+    out.setdefault("tokens_in", None)
+    out.setdefault("tokens_out", None)
+    out.setdefault("duration_ms", None)
     out.setdefault("eval_pass", None)
     out.setdefault("detail", None)
     return out

@@ -49,6 +49,21 @@ def test_complete_record_writes_one_line():
         shutil.rmtree(d)
 
 
+def test_missing_tokens_default_null_not_zero():
+    d = tempfile.mkdtemp()
+    try:
+        rec = {"kind": "skill", "skill": "x", "outcome": "success"}
+        r = _run(rec, d)
+        assert r.returncode == 0, f"exit non-zero: {r.stderr}"
+        files = os.listdir(d)
+        obj = json.loads(open(os.path.join(d, files[0]), encoding="utf-8").read().splitlines()[0])
+        assert obj["tokens_in"] is None, f"missing tokens_in must be None, got {obj['tokens_in']!r}"
+        assert obj["tokens_out"] is None, f"missing tokens_out must be None, got {obj['tokens_out']!r}"
+        assert obj["duration_ms"] is None, f"missing duration_ms must be None, got {obj['duration_ms']!r}"
+    finally:
+        shutil.rmtree(d)
+
+
 def test_missing_required_field_exits_nonzero():
     d = tempfile.mkdtemp()
     try:
@@ -93,6 +108,7 @@ def test_append_only_no_readback():
 def main():
     tests = [
         test_complete_record_writes_one_line,
+        test_missing_tokens_default_null_not_zero,
         test_missing_required_field_exits_nonzero,
         test_symlink_safe,
         test_append_only_no_readback,
