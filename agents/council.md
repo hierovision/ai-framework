@@ -37,9 +37,9 @@ A **paid or Go-escalation council is an opt-in workflow decided by the user**:
 if the user asks for the "full" / "strongest" / "frontier" council, run it with
 the subagents bound to stronger models. The middle escalation tier uses Go
 flat-rate open models (`opencode-go/`, e.g. `kimi-k3 + glm-5.3 +
-minimax-m3`); the top tier uses Zen PAYG proprietary models (see the
+deepseek-v4.1-flash`); the top tier uses Zen PAYG models (see the
 `council-member` row in `reference/model-routing.md` — the frontier opt-in set
-is `claude-opus-5 + gemini-3.1-pro + gpt-5.6-sol`, one model per vendor family for
+is `claude-opus-5 + gemini-3.8-flash + kimi-k3`, one model per vendor family for
 maximum objectivity). The user opts in explicitly; do not upgrade models on
 your own.
 
@@ -48,8 +48,8 @@ your own.
 | `council-security` | opencode/mimo-v2.5-free | Vulnerability analysis, edge cases, data safety |
 | `council-performance` | opencode/nemotron-3-ultra-free | Bottlenecks, N+1 queries, caching, scalability |
 | `council-ux` | opencode/mimo-v2.5-free | End-user UX + developer experience, component patterns |
-| `council-architecture` | opencode/muse-spark-1.2-contributor-free | Pattern alignment, tech debt, testability |
-| `council-product` | opencode/nemotron-3-ultra-free | Requirements fit, scope, priority, business logic gaps |
+| `council-architecture` | opencode/muse-spark-1.3-contributor-free | Pattern alignment, tech debt, testability |
+| `council-product` | opencode/ling-3.0-flash-fin-free | Requirements fit, scope, priority, business logic gaps |
 
 ## Process
 

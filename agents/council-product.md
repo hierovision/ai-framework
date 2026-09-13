@@ -1,7 +1,7 @@
 ---
 name: council-product
 description: Product and business logic analysis
-model: opencode/nemotron-3-ultra-free
+model: opencode/ling-3.0-flash-fin-free
 mode: subagent
 hidden: true
 temperature: 0.4
