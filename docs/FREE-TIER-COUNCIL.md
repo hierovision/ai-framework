@@ -10,13 +10,13 @@ task (the `council-*` agents shipped in this repo are bound to free models).
 A **paid or Go-escalation council is an opt-in workflow** the user chooses —
 bind the subagents to stronger models (see the `council-member` row in
 `reference/model-routing.md`; the frontier opt-in set is
-`claude-opus-5 + gemini-3.1-pro + gpt-5.6-sol`, one model per vendor family for
+`claude-opus-5 + gemini-3.8-flash + kimi-k3`, one model per vendor family for
 maximum objectivity). Separately, when you want to force the free tier even
 with paid keys present, set `AI_FRAMEWORK_FREE_TIER=1` and every task uses a
 free model. Free models are individually weaker, so the council exists only
 where one weak model is riskiest: **planning** and **review**.
 
-## Model IDs (verified 2026-09-03 via catalog + docs fetch)
+## Model IDs (verified 2026-09-13 via catalog + docs fetch + live probes)
 
 | Role | Free model | Paid/Go row it stands in for |
 |---|---|---|
@@ -26,8 +26,8 @@ where one weak model is riskiest: **planning** and **review**.
 | devops / security (council-security) | `opencode/mimo-v2.5-free` | `triager` (mimo-v2.5) |
 | council-performance | `opencode/nemotron-3-ultra-free` | `debugger` / `reviewer` (nemotron) |
 | council-ux | `opencode/mimo-v2.5-free` | `debugger` / `reviewer` (mimo) |
-| council-architecture | `opencode/muse-spark-1.2-contributor-free` | `planner` (muse-spark) |
-| council-product | `opencode/nemotron-3-ultra-free` | `planner` / `triager` (nemotron) |
+| council-architecture | `opencode/muse-spark-1.3-contributor-free` | `planner` (muse-spark) |
+| council-product | `opencode/ling-3.0-flash-fin-free` | `planner` / `triager` (ling) |
 
 The `-free` IDs are **distinct catalog entries** from `minimax-m3`
 and `mimo-v2.5` (which stay as the Go escalation rows). Skills reference
