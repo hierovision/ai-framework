@@ -21,6 +21,11 @@ dist/
 __pycache__/
 *.pyc
 
+# Playwright installed into the capturing-ui-evidence skill dir per its
+# SKILL.md bootstrap (the installed skill is a symlink here) — environment
+# artifact, not library content.
+skills/capturing-ui-evidence/package*.json
+
 # === Deprecated docs (removed from the repo; never track) ===
 PLAN.md
 docs/handoffs/
