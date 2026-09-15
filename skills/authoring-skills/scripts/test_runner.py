@@ -124,13 +124,16 @@ def test_deferred_excluded():
         assert ("alpha", 2) not in ids, "deferred eval must be excluded by default"
         assert ("alpha", 1) in ids and ("beta", 1) in ids
 
-        # --list also omits the deferred eval
+        # --list omits the deferred eval from the runnable set, but must
+        # SURFACE that deferred evals were excluded (no silent coverage drop).
         r = subprocess.run([sys.executable, RUNNER, "--list", "--skills-root", root],
                            capture_output=True, text=True)
         assert r.returncode == 0
         assert "included evals: 2" in r.stdout, r.stdout
-        assert "deferred" not in r.stdout, "deferred must not appear in default --list"
-        print("PASS  deferred eval excluded from default run + --list")
+        assert "alpha#2" not in r.stdout, "deferred eval must not be listed by default"
+        assert "deferred: 1 excluded" in r.stdout, \
+            "default --list must surface how many deferred evals are excluded"
+        print("PASS  deferred eval excluded from default run; --list surfaces the count")
     finally:
         shutil.rmtree(root)
 

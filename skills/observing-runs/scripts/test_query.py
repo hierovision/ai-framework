@@ -28,6 +28,12 @@ FIXTURE_LINES = [
     {"ts": "2026-01-01T00:03:00Z", "run_id": "g1", "kind": "skill", "skill": "gamma",
      "model": None, "tokens_in": None, "tokens_out": None, "duration_ms": None,
      "outcome": "success", "eval_pass": None, "detail": None},
+    # delta is a LEGACY record: pre-2026-09-06 writers defaulted unknown
+    # tokens/duration to literal 0. The reader must treat 0 as unknown
+    # (legacy compatibility), not as a real measured value.
+    {"ts": "2026-01-01T00:04:00Z", "run_id": "d1", "kind": "skill", "skill": "delta",
+     "model": None, "tokens_in": 0, "tokens_out": 0, "duration_ms": 0,
+     "outcome": "success", "eval_pass": None, "detail": None},
 ]
 
 # Expected aggregates (computed by hand from the fixture above).
@@ -105,6 +111,29 @@ def main():
                 print(f"FAIL  gamma mean_duration_ms: expected None, got {got_gamma['mean_duration_ms']}")
             else:
                 print("PASS  gamma mean_duration_ms = None (missing != 0)")
+
+        # legacy compatibility: literal 0 from pre-2026-09-06 writers is
+        # unknown, not a measured zero.
+        got_delta = by_skill.get("delta")
+        if got_delta is None:
+            failed += 1
+            print("FAIL  delta row missing")
+        else:
+            if got_delta["tokens_total"] != 0:
+                failed += 1
+                print(f"FAIL  delta tokens_total: expected 0, got {got_delta['tokens_total']}")
+            else:
+                print("PASS  delta tokens_total = 0 (legacy 0 treated as unknown)")
+            if got_delta["cost_per_task"] is not None:
+                failed += 1
+                print(f"FAIL  delta cost_per_task: expected None, got {got_delta['cost_per_task']}")
+            else:
+                print("PASS  delta cost_per_task = None (legacy 0 != measured 0)")
+            if got_delta["mean_duration_ms"] is not None:
+                failed += 1
+                print(f"FAIL  delta mean_duration_ms: expected None, got {got_delta['mean_duration_ms']}")
+            else:
+                print("PASS  delta mean_duration_ms = None (legacy 0 != measured 0)")
     finally:
         shutil.rmtree(d)
 

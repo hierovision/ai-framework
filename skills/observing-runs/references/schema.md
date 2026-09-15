@@ -36,6 +36,18 @@ field names elsewhere.
 `auto` = filled by `log_run.py` when absent. All twelve keys are present
 in every written line.
 
+### Legacy `0` compatibility (2026-09-13)
+
+Writers before 2026-09-06 defaulted unknown `tokens_in`/`tokens_out`/
+`duration_ms` to literal `0`. Writers now emit `null` (missing != zero). The
+aggregator (`query_runs.py`) treats a literal `0` in these three fields as
+unknown, because under the old default `0` carried no information; legacy
+records therefore cannot skew cost/latency aggregates. A genuine `0` is not a
+supported value for these fields — emit `null` when unknown. Verifier:
+`test_query.py` `delta` fixture. **Sunset:** legacy records age out of the
+30-day retention window by ~2026-10-06; the reader-side coercion can be
+removed after that date.
+
 ### `detail` discipline
 
 `detail` is **optional, failure-only, and capped at 512 characters**. It
@@ -56,12 +68,15 @@ Full I/O is never logged (privacy + noise + cost).
 Emit **one record per run**, from the run boundary (a skill/agent call
 or an eval prompt) — not from inside the run per tool call. Two ways:
 
-1. **Hook-based (preferred, zero agent tokens):** an opencode hook
-   fires outside the agent's generation and calls `log_run.py` with the
-   measured fields. See [hooks.opencode.json](hooks.opencode.json).
-2. **Convention-based (fallback):** the caller measures what it can and
+1. **Hook-based (aspirational, not the default):** an opencode hook fires
+   outside the agent's generation and calls `log_run.py` with the measured
+   fields, but the example cannot attribute skill/model/tokens/duration and
+   is not schema-honest. Dated facts:
+   [../../../reference/opencode-integration.md](../../../reference/opencode-integration.md).
+2. **Convention-based (the default):** the caller measures what it can and
    invokes `log_run.py --record '<json>'`. Adds ~80–160 tokens/run —
-   bounded but non-zero; prefer hooks when available.
+   bounded but non-zero. Prefer hook emission only once it can attribute a
+   real run.
 
 `log_run.py` accepts caller-supplied `tokens_in/out` and `duration_ms`
 (the caller measures what the runtime exposes); fields default to `null`
@@ -69,9 +84,11 @@ when unknown and are **never fabricated** (missing != zero).
 `query_runs.py` sums known components only; cost/task divides by runs with
 known tokens (None when none known).
 
-Overhead gate (closure 2026-09-06): convention-based logging must stay
-<2% AND <200 tokens/run, measured on the RM-002 weekly baseline. If either
-bound is exceeded, mandate hook-based emission before broad adoption.
+Overhead budget (dated, provisional): convention-based logging targets
+<2% AND <200 tokens/run. This is **`unverified`** until measured on the
+RM-002 baseline — it is a target, not an established bound. The number and
+method live in
+[../../../reference/run-log-overhead.md](../../../reference/run-log-overhead.md).
 
 ## Out-of-band consumers (logs are read, not write-only)
 
@@ -98,12 +115,10 @@ demand, never per agent turn:
 
 ## Hooks snippet
 
-Validated 2026-09-06 against https://opencode.ai/docs/plugins/ and
-https://opencode.ai/docs/config/ and https://opencode.ai/docs/cli/: opencode
-has no `hooks` key and no SkillInvocationEnd/AgentSessionEnd events; hooks
-are TypeScript plugins (`session.idle`, `tool.execute.before/after`, etc.).
-[hooks.opencode.json](hooks.opencode.json) records this finding; the
-doc-backed run-boundary example is [observe.plugin.js](observe.plugin.js)
-(`session.idle` -> `log_run.py`, tokens/duration null when unknown).
-Convention-based logging remains the default; hook-based emission is
-aspirational until per-skill token attribution exists.
+The dated opencode CLI/plugin facts (no `hooks` JSON key; hooks are
+TypeScript plugins; `opencode run` has no `--skill`) live in one place:
+[../../../reference/opencode-integration.md](../../../reference/opencode-integration.md).
+[hooks.opencode.json](hooks.opencode.json) records the superseded fictional
+snippet; the aspirational run-boundary example is
+[observe.plugin.EXAMPLE.js](observe.plugin.EXAMPLE.js) — not schema-honest and
+not enabled by default. Convention-based logging remains the default.

@@ -53,9 +53,9 @@ If the project declares a different stack, do not read this file.
   owner — import it.
 - **`bash -n` on a `.py` file to get verification green.** It checks
   nothing; use `py_compile`.
-- **Inventing `--skill` for `opencode run`.** The CLI has no such flag
-  (see https://opencode.ai/docs/cli/#run-1); use `--dir` + installed
-  skills, and cite the doc.
-- **Inventing a `hooks` JSON key.** Hooks are TypeScript plugins (see
-  https://opencode.ai/docs/plugins/); the JSON snippet shape is not
-  real. Ship the plugin file, not the imagined key.
+- **Inventing an opencode CLI flag or config key.** The dated facts live in
+  one place —
+  [../../../../reference/opencode-integration.md](../../../../reference/opencode-integration.md)
+  (`opencode run` has no `--skill`; there is no `hooks` JSON key; hooks are
+  TypeScript plugins). Use `--dir` + installed skills; never invent a flag or
+  key — cite that file, not the guess.

@@ -48,6 +48,25 @@ def _iter_records(logs_dir):
                     continue
 
 
+def _as_known_int(value):
+    """Return `value` as a real measured int, or None when unknown.
+
+    Legacy compatibility (2026-09-13): writers before 2026-09-06 defaulted
+    unknown `tokens_in`/`tokens_out`/`duration_ms` to literal `0`. Writers now
+    emit `null`. Because `0` carried no information (missing != zero), a literal
+    `0` is treated as unknown so legacy records cannot skew cost/latency
+    aggregates. Documented in references/schema.md.
+
+    Sunset: legacy records age out of the 30-day retention window by
+    ~2026-10-06; this shim can be removed after that date.
+    """
+    if isinstance(value, bool):  # bool is an int subclass; never a measurement
+        return None
+    if isinstance(value, int) and value != 0:
+        return value
+    return None
+
+
 def aggregate(logs_dir):
     """Return a dict of aggregate stats.
 
@@ -55,6 +74,9 @@ def aggregate(logs_dir):
     Totals sum known components only; cost_per_task divides by runs with any
     known token component (None when no run has known tokens); mean_duration
     divides by runs with known duration (None when none known).
+
+    Legacy records that stored literal `0` for unknown are coerced to unknown
+    by `_as_known_int` (see its docstring) so they do not skew the aggregates.
     """
     per_skill = {}  # skill -> {runs, tokens, tokens_known_runs, dur_sum, dur_known_runs}
     eval_rows = 0
@@ -71,15 +93,15 @@ def aggregate(logs_dir):
     for rec in _iter_records(logs_dir):
         kind = rec.get("kind")
         skill = rec.get("skill") or "(none)"
-        ti = rec.get("tokens_in")
-        to = rec.get("tokens_out")
-        dur = rec.get("duration_ms")
+        ti = _as_known_int(rec.get("tokens_in"))
+        to = _as_known_int(rec.get("tokens_out"))
+        dur = _as_known_int(rec.get("duration_ms"))
         b = skill_bucket(skill)
         b["runs"] += 1
-        if isinstance(ti, int) or isinstance(to, int):
-            b["tokens"] += (ti if isinstance(ti, int) else 0) + (to if isinstance(to, int) else 0)
+        if ti is not None or to is not None:
+            b["tokens"] += (ti if ti is not None else 0) + (to if to is not None else 0)
             b["tokens_known_runs"] += 1
-        if isinstance(dur, int):
+        if dur is not None:
             b["dur_sum"] += dur
             b["dur_known_runs"] += 1
 
