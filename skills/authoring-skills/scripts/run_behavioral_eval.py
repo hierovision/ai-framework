@@ -87,10 +87,13 @@ def assert_behavior(expected, output):
     return [exp for exp in expected if exp.lower() not in out_l]
 
 
-def run_eval(e, get_output, logs_dir=None):
+def run_eval(e, get_output, logs_dir=None, model=None):
     """Run one eval via `get_output(e)`, assert, and write a run-log record.
 
-    Returns (passed, missing, record_path).
+    Returns (passed, missing, record_path). `model` (concrete ID, e.g.
+    `opencode/nemotron-3-ultra-free`) overrides the tier label in the record
+    when the caller selected the model explicitly — the log should record
+    what actually ran.
     """
     output = get_output(e)
     missing = assert_behavior(e["expected_behavior"], output)
@@ -102,7 +105,7 @@ def run_eval(e, get_output, logs_dir=None):
         "kind": "eval",
         "skill": e["skill"],
         "agent": None,
-        "model": e["model_tier"],
+        "model": model or e["model_tier"],
         "outcome": "success" if passed else "failure",
         "eval_pass": passed,
         "detail": detail,
@@ -111,15 +114,38 @@ def run_eval(e, get_output, logs_dir=None):
     return passed, missing, path
 
 
-def invoke_opencode(e):
-    """Real fresh-agent invocation (CI only; needs the model credential).
+def opencode_run_args(tmp, prompt, model=None):
+    """argv for one fresh-agent invocation (after `opencode`) — pure, hermetic.
 
     Validated 2026-09-06 against https://opencode.ai/docs/cli/#run-1:
-    `opencode run [message..]` with `--dir`, `--agent`, `--model/-m`,
-    `--file/-f`, `--format` flags. There is NO `--skill` flag, so the prior
-    `opencode run --skill <skill> <prompt>` is replaced by
-    `opencode run --dir <tmpdir> <prompt>` with the skill resolved from the
-    repo's installed skills (symlinked global layout), not a CLI flag.
+    `opencode run [message..]` with `--dir`, `--agent`, `--model/-m`, `--file/-f`,
+    `--format` flags. There is NO `--skill` flag — the skill resolves from the
+    installed layout via `--dir`.
+
+    `model` MUST be passed in CI (workflow selects the free generalist; see
+    reference/model-routing.md): opencode's environment default on a fresh CI
+    runner is `big-pickle`, which is disabled at the gateway — found by the
+    RM-002 AC5 live gate, 2026-09-16. Omitted only for developer-local runs
+    that intentionally use the environment default.
+    """
+    args = ["run", "--dir", tmp]
+    if model:
+        args += ["--model", model]
+    args += [prompt]
+    return args
+
+
+def assert_ci_free_model(model):
+    """Model-cost policy (rm-002): CI selects only `*-free` (the $0 tier)."""
+    if not model.endswith("-free"):
+        raise ValueError(
+            f"CI model must be a `*-free` ID (Model-cost policy), got {model!r}"
+        )
+
+
+def invoke_opencode(e, model=None):
+    """Real fresh-agent invocation (CI only; needs the model credential).
+
     The model credential must already be in the environment (repo secret);
     it is consumed here, never echoed.
     """
@@ -134,7 +160,7 @@ def invoke_opencode(e):
         # The model credential must already be in the environment (repo secret);
         # it is consumed here, never echoed.
         proc = subprocess.run(
-            ["opencode", "run", "--dir", tmp, e["prompt"]],
+            ["opencode"] + opencode_run_args(tmp, e["prompt"], model=model),
             cwd=tmp, capture_output=True, text=True,
             env=os.environ,
         )
@@ -161,6 +187,13 @@ def main(argv=None):
     p.add_argument("--ci", action="store_true",
                    help="Enforce free-tier-only (skip go/zen evals); also auto-enabled "
                         "by AI_FRAMEWORK_FREE_TIER or CI env.")
+    p.add_argument("--model", default=None,
+                   help="Concrete model ID for `opencode run --model` "
+                        "(e.g. opencode/nemotron-3-ultra-free). CI MUST set this: "
+                        "opencode's environment default on a fresh runner is not "
+                        "guaranteed to be a live free model (RM-002 AC5, 2026-09-16). "
+                        "The ID is a binding — keep it in step with "
+                        "reference/model-routing.md's free generalist.")
     p.add_argument("--stub-output", default=None,
                    help="Hermetic test mode: use this fixed output for every eval "
                         "instead of invoking opencode. 'ALL' passes every eval; "
@@ -169,6 +202,16 @@ def main(argv=None):
 
     all_evals = load_skill_evals(args.skills_root)
     ci_mode = args.ci or bool(os.environ.get("AI_FRAMEWORK_FREE_TIER")) or bool(os.environ.get("CI"))
+    if args.model and ci_mode:
+        try:
+            assert_ci_free_model(args.model)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+    if ci_mode and not args.model:
+        print("warning: --model not set in CI mode; opencode will use its "
+              "environment default, which is NOT guaranteed to be a live free "
+              "model (RM-002 AC5)", file=sys.stderr)
     selected = filter_evals(all_evals, include_deferred=args.include_deferred,
                             limit=args.limit, skill=args.skill, ci_mode=ci_mode)
 
@@ -203,11 +246,12 @@ def main(argv=None):
                 # omit the first expected behavior to force a failure
                 return "\n".join(e["expected_behavior"][1:])
             return "\n".join(e["expected_behavior"])  # ALL
-        return invoke_opencode(e)
+        return invoke_opencode(e, model=args.model)
 
     failed = 0
     for e in selected:
-        passed, missing, path = run_eval(e, get_output, logs_dir=args.logs_dir)
+        passed, missing, path = run_eval(e, get_output, logs_dir=args.logs_dir,
+                                         model=args.model)
         status = "PASS" if passed else "FAIL"
         print(f"{status}  {e['skill']}#{e['eval_id']}  -> {path}")
         if not passed:
