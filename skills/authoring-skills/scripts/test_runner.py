@@ -193,6 +193,32 @@ def test_ci_free_only():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_model_flag_and_ci_guard():
+    """RM-002 AC5 live gate (2026-09-16): invoke_opencode must SELECT a model.
+    opencode's environment default on a fresh CI runner is `big-pickle`
+    (disabled at the gateway), so an eval without an explicit --model fails
+    every assertion for an infra reason, not a regression. The command must
+    carry --model <id>, and CI mode must refuse non-`*-free` models
+    (Model-cost policy) and refuse to run model-less.
+    """
+    args = runner.opencode_run_args("/tmp/x", "prompt p",
+                                    model="opencode/nemotron-3-ultra-free")
+    assert args == ["run", "--dir", "/tmp/x",
+                    "--model", "opencode/nemotron-3-ultra-free", "prompt p"], args
+    # no model -> no --model flag (opencode default; developer-local runs only)
+    args2 = runner.opencode_run_args("/tmp/x", "prompt p", model=None)
+    assert "--model" not in args2, args2
+    # CI mode must refuse a paid-tier model and refuse to run model-less
+    for bad in ("opencode-go/kimi-k3", "opencode/claude-sonnet-5"):
+        try:
+            runner.assert_ci_free_model(bad)
+            raise SystemExit(f"assert_ci_free_model accepted {bad}")
+        except ValueError:
+            pass
+    runner.assert_ci_free_model("opencode/nemotron-3-ultra-free")  # ok
+    print("PASS  --model selects the eval model; CI mode enforces *-free only")
+
+
 def main():
     tests = [
         test_assert_behavior,
@@ -202,6 +228,7 @@ def main():
         test_deferred_excluded,
         test_subset_sharding,
         test_ci_free_only,
+        test_model_flag_and_ci_guard,
     ]
     failed = 0
     for t in tests:

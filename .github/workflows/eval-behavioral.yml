@@ -46,6 +46,13 @@ jobs:
           python3 --version
           pip3 install --quiet pyyaml
 
+      # opencode is NOT preinstalled on GitHub-hosted runners; the docs install
+      # script is the supported path (https://opencode.ai/docs/, retrieved
+      # 2026-09-16). Found by the RM-002 AC5 live check: without this step the
+      # workflow never ran a single eval (missing binary).
+      - name: Install opencode CLI
+        run: curl -fsSL https://opencode.ai/install | bash
+
       - name: Run behavioral evals (fresh agent per eval)
         env:
           # Repository-level secret ONLY (org-level secrets are unavailable on
@@ -53,7 +60,12 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           AI_FRAMEWORK_FREE_TIER: 1
         run: |
-          python3 skills/authoring-skills/scripts/run_behavioral_eval.py
+          # --model is REQUIRED here: opencode's environment default on a fresh
+          # runner is `big-pickle` (disabled at the gateway) — found by the
+          # RM-002 AC5 live gate, 2026-09-16. The ID is a binding, kept in step
+          # with reference/model-routing.md's free generalist (re-verify on
+          # each routing pass).
+          python3 skills/authoring-skills/scripts/run_behavioral_eval.py --model opencode/nemotron-3-ultra-free
 
       - name: Upload run logs (30-day retention)
         if: always()

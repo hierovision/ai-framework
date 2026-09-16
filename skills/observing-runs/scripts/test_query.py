@@ -55,9 +55,53 @@ def _run_aggregate(logs_dir):
     return json.loads(r.stdout.strip())
 
 
+def test_default_logs_dir_when_imported_as_module():
+    """Same seam as test_log.py's importer test (found by the RM-002 AC5 live
+    gate, 2026-09-16): query_runs.py's default logs dir must resolve from its
+    OWN file location — never sys.argv[0] of the importing process — and must
+    be repo-root logs/ (the SKILL.md/schema.md contract), not skills/logs/.
+    """
+    expected = os.path.abspath(
+        os.path.join(os.path.dirname(SCRIPT), os.pardir, os.pardir, os.pardir, "logs")
+    )
+    sys.path.insert(0, os.path.dirname(SCRIPT))
+    import query_runs
+    assert query_runs.DEFAULT_LOGS_DIR == expected, (
+        f"query_runs.DEFAULT_LOGS_DIR is {query_runs.DEFAULT_LOGS_DIR!r}, "
+        f"expected {expected!r} (repo-root logs/ per SKILL.md/schema.md)"
+    )
+    # Cross-process: a foreign script importing query_runs gets the same value.
+    importer_dir = tempfile.mkdtemp(prefix="queryruns-importer-")
+    importer = os.path.join(importer_dir, "some_other_script.py")
+    try:
+        with open(importer, "w", encoding="utf-8") as fh:
+            fh.write(
+                "import sys\n"
+                f"sys.path.insert(0, {os.path.dirname(SCRIPT)!r})\n"
+                "import query_runs\n"
+                "print(query_runs.DEFAULT_LOGS_DIR)\n"
+            )
+        r = subprocess.run([sys.executable, importer], capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        got = r.stdout.strip().splitlines()[-1]
+        assert got == expected, (
+            "imported default logs dir is argv[0]-dependent: "
+            f"got {got!r}, expected {expected!r}"
+        )
+    finally:
+        shutil.rmtree(importer_dir)
+
+
 def main():
     d = tempfile.mkdtemp()
     failed = 0
+    # Imported-module default-dir seam (assert-based helper; counted here).
+    try:
+        test_default_logs_dir_when_imported_as_module()
+        print("PASS  test_default_logs_dir_when_imported_as_module")
+    except AssertionError as e:
+        failed += 1
+        print(f"FAIL  test_default_logs_dir_when_imported_as_module: {e}")
     try:
         path = os.path.join(d, "run-2026-01-01.jsonl")
         with open(path, "w", encoding="utf-8") as fh:

@@ -23,8 +23,14 @@ import sys
 import time
 from datetime import datetime, timezone
 
-SCRIPT_DIR = os.path.dirname(os.path.realpath(sys.argv[0]))
-REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+# Real, symlink-safe module location. `__file__` is correct BOTH when this
+# runs as a script and when it is imported as a module: sys.argv[0] points at
+# the *importer* in the imported case, which made the default logs dir
+# argv[0]-dependent (same defect family as log_run.py — RM-002 AC5, 2026-09-16).
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+# repo root = scripts -> observing-runs -> skills -> repo (THREE levels up;
+# the pre-2026-09-16 code took two and landed at skills/).
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(SCRIPT_DIR)))
 DEFAULT_LOGS_DIR = os.environ.get("OBSERVE_LOG_DIR", os.path.join(REPO_ROOT, "logs"))
 
 RUN_FILE_RE = re.compile(r"^run-(\d{4}-\d{2}-\d{2})\.jsonl$")

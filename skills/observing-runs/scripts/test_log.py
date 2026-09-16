@@ -105,12 +105,55 @@ def test_append_only_no_readback():
     assert '"r"' not in src, "log_run.py must not read the log file back (out-of-context guard)"
 
 
+def test_default_logs_dir_when_imported_as_module():
+    """RM-002 seam (found by the AC5 live gate, 2026-09-16): the eval runner
+    IMPORTS log_run as a module (single source of truth — the runner must not
+    redefine the schema), so the default logs dir must resolve from
+    log_run.py's OWN location, never from sys.argv[0] of the importing
+    process. In CI the importer is run_behavioral_eval.py, so the old
+    argv[0]-based computation landed records in skills/logs/ instead of
+    repo-root logs/ and the workflow artifact upload found nothing.
+    """
+    expected = os.path.abspath(
+        os.path.join(os.path.dirname(SCRIPT), os.pardir, os.pardir, os.pardir, "logs")
+    )
+    importer_dir = tempfile.mkdtemp(prefix="logrun-importer-")
+    importer = os.path.join(importer_dir, "some_other_script.py")
+    try:
+        with open(importer, "w", encoding="utf-8") as fh:
+            fh.write(
+                "import sys\n"
+                f"sys.path.insert(0, {os.path.dirname(SCRIPT)!r})\n"
+                "import log_run\n"
+                "print(log_run.DEFAULT_LOGS_DIR)\n"
+            )
+        r = subprocess.run([sys.executable, importer], capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        got = r.stdout.strip().splitlines()[-1]
+        assert got == expected, (
+            "imported default logs dir is argv[0]-dependent: "
+            f"got {got!r}, expected {expected!r}"
+        )
+        # In-process import from THIS test file (argv[0] = test_log.py, another
+        # script) must resolve the same default — the repo-root computation
+        # itself must be right, not just symlink-safe.
+        sys.path.insert(0, os.path.dirname(SCRIPT))
+        import log_run
+        assert log_run.DEFAULT_LOGS_DIR == expected, (
+            f"log_run.DEFAULT_LOGS_DIR is {log_run.DEFAULT_LOGS_DIR!r}, expected {expected!r} "
+            "(repo-root logs/ per SKILL.md/schema.md/.gitignore/CI artifact path)"
+        )
+    finally:
+        shutil.rmtree(importer_dir)
+
+
 def main():
     tests = [
         test_complete_record_writes_one_line,
         test_missing_tokens_default_null_not_zero,
         test_missing_required_field_exits_nonzero,
         test_symlink_safe,
+        test_default_logs_dir_when_imported_as_module,
         test_append_only_no_readback,
     ]
     failed = 0
