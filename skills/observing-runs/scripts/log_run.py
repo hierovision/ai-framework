@@ -11,9 +11,10 @@ ROI guardrail (see SKILL.md / the plan):
     one line to disk and NEVER reads any prior log content back. Logs are
     never fed into an agent's live prompt.
   - Per-run granularity: one record per run, NOT per internal sub-step.
-  - Symlink-safe: paths are resolved via realpath(argv[0]) so a symlinked
+  - Symlink-safe: paths are resolved via realpath(__file__) so a symlinked
     install (e.g. ~/.config/opencode/skills/observing-runs) resolves to the
-    real script directory (matches the library's ESM/CLI run-as-main rule).
+    real script directory — for both script and imported-module use
+    (matches the library's ESM/CLI run-as-main rule).
 """
 import argparse
 import json
@@ -22,10 +23,16 @@ import sys
 import uuid
 from datetime import datetime, timezone
 
-# Real, symlink-safe script location.
-SCRIPT_DIR = os.path.dirname(os.path.realpath(sys.argv[0]))
-# repo root = two levels up from skills/observing-runs/scripts/
-REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+# Real, symlink-safe module location. `__file__` is correct BOTH when this
+# runs as a script and when it is IMPORTED as a module by a consumer such as
+# the RM-002 eval runner: sys.argv[0] points at the *importer* in the
+# imported case, which made the default logs dir argv[0]-dependent (found by
+# the RM-002 AC5 live gate, 2026-09-16: CI records landed in skills/logs/
+# instead of repo-root logs/ and the workflow artifact upload found nothing).
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+# repo root = skills/observing-runs/scripts -> observing-runs -> skills -> repo
+# (THREE levels up; the pre-2026-09-16 code took two and landed at skills/).
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(SCRIPT_DIR)))
 DEFAULT_LOGS_DIR = os.environ.get("OBSERVE_LOG_DIR", os.path.join(REPO_ROOT, "logs"))
 
 # Fields that MUST be present in the caller's record (no safe default).
