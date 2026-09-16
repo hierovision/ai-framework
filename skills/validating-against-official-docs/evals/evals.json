@@ -4,6 +4,7 @@
   "evals": [
     {
       "id": 1,
+      "deferred": true,
       "prompt": "validate .github/workflows/deploy.yml against the authoritative Azure SWA docs in official-docs.md and emit an adherence report (ADHERENCE.md). cite what adheres and what gaps exist, with the doc-backed fix for each. repo is the working directory",
       "expected_behavior": [
         "Reads official-docs.md (the frozen authoritative source) and .github/workflows/deploy.yml before reporting",
@@ -24,6 +25,7 @@
     },
     {
       "id": 2,
+      "deferred": true,
       "prompt": "a team claims their CI is 'fully secure'. validate that claim against GitHub's security-hardening docs and give me a cited adherence report. repo is the working directory — there's a .github/workflows/ci.yml to check",
       "expected_behavior": [
         "Identifies GitHub's 'Security hardening for GitHub Actions' as the authoritative source and would fetch/date it (or uses the project's frozen copy if present)",
@@ -39,6 +41,7 @@
     },
     {
       "id": 3,
+      "deferred": true,
       "prompt": "is our supabase `db push` usage still correct per the current supabase migrations docs? validate and report. repo is the working directory",
       "expected_behavior": [
         "Names Supabase's 'Database Migrations' doc as the authoritative source and would fetch/date it",

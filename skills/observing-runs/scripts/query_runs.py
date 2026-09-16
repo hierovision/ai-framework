@@ -48,28 +48,62 @@ def _iter_records(logs_dir):
                     continue
 
 
+def _as_known_int(value):
+    """Return `value` as a real measured int, or None when unknown.
+
+    Legacy compatibility (2026-09-13): writers before 2026-09-06 defaulted
+    unknown `tokens_in`/`tokens_out`/`duration_ms` to literal `0`. Writers now
+    emit `null`. Because `0` carried no information (missing != zero), a literal
+    `0` is treated as unknown so legacy records cannot skew cost/latency
+    aggregates. Documented in references/schema.md.
+
+    Sunset: legacy records age out of the 30-day retention window by
+    ~2026-10-06; this shim can be removed after that date.
+    """
+    if isinstance(value, bool):  # bool is an int subclass; never a measurement
+        return None
+    if isinstance(value, int) and value != 0:
+        return value
+    return None
+
+
 def aggregate(logs_dir):
-    """Return a dict of aggregate stats."""
-    per_skill = {}  # skill -> {runs, tokens, dur_sum}
+    """Return a dict of aggregate stats.
+
+    Missing != zero: tokens_in/out and duration_ms default None when unknown.
+    Totals sum known components only; cost_per_task divides by runs with any
+    known token component (None when no run has known tokens); mean_duration
+    divides by runs with known duration (None when none known).
+
+    Legacy records that stored literal `0` for unknown are coerced to unknown
+    by `_as_known_int` (see its docstring) so they do not skew the aggregates.
+    """
+    per_skill = {}  # skill -> {runs, tokens, tokens_known_runs, dur_sum, dur_known_runs}
     eval_rows = 0
     eval_pass = 0
 
     def skill_bucket(key):
         b = per_skill.get(key)
         if b is None:
-            b = {"runs": 0, "tokens": 0, "dur_sum": 0}
+            b = {"runs": 0, "tokens": 0, "tokens_known_runs": 0,
+                 "dur_sum": 0, "dur_known_runs": 0}
             per_skill[key] = b
         return b
 
     for rec in _iter_records(logs_dir):
         kind = rec.get("kind")
         skill = rec.get("skill") or "(none)"
-        tokens = (rec.get("tokens_in") or 0) + (rec.get("tokens_out") or 0)
-        dur = rec.get("duration_ms") or 0
+        ti = _as_known_int(rec.get("tokens_in"))
+        to = _as_known_int(rec.get("tokens_out"))
+        dur = _as_known_int(rec.get("duration_ms"))
         b = skill_bucket(skill)
         b["runs"] += 1
-        b["tokens"] += tokens
-        b["dur_sum"] += dur
+        if ti is not None or to is not None:
+            b["tokens"] += (ti if ti is not None else 0) + (to if to is not None else 0)
+            b["tokens_known_runs"] += 1
+        if dur is not None:
+            b["dur_sum"] += dur
+            b["dur_known_runs"] += 1
 
         if kind == "eval":
             eval_rows += 1
@@ -82,8 +116,8 @@ def aggregate(logs_dir):
             "skill": skill,
             "runs": b["runs"],
             "tokens_total": b["tokens"],
-            "cost_per_task": (b["tokens"] / b["runs"]) if b["runs"] else 0,
-            "mean_duration_ms": (b["dur_sum"] / b["runs"]) if b["runs"] else 0,
+            "cost_per_task": (b["tokens"] / b["tokens_known_runs"]) if b["tokens_known_runs"] else None,
+            "mean_duration_ms": (b["dur_sum"] / b["dur_known_runs"]) if b["dur_known_runs"] else None,
         })
 
     result = {

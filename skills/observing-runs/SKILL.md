@@ -24,9 +24,11 @@ Logging is **strictly out-of-context at runtime**:
 - `detail` is **failure-only and capped at 512 chars** — never raw prompt,
   output, or transcript.
 
-This keeps logging cost <1% of a run's tokens (one `log_run.py` tool call
-≈ 80–160 tokens vs thousands per task) and eliminable entirely via
-hook-based emission.
+This keeps logging bounded — once per run, out-of-context, and eliminable via
+hook-based emission. The numeric budget (`<2%` and `<200 tokens/run`) is
+**`unverified`**: no RM-002 baseline has been recorded, so it is a dated,
+provisional target, not an established hard bound — see
+[../../reference/run-log-overhead.md](../../reference/run-log-overhead.md).
 
 ## The contract
 
@@ -72,13 +74,19 @@ python3 skills/observing-runs/scripts/query_runs.py prune --older-than 30d --dry
 Default window **30 days**; `--archive` gzips to `logs/archive/`; `--dry-run`
 is a no-op. Aggregates persist (RM-003/009/011); raw lines don't.
 
-## Hook-based emission (preferred, zero agent tokens)
+## Hook-based emission (aspirational, not the default)
 
 A hook fires outside the agent's generation and costs the agent **zero
-tokens**. Reference config: [references/hooks.opencode.json](references/hooks.opencode.json).
-Verify the hook event model against current opencode docs before enabling
-auto-instrumentation; fall back to convention-based logging if hooks are
-unavailable.
+tokens**. Today this is an **example only**: opencode hooks are TypeScript
+plugins (dated facts in
+[../../reference/opencode-integration.md](../../reference/opencode-integration.md)).
+The example is
+[references/observe.plugin.EXAMPLE.js](references/observe.plugin.EXAMPLE.js);
+[references/hooks.opencode.json](references/hooks.opencode.json) marks the
+prior fictional JSON snippet as superseded. The example fabricates
+`outcome:"success"` and cannot attribute skill/model/tokens/duration, so it is
+**not schema-honest and must not be enabled as-is**. Convention-based
+`log_run.py --record` remains the default.
 
 ## What gets logged (narrow event set)
 

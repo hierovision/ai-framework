@@ -123,8 +123,8 @@ Phase grouping (orientation only):
 
 ## 7. Exit criteria (how we know we arrived)
 
-- [ ] Queryable run logs answer "why did the agent do X" (Observability L4)
-- [ ] Eval suite runs per change / scheduled and blocks regressions (Eval L4)
+- [x] Queryable run logs answer "why did the agent do X" (Observability L4) — RM-001
+- [ ] Eval suite runs per change / scheduled and blocks regressions (Eval L4) — RM-002 partial: scheduled weekly + blocks regressions; not yet per-change; two network-fetching suites deferred (RM-003 tracks the coverage gap)
 - [ ] Named owner + calendared governance review exists (Governance L4)
 - [ ] Agents in change mgmt via PR checks + registry (Integration L4)
 - [ ] Decision boundaries enforced in config (L4)

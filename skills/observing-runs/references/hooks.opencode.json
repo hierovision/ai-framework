@@ -1,18 +1,3 @@
 {
-  "hooks": {
-    "SkillInvocationEnd": [
-      {
-        "type": "command",
-        "command": "python3 ${skill_dir}/scripts/log_run.py --record '{\"kind\":\"skill\",\"skill\":\"${skill_name}\",\"agent\":null,\"model\":${model_tier},\"tokens_in\":${tokens_in},\"tokens_out\":${tokens_out},\"duration_ms\":${duration_ms},\"outcome\":\"${outcome}\",\"eval_pass\":null,\"detail\":${detail}}'",
-        "timeout_ms": 5000
-      }
-    ],
-    "AgentSessionEnd": [
-      {
-        "type": "command",
-        "command": "python3 ${skill_dir}/scripts/log_run.py --record '{\"kind\":\"agent\",\"skill\":null,\"agent\":\"${agent_name}\",\"model\":${model_tier},\"tokens_in\":${tokens_in},\"tokens_out\":${tokens_out},\"duration_ms\":${duration_ms},\"outcome\":\"${outcome}\",\"eval_pass\":null,\"detail\":${detail}}'",
-        "timeout_ms": 5000
-      }
-    ]
-  }
+  "$comment": "NOT a valid opencode.json hooks config — records the superseded fictional snippet. The dated opencode CLI/plugin facts live in one place: reference/opencode-integration.md (repo root). There is no `hooks` key; hooks are TypeScript plugins. The aspirational run-boundary example is observe.plugin.EXAMPLE.js in this directory (not schema-honest, not enabled by default). Convention-based `log_run.py --record` remains the default."
 }

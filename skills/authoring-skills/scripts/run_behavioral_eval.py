@@ -114,10 +114,14 @@ def run_eval(e, get_output, logs_dir=None):
 def invoke_opencode(e):
     """Real fresh-agent invocation (CI only; needs the model credential).
 
-    Best-effort: copy the eval's fixture files to a temp working dir, prompt a
-    fresh `opencode` session with the skill installed, return its final output.
-    Exact headless subcommand / skill-install semantics depend on opencode's
-    current CLI (see plan OQ1) — verify before relying on this in production.
+    Validated 2026-09-06 against https://opencode.ai/docs/cli/#run-1:
+    `opencode run [message..]` with `--dir`, `--agent`, `--model/-m`,
+    `--file/-f`, `--format` flags. There is NO `--skill` flag, so the prior
+    `opencode run --skill <skill> <prompt>` is replaced by
+    `opencode run --dir <tmpdir> <prompt>` with the skill resolved from the
+    repo's installed skills (symlinked global layout), not a CLI flag.
+    The model credential must already be in the environment (repo secret);
+    it is consumed here, never echoed.
     """
     tmp = tempfile.mkdtemp(prefix="beval-")
     try:
@@ -130,7 +134,7 @@ def invoke_opencode(e):
         # The model credential must already be in the environment (repo secret);
         # it is consumed here, never echoed.
         proc = subprocess.run(
-            ["opencode", "run", "--skill", e["skill"], e["prompt"]],
+            ["opencode", "run", "--dir", tmp, e["prompt"]],
             cwd=tmp, capture_output=True, text=True,
             env=os.environ,
         )
@@ -170,6 +174,20 @@ def main(argv=None):
 
     if args.list:
         print(f"included evals: {len(selected)}")
+        deferred_excluded = (
+            0 if args.include_deferred
+            else sum(1 for e in all_evals if e["deferred"])
+        )
+        if deferred_excluded:
+            print(f"deferred: {deferred_excluded} excluded by default "
+                  f"(pass --include-deferred to include)")
+        paid_excluded = sum(
+            1 for e in all_evals
+            if ci_mode and not e["deferred"] and e["model_tier"] in ("go", "zen")
+        )
+        if paid_excluded:
+            print(f"paid-tier: {paid_excluded} excluded by CI mode "
+                  f"(free-only; see reference/model-routing.md)")
         for e in selected:
             tag = "deferred" if e["deferred"] else "eval"
             print(f"  [{tag}] {e['skill']}#{e['eval_id']} (tier={e['model_tier']})")

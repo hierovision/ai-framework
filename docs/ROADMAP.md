@@ -22,9 +22,9 @@ Note: No single standard exists for an "agentic dev lifecycle." We compose the a
 
 | ID | Category | Title | Priority | Phase | Status | Source | Acceptance |
 |---|---|---|---|---|---|---|---|
-| RM-001 | observability | Run-log schema + `observing-runs` skill | 1 | 1 | next | plan §5-A; repo audit (Observability L1) | Structured `logs/run-*.jsonl` emitted on every skill/agent invocation with skill, agent, model, tokens, duration, outcome, eval pass/fail; query script returns cost/task, latency, eval-pass rate. |
-| RM-002 | evaluation | Wire behavioral eval suite into CI | 1 | 1 | next | plan §5-B; `skills/authoring-skills` eval protocol | Fresh-agent eval protocol runs on schedule/hermetic CI; regression failures block the run; no manual "I tried it" gates. |
-| RM-003 | evaluation | Eval report artifact + dashboard | 2 | 1 | backlog | plan §5-B | Per-run eval scores persisted and queryable; report links from CI summary. |
+| RM-001 | observability | Run-log schema + `observing-runs` skill | 1 | 1 | done | plan §5-A; repo audit (Observability L1) | Structured `logs/run-*.jsonl` emitted on every skill/agent invocation with skill, agent, model, tokens, duration, outcome, eval pass/fail; query script returns cost/task, latency, eval-pass rate. |
+| RM-002 | evaluation | Wire behavioral eval suite into CI | 1 | 1 | in-progress | plan §5-B; `skills/authoring-skills` eval protocol | Fresh-agent eval protocol runs on schedule/hermetic CI; regression failures block the run; no manual "I tried it" gates. Remaining: live-dispatch regression check (rm-002 AC5, manual); two network-fetching suites deferred (RM-003 tracks the coverage gap). |
+| RM-003 | evaluation | Eval report artifact + dashboard | 2 | 1 | backlog | plan §5-B | Per-run eval scores persisted and queryable; report links from CI summary. Must also report coverage gaps: skills with zero eval records and deferred (excluded-by-default) evals. |
 | RM-004 | governance | Formal governance artifacts | 2 | 2 | backlog | plan §5-C; repo audit (Governance L2) | `CONTRIBUTING.md`, `CODEOWNERS`, `SECURITY.md`, `docs/ADRs/` exist and are referenced by contribution flow. |
 | RM-005 | governance | Skill/agent registry manifest | 2 | 2 | backlog | plan §5-D | Machine-readable manifest listing each skill/agent: owner, maturity level, boundary ref. Consumed by tooling. |
 | RM-006 | integration | Adoptable CI/CD templates | 3 | 2 | backlog | plan §5-D; `skills/designing-cicd` | `templates/` YAML a consumer repo can copy to get evaluate→build→deploy golden path. |
@@ -41,8 +41,9 @@ RM-005, RM-006) converts prose rules into enforced artifacts and ships reusable
 pipelines. Phase 3 (RM-007, RM-008, RM-009, RM-010) closes integration,
 boundary-encoding, ROI, and HITL consistency. Phase 4 (RM-011) is the
 optimizing loop.
-
 ## Next-session entry
-Start RM-001 + RM-002 (Phase 1). Both are independent and unblock all later
-work. Design artifacts for each belong in `.opencode/plans/` via
-`designing-architecture` before `implementing-features` executes.
+
+RM-001/RM-002 closure is in PR #14. RM-002's live-dispatch regression check
+(AC5) is the remaining manual gate. The next Phase-1 item is RM-003 (eval
+report + coverage-gap tracking). Design artifacts belong in `.opencode/plans/`
+via `designing-architecture` before `implementing-features` executes.
