@@ -111,7 +111,10 @@ def main():
         sys.exit(2)
 
     if args == ["--all"]:
-        here = os.path.dirname(os.path.abspath(__file__))
+        # realpath so a symlinked install (e.g. ~/.config/opencode/skills/...)
+        # still resolves to the real repo's skills/ root (Layer 1 hermeticity:
+        # the hook must validate the checkout it was installed into).
+        here = os.path.dirname(os.path.realpath(__file__))
         skills_root = os.path.normpath(os.path.join(here, "..", ".."))
         args = sorted(
             os.path.join(skills_root, d)
