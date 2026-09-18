@@ -82,6 +82,32 @@ If named subagents (`subagent_type: "council-*"`) are not available, STOP.
 Report which agents are missing and refuse to run a degraded council.
 A council on a single model family produces false objectivity.
 
+## Known limitation (opencode 1.18.18, observed 2026-09-18)
+
+Summoning the free council currently fails on both paths, in different ways:
+
+- **Task tool + `council-*` subagents:** the nested session's free-tier model
+  calls are rejected by the Console ("OpenCode's free tier can only be used
+  from within OpenCode") — the member dies at step 0, zero tokens, and the
+  task harness surfaces the failure as an EMPTY result. Rule: an empty task
+  result from a council member is a failure, never a review; do not
+  synthesize over it.
+- **`opencode run --agent council-*`:** council agents are subagent-mode and
+  cannot be primary; the CLI silently falls back to the default agent, losing
+  both the persona and the lens's bound model. A fallback run is a
+  single-family council wearing lens prompts — name it as degraded or refuse.
+
+Recovery that preserves the lens-model intent:
+
+1. Run each member with the model forced explicitly (`-m opencode/<lens-model>`
+   per the member table above); the `-m` flag wins over the fallback binding.
+2. Verify each member's run header shows the intended `agent · model` line
+   BEFORE synthesizing; a mismatch means the lens ran on the wrong model —
+   re-run that member, don't synthesize around it.
+3. If any member cannot be bound to its intended model, the council is
+   degraded: state that in the synthesis (which family wore which lens) and
+   do not present it as a full council.
+
 ## Relationship to `reviewing-code`
 
 `reviewing-code` (the skill `build` hands off to for a final verdict) is a
