@@ -2,7 +2,7 @@
 
 Status: draft for refinement
 Date: 2026-08-28
-Author: triage agent (planning pass)
+Author: curator agent (planning pass)
 Location: `docs/maturity-plan.md` (moved from `~/repos/temp`)
 
 ## 1. Scope & intent

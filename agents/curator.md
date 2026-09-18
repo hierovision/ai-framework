@@ -1,5 +1,5 @@
 ---
-name: triage
+name: curator
 description: Consolidate, trim, and prioritize the project backlog.
 model: opencode/nemotron-3-ultra-free
 mode: primary
@@ -29,6 +29,6 @@ or references directly.
 
 ## When to Delegate
 
-- For multi-file features or database changes, run `design` to produce a
-  plan before `build` executes.
-- For straightforward coding from an approved plan, run `build` directly.
+- For multi-file features or database changes, run `architect` to produce a
+  plan before `implementer` executes.
+- For straightforward coding from an approved plan, run `implementer` directly.

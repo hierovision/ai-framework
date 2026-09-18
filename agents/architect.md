@@ -1,5 +1,5 @@
 ---
-name: design
+name: architect
 description: Architect multi-file features, plan database changes, produce implementation plans.
 model: opencode/nemotron-3-ultra-free
 mode: primary
@@ -26,7 +26,7 @@ Project-specific context to bring into that skill's research step:
 
 - Read `.opencode/agents.md` (architectural guardrails), the project's
   requirements/backlog docs, and its `ROADMAP.md` (the consolidated backlog
-  produced by the `triage` agent / `triaging-requirements` skill).
+  produced by the `curator` agent / `triaging-requirements` skill).
 - Cross-reference any schema/type change with the project's generated
   database types (never hand-edit generated types).
 - Plans are written to `.opencode/plans/<slug>.md` (one file per item, per
@@ -34,6 +34,6 @@ Project-specific context to bring into that skill's research step:
 
 ## When to Delegate
 
-- If scope or requirements are unclear, run `triage` first.
-- After the plan is approved, hand off to `build` for implementation
+- If scope or requirements are unclear, run `curator` first.
+- After the plan is approved, hand off to `implementer` for implementation
   (direct the new session at the plan's `.opencode/plans/<slug>.md` path).

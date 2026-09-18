@@ -126,7 +126,7 @@ custom personas are rejected regardless of model:
 
 ## Relationship to `reviewing-code`
 
-`reviewing-code` (the skill `build` hands off to for a final verdict) is a
+`reviewing-code` (the skill `implementer` hands off to for a final verdict) is a
 **single-reviewer** discipline: one reviewer, one verdict, against a plan.
 This council is the separate **multi-perspective** discipline — parallel
 lenses, discussion-only, no verdict. Use council for validation/brainstorming
@@ -135,6 +135,6 @@ diff. Do not substitute one for the other.
 
 ## When to Delegate
 
-- If the user asks for an implementation plan after the synthesis, hand off to `design`.
-- If the user wants to execute after the synthesis, hand off to `build`.
-- If requirements are unclear, suggest running `triage` first.
+- If the user asks for an implementation plan after the synthesis, hand off to `architect`.
+- If the user wants to execute after the synthesis, hand off to `implementer`.
+- If requirements are unclear, suggest running `curator` first.
