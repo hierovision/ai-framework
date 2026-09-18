@@ -53,3 +53,10 @@ jobs:
 
       - name: Lint install.sh
         run: bash -n install.sh
+
+      # Enforces .yamllint.yaml (structural rules only — see the config's
+      # comments for which stylistic rules are disabled and why).
+      - name: Lint workflow YAML
+        run: |
+          pip install --quiet yamllint
+          python3 -m yamllint -c .yamllint.yaml .github/workflows/
