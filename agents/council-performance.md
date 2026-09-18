@@ -2,7 +2,7 @@
 name: council-performance
 description: Performance and scalability analysis
 model: opencode/nemotron-3-ultra-free
-mode: subagent
+mode: all
 hidden: true
 temperature: 0.3
 permission:

@@ -37,9 +37,9 @@ A **paid or Go-escalation council is an opt-in workflow decided by the user**:
 if the user asks for the "full" / "strongest" / "frontier" council, run it with
 the subagents bound to stronger models. The middle escalation tier uses Go
 flat-rate open models (`opencode-go/`, e.g. `kimi-k3 + glm-5.3 +
-deepseek-v4.1-flash`); the top tier uses Zen PAYG models (see the
+qwen3.8-max`); the top tier uses Zen PAYG models (see the
 `council-member` row in `reference/model-routing.md` — the frontier opt-in set
-is `claude-opus-5 + gemini-3.8-flash + kimi-k3`, one model per vendor family for
+is `claude-opus-5 + muse-spark-1.3 + kimi-k3`, one model per vendor family for
 maximum objectivity). The user opts in explicitly; do not upgrade models on
 your own.
 
@@ -81,6 +81,48 @@ members" or "fast council".
 If named subagents (`subagent_type: "council-*"`) are not available, STOP.
 Report which agents are missing and refuse to run a degraded council.
 A council on a single model family produces false objectivity.
+
+## Known limitation (opencode 1.18.18, observed 2026-09-18)
+
+Summoning the free council currently fails on both paths, in different ways:
+
+- **Task tool + `council-*` subagents:** the nested session's free-tier model
+  calls are rejected by the Console ("OpenCode's free tier can only be used
+  from within OpenCode") — the member dies at step 0, zero tokens, and the
+  task harness surfaces the failure as an EMPTY result. Rule: an empty task
+  result from a council member is a failure, never a review; do not
+  synthesize over it.
+- **`opencode run --agent council-*`:** council agents are subagent-mode and
+  cannot be primary; the CLI silently falls back to the default agent, losing
+  both the persona and the lens's bound model. A fallback run is a
+  single-family council wearing lens prompts — name it as degraded or refuse.
+
+Recovery that preserves the lens-model intent (verified 2026-09-18):
+
+The Console's free-tier gate allowlists **stock OpenCode agent contexts**;
+custom personas are rejected regardless of model:
+
+| Invocation | Result |
+|---|---|
+| default build agent + free model | works |
+| `council-*` persona + free model | rejected ("free tier can only be used from within OpenCode") |
+| `council-*` persona + Go/Zen model | works |
+
+1. **Free council:** run each member as the default agent with the lens MODEL
+   forced explicitly (`-m opencode/<lens-model>` per the member table above)
+   and the lens brief carried in the prompt. This preserves family diversity
+   (the models are the independence mechanism) at the cost of persona-file
+   framing — inline the persona's key instructions in the prompt instead.
+2. **Paid council (Go/Zen):** `mode: all` on the council agents makes the
+   personas primary-capable — `opencode run --agent council-security` resolves
+   the true persona + its bound model (`council-security · mimo-v2.5-free`
+   header), and works cleanly on `opencode-go/` and `opencode/` models.
+3. In every case, verify each member's run header shows the intended
+   `agent · model` line BEFORE synthesizing; a mismatch means the lens ran on
+   the wrong model — re-run that member, don't synthesize around it.
+4. If any member cannot be bound to its intended model, the council is
+   degraded: state that in the synthesis (which family wore which lens) and
+   do not present it as a full council.
 
 ## Relationship to `reviewing-code`
 
