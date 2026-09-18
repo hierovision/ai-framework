@@ -2,7 +2,7 @@
 name: council-architecture
 description: Architecture and maintainability analysis
 model: opencode/muse-spark-1.3-contributor-free
-mode: subagent
+mode: all
 hidden: true
 temperature: 0.2
 permission:

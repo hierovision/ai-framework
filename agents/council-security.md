@@ -2,7 +2,7 @@
 name: council-security
 description: Security and edge case analysis
 model: opencode/mimo-v2.5-free
-mode: subagent
+mode: all
 hidden: true
 temperature: 0.2
 permission:

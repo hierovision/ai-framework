@@ -2,7 +2,7 @@
 name: council-ux
 description: User experience and developer experience analysis
 model: opencode/mimo-v2.5-free
-mode: subagent
+mode: all
 hidden: true
 temperature: 0.5
 permission:
