@@ -97,14 +97,30 @@ Summoning the free council currently fails on both paths, in different ways:
   both the persona and the lens's bound model. A fallback run is a
   single-family council wearing lens prompts — name it as degraded or refuse.
 
-Recovery that preserves the lens-model intent:
+Recovery that preserves the lens-model intent (verified 2026-09-18):
 
-1. Run each member with the model forced explicitly (`-m opencode/<lens-model>`
-   per the member table above); the `-m` flag wins over the fallback binding.
-2. Verify each member's run header shows the intended `agent · model` line
-   BEFORE synthesizing; a mismatch means the lens ran on the wrong model —
-   re-run that member, don't synthesize around it.
-3. If any member cannot be bound to its intended model, the council is
+The Console's free-tier gate allowlists **stock OpenCode agent contexts**;
+custom personas are rejected regardless of model:
+
+| Invocation | Result |
+|---|---|
+| default build agent + free model | works |
+| `council-*` persona + free model | rejected ("free tier can only be used from within OpenCode") |
+| `council-*` persona + Go/Zen model | works |
+
+1. **Free council:** run each member as the default agent with the lens MODEL
+   forced explicitly (`-m opencode/<lens-model>` per the member table above)
+   and the lens brief carried in the prompt. This preserves family diversity
+   (the models are the independence mechanism) at the cost of persona-file
+   framing — inline the persona's key instructions in the prompt instead.
+2. **Paid council (Go/Zen):** `mode: all` on the council agents makes the
+   personas primary-capable — `opencode run --agent council-security` resolves
+   the true persona + its bound model (`council-security · mimo-v2.5-free`
+   header), and works cleanly on `opencode-go/` and `opencode/` models.
+3. In every case, verify each member's run header shows the intended
+   `agent · model` line BEFORE synthesizing; a mismatch means the lens ran on
+   the wrong model — re-run that member, don't synthesize around it.
+4. If any member cannot be bound to its intended model, the council is
    degraded: state that in the synthesis (which family wore which lens) and
    do not present it as a full council.
 
