@@ -124,9 +124,9 @@ Phase grouping (orientation only):
 ## 7. Exit criteria (how we know we arrived)
 
 - [x] Queryable run logs answer "why did the agent do X" (Observability L4) — RM-001
-- [ ] Eval suite runs per change / scheduled and blocks regressions (Eval L4) — RM-002
-    - [x] scheduled weekly + blocks regressions, verified live (negative-path canary 35108912831, 2026-09-16)
-    - [ ] per-change triggering
+- [ ] Eval suite runs per change / scheduled and blocks regressions (Eval L4) — RM-002 + RM-003
+    - [x] scheduled weekly + blocks regressions, verified live (AC5 live-dispatch regression check, negative-path canary — see RM-002 acceptance in ROADMAP)
+    - [ ] per-change triggering → RM-003
     - [ ] deferred network-fetching suites → RM-003
 - [ ] Named owner + calendared governance review exists (Governance L4)
 - [ ] Agents in change mgmt via PR checks + registry (Integration L4)
