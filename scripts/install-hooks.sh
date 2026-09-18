@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Install the Layer 1 git pre-commit hook (RM-003 AC5).
 #
-# The generated hook runs the two HERMETIC validators on every commit:
+# The generated hook runs the HERMETIC validators on every commit:
 #   - skills/authoring-skills/scripts/validate_skill.py --all  (skill structure)
 #   - scripts/verify.mjs                                       (eval-manifest schema)
+#   - yamllint -c .yamllint.yaml .github/workflows/            (workflow YAML —
+#     if yamllint is installed locally; otherwise warns and skips, and CI
+#     quality-gates enforces it regardless)
 #
 # It is advisory: bypassable with `git commit --no-verify`. It costs zero CI
-# minutes and catches malformed skills/manifests before a commit (~14s).
+# minutes and catches malformed skills/manifests/workflows before a commit
+# (~15s).
 #
 # Usage:
 #   bash scripts/install-hooks.sh
@@ -46,6 +50,13 @@ python3 "${REPO_ROOT}/skills/authoring-skills/scripts/validate_skill.py" --all |
 
 echo "  -> verify.mjs"
 node "${REPO_ROOT}/scripts/verify.mjs" || fail "verify.mjs"
+
+if python3 -m yamllint --version >/dev/null 2>&1; then
+    echo "  -> yamllint (.github/workflows/)"
+    python3 -m yamllint -c "${REPO_ROOT}/.yamllint.yaml" "${REPO_ROOT}/.github/workflows/" || fail "yamllint"
+else
+    echo "  -> yamllint skipped (not installed locally — pip install yamllint; CI quality-gates still enforces it)"
+fi
 
 echo "Layer 1 pre-commit: all validators passed"
 EOF
