@@ -1,5 +1,5 @@
 ---
-name: build
+name: implementer
 description: Execute coding tasks from an approved plan. Build components, run tests, resolve specific todos.
 model: opencode/nemotron-3-ultra-free
 mode: primary
@@ -39,6 +39,6 @@ AC layer, and hands off to `reviewing-code` for the final verdict.
 ## When to Delegate
 
 - If requirements are unclear or the project's backlog/requirements need
-  cleanup, run `triage` first.
+  cleanup, run `curator` first.
 - For architecture decisions, database changes, or multi-file features, run
-  `design` first to produce a plan at `.opencode/plans/<slug>.md`.
+  `architect` first to produce a plan at `.opencode/plans/<slug>.md`.

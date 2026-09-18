@@ -3,7 +3,7 @@
 The library's branch / commit / merge discipline for implement loops.
 Consumed by `implementing-features` (Step 1 + Step 11), `reviewing-code`
 (the PR is the review unit), `designing-architecture` (branch derives
-from the plan slug), and the `build` / `design` agents. Projects may
+from the plan slug), and the `implementer` / `architect` agents. Projects may
 override the *naming* via their rules file; the *discipline* is fixed.
 
 ## Trunk policy: main is protected
