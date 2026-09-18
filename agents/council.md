@@ -37,9 +37,9 @@ A **paid or Go-escalation council is an opt-in workflow decided by the user**:
 if the user asks for the "full" / "strongest" / "frontier" council, run it with
 the subagents bound to stronger models. The middle escalation tier uses Go
 flat-rate open models (`opencode-go/`, e.g. `kimi-k3 + glm-5.3 +
-deepseek-v4.1-flash`); the top tier uses Zen PAYG models (see the
+qwen3.8-max`); the top tier uses Zen PAYG models (see the
 `council-member` row in `reference/model-routing.md` — the frontier opt-in set
-is `claude-opus-5 + gemini-3.8-flash + kimi-k3`, one model per vendor family for
+is `claude-opus-5 + muse-spark-1.3 + kimi-k3`, one model per vendor family for
 maximum objectivity). The user opts in explicitly; do not upgrade models on
 your own.
 
