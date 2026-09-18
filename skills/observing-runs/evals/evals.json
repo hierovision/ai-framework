@@ -19,6 +19,22 @@
         "../SKILL.md",
         "fixtures/observing-runs/emit-record/README.md"
       ]
+    },
+    {
+      "id": 2,
+      "prompt": "run the RM-003 coverage-gap report over our eval run logs and tell me what it says. the repo has the observing-runs skill under skills/observing-runs/.",
+      "expected_behavior": [
+        "Runs the observing-runs helper (skills/observing-runs/scripts/query_runs.py coverage-gaps, or its scripts/eval-report.py coverage-gaps wrapper) instead of hand-rolling a log scan",
+        "Reports the three required arrays: zero_eval_skills (skills with evals but no eval records), deferred_evals (deferred:true excluded by default), and free_tier_excluded_evals (model_tier go|zen excluded in CI)",
+        "Treats deferred:true and model_tier go|zen evals as excluded-by-default coverage gaps, not as pass/fail failures",
+        "Also surfaces quarantined_evals from logs/quarantine.json when present",
+        "Keeps the report out-of-band (reads logs to build an artifact; never feeds raw logs back into the agent context)"
+      ],
+      "files": [
+        "../scripts/query_runs.py",
+        "../references/schema.md",
+        "../../../scripts/eval-report.py"
+      ]
     }
   ]
 }

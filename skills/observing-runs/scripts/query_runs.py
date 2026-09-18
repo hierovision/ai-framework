@@ -35,6 +35,9 @@ DEFAULT_LOGS_DIR = os.environ.get("OBSERVE_LOG_DIR", os.path.join(REPO_ROOT, "lo
 
 RUN_FILE_RE = re.compile(r"^run-(\d{4}-\d{2}-\d{2})\.jsonl$")
 
+# RM-003 AC3: model tiers excluded from the default CI eval run (free-tier policy).
+EVAL_TIERS_EXCLUDED = ("go", "zen")
+
 
 def _iter_records(logs_dir):
     if not os.path.isdir(logs_dir):
@@ -135,6 +138,76 @@ def aggregate(logs_dir):
     return result
 
 
+def _iter_eval_manifests(skills_root):
+    """Yield (skill, manifest_dict) for every skills/*/evals/evals.json."""
+    if not os.path.isdir(skills_root):
+        return
+    for name in sorted(os.listdir(skills_root)):
+        path = os.path.join(skills_root, name, "evals", "evals.json")
+        if not os.path.isfile(path):
+            continue
+        try:
+            data = json.load(open(path, encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            yield name, data
+
+
+def coverage_gaps(logs_dir, skills_root=None):
+    """RM-003 AC3 coverage-gap report.
+
+    Returns four arrays:
+      zero_eval_skills        skills with an evals manifest but zero kind=eval
+                              records in the (retention-limited) log window
+      deferred_evals          evals flagged deferred:true (excluded by default)
+      free_tier_excluded_evals evals whose model_tier is go|zen (excluded in CI)
+      quarantined_evals       evals at status=quarantined in quarantine.json
+    """
+    if skills_root is None:
+        skills_root = os.path.join(REPO_ROOT, "skills")
+
+    eval_record_skills = set()
+    for rec in _iter_records(logs_dir):
+        if rec.get("kind") == "eval" and rec.get("skill"):
+            eval_record_skills.add(rec["skill"])
+
+    zero_eval_skills, deferred_evals, free_tier_excluded_evals = [], [], []
+    for skill, data in _iter_eval_manifests(skills_root):
+        default_tier = data.get("default_model_tier", "free")
+        if skill not in eval_record_skills:
+            zero_eval_skills.append(skill)
+        for e in data.get("evals", []):
+            tier = e.get("default_model_tier", default_tier)
+            item = {"skill": skill, "eval_id": e.get("id"), "model_tier": tier}
+            if e.get("deferred"):
+                deferred_evals.append({**item,
+                                       "reason": "deferred:true excluded from default run"})
+            elif tier in EVAL_TIERS_EXCLUDED:
+                free_tier_excluded_evals.append(
+                    {**item, "reason": f"model_tier={tier} excluded by CI free-tier policy"}
+                )
+
+    quarantined_evals = []
+    quarantine_path = os.path.join(logs_dir, "quarantine.json")
+    if os.path.isfile(quarantine_path):
+        try:
+            qdata = json.load(open(quarantine_path, encoding="utf-8"))
+        except json.JSONDecodeError:
+            qdata = {}
+        if isinstance(qdata, dict):
+            for key, entry in sorted(qdata.items()):
+                if isinstance(entry, dict) and entry.get("status") == "quarantined":
+                    quarantined_evals.append({"key": key, **entry})
+
+    return {
+        "zero_eval_skills": sorted(zero_eval_skills),
+        "deferred_evals": deferred_evals,
+        "free_tier_excluded_evals": free_tier_excluded_evals,
+        "quarantined_evals": quarantined_evals,
+    }
+
+
 def _parse_older_than(spec):
     """Parse '30d' (days) into a number of seconds. Default unit days."""
     m = re.match(r"^(\d+)\s*(d|h|m|s)?$", spec.strip())
@@ -206,8 +279,22 @@ def main(argv=None):
                     help="gzip to logs/archive/ instead of deleting.")
     pp.add_argument("--dry-run", action="store_true", help="Report only; change nothing.")
 
+    pc = sub.add_parser("coverage-gaps", parents=[parent],
+                        help="Report eval coverage gaps (RM-003 AC3).")
+    pc.add_argument("--skills-root", default=None,
+                    help="Skills root (default <repo>/skills).")
+    pc.add_argument("--print", action="store_true", help="Also pretty-print to stdout.")
+
     args = p.parse_args(argv)
     logs_dir = args.logs_dir or DEFAULT_LOGS_DIR
+
+    if args.cmd == "coverage-gaps":
+        result = coverage_gaps(logs_dir, skills_root=getattr(args, "skills_root", None))
+        if getattr(args, "print", False):
+            print(json.dumps(result, indent=2))
+        else:
+            print(json.dumps(result))
+        return 0
 
     if args.cmd == "prune":
         try:
