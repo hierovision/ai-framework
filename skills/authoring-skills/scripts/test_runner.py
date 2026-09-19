@@ -42,6 +42,39 @@ def _make_skills_root():
     return root
 
 
+def _make_marker_skills_root():
+    """Skills root exercising the two-tier marker selection (RM-003 pass 4)."""
+    root = tempfile.mkdtemp(prefix="beval-markers-")
+
+    def skill(name, evals):
+        d = os.path.join(root, name, "evals")
+        os.makedirs(d)
+        json.dump({"evals": evals}, open(os.path.join(d, "evals.json"), "w"))
+
+    # marked default + core; a non-default sibling
+    skill("auth-skill", [
+        {"id": 1, "prompt": "p", "expected_behavior": ["auth one"],
+         "default": True, "core": True},
+        {"id": 2, "prompt": "p", "expected_behavior": ["auth two"]},
+    ])
+    # marked default only (not a core skill)
+    skill("obs-skill", [
+        {"id": 1, "prompt": "p", "expected_behavior": ["obs one"], "default": True},
+        {"id": 2, "prompt": "p", "expected_behavior": ["obs two"]},
+    ])
+    # core only, first eval in file order
+    skill("core-a", [
+        {"id": 1, "prompt": "p", "expected_behavior": ["core a one"], "core": True},
+        {"id": 2, "prompt": "p", "expected_behavior": ["core a two"]},
+    ])
+    # no markers at all -> first-eval fallback
+    skill("unmarked", [
+        {"id": 1, "prompt": "p", "expected_behavior": ["unmarked one"]},
+        {"id": 2, "prompt": "p", "expected_behavior": ["unmarked two"]},
+    ])
+    return root
+
+
 def _read_logs(logs_dir):
     recs = []
     if not os.path.isdir(logs_dir):
@@ -219,6 +252,82 @@ def test_model_flag_and_ci_guard():
     print("PASS  --model selects the eval model; CI mode enforces *-free only")
 
 
+def test_default_marker_selection_and_fallback():
+    """RM-003 AC12: --default resolves exactly one canary per skill.
+
+    A marked skill yields its `"default": true` eval; an unmarked skill falls
+    back to the first eval in file order (never empty).
+    """
+    root = _make_marker_skills_root()
+    try:
+        evals = runner.load_skill_evals(root)
+        sel = runner.filter_evals(evals, default_only=True, skill="auth-skill")
+        assert [(e["skill"], e["eval_id"]) for e in sel] == [("auth-skill", 1)], sel
+        fallback = runner.filter_evals(evals, default_only=True, skill="unmarked")
+        assert [(e["skill"], e["eval_id"]) for e in fallback] == [("unmarked", 1)], fallback
+        print("PASS  --default = one canary per skill (marker, else first-eval fallback)")
+    finally:
+        shutil.rmtree(root)
+
+
+def test_core_marker_selection():
+    """RM-003 AC12: --core resolves exactly the core-marked evals."""
+    root = _make_marker_skills_root()
+    try:
+        evals = runner.load_skill_evals(root)
+        sel = runner.filter_evals(evals, core_only=True)
+        got = [(e["skill"], e["eval_id"]) for e in sel]
+        assert got == [("auth-skill", 1), ("core-a", 1)], got
+        print("PASS  --core = exactly the core-marked evals")
+    finally:
+        shutil.rmtree(root)
+
+
+def test_selected_path_ignores_limit():
+    """RM-003 AC8/AC12: the marker-selected path ignores --limit (sharding only)."""
+    root = _make_marker_skills_root()
+    try:
+        evals = runner.load_skill_evals(root)
+        assert len(runner.filter_evals(evals, core_only=True, limit=1)) == 2
+        # one per skill, despite --limit 1
+        assert len(runner.filter_evals(evals, default_only=True, limit=1)) == 4
+        print("PASS  --limit ignored on the --default / --core selected paths")
+    finally:
+        shutil.rmtree(root)
+
+
+def test_cli_list_default_and_core():
+    """RM-003 AC12: `--list --default` / `--list --core` list the resolved sets."""
+    root = _make_marker_skills_root()
+    try:
+        r = subprocess.run([sys.executable, RUNNER, "--list", "--default",
+                            "--skills-root", root], capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        default_lines = [l for l in r.stdout.splitlines() if "#" in l]
+        assert len(default_lines) == 4, r.stdout  # one per skill (fallback included)
+        r2 = subprocess.run([sys.executable, RUNNER, "--list", "--core",
+                             "--skills-root", root], capture_output=True, text=True)
+        assert r2.returncode == 0, r2.stderr
+        core_lines = [l for l in r2.stdout.splitlines() if "#" in l]
+        assert len(core_lines) == 2, r2.stdout
+        print("PASS  --list --default / --core list the resolved selections")
+    finally:
+        shutil.rmtree(root)
+
+
+def test_repo_core_and_default_markers():
+    """RM-003 AC12: the six core skills carry core; the two canaries default."""
+    skills_root = os.path.normpath(os.path.join(HERE, "..", ".."))
+    evals = runner.load_skill_evals(skills_root)
+    core = {e["skill"] for e in evals if e["core"]}
+    assert core == {"authoring-skills", "designing-architecture",
+                    "implementing-features", "reviewing-code",
+                    "triaging-requirements", "writing-unit-tests"}, core
+    defaults = {e["skill"] for e in evals if e["default"]}
+    assert {"authoring-skills", "observing-runs"} <= defaults, defaults
+    print("PASS  repo markers: six core skills carry core; authoring+observing default")
+
+
 def main():
     tests = [
         test_assert_behavior,
@@ -229,6 +338,11 @@ def main():
         test_subset_sharding,
         test_ci_free_only,
         test_model_flag_and_ci_guard,
+        test_default_marker_selection_and_fallback,
+        test_core_marker_selection,
+        test_selected_path_ignores_limit,
+        test_cli_list_default_and_core,
+        test_repo_core_and_default_markers,
     ]
     failed = 0
     for t in tests:

@@ -19,6 +19,11 @@ full run stays within the 2,000 min/month cap.
 Deferral: evals flagged `deferred: true` (real-browser / harness-unavailable)
 are excluded from the default run. `default_model_tier` (top-level) selects the
 tier; both are additive, backward-compatible extensions to the eval protocol.
+
+Two-tier marker selection (RM-003 pass 4): `--default` runs each selected
+skill's `"default": true` canary (fallback: first eval in file order);
+`--core` runs the `"core": true` evals (the six core skills). The selected
+paths ignore `--limit` (sharding only). See AC6 / AC12.
 """
 import argparse
 import json
@@ -79,6 +84,10 @@ def load_skill_evals(skills_root):
                 "deferred": bool(e.get("deferred", False)),
                 "model_tier": e.get("default_model_tier", tier),
                 "files": e.get("files", []),
+                # RM-003 pass 4 two-tier markers (AC12): `default` = the
+                # skill's per-change canary; `core` = a harness-change canary.
+                "default": bool(e.get("default", False)),
+                "core": bool(e.get("core", False)),
             })
     return out
 
@@ -89,13 +98,22 @@ def eval_key(e):
 
 
 def filter_evals(evals, include_deferred=False, limit=None, skill=None,
-                 ci_mode=False, quarantined=None, include_quarantine=False):
+                 ci_mode=False, quarantined=None, include_quarantine=False,
+                 default_only=False, core_only=False):
     """Select the eval set.
 
     `skill` accepts a single name or a list (repeatable `--skill`), so the
     Layer 3 workflow can run several changed skills in one invocation.
     `quarantined` is a set of `skill#eval_id` keys excluded by default
     (RM-003 AC9); pass `include_quarantine=True` to run them anyway.
+
+    Two-tier marker selection (RM-003 pass 4, AC6/AC12):
+    - `default_only` (`--default`): per selected skill, keep exactly that
+      skill's `"default": true` eval; when a skill has no marker, fall back to
+      its first eval in file order (deterministic; never empty).
+    - `core_only` (`--core`): keep only evals carrying `"core": true`.
+    The marker-selected paths ignore `limit`; `limit` is retained for sharding
+    only (AC8).
     """
     if isinstance(skill, str):
         skill = [skill]
@@ -111,7 +129,19 @@ def filter_evals(evals, include_deferred=False, limit=None, skill=None,
         out.append(e)
     if skill:
         out = [e for e in out if e["skill"] in skill]
-    if limit is not None:
+    if core_only:
+        out = [e for e in out if e.get("core")]
+    elif default_only:
+        by_skill = {}
+        for e in out:
+            by_skill.setdefault(e["skill"], []).append(e)
+        kept = []
+        for items in by_skill.values():
+            marked = [x for x in items if x.get("default")]
+            kept.append(marked[0] if marked else items[0])  # marker, else first
+        keep_ids = {id(x) for x in kept}
+        out = [e for e in out if id(e) in keep_ids]
+    if limit is not None and not (default_only or core_only):
         out = out[:limit]
     return out
 
@@ -272,6 +302,12 @@ def main(argv=None):
     p.add_argument("--skill", action="append", default=None,
                    help="Run only evals for this skill (repeatable; subset sharding). "
                         "The Layer 3 workflow passes one --skill per changed skill.")
+    p.add_argument("--default", dest="default_only", action="store_true",
+                   help="Run each selected skill's single default-marked eval "
+                        "(fallback: first eval in file order). Layer 3 skill path.")
+    p.add_argument("--core", dest="core_only", action="store_true",
+                   help="Run the core-marked evals (the six core skills' default "
+                        "evals). Layer 3 harness path.")
     p.add_argument("--logs-dir", default=None,
                    help="Log directory (default repo logs/).")
     p.add_argument("--skills-root", default=SKILLS_ROOT,
@@ -327,7 +363,9 @@ def main(argv=None):
     selected = filter_evals(all_evals, include_deferred=args.include_deferred,
                             limit=args.limit, skill=args.skill, ci_mode=ci_mode,
                             quarantined=quarantined,
-                            include_quarantine=args.include_quarantine)
+                            include_quarantine=args.include_quarantine,
+                            default_only=args.default_only,
+                            core_only=args.core_only)
 
     if args.list:
         print(f"included evals: {len(selected)}")

@@ -4,6 +4,7 @@
   "evals": [
     {
       "id": 1,
+      "core": true,
       "prompt": "the plan for feat-offline-queue was approved, go. it's at .opencode/plans/feat-offline-queue.md. the repo is the working directory \u2014 implement it",
       "expected_behavior": [
         "Reads the plan artifact at .opencode/plans/feat-offline-queue.md before touching any source \u2014 does not implement from the prompt alone",

@@ -4,6 +4,8 @@
  "evals": [
   {
    "id": 1,
+   "default": true,
+   "core": true,
    "prompt": "ok I just spent an hour walking an agent through our release process again \u2014 bump the version in package.json, update CHANGELOG.md from merged PRs since the last tag, tag it, draft the gh release notes. I'm sick of re-explaining it. turn this into a skill so any agent can just do it",
    "expected_behavior": [
     "Restates the extracted release-workflow steps (bump version, changelog from merged PRs since the last tag, tag, gh release notes) for confirmation",

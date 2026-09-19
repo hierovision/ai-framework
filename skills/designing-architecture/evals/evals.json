@@ -4,6 +4,7 @@
   "evals": [
     {
       "id": 1,
+      "core": true,
       "prompt": "the roadmap puts feat-offline-queue at #1 (queue timer session events while offline, sync on reconnect). design the approach for it. the repo is the working directory — there's already a plan draft at .opencode/plans/feat-offline-queue.md from an earlier pass, revise it rather than blowing it away",
       "expected_behavior": [
         "Reads the roadmap entry (feat-offline-queue, the #1 item) and treats it as the single work item to plan — does not attempt to plan the whole roadmap",

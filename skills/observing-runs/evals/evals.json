@@ -4,6 +4,7 @@
   "evals": [
     {
       "id": 1,
+      "default": true,
       "prompt": "I just ran a behavioral eval of the writing-unit-tests skill. record that run using the observing-runs skill's log_run.py helper: model tier go, tokens_in 812, tokens_out 305, duration_ms 142000, outcome success, eval_pass true. the working dir has the skill at skills/observing-runs/. afterwards, in one sentence, tell me the ROI guardrail for run logs.",
       "expected_behavior": [
         "Records the run by CALLING skills/observing-runs/scripts/log_run.py (not hand-writing a JSONL file with redefined field names) — honors the single source of truth",

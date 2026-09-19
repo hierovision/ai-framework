@@ -21,6 +21,17 @@ const repoRoot = resolve(__dirname, "..");
 const skillsRoot = join(repoRoot, "skills");
 
 const TIERS = new Set(["free", "go", "zen"]);
+// RM-003 pass 4: JS mirror of query_runs.py's CORE_SKILLS (the canonical
+// source). Kept in step with the Python list; the six core skills must carry
+// a `"core": true` marker on their default eval.
+const CORE_SKILLS = new Set([
+  "authoring-skills",
+  "designing-architecture",
+  "implementing-features",
+  "reviewing-code",
+  "triaging-requirements",
+  "writing-unit-tests",
+]);
 const errors = [];
 const warnings = [];
 
@@ -43,6 +54,8 @@ function validateManifest(skill, manifestPath, data) {
     errors.push(`${label}: 'evals' must be an array`);
     return;
   }
+  const defaultIdx = [];
+  const coreIdx = [];
   data.evals.forEach((e, i) => {
     const where = `${label}: evals[${i}]`;
     if (!isPlainObject(e)) {
@@ -62,6 +75,20 @@ function validateManifest(skill, manifestPath, data) {
     if (e.deferred !== undefined && typeof e.deferred !== "boolean") {
       errors.push(`${where}: 'deferred' must be a boolean`);
     }
+    if (e.default !== undefined) {
+      if (typeof e.default !== "boolean") {
+        errors.push(`${where}: 'default' must be a boolean`);
+      } else if (e.default) {
+        defaultIdx.push(i);
+      }
+    }
+    if (e.core !== undefined) {
+      if (typeof e.core !== "boolean") {
+        errors.push(`${where}: 'core' must be a boolean`);
+      } else if (e.core) {
+        coreIdx.push(i);
+      }
+    }
     if (e.default_model_tier !== undefined &&
         (typeof e.default_model_tier !== "string" || !TIERS.has(e.default_model_tier))) {
       errors.push(`${where}: default_model_tier must be one of free|go|zen`);
@@ -79,6 +106,21 @@ function validateManifest(skill, manifestPath, data) {
       }
     }
   });
+  if (defaultIdx.length > 1) {
+    errors.push(`${label}: ${defaultIdx.length} evals marked 'default': true (max one)`);
+  }
+  if (coreIdx.length > 1) {
+    errors.push(`${label}: ${coreIdx.length} evals marked 'core': true (max one)`);
+  }
+  for (const i of coreIdx) {
+    if (i !== 0 && !defaultIdx.includes(i)) {
+      errors.push(`${label}: evals[${i}] is 'core': true but is not the ` +
+        `'default' or first eval in file order`);
+    }
+  }
+  if (CORE_SKILLS.has(skill) && coreIdx.length === 0) {
+    errors.push(`${label}: core skill '${skill}' must carry 'core': true on its default eval`);
+  }
 }
 
 function main() {
