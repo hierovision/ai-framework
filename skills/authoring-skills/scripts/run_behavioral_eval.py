@@ -26,6 +26,7 @@ import os
 import re
 import shutil
 import subprocess
+import signal
 import sys
 import tempfile
 import time
@@ -207,6 +208,7 @@ def invoke_opencode(e, model=None):
     it is consumed here, never echoed.
     """
     tmp = tempfile.mkdtemp(prefix="beval-")
+    stall_timeout = int(os.environ.get("BEVAL_TIMEOUT_SECONDS", "240"))
     try:
         for rel in e["files"]:
             src = os.path.join(SKILLS_ROOT, e["skill"], "evals", rel)
@@ -216,12 +218,29 @@ def invoke_opencode(e, model=None):
                 shutil.copy(src, dst)
         # The model credential must already be in the environment (repo secret);
         # it is consumed here, never echoed.
-        proc = subprocess.run(
-            ["opencode"] + opencode_run_args(tmp, e["prompt"], model=model),
-            cwd=tmp, capture_output=True, text=True,
-            env=os.environ,
-        )
-        return proc.stdout + proc.stderr
+        # start_new_session=True: a stalled opencode may leak child processes
+        # (zombie `opencode` servers); the whole group must be re-apable, so
+        # the TimeoutExpired handler below kills the group, not just the child.
+        try:
+            proc = subprocess.Popen(
+                ["opencode"] + opencode_run_args(tmp, e["prompt"], model=model),
+                cwd=tmp, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, env=os.environ,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            return f"opencode invocation failed: {exc}"
+        try:
+            out, err = proc.communicate(timeout=stall_timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass  # group already gone
+            proc.communicate()  # reap the killed group's pipes
+            return (f"eval stall: subprocess timed out after {stall_timeout}s "
+                    f"with no completion (transient; subprocess group killed)")
+        return out + err
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
