@@ -4,6 +4,7 @@
   "evals": [
     {
       "id": 1,
+      "core": true,
       "prompt": "we just shipped feat-duration-format and have zero unit tests for the duration formatter. the plan's at .opencode/plans/feat-duration-format.md and it's approved. there's a seeded broken variant at src/lib/duration.broken.js you can use to prove the tests actually catch a break. repo is the working directory \u2014 write the unit tests",
       "expected_behavior": [
         "Reads the plan at .opencode/plans/feat-duration-format.md before writing any test \u2014 derives the cases from the Acceptance Criteria, not from guessing the module's behaviour",

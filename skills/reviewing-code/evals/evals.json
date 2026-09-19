@@ -4,6 +4,7 @@
   "evals": [
     {
       "id": 1,
+      "core": true,
       "prompt": "review this branch for me \u2014 the diff is in change.diff, plan's at .opencode/plans/feat-session-sort.md and it's approved. repo is the working directory. is this ready to merge?",
       "expected_behavior": [
         "Reads the plan at .opencode/plans/feat-session-sort.md FIRST (frontmatter status: approved) and reads change.diff \u2014 does not review from the prompt alone",

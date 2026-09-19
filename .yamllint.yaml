@@ -1,0 +1,18 @@
+---
+# yamllint config for this repo.
+#
+# GitHub Actions workflow files legitimately trigger three yamllint defaults:
+#   - `on:` is a YAML 1.1 boolean (truthy) even though Actions requires the key
+#     spelled `on`;
+#   - workflow comments/`uses:` lines routinely exceed 80 columns;
+#   - Actions files conventionally omit a `---` document start.
+# Keep lint focused on real structural errors (indentation, duplicated keys,
+# invalid booleans) rather than stylistic defaults that fight the Actions format.
+extends: default
+
+rules:
+  document-start: disable
+  line-length: disable
+  truthy: disable
+  comments:
+    min-spaces-from-content: 1

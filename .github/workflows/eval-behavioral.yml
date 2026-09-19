@@ -36,6 +36,10 @@ concurrency:
 jobs:
   behavioral-eval:
     runs-on: ubuntu-latest
+    # Full weekly suite: ~63 evals at the measured ~100s/eval ~= 105 min
+    # (see reference/per-change-eval-sla.md). The 120 min ceiling is the AC10
+    # green-run budget; the ~105 min duration is expected, not a defect.
+    timeout-minutes: 120
     steps:
       # SHA-pinned (supply-chain safety — see securing-ci skill).
       - name: Checkout
@@ -67,10 +71,45 @@ jobs:
           # each routing pass).
           python3 skills/authoring-skills/scripts/run_behavioral_eval.py --model opencode/nemotron-3-ultra-free
 
+      - name: Build eval report artifacts
+        if: always()
+        run: |
+          python3 scripts/eval-report.py aggregate --logs-dir logs/ --out eval-report.json || true
+          python3 scripts/eval-report.py coverage-gaps --logs-dir logs/ --out coverage-gaps.json || true
+          python3 scripts/eval-report.py green-run-status --out green-run-status.json || true
+          python3 scripts/eval-report.py quota-projection --out quota-projection.json || true
+
       - name: Upload run logs (30-day retention)
         if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
         with:
           name: observe-run-logs
           path: logs/
           retention-days: 30
+
+      - name: Upload eval report artifacts (30-day retention)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
+        with:
+          name: eval-report-${{ github.run_id }}
+          path: |
+            eval-report.json
+            coverage-gaps.json
+            green-run-status.json
+            quota-projection.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: CI summary (report links)
+        if: always()
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          {
+            echo "### Eval Report"
+            echo "- [eval-report-${{ github.run_id }}]($RUN_URL#artifacts) artifact"
+            echo "### Coverage Gaps"
+            echo "- [coverage-gaps-${{ github.run_id }}]($RUN_URL#artifacts) artifact"
+            echo "### Steady-State Green Run"
+            echo "- [green-run-status-${{ github.run_id }}]($RUN_URL#artifacts) artifact"
+            echo "- [definition](reference/eval-green-run-definition.md)"
+          } >> "$GITHUB_STEP_SUMMARY"

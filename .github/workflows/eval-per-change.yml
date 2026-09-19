@@ -1,0 +1,353 @@
+# Eval per change (Layer 3) — the un-bypassable per-change regression gate.
+#
+# Per the library's own skills:
+#   - securing-ci: least-privilege `permissions:`, SHA-pinned actions, no secret echo.
+#   - designing-cicd: per-change eval is a required PR check (git hooks are
+#     bypassable via --no-verify; required checks are not). The weekly
+#     eval-behavioral run stays the authoritative full-suite gate.
+#
+# Three-layer gating (see reference/three-layer-gating.md):
+#   Layer 1 pre-commit  -> scripts/install-hooks.sh (validated here)
+#   Layer 2 pre-push    -> optional local advisory run (--no-quarantine)
+#   Layer 3 this file   -> marker-selected evals on pull_request / push to main
+#
+# Marker selection (RM-003 pass 4, AC6/AC12):
+#   - a skill change runs that skill's `"default": true` canary (fallback:
+#     first eval in file order) via `--default --skill <skill>`.
+#   - a harness change (repo-root scripts/, .github/workflows/) runs the fixed
+#     six-core-default set via `--core --skill <skill>`.
+#   Selected evals run as a one-eval-per-job matrix (fail-fast, max-parallel),
+#   so a red eval surfaces in 2-3 min; the report job runs needs:[evals] +
+#   if: always() so artifacts and SLA reporting survive a red leg.
+#
+# Cost/quota (AC11, see reference/per-change-eval-sla.md):
+#   - AI_FRAMEWORK_FREE_TIER=1 + the *-free model only.
+#   - docs-only change -> 0 evals, exits immediately.
+#   - skill change -> 1-2 default canaries; harness change -> <=6 core evals.
+#   - quota guardrail fails fast above the 1,800 min/month projection.
+name: Eval per change
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      changed_files:
+        description: Space-separated changed file paths (manual dispatch)
+        required: false
+        default: ""
+
+# Least-privilege: the eval jobs only read the repo and upload artifacts.
+permissions:
+  contents: read
+
+# Cancel a stale run when a newer commit lands on the same ref.
+concurrency:
+  group: eval-per-change-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Layer 1 proof: the hook installer is syntactically valid and the hook it
+  # generates runs the hermetic validators clean.
+  pre-commit-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (node24)
+        with:
+          node-version: "24"
+      - name: Install pyyaml (validate_skill.py dependency)
+        run: pip3 install --quiet pyyaml
+      - name: Validate hook installer syntax
+        run: bash -n scripts/install-hooks.sh
+      - name: Install and exercise the pre-commit hook
+        run: |
+          bash scripts/install-hooks.sh
+          .git/hooks/pre-commit
+
+  # Resolve the changed-file class, the eval selection/matrix, and the
+  # quota guardrail once, before any eval job starts.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      klass: ${{ steps.map.outputs.class }}
+      skills: ${{ steps.map.outputs.skills }}
+      selected: ${{ steps.select.outputs.selected }}
+      started_at: ${{ steps.start.outputs.started_at }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        run: |
+          python3 --version
+          pip3 install --quiet pyyaml
+
+      - name: Determine changed files
+        id: changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          DISPATCH_FILES: ${{ github.event.inputs.changed_files }}
+        run: |
+          set -euo pipefail
+          : > /tmp/changed_files.txt
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            printf '%s\n' "$DISPATCH_FILES" | tr ' ' '\n' | sed '/^[[:space:]]*$/d' > /tmp/changed_files.txt
+          elif [ "$EVENT_NAME" = "pull_request" ]; then
+            git diff --name-only "$PR_BASE" HEAD > /tmp/changed_files.txt
+          else
+            BASE="$PUSH_BEFORE"
+            if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+              BASE="$(git rev-list --max-parents=0 HEAD)"
+            fi
+            git diff --name-only "$BASE" HEAD > /tmp/changed_files.txt
+          fi
+          echo "Changed files:"
+          cat /tmp/changed_files.txt
+
+      - name: Map changed files to skills / class
+        id: map
+        run: |
+          set -euo pipefail
+          mapfile -t FILES < <(sed '/^[[:space:]]*$/d' /tmp/changed_files.txt)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "class=non_evaluable" >> "$GITHUB_OUTPUT"
+            echo "skills=" >> "$GITHUB_OUTPUT"
+            echo "harness=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 scripts/changed-files-to-skills.py --format object "${FILES[@]}" > /tmp/mapping.json
+          cat /tmp/mapping.json
+          python3 - "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import sys
+          m = json.load(open("/tmp/mapping.json"))
+          skills = m["skills"]
+          if skills:
+              klass = "evaluable"
+          elif m["harness"]:
+              klass = "harness"
+          else:
+              klass = "non_evaluable"
+          with open(sys.argv[1], "a", encoding="utf-8") as fh:
+              fh.write("class=%s\n" % klass)
+              fh.write("skills=%s\n" % ",".join(skills))
+              fh.write("harness=%s\n" % ("true" if m["harness"] else "false"))
+          PY
+
+      - name: Quota guardrail (AC11)
+        run: |
+          set -euo pipefail
+          python3 scripts/eval-report.py quota-projection --out quota-projection.json >/dev/null
+          cat quota-projection.json
+          python3 - <<'PY'
+          import json
+          import sys
+          projected = json.load(open("quota-projection.json")).get("projected_monthly", 0)
+          limit = 1800
+          print("Projected monthly CI minutes: %s (guardrail %s)" % (projected, limit))
+          if projected > limit:
+              print("::error::Quota guardrail: projected monthly minutes %s would exceed %s" % (projected, limit))
+              sys.exit(1)
+          PY
+
+      - name: Select evals (one matrix entry per eval)
+        id: select
+        run: |
+          set -euo pipefail
+          python3 - "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          mapping_path = "/tmp/mapping.json"
+          if not os.path.isfile(mapping_path):
+              entries = []
+          else:
+              m = json.load(open(mapping_path))
+              entries = []
+              seen = set()
+              for s in m["skills"]:
+                  entries.append({"skill": s, "mode": "default"})
+                  seen.add(s)
+              if m["harness"]:
+                  runner = "skills/authoring-skills/scripts/run_behavioral_eval.py"
+                  out = subprocess.run(
+                      [sys.executable, runner, "--list", "--core"],
+                      capture_output=True, text=True)
+                  # `  [eval] <skill>#<id> (tier=...)` -> skill names
+                  for s in re.findall(r"\[[^\]]*\]\s+([^#\s]+)#", out.stdout):
+                      if s not in seen:
+                          entries.append({"skill": s, "mode": "core"})
+                          seen.add(s)
+          with open(sys.argv[1], "a", encoding="utf-8") as fh:
+              fh.write("matrix=%s\n" % json.dumps(entries))
+              fh.write("selected=%d\n" % len(entries))
+          print("selected evals: %d" % len(entries))
+          print(json.dumps(entries))
+          PY
+
+      - name: Record run start (SLA)
+        id: start
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+  # One eval per job: a red eval cancels in-flight siblings (fail-fast) and
+  # surfaces the regression in 2-3 min.
+  evals:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    # AC8: static ceiling for the whole matrix; the target is <=12 min.
+    timeout-minutes: 20
+    outputs:
+      klass: ${{ needs.plan.outputs.klass }}
+      started_at: ${{ needs.plan.outputs.started_at }}
+    strategy:
+      fail-fast: true
+      # Env-configurable via the repository variable EVAL_MAX_PARALLEL
+      # (default 3; raise only after a clean live CI run — AC13).
+      max-parallel: ${{ vars.EVAL_MAX_PARALLEL || 3 }}
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+
+      - name: Setup Python
+        run: |
+          python3 --version
+          pip3 install --quiet pyyaml
+
+      # opencode is NOT preinstalled on GitHub-hosted runners; the docs install
+      # script is the supported path (https://opencode.ai/docs/, 2026-09-16).
+      # Resolve the CLI version first so the install dir is cached on it.
+      - name: Resolve opencode CLI version
+        id: opencode
+        run: |
+          set -euo pipefail
+          VERSION="$(curl -fsSL https://api.github.com/repos/anomalyco/opencode/releases/latest \
+            | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' || true)"
+          if [ -z "$VERSION" ]; then VERSION="latest"; fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache opencode CLI
+        id: opencode-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 (node24)
+        with:
+          path: ~/.opencode/bin
+          key: opencode-${{ runner.os }}-${{ steps.opencode.outputs.version }}
+
+      - name: Install opencode CLI
+        if: steps.opencode-cache.outputs.cache-hit != 'true'
+        env:
+          VERSION: ${{ steps.opencode.outputs.version }}
+        run: |
+          if [ "$VERSION" = "latest" ]; then unset VERSION; fi
+          curl -fsSL https://opencode.ai/install | bash
+
+      - name: Add opencode to PATH
+        run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: Run selected eval
+        env:
+          # Repository-level secret ONLY; consumed by the runner, never echoed.
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          AI_FRAMEWORK_FREE_TIER: 1
+        run: |
+          set -euo pipefail
+          RUNNER="skills/authoring-skills/scripts/run_behavioral_eval.py"
+          if [ "${{ matrix.mode }}" = "core" ]; then
+            python3 "$RUNNER" --model opencode/nemotron-3-ultra-free \
+              --core --skill "${{ matrix.skill }}"
+          else
+            python3 "$RUNNER" --model opencode/nemotron-3-ultra-free \
+              --default --skill "${{ matrix.skill }}"
+          fi
+
+      - name: Upload per-eval logs (always)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
+        with:
+          name: eval-logs-${{ matrix.skill }}
+          path: logs/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # Aggregation/report: needs:[evals] + if: always() so the artifacts and SLA
+  # reporting survive a red eval leg.
+  report:
+    needs: [evals]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+
+      - name: Setup Python
+        run: pip3 install --quiet pyyaml
+
+      - name: Download per-eval logs
+        # Best-effort: no per-leg artifact exists for a docs-only run.
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1 (node24)
+        with:
+          pattern: eval-logs-*
+          path: logs
+          merge-multiple: true
+
+      - name: Build eval report artifacts
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/eval-report.py aggregate --logs-dir logs/ --out eval-report-pr.json || true
+          python3 scripts/eval-report.py coverage-gaps --logs-dir logs/ --out coverage-gaps-pr.json || true
+
+      - name: CI summary (report links + SLA)
+        if: always()
+        run: |
+          set -euo pipefail
+          STARTED="${{ needs.evals.outputs.started_at }}"
+          KLASS="${{ needs.evals.outputs.klass }}"
+          ELAPSED=0
+          if [ -n "$STARTED" ]; then ELAPSED=$(( $(date +%s) - STARTED )); fi
+          if [ "$KLASS" = "non_evaluable" ] || [ -z "$KLASS" ]; then
+            TARGET="n/a (0 evals)"
+          else
+            TARGET="<=12m / ceiling 20m"
+          fi
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          {
+            echo "### Per-change eval"
+            echo ""
+            echo "- SLA elapsed: $((ELAPSED / 60))m $((ELAPSED % 60))s, target $TARGET"
+            echo "- Change class: ${KLASS:-non_evaluable}"
+            echo "- Selected evals: ${{ needs.evals.result }}"
+            echo ""
+            echo "### Eval Report"
+            echo "- [eval-report-pr-${{ github.run_id }}]($RUN_URL#artifacts) artifact"
+            echo "### Coverage Gaps"
+            echo "- [coverage-gaps-pr-${{ github.run_id }}]($RUN_URL#artifacts) artifact"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload eval report artifacts (30-day retention)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
+        with:
+          name: eval-report-pr-${{ github.run_id }}
+          path: |
+            eval-report-pr.json
+            coverage-gaps-pr.json
+            logs/
+          retention-days: 30
+          if-no-files-found: ignore
