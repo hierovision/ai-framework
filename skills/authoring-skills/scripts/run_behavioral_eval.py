@@ -145,8 +145,23 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
     missing = assert_behavior(e["expected_behavior"], output)
     attempts = 0
     while missing and attempts < max_retries and is_transient(output):
+        # Per-attempt annotation (2026-09-19 directive): a retry means the
+        # model hit an unexpected event (stall / rate limit / transient
+        # error) — that event is reliability evidence, not noise, and gets
+        # its OWN run-log record so a later attempt's success cannot bury it.
         delay = RETRY_BACKOFF_SECONDS[min(attempts, len(RETRY_BACKOFF_SECONDS) - 1)]
         attempts += 1
+        # Reliability annotation record: eval_pass=None so aggregators count
+        # only FINAL verdicts toward pass rates (RM-001 null semantics).
+        log_run.log_record({
+            "kind": "eval",
+            "skill": e["skill"],
+            "agent": None,
+            "model": model or e["model_tier"],
+            "outcome": "error",
+            "eval_pass": None,
+            "detail": ("transient attempt %d: %s" % (attempts, output))[:DETAIL_MAX],
+        }, logs_dir=logs_dir)
         sleep(delay)
         output = get_output(e)
         missing = assert_behavior(e["expected_behavior"], output)

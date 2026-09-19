@@ -115,8 +115,14 @@ def aggregate(logs_dir):
             b["dur_known_runs"] += 1
 
         if kind == "eval":
+            # eval_pass=None rows are per-attempt reliability annotations
+            # (a retried transient failure) — they consume tokens/cost and
+            # are counted above, but never count toward the pass rate.
+            ep = rec.get("eval_pass")
+            if ep is None:
+                continue
             eval_rows += 1
-            if rec.get("eval_pass") is True:
+            if ep is True:
                 eval_pass += 1
 
     skills = []
