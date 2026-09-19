@@ -37,16 +37,31 @@ def test_non_evaluable():
         r = cfs.analyze([path])
         assert r["skills"] == [], (path, r)
         assert r["class"] == "non_evaluable", (path, r)
-        assert r["smoke"] is False, (path, r)
+        assert r["harness"] is False, (path, r)
 
 
-def test_smoke():
+def test_harness():
+    """RM-003 pass 4: CI-infra/unmatched paths are the `harness` class, whose
+    action is the fixed six-core-default set (no relevance list / alphabetical
+    fallback)."""
+    expected_core = ["authoring-skills", "designing-architecture",
+                     "implementing-features", "reviewing-code",
+                     "triaging-requirements", "writing-unit-tests"]
     for path in ("scripts/changed-files-to-skills.py", "scripts/eval-report.py",
                  ".github/workflows/eval-behavioral.yml", "Makefile"):
         r = cfs.analyze([path])
         assert r["skills"] == [], (path, r)
-        assert r["class"] == "smoke", (path, r)
-        assert r["smoke"] is True, (path, r)
+        assert r["class"] == "harness", (path, r)
+        assert r["harness"] is True, (path, r)
+        assert r["core_skills"] == expected_core, (path, r)
+
+
+def test_harness_has_no_relevance_list_or_alphabetical_fallback():
+    """RM-003 AC7: a harness change never guesses skills alphabetically."""
+    r = cfs.analyze(["scripts/unknown-new-script.py"])
+    assert r["class"] == "harness" and r["skills"] == [], r
+    # the fixed core set is the harness target, independent of the changed name
+    assert r["core_skills"] == list(cfs.CORE_SKILLS), r
 
 
 def test_first_match_wins_and_dedupe():
@@ -66,7 +81,7 @@ def test_class_precedence_evaluable_wins():
                      ".github/workflows/ci.yml", "docs/x.md"])
     assert r["class"] == "evaluable", r
     assert r["skills"] == ["observing-runs"], r
-    assert r["smoke"] is True and r["non_evaluable"] is True, r
+    assert r["harness"] is True and r["non_evaluable"] is True, r
 
 
 def test_docs_only_runs_zero_evals():
@@ -80,7 +95,8 @@ def main():
         test_evaluable_skills,
         test_optimizing_model_routing,
         test_non_evaluable,
-        test_smoke,
+        test_harness,
+        test_harness_has_no_relevance_list_or_alphabetical_fallback,
         test_first_match_wins_and_dedupe,
         test_class_precedence_evaluable_wins,
         test_docs_only_runs_zero_evals,

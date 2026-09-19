@@ -40,11 +40,13 @@ GREEN_RUN_EARLIEST = "2026-09-21"
 # RM-002's negative-path canary (red counterpart) for reference.
 RM002_CANARY_RUN = "35108912831"
 
-# AC11 quota model (documented in reference/per-change-eval-sla.md).
-WEEKLY_MIN_PER_EVAL = 0.5   # ~30s per eval
+# AC11 quota model (pass 4; documented in reference/per-change-eval-sla.md).
+# Measured ~100s per fresh-agent eval (PR #23, run 35392700424) supersedes
+# the prior imaginary 30s figure.
+WEEKLY_MIN_PER_EVAL = 1.67  # ~100s per eval
 WEEKS_PER_MONTH = 4
-PER_CHANGE_RUN_MIN = 9      # <=3 skills
-PRS_PER_MONTH_ASSUMED = 5
+PER_CHANGE_RUN_MIN = 7      # blended 1-2 skill / <=6 harness evals
+PRS_PER_MONTH_ASSUMED = 15
 GUARDRAIL_LIMIT = 1800      # 90% of GitHub Free 2,000 min/month
 
 
@@ -88,7 +90,13 @@ def aggregate_report(logs_dir):
 
 
 def coverage_gaps(logs_dir, skills_root=None):
-    """AC3: delegate to query_runs' coverage-gaps implementation."""
+    """AC3: delegate to query_runs' coverage-gaps implementation.
+
+    Returns the three required arrays (`zero_eval_skills`, `deferred_evals`,
+    `free_tier_excluded_evals`) plus `quarantined_evals`, pass-4
+    `no_default_marker`, core coverage (`core_covered` / `core_uncovered`),
+    and the retained `smoke_uncovered`.
+    """
     return query_runs.coverage_gaps(logs_dir, skills_root=skills_root)
 
 
@@ -114,8 +122,8 @@ def green_run_status(achieved=False, run_id=None, date=None, branch=None,
         f"is the weekly eval-behavioral run on {GREEN_RUN_EARLIEST} on main "
         f"(subsequent candidate: 2026-09-28). RM-002's negative-path canary run "
         f"{RM002_CANARY_RUN} (2026-09-16) is the red counterpart, not a green run. "
-        "Qualification also requires the full included suite to fit the <=20 min "
-        "budget (see reference/eval-green-run-definition.md)."
+        "Qualification also requires the full included suite to fit the <=120 min "
+        "weekly budget (see reference/eval-green-run-definition.md)."
     )
     return {
         "achieved": False,

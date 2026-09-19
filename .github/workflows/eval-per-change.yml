@@ -9,13 +9,21 @@
 # Three-layer gating (see reference/three-layer-gating.md):
 #   Layer 1 pre-commit  -> scripts/install-hooks.sh (validated here)
 #   Layer 2 pre-push    -> optional local advisory run (--no-quarantine)
-#   Layer 3 this file   -> changed-skills evals on pull_request / push to main
+#   Layer 3 this file   -> marker-selected evals on pull_request / push to main
+#
+# Marker selection (RM-003 pass 4, AC6/AC12):
+#   - a skill change runs that skill's `"default": true` canary (fallback:
+#     first eval in file order) via `--default --skill <skill>`.
+#   - a harness change (repo-root scripts/, .github/workflows/) runs the fixed
+#     six-core-default set via `--core --skill <skill>`.
+#   Selected evals run as a one-eval-per-job matrix (fail-fast, max-parallel),
+#   so a red eval surfaces in 2-3 min; the report job runs needs:[evals] +
+#   if: always() so artifacts and SLA reporting survive a red leg.
 #
 # Cost/quota (AC11, see reference/per-change-eval-sla.md):
 #   - AI_FRAMEWORK_FREE_TIER=1 + the *-free model only.
 #   - docs-only change -> 0 evals, exits immediately.
-#   - smoke change -> bounded subset (--limit 30).
-#   - changed skills -> --limit derived from skill count (max 3 skills -> 18).
+#   - skill change -> 1-2 default canaries; harness change -> <=6 core evals.
 #   - quota guardrail fails fast above the 1,800 min/month projection.
 name: Eval per change
 
@@ -31,7 +39,7 @@ on:
         required: false
         default: ""
 
-# Least-privilege: the eval job only reads the repo and uploads artifacts.
+# Least-privilege: the eval jobs only read the repo and upload artifacts.
 permissions:
   contents: read
 
@@ -61,10 +69,16 @@ jobs:
           bash scripts/install-hooks.sh
           .git/hooks/pre-commit
 
-  eval-per-change:
+  # Resolve the changed-file class, the eval selection/matrix, and the
+  # quota guardrail once, before any eval job starts.
+  plan:
     runs-on: ubuntu-latest
-    # AC8: SLA budget for <=3 skills. Bounded smoke uses the same cap.
-    timeout-minutes: 20
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      klass: ${{ steps.map.outputs.class }}
+      skills: ${{ steps.map.outputs.skills }}
+      selected: ${{ steps.select.outputs.selected }}
+      started_at: ${{ steps.start.outputs.started_at }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
@@ -75,11 +89,6 @@ jobs:
         run: |
           python3 --version
           pip3 install --quiet pyyaml
-
-      # opencode is NOT preinstalled on GitHub-hosted runners; the docs install
-      # script is the supported path (https://opencode.ai/docs/, 2026-09-16).
-      - name: Install opencode CLI
-        run: curl -fsSL https://opencode.ai/install | bash
 
       - name: Determine changed files
         id: changed
@@ -105,7 +114,7 @@ jobs:
           echo "Changed files:"
           cat /tmp/changed_files.txt
 
-      - name: Map changed files to skills
+      - name: Map changed files to skills / class
         id: map
         run: |
           set -euo pipefail
@@ -113,7 +122,7 @@ jobs:
           if [ "${#FILES[@]}" -eq 0 ]; then
             echo "class=non_evaluable" >> "$GITHUB_OUTPUT"
             echo "skills=" >> "$GITHUB_OUTPUT"
-            echo "smoke=false" >> "$GITHUB_OUTPUT"
+            echo "harness=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           python3 scripts/changed-files-to-skills.py --format object "${FILES[@]}" > /tmp/mapping.json
@@ -125,14 +134,14 @@ jobs:
           skills = m["skills"]
           if skills:
               klass = "evaluable"
-          elif m["smoke"]:
-              klass = "smoke"
+          elif m["harness"]:
+              klass = "harness"
           else:
               klass = "non_evaluable"
           with open(sys.argv[1], "a", encoding="utf-8") as fh:
               fh.write("class=%s\n" % klass)
               fh.write("skills=%s\n" % ",".join(skills))
-              fh.write("smoke=%s\n" % ("true" if m["smoke"] else "false"))
+              fh.write("harness=%s\n" % ("true" if m["harness"] else "false"))
           PY
 
       - name: Quota guardrail (AC11)
@@ -151,52 +160,179 @@ jobs:
               sys.exit(1)
           PY
 
-      - name: Run per-change evals
-        id: evals
-        if: steps.map.outputs.class == 'evaluable' || steps.map.outputs.class == 'smoke'
+      - name: Select evals (one matrix entry per eval)
+        id: select
+        run: |
+          set -euo pipefail
+          python3 - "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          mapping_path = "/tmp/mapping.json"
+          if not os.path.isfile(mapping_path):
+              entries = []
+          else:
+              m = json.load(open(mapping_path))
+              entries = []
+              seen = set()
+              for s in m["skills"]:
+                  entries.append({"skill": s, "mode": "default"})
+                  seen.add(s)
+              if m["harness"]:
+                  runner = "skills/authoring-skills/scripts/run_behavioral_eval.py"
+                  out = subprocess.run(
+                      [sys.executable, runner, "--list", "--core"],
+                      capture_output=True, text=True)
+                  # `  [eval] <skill>#<id> (tier=...)` -> skill names
+                  for s in re.findall(r"\[[^\]]*\]\s+([^#\s]+)#", out.stdout):
+                      if s not in seen:
+                          entries.append({"skill": s, "mode": "core"})
+                          seen.add(s)
+          with open(sys.argv[1], "a", encoding="utf-8") as fh:
+              fh.write("matrix=%s\n" % json.dumps(entries))
+              fh.write("selected=%d\n" % len(entries))
+          print("selected evals: %d" % len(entries))
+          print(json.dumps(entries))
+          PY
+
+      - name: Record run start (SLA)
+        id: start
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+  # One eval per job: a red eval cancels in-flight siblings (fail-fast) and
+  # surfaces the regression in 2-3 min.
+  evals:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    # AC8: static ceiling for the whole matrix; the target is <=12 min.
+    timeout-minutes: 20
+    outputs:
+      klass: ${{ needs.plan.outputs.klass }}
+      started_at: ${{ needs.plan.outputs.started_at }}
+    strategy:
+      fail-fast: true
+      # Env-configurable via the repository variable EVAL_MAX_PARALLEL
+      # (default 3; raise only after a clean live CI run — AC13).
+      max-parallel: ${{ vars.EVAL_MAX_PARALLEL || 3 }}
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+
+      - name: Setup Python
+        run: |
+          python3 --version
+          pip3 install --quiet pyyaml
+
+      # opencode is NOT preinstalled on GitHub-hosted runners; the docs install
+      # script is the supported path (https://opencode.ai/docs/, 2026-09-16).
+      # Resolve the CLI version first so the install dir is cached on it.
+      - name: Resolve opencode CLI version
+        id: opencode
+        run: |
+          set -euo pipefail
+          VERSION="$(curl -fsSL https://api.github.com/repos/anomalyco/opencode/releases/latest \
+            | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' || true)"
+          if [ -z "$VERSION" ]; then VERSION="latest"; fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache opencode CLI
+        id: opencode-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 (node24)
+        with:
+          path: ~/.opencode/bin
+          key: opencode-${{ runner.os }}-${{ steps.opencode.outputs.version }}
+
+      - name: Install opencode CLI
+        if: steps.opencode-cache.outputs.cache-hit != 'true'
+        env:
+          VERSION: ${{ steps.opencode.outputs.version }}
+        run: |
+          if [ "$VERSION" = "latest" ]; then unset VERSION; fi
+          curl -fsSL https://opencode.ai/install | bash
+
+      - name: Add opencode to PATH
+        run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: Run selected eval
         env:
           # Repository-level secret ONLY; consumed by the runner, never echoed.
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           AI_FRAMEWORK_FREE_TIER: 1
         run: |
           set -euo pipefail
-          date +%s > /tmp/eval_start
-          if [ "${{ steps.map.outputs.class }}" = "smoke" ]; then
-            echo "smoke subset: harness change with no owning behavioral eval"
-            python3 skills/authoring-skills/scripts/run_behavioral_eval.py \
-              --model opencode/nemotron-3-ultra-free --limit 30
+          RUNNER="skills/authoring-skills/scripts/run_behavioral_eval.py"
+          if [ "${{ matrix.mode }}" = "core" ]; then
+            python3 "$RUNNER" --model opencode/nemotron-3-ultra-free \
+              --core --skill "${{ matrix.skill }}"
           else
-            IFS=',' read -r -a SELECTED <<< "${{ steps.map.outputs.skills }}"
-            COUNT=${#SELECTED[@]}
-            LIMIT=$(( COUNT * 6 ))
-            if [ "$LIMIT" -gt 18 ]; then LIMIT=18; fi
-            ARGS=()
-            for s in "${SELECTED[@]}"; do ARGS+=(--skill "$s"); done
-            python3 skills/authoring-skills/scripts/run_behavioral_eval.py \
-              --model opencode/nemotron-3-ultra-free --limit "$LIMIT" "${ARGS[@]}"
+            python3 "$RUNNER" --model opencode/nemotron-3-ultra-free \
+              --default --skill "${{ matrix.skill }}"
           fi
 
-      - name: No behavioral surface changed
-        if: steps.map.outputs.class == 'non_evaluable'
-        run: echo "No behavioral surface changed; 0 evals run."
+      - name: Upload per-eval logs (always)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
+        with:
+          name: eval-logs-${{ matrix.skill }}
+          path: logs/
+          retention-days: 30
+          if-no-files-found: ignore
 
-      - name: Report + CI summary
+  # Aggregation/report: needs:[evals] + if: always() so the artifacts and SLA
+  # reporting survive a red eval leg.
+  report:
+    needs: [evals]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+
+      - name: Setup Python
+        run: pip3 install --quiet pyyaml
+
+      - name: Download per-eval logs
+        # Best-effort: no per-leg artifact exists for a docs-only run.
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1 (node24)
+        with:
+          pattern: eval-logs-*
+          path: logs
+          merge-multiple: true
+
+      - name: Build eval report artifacts
         if: always()
         run: |
           set -euo pipefail
           python3 scripts/eval-report.py aggregate --logs-dir logs/ --out eval-report-pr.json || true
           python3 scripts/eval-report.py coverage-gaps --logs-dir logs/ --out coverage-gaps-pr.json || true
+
+      - name: CI summary (report links + SLA)
+        if: always()
+        run: |
+          set -euo pipefail
+          STARTED="${{ needs.evals.outputs.started_at }}"
+          KLASS="${{ needs.evals.outputs.klass }}"
           ELAPSED=0
-          if [ -f /tmp/eval_start ]; then
-            ELAPSED=$(( $(date +%s) - $(cat /tmp/eval_start) ))
+          if [ -n "$STARTED" ]; then ELAPSED=$(( $(date +%s) - STARTED )); fi
+          if [ "$KLASS" = "non_evaluable" ] || [ -z "$KLASS" ]; then
+            TARGET="n/a (0 evals)"
+          else
+            TARGET="<=12m / ceiling 20m"
           fi
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           {
             echo "### Per-change eval"
             echo ""
-            echo "- SLA elapsed: $((ELAPSED / 60))m $((ELAPSED % 60))s (budget 20m)"
-            echo "- Change class: ${{ steps.map.outputs.class }}"
-            echo "- Changed skills: ${{ steps.map.outputs.skills }}"
+            echo "- SLA elapsed: $((ELAPSED / 60))m $((ELAPSED % 60))s, target $TARGET"
+            echo "- Change class: ${KLASS:-non_evaluable}"
+            echo "- Selected evals: ${{ needs.evals.result }}"
             echo ""
             echo "### Eval Report"
             echo "- [eval-report-pr-${{ github.run_id }}]($RUN_URL#artifacts) artifact"
@@ -206,7 +342,7 @@ jobs:
 
       - name: Upload eval report artifacts (30-day retention)
         if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
         with:
           name: eval-report-pr-${{ github.run_id }}
           path: |

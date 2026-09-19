@@ -22,6 +22,10 @@ _SPEC = importlib.util.spec_from_file_location(
 report = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(report)
 
+_QS = importlib.util.spec_from_file_location("query_runs", QUERY)
+query_runs = importlib.util.module_from_spec(_QS)
+_QS.loader.exec_module(query_runs)
+
 FIXTURE_LINES = [
     {"ts": "2026-09-17T06:00:00Z", "run_id": "r1", "kind": "eval",
      "skill": "writing-unit-tests", "model": "free", "tokens_in": 800,
@@ -70,7 +74,9 @@ def test_coverage_gaps_shape_and_quarantine():
                 "last_fail": "2026-09-17", "status": "quarantined"}}, fh)
         gaps = report.coverage_gaps(d)
         assert set(gaps) == {"zero_eval_skills", "deferred_evals",
-                             "free_tier_excluded_evals", "quarantined_evals"}, gaps
+                             "free_tier_excluded_evals", "quarantined_evals",
+                             "no_default_marker", "core_covered", "core_uncovered",
+                             "smoke_uncovered"}, gaps
         # writing-unit-tests + observing-runs have eval records -> not zero.
         assert "writing-unit-tests" not in gaps["zero_eval_skills"]
         assert "observing-runs" not in gaps["zero_eval_skills"]
@@ -119,10 +125,37 @@ def test_quota_projection_under_guardrail():
     assert q["projected_monthly"] < q["guardrail_limit"], q
 
 
+def test_coverage_gaps_default_and_core_arrays():
+    """RM-003 pass 4 / AC3: no_default_marker + core coverage arrays.
+
+    Additive to the three required arrays. The six core skills must resolve a
+    core-marked canary; only the two pass-4 canaries carry `default`.
+    """
+    d = tempfile.mkdtemp()
+    try:
+        gaps = report.coverage_gaps(d)
+        for key in ("no_default_marker", "core_covered",
+                    "core_uncovered", "smoke_uncovered"):
+            assert key in gaps, (key, gaps)
+        covered = {x["skill"] for x in gaps["core_covered"]}
+        assert covered == set(query_runs.CORE_SKILLS), covered
+        assert gaps["core_uncovered"] == [], gaps["core_uncovered"]
+        # default marker rollout: only authoring-skills + observing-runs this pass
+        assert "authoring-skills" not in gaps["no_default_marker"]
+        assert "observing-runs" not in gaps["no_default_marker"]
+        assert "designing-architecture" in gaps["no_default_marker"]
+        # core_covered entries name the canary eval id
+        for item in gaps["core_covered"]:
+            assert item["eval_id"] == 1, item
+    finally:
+        shutil.rmtree(d)
+
+
 def main():
     tests = [
         test_aggregate_report_per_run_scores,
         test_coverage_gaps_shape_and_quarantine,
+        test_coverage_gaps_default_and_core_arrays,
         test_query_runs_coverage_gaps_cli,
         test_green_run_status_not_achieved_and_recorded,
         test_quota_projection_under_guardrail,

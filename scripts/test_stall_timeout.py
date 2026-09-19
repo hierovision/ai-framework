@@ -38,7 +38,26 @@ assert rbe.is_transient("eval stall: subprocess timed out after 240s with no com
     "stall string must match is_transient() for retry/quarantine"
 print("PASS  stall string classifies as transient (retry + quarantine path)")
 
-# Zombie proof: after the handler, the sleep-600 group must be dead.
-probe = subprocess.run(["bash", "-c", "ps -eo comm= | grep -c '^sleep$'"], capture_output=True, text=True)
-assert probe.stdout.strip() == "0", f"zombie children survived: {probe.stdout}"
+# Zombie proof (hermetic): the killed group's pgid must no longer exist.
+# (Scanning global `sleep` processes is environment-sensitive — other
+# processes on the machine legitimately sleep. Check OUR group only.)
+r2 = subprocess.run([sys.executable, "-c", textwrap.dedent("""
+import os, subprocess, signal, sys
+proc = subprocess.Popen(["bash", "-c", "sleep 600 & wait"],
+    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+try:
+    proc.communicate(timeout=3)
+except subprocess.TimeoutExpired:
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    proc.communicate()
+try:
+    os.kill(os.getpgid(proc.pid), 0)
+    print("GROUP_ALIVE")
+except ProcessLookupError:
+    print("GROUP_DEAD")
+""")], capture_output=True, text=True, timeout=30)
+assert "GROUP_DEAD" in r2.stdout, f"group survived: {r2.stdout!r}"
 print("PASS  process group killed — no zombie children")

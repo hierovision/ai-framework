@@ -1,63 +1,102 @@
 # Per-change eval SLA + quota guardrail (RM-003 AC8, AC11)
 
 SLA and cost model for the Layer 3 per-change eval workflow
-(`.github/workflows/eval-per-change.yml`).
+(`.github/workflows/eval-per-change.yml`). Pass 4 re-derives the math from the
+**measured ~100s per fresh-agent eval** (first live per-change run, PR #23,
+run 35392700424 — 12 evals exceeded the old 20 min ceiling); the prior 30s/eval
+figure was imaginary and is superseded.
 
 ## Contents
 
 - SLA budget
-- Timeout and `--limit` derivation
+- Selection and `--limit`
+- Matrix execution
+- Stall headroom
 - Quota model
 - Guardrail
 - Three-layer cost
+- Concurrency evidence
 - Trade-offs
 
 ## SLA budget
 
+Marker-selected math: a skill change runs that skill's one `default` canary
+(fallback: first eval in file order); a harness change runs the fixed six-core
+set. Stalls add up to **2×240s worst case per eval** (one 240s stall + one
+bounded retry).
+
 | Scenario | Max skills | Max evals | Target wall time | Job timeout |
 |---|---|---|---|---|
-| Single skill change | 1 | ~6 | <= 5 min | 10 min |
-| 2-3 skills changed | 2-3 | ~12-18 | <= 12 min | 20 min |
-| Fallback smoke (ambiguous / no match) | <= 10 | <= 30 (3 per skill) | <= 15 min | 25 min |
-| Docs-only / non-evaluable | 0 | 0 | ~0s | exits early |
+| Single skill change | 1 | 1 | ~2 min | <= 5 min | 20 min |
+| Two skill changes | 2 | 2 | ~3-4 min | <= 12 min | 20 min |
+| Harness change (repo-root `scripts/`, `.github/workflows/`) | 6 (core set) | <= 6 | ~10-11 min | <= 12 min | 20 min |
+| Docs-only / non-evaluable | 0 | 0 | ~0s | n/a | exits early |
 
-The workflow sets a single `timeout-minutes: 20` cap (AC8). The report/summary
-step records actual elapsed time against the 20-minute budget in the CI job
-summary: `Per-change eval: <m>m <s>s (budget 20m)`.
+The workflow keeps a single static `timeout-minutes: 20` for the matrix. The
+CI summary reports elapsed against the scenario target:
+`Per-change eval: 5m 12s, target <=12m / ceiling 20m`.
 
-## Timeout and `--limit` derivation
+## Selection and `--limit`
 
-GitHub Actions evaluates `timeout-minutes` at job start, so the cap is static
-(20 min) rather than computed from the skill count. The eval **count** is
-bounded dynamically in the run step:
+The workflow selects the eval set deterministically via the runner's two-tier
+marker flags:
 
-- changed skills present: `--limit = min(changed_skill_count * 6, 18)`
-  (max 3 skills -> 18 evals).
-- smoke class: `--limit 30` (bounded smoke subset).
-- non-evaluable class: no eval invocation (0 evals).
+- skill change: `--default --skill <skill>` (that skill's `"default": true`
+  canary; fallback = first eval in file order).
+- harness change: `--core --skill <skill>` for each of the fixed six core
+  skills (their `"core": true` default evals).
+
+Both selected paths **ignore `--limit`**; `--limit` is retained for manual
+sharding only. There is no relevance list and no alphabetical fallback — a
+harness change is the fixed six-core set.
+
+## Matrix execution
+
+Selected evals run as a **one-eval-per-job matrix** (`strategy.matrix.include`
+from the plan job's selection JSON) with:
+
+- `fail-fast: true` — a red eval cancels in-flight siblings and surfaces in
+  **2-3 min**.
+- `max-parallel` configurable via the repository variable
+  `EVAL_MAX_PARALLEL` (default **3**; raise only after a clean live CI run).
+
+The aggregation/report job runs `needs: [evals]` + `if: always()`, so the
+eval-report and coverage-gap artifacts plus SLA reporting survive a red leg.
+Each matrix leg uploads its `logs/` as `eval-logs-<skill>`; the report job
+downloads them (`merge-multiple: true`) and aggregates.
+
+## Stall headroom
+
+Every `opencode` invocation is bounded by `BEVAL_TIMEOUT_SECONDS` (default
+240s) with a process-group kill and a synthetic transient failure (AC9). A
+stalled eval therefore costs at most 2×240s before it is classified; the 20 min
+job ceiling absorbs a stall on the small selected set.
 
 ## Quota model
 
 `scripts/eval-report.py quota-projection` writes `quota-projection.json`
-(also uploaded by the weekly workflow):
+(also uploaded by the weekly workflow). Pass-4 counts:
 
 ```json
 {
-  "weekly_run_min": 38.0,
-  "weekly_min_used": 152.0,
-  "per_change_run_min": 9,
-  "per_change_min_used": 45,
-  "prs_per_month_assumed": 5,
-  "projected_monthly": 197.0,
+  "weekly_run_min": 128.6,
+  "weekly_min_used": 514.4,
+  "per_change_run_min": 7,
+  "per_change_min_used": 105,
+  "prs_per_month_assumed": 15,
+  "projected_monthly": 619.4,
   "guardrail_limit": 1800,
-  "updated": "2026-09-18"
+  "updated": "2026-09-19"
 }
 ```
 
-- `weekly_run_min` = included evals x 30s.
+- `weekly_run_min` = included evals x ~100s (`WEEKLY_MIN_PER_EVAL = 1.67`).
+  The current CI-included count is 77 (deferred + go/zen excluded).
 - `weekly_min_used` = `weekly_run_min` x 4 weeks.
-- `per_change_min_used` = 9 min x 5 assumed PRs/month.
-- `projected_monthly` = sum of the two monthly buckets.
+- `per_change_run_min` = 7 (blended 1-2 skill / <=6 harness evals).
+- `per_change_min_used` = 7 x 15 assumed PRs/month.
+- `projected_monthly` = sum of the two monthly buckets (~619 min, well under
+  the 1,800 guardrail).
 
 ## Guardrail
 
@@ -76,8 +115,19 @@ The 1,800 limit is the 90% guardrail; the absolute cap is 2,000.
 |---|---|---|---|
 | 1. Pre-commit hook | developer machine | 0 | ~14s/commit |
 | 2. Advisory pre-push | developer machine (opt-in) | 0 | ~30-60s/push |
-| 3. Per-change PR check | GitHub Actions | <= 20 min/PR | n/a |
-| Weekly full suite | GitHub Actions | ~32 min/week | n/a |
+| 3. Per-change PR check | GitHub Actions | ~2-11 min/PR (marker-selected) | n/a |
+| Weekly full suite | GitHub Actions | ~129 min/week (77 evals) | n/a |
+
+## Concurrency evidence
+
+The 2026-09-19 6-parallel free-tier eval-session probe completed with **zero
+429/rejections** — the matrix premise holds. `max-parallel` starts at 3 and is
+raised only after a clean live CI run.
+
+**Gateway caveat (2026-09-19)**: four model families stalled simultaneously
+while the direct-key deepseek lane answered clean in 2.6s, so the stall lives
+in the shared gateway, not any model. The stall machinery (AC9) is the correct
+CI response; eval-model A/B is unanswerable mid-window and is out of scope.
 
 ## Trade-offs
 
@@ -85,5 +135,12 @@ The 1,800 limit is the 90% guardrail; the absolute cap is 2,000.
   minutes; both are advisory and bypassable.
 - Layer 3 is the enforcement gate and cannot be bypassed (unlike `git commit
   --no-verify`).
-- The per-change cap (`--limit 18`) may under-run a skill with more than 6
-  evals when 3 skills change; the weekly suite remains the full-coverage gate.
+- Per-change is a fast high-signal tripwire, not a shallow copy of the weekly
+  gate: non-default evals only ever ran weekly, so their regression window is
+  unchanged from RM-002. Skills without a `default` marker are surfaced in
+  `coverage-gaps.no_default_marker` and fall back to their first eval.
+- **Known tension (recorded pass 4)**: the plan's weekly estimate assumed ~63
+  evals; the current CI-included count is 77, so at the measured ~100s/eval
+  the full suite is ~129 min, above the 120 min weekly ceiling. The weekly
+  workflow keeps `timeout-minutes: 120` per AC10. Re-baseline the ceiling or
+  shard the weekly suite before a full run can qualify as green.

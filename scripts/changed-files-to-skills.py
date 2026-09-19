@@ -4,8 +4,9 @@
 Deterministic, first-match-wins mapping. Three classes:
 
   evaluable      a skill's behavioral surface changed -> run that skill's evals
-  smoke          CI/harness infra changed; no owning behavioral eval ->
-                 run the bounded smoke subset (see references/per-change-eval-sla.md)
+  harness        CI/harness infra changed; no owning behavioral eval ->
+                 run the fixed six-core-default set (see
+                 reference/per-change-eval-sla.md)
   non_evaluable  docs/config only; no behavioral surface -> run 0 evals
 
 Mapping table (evaluated in order; FIRST MATCH WINS, no fall-through):
@@ -19,38 +20,51 @@ Mapping table (evaluated in order; FIRST MATCH WINS, no fall-through):
   | reference/** (except model-routing)  | non_evaluable | skip (0 evals)                 |
   | .opencode/**                         | non_evaluable | skip (0 evals)                 |
   | README.md / LICENSE / .gitignore     | non_evaluable | skip (0 evals)                 |
-  | .github/workflows/** / scripts/**    | smoke         | bounded smoke subset           |
+  | .github/workflows/** / scripts/**    | harness       | fixed six-core-default set     |
   | *.md outside skills/** and docs/**   | non_evaluable | skip (0 evals)                 |
-  | (anything unmatched)                 | smoke         | bounded smoke subset (fallback)|
+  | (anything unmatched)                 | harness       | fixed six-core-default set     |
 
 Notes:
 - `skills/<name>/**` covers every skill-internal file (scripts, evals,
   fixtures, references); explicit per-file skill rows are deliberately
   omitted as redundant (see the plan's mapping-table notes).
-- Repo-root CI-infra (`.github/workflows/`, `scripts/`) maps to the smoke
-  subset and is flagged in coverage-gaps as "harness change with no owning
-  behavioral eval" -- it never maps to a skill eval.
+- Repo-root CI-infra (`.github/workflows/`, `scripts/`) maps to the `harness`
+  class and is flagged in coverage-gaps as "harness change with no owning
+  behavioral eval" -- it never maps to a skill eval. Its action is the fixed
+  six-core-default set (RM-003 pass 4); the pass-3 relevance list and
+  alphabetical fallback are deleted.
 - A docs-only change yields `[]` (0 evals).
 
 CLI:
   changed-files-to-skills.py <path> [<path> ...]
       Prints a JSON array of evaluable skill names (deduped, first-seen
-      order). Smoke / non-evaluable inputs contribute no skill name.
+      order). Harness / non-evaluable inputs contribute no skill name.
   changed-files-to-skills.py --format object <path> ...
-      Prints {"files": [...], "skills": [...], "class": "...",
-               "smoke": bool, "non_evaluable": bool, "entries": [...]}
-      so the workflow can tell smoke (bounded subset) from non-evaluable
-      (exit early, 0 evals).
+      Prints {"skills": [...], "class": "...", "harness": bool,
+               "non_evaluable": bool, "core_skills": [...], "entries": [...]}
+      so the workflow can tell harness (fixed six-core set) from
+      non-evaluable (exit early, 0 evals).
   changed-files-to-skills.py --stdin
       Read newline-separated paths from stdin instead of argv.
 """
 import argparse
 import json
+import os
 import re
 import sys
 
 SKILL_RE = re.compile(r"^skills/([^/]+)/")
 TOP_LEVEL_NON_EVALUABLE = {"README.md", "LICENSE", ".gitignore"}
+
+# Canonical six-core set (RM-003 pass 4). Single source of truth lives in
+# query_runs.py (the coverage owner); imported here so a harness change's
+# target and the coverage report cannot drift.
+_OBSERVE_SCRIPTS = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+    "skills", "observing-runs", "scripts")
+if _OBSERVE_SCRIPTS not in sys.path:
+    sys.path.insert(0, _OBSERVE_SCRIPTS)
+from query_runs import CORE_SKILLS  # noqa: E402  (path set above)
 
 
 def classify(path):
@@ -84,20 +98,20 @@ def classify(path):
         return ("non_evaluable", None, "top-level config")
 
     if p.startswith(".github/workflows/") or p.startswith("scripts/"):
-        return ("smoke", None, "ci-infra (no owning behavioral eval)")
+        return ("harness", None, "ci-infra (no owning behavioral eval)")
 
     if p.endswith(".md"):
         return ("non_evaluable", None, "*.md outside skills/** and docs/**")
 
-    # Ambiguous: a bounded smoke subset is the safe fallback (plan Risks).
-    return ("smoke", None, "unmatched -> smoke fallback")
+    # Ambiguous: the fixed harness set is the safe fallback (plan Risks).
+    return ("harness", None, "unmatched -> harness fallback")
 
 
 def analyze(paths):
     """Return the mapping result for a list of paths (order preserved)."""
     entries = []
     skills = []  # first-seen order (deterministic for a given path list)
-    smoke = False
+    harness = False
     non_evaluable = False
     for raw in paths:
         result = classify(raw)
@@ -109,15 +123,15 @@ def analyze(paths):
         if klass == "evaluable":
             if skill not in skills:
                 skills.append(skill)
-        elif klass == "smoke":
-            smoke = True
+        elif klass == "harness":
+            harness = True
         else:
             non_evaluable = True
 
     if skills:
         overall = "evaluable"
-    elif smoke:
-        overall = "smoke"
+    elif harness:
+        overall = "harness"
     elif non_evaluable:
         overall = "non_evaluable"
     else:
@@ -126,8 +140,11 @@ def analyze(paths):
     return {
         "class": overall,
         "skills": skills,
-        "smoke": smoke,
+        "harness": harness,
         "non_evaluable": non_evaluable,
+        # Harness action is the fixed six-core-default set (never a
+        # relevance list / alphabetical guess).
+        "core_skills": list(CORE_SKILLS),
         "entries": entries,
     }
 

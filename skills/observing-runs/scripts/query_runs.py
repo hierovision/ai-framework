@@ -38,6 +38,19 @@ RUN_FILE_RE = re.compile(r"^run-(\d{4}-\d{2}-\d{2})\.jsonl$")
 # RM-003 AC3: model tiers excluded from the default CI eval run (free-tier policy).
 EVAL_TIERS_EXCLUDED = ("go", "zen")
 
+# RM-003 pass 4 / AC12: the six core skills whose default evals run on a
+# harness change. Canonical single source of truth, imported by
+# scripts/changed-files-to-skills.py and validate_skill.py so the harness
+# target, the coverage report, and marker validation cannot drift.
+CORE_SKILLS = (
+    "authoring-skills",
+    "designing-architecture",
+    "implementing-features",
+    "reviewing-code",
+    "triaging-requirements",
+    "writing-unit-tests",
+)
+
 
 def _iter_records(logs_dir):
     if not os.path.isdir(logs_dir):
@@ -163,12 +176,19 @@ def _iter_eval_manifests(skills_root):
 def coverage_gaps(logs_dir, skills_root=None):
     """RM-003 AC3 coverage-gap report.
 
-    Returns four arrays:
-      zero_eval_skills        skills with an evals manifest but zero kind=eval
-                              records in the (retention-limited) log window
-      deferred_evals          evals flagged deferred:true (excluded by default)
+    The three required arrays (the contract):
+      zero_eval_skills         skills with an evals manifest but zero kind=eval
+                               records in the (retention-limited) log window
+      deferred_evals           evals flagged deferred:true (excluded by default)
       free_tier_excluded_evals evals whose model_tier is go|zen (excluded in CI)
-      quarantined_evals       evals at status=quarantined in quarantine.json
+    Plus:
+      quarantined_evals        evals at status=quarantined in quarantine.json
+      no_default_marker        skills without a `"default": true` eval
+      core_covered             six core skills that resolve a `"core": true`
+                               canary `{skill, eval_id}`
+      core_uncovered           core skills lacking a core-marked eval
+      smoke_uncovered          skills outside the fixed six-core harness set
+                               (a harness change does not run them)
     """
     if skills_root is None:
         skills_root = os.path.join(REPO_ROOT, "skills")
@@ -179,11 +199,17 @@ def coverage_gaps(logs_dir, skills_root=None):
             eval_record_skills.add(rec["skill"])
 
     zero_eval_skills, deferred_evals, free_tier_excluded_evals = [], [], []
+    no_default_marker = []
+    manifests = {}
     for skill, data in _iter_eval_manifests(skills_root):
+        manifests[skill] = data
         default_tier = data.get("default_model_tier", "free")
         if skill not in eval_record_skills:
             zero_eval_skills.append(skill)
-        for e in data.get("evals", []):
+        evals = data.get("evals", [])
+        if not any(e.get("default") for e in evals):
+            no_default_marker.append(skill)
+        for e in evals:
             tier = e.get("default_model_tier", default_tier)
             item = {"skill": skill, "eval_id": e.get("id"), "model_tier": tier}
             if e.get("deferred"):
@@ -193,6 +219,18 @@ def coverage_gaps(logs_dir, skills_root=None):
                 free_tier_excluded_evals.append(
                     {**item, "reason": f"model_tier={tier} excluded by CI free-tier policy"}
                 )
+
+    core_covered, core_uncovered = [], []
+    for skill in CORE_SKILLS:
+        data = manifests.get(skill)
+        marked = ([e for e in data.get("evals", []) if e.get("core")]
+                  if data is not None else [])
+        if marked:
+            core_covered.append({"skill": skill, "eval_id": marked[0].get("id")})
+        else:
+            core_uncovered.append(skill)
+
+    smoke_uncovered = sorted(s for s in manifests if s not in set(CORE_SKILLS))
 
     quarantined_evals = []
     quarantine_path = os.path.join(logs_dir, "quarantine.json")
@@ -211,6 +249,10 @@ def coverage_gaps(logs_dir, skills_root=None):
         "deferred_evals": deferred_evals,
         "free_tier_excluded_evals": free_tier_excluded_evals,
         "quarantined_evals": quarantined_evals,
+        "no_default_marker": sorted(no_default_marker),
+        "core_covered": core_covered,
+        "core_uncovered": core_uncovered,
+        "smoke_uncovered": smoke_uncovered,
     }
 
 
