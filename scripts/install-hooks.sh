@@ -4,6 +4,8 @@
 # The generated hook runs the HERMETIC validators on every commit:
 #   - skills/authoring-skills/scripts/validate_skill.py --all  (skill structure)
 #   - scripts/verify.mjs                                       (eval-manifest schema)
+#   - scripts/check_typed_evals.py --base HEAD                 (new/changed evals
+#     must carry a typed `expect` block — RM-003 pass 5, AC17/AC19)
 #   - yamllint -c .yamllint.yaml .github/workflows/            (workflow YAML —
 #     if yamllint is installed locally; otherwise warns and skips, and CI
 #     quality-gates enforces it regardless)
@@ -36,6 +38,7 @@ cat > "${HOOK_PATH}" <<'EOF'
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}"
 
 fail() {
     echo "pre-commit: $1 failed" >&2
@@ -51,6 +54,9 @@ python3 "${REPO_ROOT}/skills/authoring-skills/scripts/validate_skill.py" --all |
 echo "  -> verify.mjs"
 node "${REPO_ROOT}/scripts/verify.mjs" || fail "verify.mjs"
 
+echo "  -> check_typed_evals.py --base HEAD"
+python3 "${REPO_ROOT}/scripts/check_typed_evals.py" --base HEAD || fail "check_typed_evals.py"
+
 if python3 -m yamllint --version >/dev/null 2>&1; then
     echo "  -> yamllint (.github/workflows/)"
     python3 -m yamllint -c "${REPO_ROOT}/.yamllint.yaml" "${REPO_ROOT}/.github/workflows/" || fail "yamllint"
@@ -63,4 +69,4 @@ EOF
 
 chmod +x "${HOOK_PATH}"
 echo "Installed pre-commit hook at ${HOOK_PATH}"
-echo "It runs validate_skill.py --all and scripts/verify.mjs on every commit."
+echo "It runs validate_skill.py --all, scripts/verify.mjs, and check_typed_evals.py on every commit."

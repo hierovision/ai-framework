@@ -41,6 +41,19 @@ if _OBSERVE_SCRIPTS not in sys.path:
     sys.path.insert(0, _OBSERVE_SCRIPTS)
 from query_runs import CORE_SKILLS  # noqa: E402  (path set above)
 
+# RM-003 pass 5: the closed typed-assertion schema is owned by
+# scripts/check_typed_evals.py (single source of truth); import its validator
+# so Layer 1 and the pre-commit/CI gate cannot drift. The JS mirror lives in
+# scripts/verify.mjs (Layer 1 is hermetic and cannot import Python).
+_REPO_SCRIPTS = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.realpath(__file__)), "..", "..", "..", "scripts"))
+if _REPO_SCRIPTS not in sys.path:
+    sys.path.insert(0, _REPO_SCRIPTS)
+try:
+    from check_typed_evals import validate_expect, has_expect  # noqa: E402
+except Exception:  # pragma: no cover - defensive: repo scripts always present
+    validate_expect = has_expect = None
+
 NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 
@@ -113,6 +126,24 @@ def validate(skill_dir):
                     p = os.path.join(skill_dir, "evals", f)
                     if not os.path.isfile(p):
                         errors.append(f"evals.json files[] entry does not resolve: {f}")
+                # RM-003 pass 5 typed-assertion enforcement (AC12/AC17).
+                if "expect" in e:
+                    if validate_expect is not None:
+                        errors.extend(validate_expect(
+                            e["expect"], where=f"evals.json evals[{idx}].expect"))
+                if (e.get("default") or e.get("core")) and not (
+                        has_expect and has_expect(e)):
+                    errors.append(
+                        f"evals.json evals[{idx}] carries a default/core marker "
+                        f"without a typed 'expect' block (AC12/AC17)")
+                if "expect" not in e:
+                    eb = e.get("expected_behavior")
+                    if (not isinstance(eb, list) or not eb
+                            or any(not isinstance(b, str) or not b.strip()
+                                   for b in eb)):
+                        errors.append(
+                            f"evals.json evals[{idx}] needs a non-empty "
+                            f"'expected_behavior' when 'expect' is absent")
             if len(defaults) > 1:
                 errors.append(
                     f"evals.json has {len(defaults)} 'default': true evals (max one)")

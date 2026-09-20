@@ -32,6 +32,10 @@ jobs:
       # SHA-pinned (supply-chain safety — see securing-ci skill).
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+        with:
+          # Full history so check_typed_evals.py can resolve the base ref it
+          # compares new/changed evals against (RM-003 pass 5).
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (node24)
@@ -40,6 +44,14 @@ jobs:
 
       - name: Validate all skills (mandatory library rule)
         run: python3 skills/authoring-skills/scripts/validate_skill.py --all
+
+      # RM-003 pass 5 (AC17/AC19): a NEW or CHANGED eval must carry a typed
+      # `expect` block. Compare against the PR base (or the pre-push commit).
+      - name: Typed-eval enforcement (new/changed evals must carry expect)
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || github.event.before || 'main' }}"
+          if [[ "$BASE" =~ ^0+$ || -z "$BASE" ]]; then BASE="main"; fi
+          python3 scripts/check_typed_evals.py --base "$BASE"
 
       - name: Unit tests — issue scripts
         run: |
