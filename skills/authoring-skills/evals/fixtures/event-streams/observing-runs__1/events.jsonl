@@ -1,0 +1,3 @@
+{"type":"tool","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"python3 skills/observing-runs/scripts/log_run.py --kind eval --skill writing-unit-tests --model go --tokens-in 812 --tokens-out 305 --duration-ms 142000 --outcome success --eval-pass true"}}}}
+{"type":"text","part":{"type":"text","text":"Recorded the run as one JSONL line in logs/run-2026-09-20.jsonl. ROI guardrail: run logs are out-of-context, append-only, and must never be read back into the agent's own prompt."}}
+{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":640,"output":120}}}

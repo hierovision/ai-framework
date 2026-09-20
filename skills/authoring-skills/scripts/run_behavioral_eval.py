@@ -2,10 +2,21 @@
 """Run the behavioral (fresh-agent) eval suite and gate on regressions.
 
 For every skill's `evals/evals.json`, launch a fresh agent session with the
-skill installed, capture its final output, and assert each
-`expected_behavior` entry is present (case-insensitive substring). Any miss
-fails the build and writes an `eval_pass=false` run-log record via RM-001's
-`log_run.py` (single source of truth — the schema is NOT redefined here).
+skill installed, capture its `opencode run --format json` event stream, and
+assert its typed `expect` block (RM-003 pass 5). Any miss fails the build and
+writes an `eval_pass=false` run-log record via RM-001's `log_run.py` (single
+source of truth — the schema is NOT redefined here).
+
+Typed assertion protocol (RM-003 pass 5 / AC16–AC21): an eval may carry an
+`expect` block with up to three closed classes —
+`action` (tool-event predicates over the event stream), `artifact` (a written
+file + key phrases in its content), `text` (a key phrase in the final
+response). `expect` wins when present; an eval without it falls back to the
+legacy `expected_behavior` substring path (text-class, flagged legacy). The
+stream is newline-delimited JSON: a text event carries
+`part.type='text'`/`.text`; a tool event carries `part.type='tool'`/`.tool`
+with `state.input` args. A stream parse failure fails closed (never a silent
+pass). See `../references/eval-assertions.md` for the full schema.
 
 Offline gate: the assertion logic + listing/subset logic are pure and
 testable without a model (see test_runner.py, which injects a stub agent).
@@ -26,6 +37,8 @@ skill's `"default": true` canary (fallback: first eval in file order);
 paths ignore `--limit` (sharding only). See AC6 / AC12.
 """
 import argparse
+import fnmatch
+import glob
 import json
 import os
 import re
@@ -81,6 +94,9 @@ def load_skill_evals(skills_root):
                 "eval_id": e.get("id"),
                 "prompt": e.get("prompt", ""),
                 "expected_behavior": e.get("expected_behavior", []),
+                # RM-003 pass 5 typed assertions (AC16/AC21): a closed
+                # action/artifact/text block; wins over expected_behavior.
+                "expect": e.get("expect"),
                 "deferred": bool(e.get("deferred", False)),
                 "model_tier": e.get("default_model_tier", tier),
                 "files": e.get("files", []),
@@ -157,6 +173,208 @@ def assert_behavior(expected, output):
     return [exp for exp in expected if exp.lower() not in out_l]
 
 
+# ---------------------------------------------------------------------------
+# Typed assertion protocol (RM-003 pass 5, AC16/AC17/AC21)
+#
+# `expect` (when present) is a closed block with up to three classes:
+#   action   tool-event predicates over the `opencode run --format json` stream
+#   artifact a written file (glob path under the run workdir) + key phrases
+#   text     a key phrase in the final response text
+# The matcher is a pure function of (expect, context) so it is testable from a
+# committed event-stream fixture with no model and no network.
+# ---------------------------------------------------------------------------
+
+class EvalResult:
+    """One invocation's raw event stream (+ stderr + workdir for artifacts)."""
+
+    __slots__ = ("raw", "stderr", "workdir", "cleanup")
+
+    def __init__(self, raw, stderr="", workdir=None, cleanup=False):
+        self.raw = raw or ""
+        self.stderr = stderr or ""
+        self.workdir = workdir
+        self.cleanup = cleanup
+
+    def close(self):
+        if self.cleanup and self.workdir:
+            shutil.rmtree(self.workdir, ignore_errors=True)
+
+
+def parse_event_stream(raw):
+    """Parse a newline-delimited JSON event stream -> (events, errors).
+
+    A malformed line is recorded as an error rather than dropped; callers fail
+    closed on a non-empty error list for a typed eval.
+    """
+    events, errors = [], []
+    for i, line in enumerate((raw or "").splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError as exc:
+            errors.append(f"line {i}: {exc.msg}")
+            continue
+        if isinstance(obj, dict):
+            events.append(obj)
+        else:
+            errors.append(f"line {i}: event is not a JSON object")
+    return events, errors
+
+
+def _event_part(ev):
+    part = ev.get("part")
+    return part if isinstance(part, dict) else {}
+
+
+def _event_type(ev):
+    return _event_part(ev).get("type") or ev.get("type")
+
+
+def extract_final_text(events):
+    """Concatenate the text-event parts of the stream (the final response)."""
+    chunks = []
+    for ev in events:
+        if _event_type(ev) != "text":
+            continue
+        part = _event_part(ev)
+        txt = part.get("text")
+        if txt is None:
+            txt = ev.get("text")
+        if isinstance(txt, str):
+            chunks.append(txt)
+    return "\n".join(chunks)
+
+
+def extract_tool_calls(events):
+    """Return the parsed tool events as `{"tool": ..., "args": {...}}`."""
+    calls = []
+    for ev in events:
+        if _event_type(ev) != "tool":
+            continue
+        part = _event_part(ev)
+        tool = part.get("tool") or ev.get("tool")
+        args = None
+        state = part.get("state")
+        if isinstance(state, dict) and isinstance(state.get("input"), dict):
+            args = state["input"]
+        elif isinstance(part.get("input"), dict):
+            args = part["input"]
+        elif isinstance(ev.get("input"), dict):
+            args = ev["input"]
+        calls.append({"tool": tool, "args": args or {}})
+    return calls
+
+
+def build_context(result):
+    """Normalize a `get_output` result (EvalResult or raw str) for matching.
+
+    A plain string is treated as a legacy raw output: when it does not parse as
+    an event stream the whole string is the text channel (backward compatible
+    with `--stub-output` and injected stub callables).
+    """
+    if isinstance(result, EvalResult):
+        raw, stderr, workdir = result.raw, result.stderr, result.workdir
+    else:
+        raw, stderr, workdir = result, "", None
+    events, errors = parse_event_stream(raw)
+    final_text = extract_final_text(events) if events else (raw or "")
+    return {
+        "raw": raw or "",
+        "stderr": stderr or "",
+        "workdir": workdir,
+        "events": events,
+        "final_text": final_text,
+        "parse_error": ("; ".join(errors) if errors else None),
+    }
+
+
+def _glob_match(value, pattern):
+    if value is None:
+        return False
+    return fnmatch.fnmatchcase(str(value), pattern)
+
+
+def assert_action(entries, events):
+    """Return missing `action` predicates (tool name + argument globs)."""
+    calls = extract_tool_calls(events)
+    missing = []
+    for entry in entries:
+        tool = entry.get("tool")
+        args_spec = entry.get("args") or {}
+        ok = any(
+            _glob_match(call["tool"], tool)
+            and all(_glob_match(call["args"].get(k), v) for k, v in args_spec.items())
+            for call in calls
+        )
+        if not ok:
+            detail = ", ".join(f"{k}={v!r}" for k, v in args_spec.items()) or "no args"
+            missing.append(f"action: no tool event matching tool={tool!r} ({detail})")
+    return missing
+
+
+def _artifact_files(workdir, path):
+    if not workdir:
+        return []
+    target = path if os.path.isabs(path) else os.path.join(workdir, path)
+    files = [p for p in glob.glob(target, recursive=True) if os.path.isfile(p)]
+    if os.path.isfile(target) and target not in files:
+        files.append(target)
+    return files
+
+
+def assert_artifact(entries, workdir):
+    """Return missing `artifact` predicates (file path glob + content phrases)."""
+    missing = []
+    for entry in entries:
+        path = entry.get("path")
+        phrases = entry.get("phrases") or []
+        found = False
+        for fp in _artifact_files(workdir, path):
+            try:
+                content = open(fp, encoding="utf-8", errors="replace").read()
+            except OSError:
+                continue
+            if all(p.lower() in content.lower() for p in phrases):
+                found = True
+                break
+        if not found:
+            missing.append(
+                f"artifact: no file matching {path!r} containing all phrases {phrases}")
+    return missing
+
+
+def assert_text(phrases, final_text):
+    """Return missing `text` key-phrases (case-insensitive substring)."""
+    low = (final_text or "").lower()
+    return [f"text: phrase not found: {p!r}" for p in phrases if p.lower() not in low]
+
+
+def assert_expect(expect, ctx):
+    """Return missing descriptions for one typed `expect` block (fails closed)."""
+    if ctx.get("parse_error"):
+        return [f"event stream parse error: {ctx['parse_error']}"]
+    missing = []
+    if expect.get("action"):
+        missing += assert_action(expect["action"], ctx["events"])
+    if expect.get("artifact"):
+        missing += assert_artifact(expect["artifact"], ctx["workdir"])
+    if expect.get("text"):
+        missing += assert_text(expect["text"], ctx["final_text"])
+    if not any(expect.get(k) for k in ("action", "artifact", "text")):
+        missing.append("expect: empty typed block (no action/artifact/text entries)")
+    return missing
+
+
+def assert_eval(e, ctx):
+    """Assert one eval: typed `expect` when present, else legacy text-class."""
+    expect = e.get("expect")
+    if isinstance(expect, dict) and expect:
+        return assert_expect(expect, ctx)
+    return assert_behavior(e.get("expected_behavior", []), ctx["final_text"])
+
+
 def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
              sleep=time.sleep, quarantine_path=None):
     """Run one eval via `get_output(e)`, assert, and write a run-log record.
@@ -171,50 +389,59 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
     with `RETRY_BACKOFF_SECONDS` backoff. `quarantine_path`, when set,
     records the final failure (or clears on success) — CI-owned only.
     """
-    output = get_output(e)
-    missing = assert_behavior(e["expected_behavior"], output)
-    attempts = 0
-    while missing and attempts < max_retries and is_transient(output):
-        # Per-attempt annotation (2026-09-19 directive): a retry means the
-        # model hit an unexpected event (stall / rate limit / transient
-        # error) — that event is reliability evidence, not noise, and gets
-        # its OWN run-log record so a later attempt's success cannot bury it.
-        delay = RETRY_BACKOFF_SECONDS[min(attempts, len(RETRY_BACKOFF_SECONDS) - 1)]
-        attempts += 1
-        # Reliability annotation record: eval_pass=None so aggregators count
-        # only FINAL verdicts toward pass rates (RM-001 null semantics).
-        log_run.log_record({
+    result = get_output(e)
+    try:
+        ctx = build_context(result)
+        missing = assert_eval(e, ctx)
+        attempts = 0
+        while (missing and attempts < max_retries
+               and is_transient(ctx["raw"] + " " + ctx["stderr"])):
+            # Per-attempt annotation (2026-09-19 directive): a retry means the
+            # model hit an unexpected event (stall / rate limit / transient
+            # error) — that event is reliability evidence, not noise, and gets
+            # its OWN run-log record so a later attempt's success cannot bury it.
+            delay = RETRY_BACKOFF_SECONDS[min(attempts, len(RETRY_BACKOFF_SECONDS) - 1)]
+            attempts += 1
+            # Reliability annotation record: eval_pass=None so aggregators count
+            # only FINAL verdicts toward pass rates (RM-001 null semantics).
+            log_run.log_record({
+                "kind": "eval",
+                "skill": e["skill"],
+                "agent": None,
+                "model": model or e["model_tier"],
+                "outcome": "error",
+                "eval_pass": None,
+                "detail": ("transient attempt %d: %s" % (attempts, ctx["raw"]))[:DETAIL_MAX],
+            }, logs_dir=logs_dir)
+            if isinstance(result, EvalResult):
+                result.close()
+            sleep(delay)
+            result = get_output(e)
+            ctx = build_context(result)
+            missing = assert_eval(e, ctx)
+        passed = not missing
+        detail = None
+        if missing:
+            detail = ("missing: " + " | ".join(missing))[:DETAIL_MAX]
+        rec = {
             "kind": "eval",
             "skill": e["skill"],
             "agent": None,
             "model": model or e["model_tier"],
-            "outcome": "error",
-            "eval_pass": None,
-            "detail": ("transient attempt %d: %s" % (attempts, output))[:DETAIL_MAX],
-        }, logs_dir=logs_dir)
-        sleep(delay)
-        output = get_output(e)
-        missing = assert_behavior(e["expected_behavior"], output)
-    passed = not missing
-    detail = None
-    if missing:
-        detail = ("missing expected_behavior: " + " | ".join(missing))[:DETAIL_MAX]
-    rec = {
-        "kind": "eval",
-        "skill": e["skill"],
-        "agent": None,
-        "model": model or e["model_tier"],
-        "outcome": "success" if passed else "failure",
-        "eval_pass": passed,
-        "detail": detail,
-    }
-    path = log_run.log_record(rec, logs_dir=logs_dir)
-    if quarantine_path:
-        if passed:
-            quarantine.record_success(quarantine_path, eval_key(e))
-        else:
-            quarantine.record_failure(quarantine_path, eval_key(e))
-    return passed, missing, path
+            "outcome": "success" if passed else "failure",
+            "eval_pass": passed,
+            "detail": detail,
+        }
+        path = log_run.log_record(rec, logs_dir=logs_dir)
+        if quarantine_path:
+            if passed:
+                quarantine.record_success(quarantine_path, eval_key(e))
+            else:
+                quarantine.record_failure(quarantine_path, eval_key(e))
+        return passed, missing, path
+    finally:
+        if isinstance(result, EvalResult):
+            result.close()
 
 
 def opencode_run_args(tmp, prompt, model=None):
@@ -234,7 +461,9 @@ def opencode_run_args(tmp, prompt, model=None):
     args = ["run", "--dir", tmp]
     if model:
         args += ["--model", model]
-    args += [prompt]
+    # RM-003 pass 5: capture the newline-delimited JSON event stream so typed
+    # `action`/`artifact` predicates can observe tool events (AC21).
+    args += ["--format", "json", prompt]
     return args
 
 
@@ -254,6 +483,7 @@ def invoke_opencode(e, model=None):
     """
     tmp = tempfile.mkdtemp(prefix="beval-")
     stall_timeout = int(os.environ.get("BEVAL_TIMEOUT_SECONDS", "240"))
+    keep = False
     try:
         for rel in e["files"]:
             src = os.path.join(SKILLS_ROOT, e["skill"], "evals", rel)
@@ -274,7 +504,7 @@ def invoke_opencode(e, model=None):
                 start_new_session=True,
             )
         except OSError as exc:
-            return f"opencode invocation failed: {exc}"
+            return EvalResult(raw=f"opencode invocation failed: {exc}")
         try:
             out, err = proc.communicate(timeout=stall_timeout)
         except subprocess.TimeoutExpired:
@@ -283,11 +513,72 @@ def invoke_opencode(e, model=None):
             except (ProcessLookupError, PermissionError):
                 pass  # group already gone
             proc.communicate()  # reap the killed group's pipes
-            return (f"eval stall: subprocess timed out after {stall_timeout}s "
-                    f"with no completion (transient; subprocess group killed)")
-        return out + err
+            return EvalResult(
+                raw=(f"eval stall: subprocess timed out after {stall_timeout}s "
+                     f"with no completion (transient; subprocess group killed)"))
+        # Keep the workdir: the artifact class reads files the agent wrote
+        # there; run_eval closes (removes) it after matching.
+        keep = True
+        return EvalResult(raw=out, stderr=err, workdir=tmp, cleanup=True)
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        if not keep:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def load_event_fixture(path):
+    """Replay a recorded event stream instead of invoking opencode (AC21).
+
+    `path` is either an `events.jsonl` file or a directory containing one; the
+    directory is the workdir for `artifact` predicates, so committed artifact
+    files sit next to the stream.
+    """
+    events_path = path if os.path.isfile(path) else os.path.join(path, "events.jsonl")
+    with open(events_path, encoding="utf-8") as fh:
+        raw = fh.read()
+    return EvalResult(raw=raw, workdir=os.path.dirname(os.path.abspath(events_path)))
+
+
+def _stub_typed_result(e):
+    """Synthesize a passing output for one eval (legacy text or typed stream)."""
+    expect = e.get("expect")
+    if not (isinstance(expect, dict) and expect):
+        # Legacy eval (or typed-less): the text channel is the whole output.
+        return EvalResult(raw="\n".join(e.get("expected_behavior", [])))
+    workdir = tempfile.mkdtemp(prefix="beval-stub-")
+    events = []
+    for entry in expect.get("action", []):
+        args = {k: (str(v).replace("*", "") or "x")
+                for k, v in (entry.get("args") or {}).items()}
+        tool = str(entry.get("tool", "")).replace("*", "") or "bash"
+        events.append({"type": "tool", "part": {
+            "type": "tool", "tool": tool,
+            "state": {"status": "completed", "input": args}}})
+    for entry in expect.get("artifact", []):
+        rel = str(entry.get("path", "")).replace("*", "").strip("/")
+        dest = os.path.join(workdir, rel) if rel else os.path.join(workdir, "artifact.txt")
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(entry.get("phrases", [])))
+    text = "\n".join(expect.get("text", []))
+    if text:
+        events.append({"type": "text", "part": {"type": "text", "text": text}})
+    raw = "\n".join(json.dumps(ev) for ev in events)
+    return EvalResult(raw=raw, workdir=workdir, cleanup=True)
+
+
+def stub_result(e, mode, calls):
+    """Hermetic test output for one eval (ALL / :MISS: / :FLAKY:)."""
+    if mode.startswith(":MISS:"):
+        if e.get("expected_behavior"):
+            return EvalResult(raw="\n".join(e["expected_behavior"][1:]))
+        return EvalResult(raw="")
+    if mode.startswith(":FLAKY:"):
+        key = eval_key(e)
+        n = calls.get(key, 0)
+        calls[key] = n + 1
+        if n == 0:
+            return EvalResult(raw="error: connection timeout contacting model (transient)")
+    return _stub_typed_result(e)
 
 
 def main(argv=None):
@@ -336,7 +627,14 @@ def main(argv=None):
                         "instead of invoking opencode. 'ALL' passes every eval; "
                         "':MISS:' forces a permanent (non-transient) failure; "
                         "':FLAKY:' emits a transient error first, then passes "
-                        "(exercises the retry path).")
+                        "(exercises the retry path). Typed evals are synthesized "
+                        "to match their expect block.")
+    p.add_argument("--event-fixture", default=None,
+                   help="Hermetic replay (RM-003 pass 5): path to a recorded "
+                        "event-stream file (events.jsonl) or its directory; "
+                        "replays it through the typed matcher instead of invoking "
+                        "opencode (no model, no network). The directory is the "
+                        "workdir for artifact predicates.")
     args = p.parse_args(argv)
 
     all_evals = load_skill_evals(args.skills_root)
@@ -401,18 +699,10 @@ def main(argv=None):
     _stub_calls = {}
 
     def get_output(e):
+        if args.event_fixture:
+            return load_event_fixture(args.event_fixture)
         if args.stub_output is not None:
-            if args.stub_output.startswith(":MISS:"):
-                # omit the first expected behavior to force a stable failure
-                return "\n".join(e["expected_behavior"][1:])
-            if args.stub_output.startswith(":FLAKY:"):
-                key = eval_key(e)
-                n = _stub_calls.get(key, 0)
-                _stub_calls[key] = n + 1
-                if n == 0:
-                    return "error: connection timeout contacting model (transient)"
-                return "\n".join(e["expected_behavior"])
-            return "\n".join(e["expected_behavior"])  # ALL
+            return stub_result(e, args.stub_output, _stub_calls)
         return invoke_opencode(e, model=args.model)
 
     failed = 0

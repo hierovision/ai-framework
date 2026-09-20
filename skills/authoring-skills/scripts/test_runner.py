@@ -237,7 +237,8 @@ def test_model_flag_and_ci_guard():
     args = runner.opencode_run_args("/tmp/x", "prompt p",
                                     model="opencode/nemotron-3-ultra-free")
     assert args == ["run", "--dir", "/tmp/x",
-                    "--model", "opencode/nemotron-3-ultra-free", "prompt p"], args
+                    "--model", "opencode/nemotron-3-ultra-free",
+                    "--format", "json", "prompt p"], args
     # no model -> no --model flag (opencode default; developer-local runs only)
     args2 = runner.opencode_run_args("/tmp/x", "prompt p", model=None)
     assert "--model" not in args2, args2
@@ -328,6 +329,186 @@ def test_repo_core_and_default_markers():
     print("PASS  repo markers: six core skills carry core; authoring+observing default")
 
 
+# ---------------------------------------------------------------------------
+# RM-003 pass 5: typed-assertion matcher + canary fixture replay (AC20/AC21)
+# ---------------------------------------------------------------------------
+
+FIXTURE_ROOT = os.path.normpath(
+    os.path.join(HERE, "..", "evals", "fixtures", "event-streams"))
+
+CANARY_KEYS = {
+    ("authoring-skills", 1),
+    ("observing-runs", 1),
+    ("designing-architecture", 1),
+    ("implementing-features", 1),
+    ("reviewing-code", 1),
+    ("triaging-requirements", 1),
+    ("writing-unit-tests", 1),
+}
+
+
+def _load_fixture(skill, eval_id):
+    d = os.path.join(FIXTURE_ROOT, f"{skill}__{eval_id}")
+    assert os.path.isdir(d), f"missing event-stream fixture: {d}"
+    raw = open(os.path.join(d, "events.jsonl"), encoding="utf-8").read()
+    return runner.EvalResult(raw=raw, workdir=d)
+
+
+def test_event_stream_parse_and_final_text():
+    ctx = runner.build_context(_load_fixture("observing-runs", 1))
+    assert ctx["parse_error"] is None, ctx["parse_error"]
+    assert "ROI guardrail" in ctx["final_text"], ctx["final_text"]
+    calls = runner.extract_tool_calls(ctx["events"])
+    assert calls and calls[0]["tool"] == "bash", calls
+    assert "log_run.py" in calls[0]["args"]["command"], calls
+    print("PASS  parse event stream -> tool calls + final text")
+
+
+def test_action_predicate():
+    ctx = runner.build_context(_load_fixture("observing-runs", 1))
+    ok = {"action": [{"tool": "bash", "args": {"command": "*log_run.py*"}}]}
+    assert runner.assert_expect(ok, ctx) == [], runner.assert_expect(ok, ctx)
+    bad = {"action": [{"tool": "bash", "args": {"command": "*never-runs*"}}]}
+    assert runner.assert_expect(bad, ctx), "non-matching command glob must fail"
+    bad_tool = {"action": [{"tool": "write"}]}
+    assert runner.assert_expect(bad_tool, ctx), "non-matching tool must fail"
+    print("PASS  action predicate: matches tool+arg globs, misses otherwise")
+
+
+def test_artifact_predicate():
+    d = tempfile.mkdtemp(prefix="beval-art-")
+    try:
+        os.makedirs(os.path.join(d, "src", "lib"))
+        with open(os.path.join(d, "src", "lib", "offline-queue.ts"), "w") as fh:
+            fh.write("export function queueSession() {}\n")
+        ctx = runner.build_context(runner.EvalResult(raw="", workdir=d))
+        ok = {"artifact": [{"path": "src/lib/offline-queue.ts",
+                            "phrases": ["queueSession", "export"]}]}
+        assert runner.assert_expect(ok, ctx) == [], runner.assert_expect(ok, ctx)
+        bad = {"artifact": [{"path": "src/lib/offline-queue.ts",
+                             "phrases": ["nonexistent-phrase"]}]}
+        assert runner.assert_expect(bad, ctx), "missing phrase must fail"
+        absent = {"artifact": [{"path": "src/lib/absent.ts", "phrases": ["x"]}]}
+        assert runner.assert_expect(absent, ctx), "absent file must fail"
+        globbed = {"artifact": [{"path": "**/offline-queue.ts",
+                                 "phrases": ["queueSession"]}]}
+        assert runner.assert_expect(globbed, ctx) == [], runner.assert_expect(globbed, ctx)
+        print("PASS  artifact predicate: reads a written file + glob paths")
+    finally:
+        shutil.rmtree(d)
+
+
+def test_text_predicate_and_expect_wins():
+    # expect wins over legacy expected_behavior: the legacy phrase is absent but
+    # the typed text phrase is present.
+    stream = '{"type":"text","part":{"type":"text","text":"a typed phrase here"}}\n'
+    ctx = runner.build_context(runner.EvalResult(raw=stream))
+    e = {"expected_behavior": ["THIS LEGACY PHRASE IS ABSENT"],
+         "expect": {"text": ["typed phrase"]}}
+    assert runner.assert_eval(e, ctx) == [], runner.assert_eval(e, ctx)
+    # Without expect, the legacy text-class path still gates.
+    assert runner.assert_eval({"expected_behavior": ["typed phrase"]}, ctx) == []
+    assert runner.assert_eval({"expected_behavior": ["absent"]}, ctx), \
+        "legacy substring path must still fail on a miss"
+    print("PASS  expect wins over legacy; legacy expected_behavior still works as text")
+
+
+def test_parse_failure_fails_closed():
+    e = {"expect": {"text": ["anything"]}}
+    ctx = runner.build_context(runner.EvalResult(raw="not json at all\n{oops"))
+    missing = runner.assert_eval(e, ctx)
+    assert missing and "parse error" in missing[0], missing
+    print("PASS  a malformed event stream fails closed for a typed eval")
+
+
+def test_seven_canaries_replay_fixtures():
+    skills_root = os.path.normpath(os.path.join(HERE, "..", ".."))
+    evals = runner.load_skill_evals(skills_root)
+    by_key = {runner.eval_key(e): e for e in evals}
+    for skill, eval_id in sorted(CANARY_KEYS):
+        key = f"{skill}#{eval_id}"
+        assert key in by_key, f"missing canary {key}"
+        e = by_key[key]
+        assert isinstance(e.get("expect"), dict) and e["expect"], \
+            f"{key} must carry a typed expect block (AC20)"
+        ctx = runner.build_context(_load_fixture(skill, eval_id))
+        missing = runner.assert_eval(e, ctx)
+        assert missing == [], f"{key} fixture did not satisfy its expect: {missing}"
+    print("PASS  all seven canaries replay their fixtures through the matcher")
+
+
+def test_event_fixture_cli():
+    fixture = os.path.join(FIXTURE_ROOT, "authoring-skills__1")
+    logs = tempfile.mkdtemp(prefix="beval-fix-logs-")
+    try:
+        r = subprocess.run(
+            [sys.executable, RUNNER, "--default", "--skill", "authoring-skills",
+             "--event-fixture", fixture, "--no-quarantine", "--logs-dir", logs],
+            capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "authoring-skills#1" in r.stdout and "PASS" in r.stdout, r.stdout
+        recs = _read_logs(logs)
+        assert recs and recs[-1]["eval_pass"] is True, recs
+    finally:
+        shutil.rmtree(logs, ignore_errors=True)
+    # A stream that does not satisfy the canary must fail the gate.
+    empty = tempfile.mkdtemp(prefix="beval-fix-empty-")
+    logs2 = tempfile.mkdtemp(prefix="beval-fix-logs2-")
+    try:
+        with open(os.path.join(empty, "events.jsonl"), "w") as fh:
+            fh.write('{"type":"text","part":{"type":"text","text":"unrelated"}}\n')
+        r2 = subprocess.run(
+            [sys.executable, RUNNER, "--default", "--skill", "authoring-skills",
+             "--event-fixture", empty, "--no-quarantine", "--logs-dir", logs2],
+            capture_output=True, text=True)
+        assert r2.returncode == 1, r2.stdout + r2.stderr
+    finally:
+        shutil.rmtree(empty, ignore_errors=True)
+        shutil.rmtree(logs2, ignore_errors=True)
+    print("PASS  --event-fixture CLI replays a stream with no model/network")
+
+
+def test_typed_stub_synthesis():
+    """AC21: a typed eval passes under --stub-output ALL (stream synthesized).
+
+    Coverage-gate expand (pass 5): the typed matcher must not make the
+    hermetic stub path unusable — the stub synthesizes a matching event stream
+    + artifact for a typed eval, and :MISS: still fails it.
+    """
+    root = tempfile.mkdtemp(prefix="beval-typed-")
+    try:
+        d = os.path.join(root, "typed-skill", "evals")
+        os.makedirs(d)
+        json.dump({"evals": [{
+            "id": 1, "prompt": "p",
+            "expect": {
+                "action": [{"tool": "bash", "args": {"command": "*log_run.py*"}}],
+                "artifact": [{"path": "**/out.md", "phrases": ["hi"]}],
+                "text": ["typed text"],
+            },
+        }]}, open(os.path.join(d, "evals.json"), "w"))
+        logs = tempfile.mkdtemp(prefix="beval-typed-logs-")
+        r = subprocess.run(
+            [sys.executable, RUNNER, "--skills-root", root, "--logs-dir", logs,
+             "--stub-output", "ALL", "--no-quarantine"],
+            capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        recs = _read_logs(logs)
+        assert recs and all(x["eval_pass"] is True for x in recs), recs
+
+        logs2 = tempfile.mkdtemp(prefix="beval-typed-logs2-")
+        r2 = subprocess.run(
+            [sys.executable, RUNNER, "--skills-root", root, "--logs-dir", logs2,
+             "--stub-output", ":MISS:", "--no-quarantine"],
+            capture_output=True, text=True)
+        assert r2.returncode == 1, r2.stdout + r2.stderr
+        shutil.rmtree(logs, ignore_errors=True)
+        shutil.rmtree(logs2, ignore_errors=True)
+        print("PASS  typed evals pass under --stub-output ALL and fail under :MISS:")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     tests = [
         test_assert_behavior,
@@ -343,6 +524,14 @@ def main():
         test_selected_path_ignores_limit,
         test_cli_list_default_and_core,
         test_repo_core_and_default_markers,
+        test_event_stream_parse_and_final_text,
+        test_action_predicate,
+        test_artifact_predicate,
+        test_text_predicate_and_expect_wins,
+        test_parse_failure_fails_closed,
+        test_seven_canaries_replay_fixtures,
+        test_event_fixture_cli,
+        test_typed_stub_synthesis,
     ]
     failed = 0
     for t in tests:
