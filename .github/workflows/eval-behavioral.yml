@@ -54,8 +54,17 @@ jobs:
       # script is the supported path (https://opencode.ai/docs/, retrieved
       # 2026-09-16). Found by the RM-002 AC5 live check: without this step the
       # workflow never ran a single eval (missing binary).
-      - name: Install opencode CLI
-        run: curl -fsSL https://opencode.ai/install | bash
+      # 2026-09-20: curl|bash queries the GitHub API internally and failed 403
+      # under runner-IP rate limiting — npm registry package instead, pinned
+      # to the locally validated version (event-stream shapes vary by CLI
+      # version; pinning removes that drift hazard).
+      - name: Install opencode CLI (pinned via npm)
+        env:
+          OPENCODE_VERSION: "1.18.18"
+        run: npm install --global "opencode-ai@${OPENCODE_VERSION}"
+
+      - name: Add opencode to PATH
+        run: echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
 
       - name: Run behavioral evals (fresh agent per eval)
         env:

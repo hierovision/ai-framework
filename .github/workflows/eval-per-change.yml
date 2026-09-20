@@ -231,33 +231,19 @@ jobs:
 
       # opencode is NOT preinstalled on GitHub-hosted runners; the docs install
       # script is the supported path (https://opencode.ai/docs/, 2026-09-16).
-      # Resolve the CLI version first so the install dir is cached on it.
-      - name: Resolve opencode CLI version
-        id: opencode
-        run: |
-          set -euo pipefail
-          VERSION="$(curl -fsSL https://api.github.com/repos/anomalyco/opencode/releases/latest \
-            | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' || true)"
-          if [ -z "$VERSION" ]; then VERSION="latest"; fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Cache opencode CLI
-        id: opencode-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 (node24)
-        with:
-          path: ~/.opencode/bin
-          key: opencode-${{ runner.os }}-${{ steps.opencode.outputs.version }}
-
-      - name: Install opencode CLI
-        if: steps.opencode-cache.outputs.cache-hit != 'true'
+      # 2026-09-20: opencode.ai/install queries the GitHub API internally and
+      # failed with 403 under runner-IP rate limiting (run 35530398048) —
+      # switched to the npm registry package, which needs no GitHub API, and
+      # PINNED to the version validated locally (1.18.18) instead of
+      # resolving "latest" (version drift is a correctness hazard: the CLI
+      # emits different event-stream shapes across versions).
+      - name: Install opencode CLI (pinned via npm)
         env:
-          VERSION: ${{ steps.opencode.outputs.version }}
-        run: |
-          if [ "$VERSION" = "latest" ]; then unset VERSION; fi
-          curl -fsSL https://opencode.ai/install | bash
+          OPENCODE_VERSION: "1.18.18"
+        run: npm install --global "opencode-ai@${OPENCODE_VERSION}"
 
       - name: Add opencode to PATH
-        run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+        run: echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
 
       - name: Run selected eval
         env:
