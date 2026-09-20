@@ -14,6 +14,11 @@
         "States the ROI guardrail: run logs must never be read back into the agent's own live prompt / context window (out-of-context, append-only, per-run)",
         "Does NOT suggest per-internal-sub-step logging (one record per tool call) — emission is once per run only"
       ],
+      "expect": {
+        "action": [
+          {"tool": "bash", "args": {"command": "*log_run.py*"}}
+        ]
+      },
       "files": [
         "../scripts/log_run.py",
         "../references/schema.md",
@@ -31,6 +36,11 @@
         "Also surfaces quarantined_evals from logs/quarantine.json when present",
         "Keeps the report out-of-band (reads logs to build an artifact; never feeds raw logs back into the agent context)"
       ],
+      "expect": {
+        "action": [
+          {"tool": "bash", "args": {"command": "*coverage-gaps*"}}
+        ]
+      },
       "files": [
         "../scripts/query_runs.py",
         "../references/schema.md",

@@ -19,6 +19,11 @@
         "SPOT-CHECK CROSS-REFERENCE (additive to this pass): the plan `## History` carries an implementing-features red-evidence + coverage-gate record (the 2026-07-11 History entry records the red-first red evidence naming the missing `getTodaySessions` behaviour and the coverage-gate outcome: rebalance none needed, expand no-gap-found). REVIEW.md references / spot-checks those records (one of: red evidence / red-first / coverage gate / coverage-gate / rebalance / spot-check) rather than ignoring them \u2014 the reviewer cross-checks that the recorded red evidence names the right failure and that the coverage-gate reasoning holds up against the diff, instead of re-deriving the meaningfulness check from zero. See implementing-features Steps 5 and 8 for the contract of those records",
         "[fix-verified] the grader's spot-check check FAILS a review that ignores the History records (asserts REVIEW.md references at least one spot-check token) \u2014 added after extending scenario-1-clean's plan History + verify-review.js in this pass (TDD-aware implement sequencing)"
       ],
+      "expect": {
+        "artifact": [
+          {"path": "**/REVIEW.md", "phrases": ["Verdict", "approve"]}
+        ]
+      },
       "files": [
         "fixtures/phasewave/scenario-1-clean/AGENTS.md",
         "fixtures/phasewave/scenario-1-clean/package.json",

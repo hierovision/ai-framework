@@ -18,6 +18,11 @@
         "Additive to the net: does not delete or weaken any existing test; if the broken variant was left in place by accident, restores it before finishing",
         "Presents a concise handoff: the test file(s) added, the AC -> test mapping, the meaningfulness proof evidence (red on broken, green on fixed), and full-suite status; then waits"
       ],
+      "expect": {
+        "artifact": [
+          {"path": "**/duration.test.js", "phrases": ["formatDuration", "RangeError"]}
+        ]
+      },
       "files": [
         "fixtures/phasewave/unit-duration/AGENTS.md",
         "fixtures/phasewave/unit-duration/package.json",

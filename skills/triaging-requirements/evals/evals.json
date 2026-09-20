@@ -18,6 +18,11 @@
         "Writes ROADMAP.md with the all-inclusive categorized list and points the user to the top-priority items",
         "Does not fabricate Jira data it couldn't fetch — states what was read and what wasn't"
       ],
+      "expect": {
+        "artifact": [
+          {"path": "**/ROADMAP.md", "phrases": ["Impact", "Urgency"]}
+        ]
+      },
       "files": []
     },
     {

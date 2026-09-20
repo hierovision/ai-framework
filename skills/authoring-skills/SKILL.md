@@ -172,17 +172,79 @@ The fresh-agent assertions above are executed automatically by
 scheduled CI workflow `.github/workflows/eval-behavioral.yml` (weekly on
 GitHub Free, plus `workflow_dispatch`). The runner:
 
-- loads every skill's `evals/evals.json`, launches a fresh agent per eval,
-  and fails the build when any `expected_behavior` substring is missing;
+- loads every skill's `evals/evals.json`, launches a fresh agent per eval
+  with `opencode run --format json`, and fails the build when the eval's
+  typed `expect` block does not match (an eval without `expect` falls back
+  to its `expected_behavior` substrings, narrowed to the final response —
+  see *Typed assertions* below);
 - writes one `kind=eval` run-log record per eval via RM-001's
   `log_run.py` (single source of truth — it does **not** redefine the
   schema), so `eval_pass=false` is observable out-of-band;
 - supports `--limit` / `--skill` subset sharding to stay within GitHub
-  Free's 2,000 min/month.
+  Free's 2,000 min/month, and `--event-fixture <path>` to replay a
+  committed event stream through the matcher with no model and no network.
 
-The hermetic per-PR gate (`ci.yml`) stays unchanged — behavioral evals
-live only in the separate scheduled workflow. A broken eval is caught
-red there, not on every PR.
+The hermetic per-PR gate (`ci.yml`) runs the structural validators
+(`validate_skill.py` + `verify.mjs`) plus the typed-eval gate
+(`check_typed_evals.py`); the behavioral fresh-agent evals live in the
+separate scheduled workflow. A broken eval is caught red there, not on
+every PR.
+
+#### Typed assertions (`expect`)
+
+An eval asserts behavior through exactly **three observable channels** — the
+closed taxonomy. The *nature rule* picks the class:
+
+| Behavior the eval checks | Class |
+|---|---|
+| Performs an action / calls a tool | `action` |
+| Produces or edits a file | `artifact` |
+| Is literally speech (restates, refuses, asks in prose) | `text` |
+
+- **`action`** — a tool-event predicate over the `opencode run --format json`
+  session stream: a tool name plus argument globs (e.g. `write` with a
+  `filePath` glob, `bash` with a `command` glob). Use when the behavior is
+  *doing* something to the environment.
+- **`artifact`** — a file the agent wrote (a path glob resolved under the run
+  workdir) plus key phrases that must appear in its content. Use when the
+  behavior *produces a file*.
+- **`text`** — a key phrase in the final response. Use only for behavior that
+  is *literally speech*; a semantic outcome asserted as a verbatim substring
+  is the classic mismatch this protocol removes.
+
+```json
+{
+  "id": 1,
+  "prompt": "record this eval run and tell me the ROI guardrail",
+  "expect": {
+    "action": [{"tool": "bash", "args": {"command": "*log_run.py*"}}],
+    "artifact": [{"path": "**/SKILL.md", "phrases": ["name:", "description:"]}],
+    "text": ["out-of-context"]
+  },
+  "expected_behavior": ["human-readable intent kept alongside the typed block"]
+}
+```
+
+`expect` wins when present; `expected_behavior` may stay beside it as
+human-readable intent. When `expect` is absent, `expected_behavior` is
+required and runs as the legacy text-class path (flagged `legacy_assertion` in
+`coverage-gaps`).
+
+**Headless-observability principle.** An eval may assert only what a
+single-shot fresh-agent run can exhibit. Such a run has no turn-taking and no
+user to interview: restate extracted steps and list unresolved specifics as
+open questions instead of inventing an interactive behavior. A predicate may
+target only the three observable channels above.
+
+**Migrate on touch.** Any eval that fails, is touched, or is selected as a
+canary MUST migrate to a typed `expect` block in the same change. Enforced:
+`validate_skill.py` + `scripts/verify.mjs` reject an eval carrying a
+`default`/`core` marker without `expect`; `scripts/check_typed_evals.py`
+(pre-commit hook + CI quality-gates) rejects a NEW or CHANGED eval without one.
+Un-migrated evals are telemetered in `coverage-gaps.legacy_assertion_evals`.
+
+The full JSON schema and the event-stream envelope live in
+[references/eval-assertions.md](references/eval-assertions.md).
 
 #### Additive eval markers (`evals.json`)
 

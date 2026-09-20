@@ -14,8 +14,21 @@
     "Produces a draft SKILL.md: gerund name matching its directory, third-person pushy description containing trigger terms, body well under 500 lines, imperative instructions",
     "Uses low degrees of freedom (exact commands) for the fragile tag/release steps and explains why",
     "Does not embed volatile facts (model IDs, current version numbers) in the skill body"
-   ],
-   "files": []
+    ],
+    "expect": {
+     "artifact": [
+      {
+       "path": "**/SKILL.md",
+       "phrases": ["name:", "description:"]
+      },
+      {
+       "path": "**/evals.json",
+       "phrases": ["prompt"]
+      }
+     ],
+     "text": ["versioning scheme", "changelog format"]
+    },
+    "files": []
   },
   {
    "id": 2,

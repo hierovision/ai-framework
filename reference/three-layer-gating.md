@@ -10,6 +10,7 @@ feedback, and an un-bypassable per-change required check.
 - Rationale
 - Changed-files mapping classes
 - Two-tier marker selection (pass 4)
+- Typed-assertion enforcement (pass 5)
 - Bypass semantics
 - Layer 2 advisory command
 - Rollback
@@ -70,6 +71,27 @@ See the mapping table in `scripts/changed-files-to-skills.py`.
   `max-parallel` from the `EVAL_MAX_PARALLEL` repository variable, default 3).
   The aggregation/report job runs `needs: [evals]` + `if: always()`, so
   artifacts and SLA reporting survive a red leg.
+
+## Typed-assertion enforcement (pass 5)
+
+Every behavioral eval asserts through one of three closed channels — `action`
+(a tool-event predicate over the `--format json` session stream), `artifact`
+(a written file + key phrases), or `text` (a key phrase in the final response)
+— selected by the nature rule (act → action; produces a file → artifact;
+literally speech → text). The full schema lives in
+`skills/authoring-skills/references/eval-assertions.md`.
+
+- **Layer 1 (pre-commit)**: `validate_skill.py` + `scripts/verify.mjs` reject a
+  malformed `expect` block and any eval carrying a `default`/`core` marker
+  without one; `scripts/check_typed_evals.py --base HEAD` rejects a NEW or
+  CHANGED eval without one.
+- **Layer 3 (CI)**: `ci.yml` quality-gates runs
+  `scripts/check_typed_evals.py --base <PR base / pre-push commit>`; the
+  checkout fetches full history so the base ref resolves.
+- **Migrate on touch**: any eval that fails, is touched, or is selected as a
+  canary migrates to a typed `expect` block in the same change. Un-migrated
+  evals are telemetered in `coverage-gaps.legacy_assertion_evals` /
+  `legacy_assertion_count` (additive to the required arrays).
 
 ## Bypass semantics
 
