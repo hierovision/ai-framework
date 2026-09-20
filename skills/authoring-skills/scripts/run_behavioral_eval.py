@@ -204,17 +204,22 @@ def parse_event_stream(raw):
     """Parse a newline-delimited JSON event stream -> (events, errors).
 
     A malformed line is recorded as an error rather than dropped; callers fail
-    closed on a non-empty error list for a typed eval.
+    closed on a non-empty error list for a typed eval. ANSI escape sequences
+    are stripped first (opencode may banner stdout with TTY codes); a line
+    that is empty after stripping is skipped. Non-JSON residue carries a
+    sanitized snippet of itself in the error — fail closed, but with evidence.
     """
     events, errors = [], []
+    ansi = re.compile(r"\x1b\[[0-9;]*m")
     for i, line in enumerate((raw or "").splitlines(), start=1):
-        line = line.strip()
+        line = ansi.sub("", line).strip()
         if not line:
             continue
         try:
             obj = json.loads(line)
         except json.JSONDecodeError as exc:
-            errors.append(f"line {i}: {exc.msg}")
+            snippet = line[:160].replace("\n", "\\n")
+            errors.append(f"line {i}: {exc.msg} | content: {snippet!r}")
             continue
         if isinstance(obj, dict):
             events.append(obj)
