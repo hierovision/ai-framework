@@ -95,7 +95,8 @@ def coverage_gaps(logs_dir, skills_root=None):
     Returns the three required arrays (`zero_eval_skills`, `deferred_evals`,
     `free_tier_excluded_evals`) plus `quarantined_evals`, pass-4
     `no_default_marker`, core coverage (`core_covered` / `core_uncovered`),
-    and the retained `smoke_uncovered`.
+    the retained `smoke_uncovered`, and the pass-5 typed-assertion migration
+    backlog (`legacy_assertion_evals` / `legacy_assertion_count`).
     """
     return query_runs.coverage_gaps(logs_dir, skills_root=skills_root)
 

@@ -76,7 +76,8 @@ def test_coverage_gaps_shape_and_quarantine():
         assert set(gaps) == {"zero_eval_skills", "deferred_evals",
                              "free_tier_excluded_evals", "quarantined_evals",
                              "no_default_marker", "core_covered", "core_uncovered",
-                             "smoke_uncovered"}, gaps
+                             "smoke_uncovered", "legacy_assertion_evals",
+                             "legacy_assertion_count"}, gaps
         # writing-unit-tests + observing-runs have eval records -> not zero.
         assert "writing-unit-tests" not in gaps["zero_eval_skills"]
         assert "observing-runs" not in gaps["zero_eval_skills"]
@@ -151,6 +152,34 @@ def test_coverage_gaps_default_and_core_arrays():
         shutil.rmtree(d)
 
 
+def test_coverage_gaps_legacy_assertion_backlog():
+    """RM-003 pass 5 / AC18: prose-only evals appear in the migration backlog.
+
+    Additive to the three required arrays; the run-log schema is not extended.
+    """
+    d = tempfile.mkdtemp()
+    try:
+        gaps = report.coverage_gaps(d)
+        assert gaps["legacy_assertion_count"] == len(gaps["legacy_assertion_evals"])
+        assert gaps["legacy_assertion_count"] > 0, "the un-migrated evals must be visible"
+        backlog = gaps["legacy_assertion_evals"]
+        assert all(x["legacy_assertion"] is True for x in backlog)
+        keys = {(x["skill"], x["eval_id"]) for x in backlog}
+        # The typed canaries are migrated and must NOT be in the backlog.
+        for migrated in (("authoring-skills", 1), ("observing-runs", 1),
+                         ("designing-architecture", 1), ("implementing-features", 1),
+                         ("reviewing-code", 1), ("triaging-requirements", 1),
+                         ("writing-unit-tests", 1)):
+            assert migrated not in keys, migrated
+        # A known prose-only eval is present with a migrate-on-touch reason.
+        assert ("writing-unit-tests", 2) in keys, sorted(keys)
+        entry = next(x for x in backlog
+                     if x["skill"] == "writing-unit-tests" and x["eval_id"] == 2)
+        assert "migrate on touch" in entry["reason"], entry
+    finally:
+        shutil.rmtree(d)
+
+
 def main():
     tests = [
         test_aggregate_report_per_run_scores,
@@ -159,6 +188,7 @@ def main():
         test_query_runs_coverage_gaps_cli,
         test_green_run_status_not_achieved_and_recorded,
         test_quota_projection_under_guardrail,
+        test_coverage_gaps_legacy_assertion_backlog,
     ]
     failed = 0
     for t in tests:

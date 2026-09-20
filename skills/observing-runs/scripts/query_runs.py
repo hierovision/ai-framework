@@ -51,6 +51,14 @@ CORE_SKILLS = (
     "writing-unit-tests",
 )
 
+# RM-003 pass 5 / AC18: the typed-assertion schema owner is
+# scripts/check_typed_evals.py; import its predicate so the migration backlog
+# and Layer 1 enforcement cannot drift on what counts as "typed".
+_REPO_SCRIPTS = os.path.join(REPO_ROOT, "scripts")
+if _REPO_SCRIPTS not in sys.path:
+    sys.path.insert(0, _REPO_SCRIPTS)
+from check_typed_evals import has_expect as _has_typed_expect  # noqa: E402
+
 
 def _iter_records(logs_dir):
     if not os.path.isdir(logs_dir):
@@ -189,6 +197,9 @@ def coverage_gaps(logs_dir, skills_root=None):
       core_uncovered           core skills lacking a core-marked eval
       smoke_uncovered          skills outside the fixed six-core harness set
                                (a harness change does not run them)
+      legacy_assertion_evals   evals without a typed `expect` block — the
+                               dated migrate-on-touch backlog (AC18)
+      legacy_assertion_count   len(legacy_assertion_evals)
     """
     if skills_root is None:
         skills_root = os.path.join(REPO_ROOT, "skills")
@@ -200,6 +211,7 @@ def coverage_gaps(logs_dir, skills_root=None):
 
     zero_eval_skills, deferred_evals, free_tier_excluded_evals = [], [], []
     no_default_marker = []
+    legacy_assertion_evals = []
     manifests = {}
     for skill, data in _iter_eval_manifests(skills_root):
         manifests[skill] = data
@@ -219,6 +231,15 @@ def coverage_gaps(logs_dir, skills_root=None):
                 free_tier_excluded_evals.append(
                     {**item, "reason": f"model_tier={tier} excluded by CI free-tier policy"}
                 )
+            # RM-003 pass 5 / AC18: an eval without a typed `expect` block is
+            # telemetered as a dated migration backlog (additive; the run-log
+            # schema is NOT extended — AC18 computes this from manifests).
+            if not _has_typed_expect(e):
+                legacy_assertion_evals.append({
+                    **item,
+                    "legacy_assertion": True,
+                    "reason": "no typed expect block; migrate on touch (AC19)",
+                })
 
     core_covered, core_uncovered = [], []
     for skill in CORE_SKILLS:
@@ -253,6 +274,8 @@ def coverage_gaps(logs_dir, skills_root=None):
         "core_covered": core_covered,
         "core_uncovered": core_uncovered,
         "smoke_uncovered": smoke_uncovered,
+        "legacy_assertion_evals": legacy_assertion_evals,
+        "legacy_assertion_count": len(legacy_assertion_evals),
     }
 
 
