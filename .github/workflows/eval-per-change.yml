@@ -214,7 +214,7 @@ jobs:
       klass: ${{ needs.plan.outputs.klass }}
       started_at: ${{ needs.plan.outputs.started_at }}
     strategy:
-      fail-fast: true
+      fail-fast: false  # shakedown phase: one run reports all legs' results; flip true once stable
       # Env-configurable via the repository variable EVAL_MAX_PARALLEL
       # (default 3; raise only after a clean live CI run — AC13).
       max-parallel: ${{ vars.EVAL_MAX_PARALLEL || 3 }}
