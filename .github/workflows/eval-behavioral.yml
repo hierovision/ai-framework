@@ -20,8 +20,11 @@ name: Behavioral Eval (weekly)
 
 on:
   schedule:
-    # Weekly Monday 06:06 UTC — NOT nightly (stays within 2,000 min/month).
-    - cron: '0 6 * * 1'
+    # Weekly Monday 10:30 UTC (6:30am ET) — off-peak for the direct-key lane
+    # (DeepSeek peak windows are 01-04 & 06-10 UTC weekdays; 06:00 sat exactly
+    # in peak = 2x input price, measured 2026-09-21). NOT nightly — stays
+    # within 2,000 CI min/month.
+    - cron: '30 10 * * 1'
   workflow_dispatch:
 
 # Least-privilege: read-only is all the eval runner needs.
