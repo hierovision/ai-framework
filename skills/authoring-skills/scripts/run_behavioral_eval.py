@@ -420,7 +420,13 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
         ctx = build_context(result)
         missing = assert_eval(e, ctx)
         attempts = 0
+        # Transient retry applies to NON-STREAM output only (stall strings,
+        # legacy raw): a parseable event stream has no transient signature in
+        # its raw text — agent chatter mentioning 'timeout' poisoned the
+        # classifier (2026-09-21). Streams with missing assertions route to
+        # the continuation policy below instead.
         while (missing and attempts < max_retries
+               and not ctx["events"]
                and is_transient(ctx["raw"] + " " + ctx["stderr"])):
             # Per-attempt annotation (2026-09-19 directive): a retry means the
             # model hit an unexpected event (stall / rate limit / transient
@@ -443,6 +449,40 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
                 result.close()
             sleep(delay)
             result = get_output(e)
+            ctx = build_context(result)
+            missing = assert_eval(e, ctx)
+        # Deterministic continuation policy (2026-09-21, the mechanical form
+        # of an eval-run orchestrator): a turn that ends with MISSING
+        # assertions and ZERO write/edit events is a premature stop — the
+        # agent ended mid-task. Continue the SAME opencode session once with
+        # an explicit finish-now nudge; bounded and logged per turn. The
+        # session id comes from the event stream itself.
+        continuations = 0
+        max_continuations = int(os.environ.get("BEVAL_MAX_CONTINUATIONS", "1"))
+        while (missing and continuations < max_continuations
+               and not any(c["tool"] in ("write", "edit")
+                           for c in extract_tool_calls(ctx["events"]))):
+            session_id = next((ev.get("sessionID") for ev in ctx["events"]
+                               if ev.get("sessionID")), None)
+            if not session_id:
+                break
+            continuations += 1
+            nudge = ("Continue the task to completion in this session. Do the "
+                     "work now — write the required files with the write tool; "
+                     "do not end with a plan to write them later.")
+            log_run.log_record({
+                "kind": "eval",
+                "skill": e["skill"],
+                "agent": None,
+                "model": model or e["model_tier"],
+                "outcome": "error",
+                "eval_pass": None,
+                "detail": (f"continuation turn {continuations}: premature stop "
+                           f"(0 write events, session {session_id})")[:DETAIL_MAX],
+            }, logs_dir=logs_dir)
+            if isinstance(result, EvalResult):
+                result.close()
+            result = get_output(e, {"session_id": session_id, "nudge": nudge})
             ctx = build_context(result)
             missing = assert_eval(e, ctx)
         passed = not missing
@@ -517,30 +557,43 @@ def assert_ci_free_model(model):
     )
 
 
-def invoke_opencode(e, model=None):
+def invoke_opencode(e, model=None, turn=None):
     """Real fresh-agent invocation (CI only; needs the model credential).
 
     The model credential must already be in the environment (repo secret);
     it is consumed here, never echoed.
+
+    `turn` (optional dict): when present with `session_id`, the invocation
+    CONTINUES that opencode session (deterministic continuation policy,
+    2026-09-21 — the mechanical form of an eval-run orchestrator: the runner,
+    not a model, ushers stalled agents forward; every nudge is logged).
     """
     tmp = tempfile.mkdtemp(prefix="beval-")
     stall_timeout = int(os.environ.get("BEVAL_TIMEOUT_SECONDS", "240"))
     keep = False
     try:
-        for rel in e["files"]:
-            src = os.path.join(SKILLS_ROOT, e["skill"], "evals", rel)
-            if os.path.exists(src):
-                dst = os.path.join(tmp, rel)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copy(src, dst)
+        if not (turn and turn.get("session_id")):
+            for rel in e["files"]:
+                src = os.path.join(SKILLS_ROOT, e["skill"], "evals", rel)
+                if os.path.exists(src):
+                    dst = os.path.join(tmp, rel)
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copy(src, dst)
         # The model credential must already be in the environment (repo secret);
         # it is consumed here, never echoed.
         # start_new_session=True: a stalled opencode may leak child processes
         # (zombie `opencode` servers); the whole group must be re-apable, so
         # the TimeoutExpired handler below kills the group, not just the child.
+        if turn and turn.get("session_id"):
+            argv = ["opencode", "run", "--dir", tmp, "--format", "json",
+                    "-s", turn["session_id"], turn["nudge"]]
+            if model:
+                argv += ["--model", model]
+        else:
+            argv = ["opencode"] + opencode_run_args(tmp, e["prompt"], model=model)
         try:
             proc = subprocess.Popen(
-                ["opencode"] + opencode_run_args(tmp, e["prompt"], model=model),
+                argv,
                 cwd=tmp, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, env=os.environ,
                 start_new_session=True,
@@ -762,12 +815,12 @@ def main(argv=None):
 
     _stub_calls = {}
 
-    def get_output(e):
+    def get_output(e, turn=None):
         if args.event_fixture:
             return load_event_fixture(args.event_fixture)
         if args.stub_output is not None:
             return stub_result(e, args.stub_output, _stub_calls)
-        return invoke_opencode(e, model=args.model)
+        return invoke_opencode(e, model=args.model, turn=turn)
 
     failed = 0
     for e in selected:
