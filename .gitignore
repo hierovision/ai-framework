@@ -11,6 +11,11 @@ REVIEW.md
 # free-tier council agent defs dropped in (designing-architecture,
 # FREE-TIER-COUNCIL). Comment out if you intend to track example plans/defs.
 .opencode/
+# Eval fixtures legitimately embed an .opencode/ project layout (the
+# workdir must look like a project for the eval prompt); un-ignore inside
+# skill eval fixtures only:
+!skills/*/evals/fixtures/**/.opencode/
+!skills/*/evals/fixtures/**/.opencode/**
 
 # === Run telemetry (observing-runs / RM-001) — never commit ===
 # JSONL run logs are git-ignored so per-run telemetry is never committed;
