@@ -50,7 +50,8 @@ def test_success_clears_consecutive():
         quarantine.record_failure(path, key)
         quarantine.record_failure(path, key)
         assert quarantine.load(path)[key]["fail_count"] == 2
-        assert quarantine.record_success(path, key) is True
+        outcome, _ = quarantine.record_success(path, key)
+        assert outcome == "removed", outcome  # watch-list entries clear on first pass
         assert key not in quarantine.load(path)
 
 

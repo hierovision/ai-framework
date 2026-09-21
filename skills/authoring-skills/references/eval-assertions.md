@@ -97,3 +97,9 @@ eval that fails, is touched, or is selected as a canary migrates to a typed
 no model and no network. The directory is the workdir for `artifact`
 predicates, so recorded artifact files sit beside the stream. Committed
 fixtures live under `evals/fixtures/event-streams/<skill>__<eval-id>/`.
+
+## expected_behavior beside `expect`
+
+When an eval carries both, `expect` is the asserted contract; `expected_behavior` is
+retained as HUMAN-READABLE INTENT and is **not cross-checked at runtime**.
+It can rot silently — update it alongside `expect` or delete it.

@@ -458,7 +458,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
         # an explicit finish-now nudge; bounded and logged per turn. The
         # session id comes from the event stream itself.
         continuations = 0
-        max_continuations = int(os.environ.get("BEVAL_MAX_CONTINUATIONS", "1"))
+        max_continuations = min(int(os.environ.get("BEVAL_MAX_CONTINUATIONS", "1")), 3)  # clamp: no runaway loops
         while (missing and continuations < max_continuations
                and not any(c["tool"] in ("write", "edit")
                            for c in extract_tool_calls(ctx["events"]))):
@@ -636,8 +636,15 @@ def _persist_event_stream(logs_dir, e, ctx):
         slug = eval_key(e).replace("#", "__")
         import time as _time
         fn = os.path.join(d, f"{slug}-{_time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.jsonl")
+        raw = ctx["raw"]
+        # Redact provider credentials before persistence (security lens,
+        # 2026-09-21): streams can embed error text echoing env keys.
+        for env_key in ("DEEPSEEK_API_KEY", "OPENCODE_API_KEY", "OPENCODE_GO_API_KEY"):
+            secret = os.environ.get(env_key)
+            if secret and secret in raw:
+                raw = raw.replace(secret, "***")
         with open(fn, "w", encoding="utf-8") as fh:
-            fh.write(ctx["raw"])
+            fh.write(raw)
     except OSError:
         pass
 

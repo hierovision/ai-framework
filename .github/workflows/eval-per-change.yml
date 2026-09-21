@@ -251,6 +251,9 @@ jobs:
       # conventions → artifact assertions fail on heading phrases
       # (diagnosed 2026-09-21 from run 35593140474's local repro: the
       # locally-installed agent passes the same eval).
+      # Trust boundary (security lens, 2026-09-21): install.sh is a
+      # repo-LOCAL script executed from the checked-out branch — the trust
+      # mechanism is branch protection on main, not remote pipelining.
       - name: Install library skills + agents (global layout)
         run: bash install.sh
 
@@ -263,6 +266,10 @@ jobs:
           # scale (measured 2026-09-21, plan History). Key is a repo secret,
           # consumed by opencode's provider auth, never echoed.
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          # Continuation depth: premature-stop turns get a same-session
+          # finish-now nudge (logged); 2 gives the variance headroom the
+          # shakedown data asked for (clamp max 3 in the runner).
+          BEVAL_MAX_CONTINUATIONS: "2"
         run: |
           set -euo pipefail
           RUNNER="skills/authoring-skills/scripts/run_behavioral_eval.py"
@@ -279,7 +286,14 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
         with:
           name: eval-logs-${{ matrix.skill }}
-          path: logs/
+          # Governance (security lens, 2026-09-21): eval-streams carry raw
+          # agent I/O — the API key is redacted at persistence (the runner),
+          # but streams may contain model outputs and repo content. Repo is
+          # PUBLIC: artifacts inherit repo visibility. If visibility ever
+          # changes, re-evaluate this exposure.
+          path: |
+            logs/
+            !logs/eval-streams/**
           retention-days: 30
           if-no-files-found: ignore
 
@@ -348,5 +362,6 @@ jobs:
             eval-report-pr.json
             coverage-gaps-pr.json
             logs/
+            !logs/eval-streams/**
           retention-days: 30
           if-no-files-found: ignore

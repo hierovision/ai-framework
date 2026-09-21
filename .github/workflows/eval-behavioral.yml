@@ -15,7 +15,8 @@
 #     Free's 90-day max; auto-expires — local prune per RM-001).
 #   - `concurrency` prevents overlapping weekly runs.
 #   - `--limit` / `--skill` subset sharding keeps a full run inside the minute budget.
-#   - AI_FRAMEWORK_FREE_TIER=1 forces the free (*-free) tier only — no Go/Zen paid usage.
+#   - Evals run on the direct-key lane (deepseek/deepseek-flash) per the
+#     2026-09-21 user directive (model-routing.md CI eval lane note).
 name: Behavioral Eval (weekly)
 
 on:
@@ -42,7 +43,7 @@ jobs:
     # Full weekly suite: ~63 evals at the measured ~100s/eval ~= 105 min
     # (see reference/per-change-eval-sla.md). The 120 min ceiling is the AC10
     # green-run budget; the ~105 min duration is expected, not a defect.
-    timeout-minutes: 120
+    timeout-minutes: 150  # measured: ~74 min serial at ~57s/eval; 150 = 2x headroom. Suite sharding (--limit/--skill) is the option if a full run ever nears the ceiling
     steps:
       # SHA-pinned (supply-chain safety — see securing-ci skill).
       - name: Checkout
@@ -72,6 +73,9 @@ jobs:
       # Fresh agents discover skills from the global opencode layout; without
       # install.sh the CI agent runs bare and produces output outside the
       # repo's conventions (see eval-per-change.yml's matching step, 2026-09-21).
+      # Trust boundary (security lens, 2026-09-21): install.sh is a
+      # repo-LOCAL script executed from the checked-out branch — the trust
+      # mechanism is branch protection on main, not remote pipelining.
       - name: Install library skills + agents (global layout)
         run: bash install.sh
 
@@ -85,6 +89,10 @@ jobs:
           # scale (measured 2026-09-21, plan History). Key is a repo secret,
           # consumed by opencode's provider auth, never echoed.
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          # Continuation depth: premature-stop turns get a same-session
+          # finish-now nudge (logged); 2 gives the variance headroom the
+          # shakedown data asked for (clamp max 3 in the runner).
+          BEVAL_MAX_CONTINUATIONS: "2"
         run: |
           # --model is REQUIRED here: opencode's environment default on a fresh
           # runner is `big-pickle` (disabled at the gateway) — found by the
@@ -106,7 +114,11 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
         with:
           name: observe-run-logs
-          path: logs/
+          # Governance (security lens, 2026-09-21): eval-streams carry raw
+          # agent I/O; key redacted at persistence. Public-repo caveat.
+          path: |
+            logs/
+            !logs/eval-streams/**
           retention-days: 30
 
       - name: Upload eval report artifacts (30-day retention)

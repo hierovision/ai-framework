@@ -40,6 +40,7 @@ REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 DEFAULT_QUARANTINE_FILE = os.path.join(REPO_ROOT, "logs", "quarantine.json")
 
 THRESHOLD = 3
+REHAB_RUNS = 3  # consecutive passes to rehabilitate a quarantined eval
 
 
 def _today():
@@ -94,14 +95,35 @@ def record_failure(path, key, today=None, threshold=THRESHOLD):
     return entry
 
 
-def record_success(path, key):
-    """Reset/remove an entry on success (consecutive semantics). Returns True if removed."""
+def record_success(path, key, today=None, rehab_runs=REHAB_RUNS):
+    """Track consecutive passes for a quarantined eval (rehabilitation).
+
+    Consecutive semantics: a watch-list entry (fail_count < threshold) is
+    removed on first success. A QUARANTINED entry is not silently cleared —
+    it is rehabilitated only after `rehab_runs` consecutive passes, so one
+    lucky pass against a transient gateway window cannot quietly reinstate
+    an eval (council/ops lens, 2026-09-21). Returns ("removed"|"rehab"|"pass-streak", entry).
+    """
+    today = today or _today()
     data = load(path)
-    if key in data:
+    entry = data.get(key)
+    if entry is None:
+        return "pass-streak", None
+    if entry.get("status") != "quarantined":
         del data[key]
         save(path, data)
-        return True
-    return False
+        return "removed", entry
+    passed = int(entry.get("pass_streak", 0)) + 1
+    entry["pass_streak"] = passed
+    entry["last_passed"] = today
+    if passed >= rehab_runs:
+        entry["status"] = "rehabilitated"
+        entry["fail_count"] = 0
+        entry["pass_streak"] = 0
+        save(path, data)
+        return "rehabilitated", entry
+    save(path, data)
+    return "pass-streak", entry
 
 
 def mark(path, key, count=1, today=None, threshold=THRESHOLD):

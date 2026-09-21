@@ -55,7 +55,10 @@ harness change is the fixed six-core set.
 Selected evals run as a **one-eval-per-job matrix** (`strategy.matrix.include`
 from the plan job's selection JSON) with:
 
-- `fail-fast: true` — a red eval cancels in-flight siblings and surfaces in
+- `fail-fast: false` **during the shakedown phase** (2026-09-21: one run reports
+  all legs' results instead of one red per run); flip to `true` after two
+  consecutive fully-green CI runs — tracked follow-up. When enabled, a red eval
+  cancels in-flight siblings and surfaces in
   **2-3 min**.
 - `max-parallel` configurable via the repository variable
   `EVAL_MAX_PARALLEL` (default **3**; raise only after a clean live CI run).

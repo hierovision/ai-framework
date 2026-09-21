@@ -47,15 +47,15 @@ Strong on craft discipline, weak on measurement and formal governance.
 |---|---|---|
 | Human-in-the-loop | L3 | Explicit `STOP` gates, designed handoffs, `REVIEW.md`/`ADHERENCE.md` |
 | Evaluation (structural) | L3 | `validate_skill.py`, offline `verify` suites, 21× `evals.json` |
-| Evaluation (behavioral) | L1 | Fresh-agent eval protocol exists but **not wired to CI** |
+| Evaluation (behavioral) | L4 (2026-09-21) | Behavioral evals wired to CI: per-change matrix gate + weekly suite, typed assertions, retry/quarantine/continuation, report artifacts — RM-002 + RM-003 done. Full eval-history queryability in `query_runs.py`/`eval-report.py` |
 | Decision boundaries | L2 | Boundaries in prose (skill `STOP`s), not encoded/enforced in config |
-| Governance | L2 | Rules in prose (`council.md`, `git-workflow.md`); **no CONTRIBUTING/CODEOWNERS/SECURITY/ADR** |
-| Integration | L2–3 | GitHub issues/PRs/projects + opencode; no change-mgmt/audit wiring |
-| Observability | L1 | **No run logs, traces, cost, or eval-history queryability** |
-| ROI math | L1 | **No cost/cycle-time/error-rate tracking** |
+| Governance | L2 | Rules in prose (`council.md`, `git-workflow.md`); **no CONTRIBUTING/CODEOWNERS/SECURITY/ADR** (RM-004, incl. the three-tier repo-memory structure) |
+| Integration | L2–3 | GitHub issues/PRs/projects + opencode; eval gating is the first PR-level integration |
+| Observability | L4 (2026-09-21) | Run logs + eval scores + coverage gaps + green-run status queryable; per-attempt reliability trail persisted |
+| ROI math | L1 | Cost/cycle-time/error-rate tracking (RM-009); eval token/cost telemetry now flows into run logs |
 
-Overall: ~Level 2–3 ("Defined") trending, gated by observability + continuous
-eval + formal governance.
+Overall: ~Level 3–4 trending. Observability and behavioral-eval gates are in
+place (RM-001/002/003 done); the gate is formal governance (RM-004).
 
 ## 4. Target — the next maturity level
 
@@ -126,8 +126,9 @@ Phase grouping (orientation only):
 - [x] Queryable run logs answer "why did the agent do X" (Observability L4) — RM-001
 - [ ] Eval suite runs per change / scheduled and blocks regressions (Eval L4) — RM-002 + RM-003
     - [x] scheduled weekly + blocks regressions, verified live (AC5 live-dispatch regression check, negative-path canary — see RM-002 acceptance in ROADMAP)
-    - [ ] per-change triggering → RM-003
-    - [ ] deferred network-fetching suites → RM-003
+    - [x] per-change triggering delivered 2026-09-21 (changed-files → skill mapping, matrix-parallel canary per changed skill — see RM-003 acceptance in ROADMAP)
+    - [ ] deferred network-fetching suites → RM-003 follow-ups
+    - [ ] first steady-state green weekly run recorded (AC4; weekly cron 10:30 UTC, direct-key lane)
 - [ ] Named owner + calendared governance review exists (Governance L4)
 - [ ] Agents in change mgmt via PR checks + registry (Integration L4)
 - [ ] Decision boundaries enforced in config (L4)

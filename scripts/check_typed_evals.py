@@ -219,8 +219,15 @@ def main(argv=None):
     for w in warnings:
         print(f"warning: {w}", file=sys.stderr)
     if errors:
-        print(f"FAIL: {len(errors)} new/changed eval(s) lack a typed 'expect' block",
-              file=sys.stderr)
+        print(
+            "FAIL: new or changed evals must carry typed assertions (an 'expect' block "
+            "saying what the agent must DO, PRODUCE, or SAY). See "
+            "skills/authoring-skills/references/eval-assertions.md — a minimal "
+            "valid block: \"expect\": {\"artifact\": [{\"path\": \"**/SKILL.md\", "
+            "\"phrases\": [\"name:\"]}]} — meaning the eval passes when the agent "
+            "wrote a SKILL.md containing those phrases.",
+            file=sys.stderr)
+        print(f"({len(errors)} eval(s) rejected)", file=sys.stderr)
         for e in errors:
             print(f"      error: {e}", file=sys.stderr)
         return 1

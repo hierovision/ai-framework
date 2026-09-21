@@ -38,7 +38,10 @@ def test_per_change_matrix_and_aggregation():
     assert "evals" in jobs and "report" in jobs, list(jobs)
     evals = jobs["evals"]
     strategy = evals["strategy"]
-    assert strategy["fail-fast"] is True, strategy
+    # fail-fast: false during shakedown (2026-09-21: one run reports all legs);
+    # flip back to True after two consecutive fully-green CI runs — tracked in
+    # the cleanup plan. When flipped, this assertion flips with it.
+    assert strategy["fail-fast"] is False, strategy
     assert "EVAL_MAX_PARALLEL" in str(strategy["max-parallel"]), strategy
     assert "needs.plan.outputs.matrix" in str(strategy["matrix"]["include"]), strategy
     assert "plan" in [evals["needs"]] or "plan" in evals["needs"], evals["needs"]
@@ -56,8 +59,13 @@ def test_per_change_selection_flags_and_cache():
         text = fh.read()
     assert "--default" in text and "--core" in text, "missing marker-selection flags"
     assert "--skill" in text, "missing --skill"
-    assert "actions/cache@" in text, "opencode install is not cached"
-    assert "steps.opencode.outputs.version" in text, "cache key is not CLI-version based"
+    # 2026-09-20: version-keyed actions/cache replaced by the npm-pinned
+    # install (opencode-ai@1.18.18) after the GitHub-API 403 rate-limit
+    # killed the install path (run 35530398048). Pinning also removes the
+    # CLI-version drift hazard in the event-stream shape.
+    assert "npm install --global" in text and "OPENCODE_VERSION" in text, \
+        "opencode install must be npm-pinned"
+    assert "actions/cache@" not in text, "cache step should be gone (superseded by npm pin)"
     print("PASS  per-change: --default/--core selection + version-keyed opencode cache")
 
 

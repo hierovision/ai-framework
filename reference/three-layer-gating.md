@@ -67,7 +67,8 @@ See the mapping table in `scripts/changed-files-to-skills.py`.
   (`authoring-skills`, `designing-architecture`, `implementing-features`,
   `reviewing-code`, `triaging-requirements`, `writing-unit-tests`) is the
   harness-change set.
-- The selected evals run as a **one-eval-per-job matrix** (`fail-fast: true`,
+- The selected evals run as a **one-eval-per-job matrix** (`fail-fast: false`
+  during shakedown, `true` once canaries are stable — tracked,
   `max-parallel` from the `EVAL_MAX_PARALLEL` repository variable, default 3).
   The aggregation/report job runs `needs: [evals]` + `if: always()`, so
   artifacts and SLA reporting survive a red leg.
@@ -108,7 +109,7 @@ Local, single-skill, **must not** touch quarantine state:
 ```bash
 python3 skills/authoring-skills/scripts/run_behavioral_eval.py \
   --skill <changed-skill> \
-  --model opencode/nemotron-3-ultra-free \
+  --model deepseek/deepseek-flash \
   --logs-dir .local-eval-logs \
   --no-quarantine
 ```

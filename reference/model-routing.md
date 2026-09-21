@@ -12,6 +12,12 @@ side-by-side vision evaluation showed DeepSeek V4.1-Flash at parity or better.
 Maps workflow **roles** to recommended models. Skills reference roles only;
 this file is the single place model IDs appear.
 
+## Contents
+
+Core routing table — Benchmark evidence principles — Hard exclusions —
+Free-tier caveats — Provider notes — Vision capability strategy —
+Update procedure — Free-tier fallback + council
+
 ## Core routing table
 
 | Role | Free default (`opencode/*-free`) | Escalation — Go flat-rate (`opencode-go/`) | Escalation — Zen PAYG (`opencode/` or `deepseek/` direct key) | Bench basis for escalation |
@@ -69,6 +75,7 @@ The free generalist was validated 2026-07-26 by a clean, no-tool head-to-head ev
 - **Free tier** ($0): `opencode/*-free` catalog entries (subset of Zen catalog) **that are docs-listed and live-verified**. Default tier — used for every role where a live free model exists. No financial consequence. Catalog-vs-docs mismatches stand: `deepseek-v4-flash-free` and `muse-spark-1.2-contributor-free` are catalog-listed but NOT docs free-listed — excluded from candidacy (the 2026-09-02 failure pattern).
 - **Go** ($10/mo flat): Open models only. Config prefix `opencode-go/`. Escalation tier — used when the free default is insufficient or unavailable (vision, peak coding). Limits: $12/5hr, $30/wk, $60/mo. `hy3` and `hy3-preview` are Go flat-rate models. `kimi-k2.7-code` confirmed live on Go — **user directive (2026-09-18): Go-only; the broken Zen upstream is no longer probed or tracked** (Go's "Use balance" Zen fallback covers credit exhaustion). New on Go 2026-09-18: `qwen3.8-max` (AA 45, live-probed clean) and `qwen3.8-flash`.
 - **Zen** (pay-as-you-go): Full catalog including proprietary models. Config prefix `opencode/`. Workspace model-access toggles gate individual models — "Model is disabled" means a workspace toggle, not a gateway death (resolved 2026-09-18 by enabling opus-5, sonnet-5, sol, luna, big-pickle). `qwen3.7-*` is Go-only — bind it as a Go escalation, never as a Zen one. `muse-spark-1.3` (paid flagship, AA 48) routes live with no toggle — distinct from the contributor-free variant and its training-terms caveat.
+- **CI eval lane (user directive 2026-09-21)**: behavioral evals in CI run on the direct-key lane (`deepseek/deepseek-flash`) — RM-002's free-only model-cost policy is amended to `*-free` OR `deepseek/*`. Evidence: the 2026-09-20/21 free-gateway outage (24h+; free models unable to serve trivial prompts while the direct lane stayed at 2.6s) and the free generalist's canary pass-rates. Budget: ~$0.68/weekly run off-peak (measured 2026-09-21, 7-canary sample extrapolated); weekly cron moved 06:00 → 10:30 UTC (out of DeepSeek's 06-10 UTC peak window = 2x input price). Single-lane risk: no eval-model fallback — documented; a fallback chain is a possible later feature.
 - **Direct-key lane** (user's own DeepSeek API key, approved 2026-09-18): config prefix `deepseek/`. Billed directly by DeepSeek to the user's own balance — check that balance separately from opencode. `deepseek/deepseek-flash` = V4.1-Flash (live-probed: text, vision, tool calls). `deepseek/deepseek-v4-pro` also routes live (AA 36, no vision). Off-peak half price during 01:00–04:00 and 06:00–10:00 UTC Mon–Fri; all other hours (i.e. the full ET working day) off-peak.
 - Go can fall back to Zen balance when limits hit ("Use balance" in the console). `AI_FRAMEWORK_FREE_TIER=1` forces the free tier even when a Go/Zen key is present.
 
