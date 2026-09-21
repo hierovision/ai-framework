@@ -257,16 +257,20 @@ jobs:
       - name: Run selected eval
         env:
           # Repository-level secret ONLY; consumed by the runner, never echoed.
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          AI_FRAMEWORK_FREE_TIER: 1
+          # Direct-key lane (user directive 2026-09-21, model-routing.md):
+          # evals run on deepseek/deepseek-flash via the user's own DeepSeek
+          # account — bypasses free-gateway outages; ~$1-2/month at suite
+          # scale (measured 2026-09-21, plan History). Key is a repo secret,
+          # consumed by opencode's provider auth, never echoed.
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
           RUNNER="skills/authoring-skills/scripts/run_behavioral_eval.py"
           if [ "${{ matrix.mode }}" = "core" ]; then
-            python3 "$RUNNER" --model opencode/nemotron-3-ultra-free \
+            python3 "$RUNNER" --model deepseek/deepseek-flash \
               --core --skill "${{ matrix.skill }}"
           else
-            python3 "$RUNNER" --model opencode/nemotron-3-ultra-free \
+            python3 "$RUNNER" --model deepseek/deepseek-flash \
               --default --skill "${{ matrix.skill }}"
           fi
 

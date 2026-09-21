@@ -472,12 +472,27 @@ def opencode_run_args(tmp, prompt, model=None):
     return args
 
 
+DIRECT_LANE_PREFIX = "deepseek/"  # user's own API key lane (model-routing.md)
+
+
 def assert_ci_free_model(model):
-    """Model-cost policy (rm-002): CI selects only `*-free` (the $0 tier)."""
-    if not model.endswith("-free"):
-        raise ValueError(
-            f"CI model must be a `*-free` ID (Model-cost policy), got {model!r}"
-        )
+    """Model-cost policy (RM-002, amended 2026-09-21 by user directive).
+
+    CI selects only: `*-free` ($0 opencode tier) or the direct-key lane
+    (`deepseek/*` — the user's own DeepSeek account, billed directly).
+    Rationale: the free-tier gateway's 2026-09-20/21 outage (24h+; free
+    models unable to serve even trivial prompts while the direct lane
+    stayed healthy) plus the free generalist's inability to pass the
+    core canaries made the free tier unfit as the eval substrate. The
+    direct-key lane is ~$1-2/month at suite scale — see the 2026-09-21
+    budget measurement in the RM-003 plan History.
+    """
+    if model.endswith("-free") or model.startswith(DIRECT_LANE_PREFIX):
+        return
+    raise ValueError(
+        f"CI model must be `*-free` or the direct-key lane `{DIRECT_LANE_PREFIX}*` "
+        f"(Model-cost policy, amended 2026-09-21), got {model!r}"
+    )
 
 
 def invoke_opencode(e, model=None):

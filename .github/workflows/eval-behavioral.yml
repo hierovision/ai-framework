@@ -76,15 +76,19 @@ jobs:
         env:
           # Repository-level secret ONLY (org-level secrets are unavailable on
           # GitHub Free private repos). Consumed by the runner; never echoed.
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          AI_FRAMEWORK_FREE_TIER: 1
+          # Direct-key lane (user directive 2026-09-21, model-routing.md):
+          # evals run on deepseek/deepseek-flash via the user's own DeepSeek
+          # account — bypasses free-gateway outages; ~$1-2/month at suite
+          # scale (measured 2026-09-21, plan History). Key is a repo secret,
+          # consumed by opencode's provider auth, never echoed.
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           # --model is REQUIRED here: opencode's environment default on a fresh
           # runner is `big-pickle` (disabled at the gateway) — found by the
           # RM-002 AC5 live gate, 2026-09-16. The ID is a binding, kept in step
           # with reference/model-routing.md's free generalist (re-verify on
           # each routing pass).
-          python3 skills/authoring-skills/scripts/run_behavioral_eval.py --model opencode/nemotron-3-ultra-free
+          python3 skills/authoring-skills/scripts/run_behavioral_eval.py --model deepseek/deepseek-flash
 
       - name: Build eval report artifacts
         if: always()
