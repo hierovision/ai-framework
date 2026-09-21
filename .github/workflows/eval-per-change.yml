@@ -245,6 +245,15 @@ jobs:
       - name: Add opencode to PATH
         run: echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
 
+      # The eval protocol's fresh agent discovers skills from the GLOBAL
+      # opencode layout (the eval workdir is a bare fixture dir). Without
+      # this, the agent runs bare: no designing-architecture plan-format
+      # conventions → artifact assertions fail on heading phrases
+      # (diagnosed 2026-09-21 from run 35593140474's local repro: the
+      # locally-installed agent passes the same eval).
+      - name: Install library skills + agents (global layout)
+        run: bash install.sh
+
       - name: Run selected eval
         env:
           # Repository-level secret ONLY; consumed by the runner, never echoed.

@@ -66,6 +66,12 @@ jobs:
       - name: Add opencode to PATH
         run: echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
 
+      # Fresh agents discover skills from the global opencode layout; without
+      # install.sh the CI agent runs bare and produces output outside the
+      # repo's conventions (see eval-per-change.yml's matching step, 2026-09-21).
+      - name: Install library skills + agents (global layout)
+        run: bash install.sh
+
       - name: Run behavioral evals (fresh agent per eval)
         env:
           # Repository-level secret ONLY (org-level secrets are unavailable on
