@@ -20,8 +20,10 @@
      {
       "path": "**/SKILL.md",
       "phrases": [
+       "changelog format",
+       "description:",
        "name:",
-       "description:"
+       "versioning scheme"
       ]
      },
      {
@@ -30,10 +32,6 @@
        "prompt"
       ]
      }
-    ],
-    "text": [
-     "versioning scheme",
-     "changelog format"
     ]
    },
    "files": []

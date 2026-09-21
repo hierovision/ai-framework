@@ -329,13 +329,23 @@ def _artifact_files(workdir, path):
     return files
 
 
-def assert_artifact(entries, workdir):
-    """Return missing `artifact` predicates (file path glob + content phrases)."""
+def assert_artifact(entries, workdir, events=None):
+    """Return missing `artifact` predicates (file path glob + content phrases).
+
+    Two match surfaces, either satisfies the predicate:
+    1. the workdir filesystem (a file the agent wrote directly), and
+    2. `write` tool events from the session stream — filePath glob + content
+       phrases. (2026-09-21: a correctly-behaving authoring agent installs
+       the drafted skill into the global opencode layout, OUTSIDE the eval
+       workdir; the write event is the observable per the protocol's nature
+       rule. Diagnosed from run 35610869434.)
+    """
     missing = []
     for entry in entries:
         path = entry.get("path")
         phrases = entry.get("phrases") or []
         found = False
+        # Surface 1: workdir filesystem.
         for fp in _artifact_files(workdir, path):
             try:
                 content = open(fp, encoding="utf-8", errors="replace").read()
@@ -344,6 +354,17 @@ def assert_artifact(entries, workdir):
             if all(p.lower() in content.lower() for p in phrases):
                 found = True
                 break
+        # Surface 2: write events (path glob + event content).
+        if not found and events:
+            for call in extract_tool_calls(events):
+                if call["tool"] not in ("write", "edit"):
+                    continue
+                if not _glob_match(call["args"].get("filePath"), path):
+                    continue
+                content = str(call["args"].get("content") or "")
+                if all(p.lower() in content.lower() for p in phrases):
+                    found = True
+                    break
         if not found:
             missing.append(
                 f"artifact: no file matching {path!r} containing all phrases {phrases}")
@@ -364,7 +385,7 @@ def assert_expect(expect, ctx):
     if expect.get("action"):
         missing += assert_action(expect["action"], ctx["events"])
     if expect.get("artifact"):
-        missing += assert_artifact(expect["artifact"], ctx["workdir"])
+        missing += assert_artifact(expect["artifact"], ctx["workdir"], ctx["events"])
     if expect.get("text"):
         missing += assert_text(expect["text"], ctx["final_text"])
     if not any(expect.get(k) for k in ("action", "artifact", "text")):
@@ -428,6 +449,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
         detail = None
         if missing:
             detail = ("missing: " + " | ".join(missing))[:DETAIL_MAX]
+            _persist_event_stream(logs_dir, e, ctx)
         rec = {
             "kind": "eval",
             "skill": e["skill"],
@@ -543,6 +565,28 @@ def invoke_opencode(e, model=None):
     finally:
         if not keep:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _persist_event_stream(logs_dir, e, ctx):
+    """Save the raw event stream of a FAILED eval next to the run log.
+
+    Typed-assertion failures are diagnosed from the stream (what the agent
+    actually did); without persistence every failure needed a local repro.
+    Best-effort: never fails the eval because diagnostics could not be
+    written.
+    """
+    if not logs_dir or not ctx.get("raw"):
+        return
+    try:
+        d = os.path.join(logs_dir, "eval-streams")
+        os.makedirs(d, exist_ok=True)
+        slug = eval_key(e).replace("#", "__")
+        import time as _time
+        fn = os.path.join(d, f"{slug}-{_time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.jsonl")
+        with open(fn, "w", encoding="utf-8") as fh:
+            fh.write(ctx["raw"])
+    except OSError:
+        pass
 
 
 def load_event_fixture(path):
