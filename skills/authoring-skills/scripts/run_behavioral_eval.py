@@ -628,8 +628,10 @@ def _persist_event_stream(logs_dir, e, ctx):
     Best-effort: never fails the eval because diagnostics could not be
     written.
     """
-    if not logs_dir or not ctx.get("raw"):
+    if not ctx.get("raw"):
         return
+    if not logs_dir:
+        logs_dir = "logs/"  # CI invokes the runner without --logs-dir
     try:
         d = os.path.join(logs_dir, "eval-streams")
         os.makedirs(d, exist_ok=True)

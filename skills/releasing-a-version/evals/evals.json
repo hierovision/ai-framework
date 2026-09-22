@@ -1,71 +1,110 @@
 {
-  "skill_name": "releasing-a-version",
-  "notes": "Run each prompt in a fresh agent session WITH the skill installed, against a WRITABLE COPY of the fixture (the eval runner copies files[] into a fresh temp workdir per run; agents must never write into evals/fixtures/ source). Grade by reading the resulting workdir + the transcript; never grade the author's own memory.\n\nHeadless scope gap (documented, not silently skipped): the runner has no git repo and no authenticated `gh`, so the live paths — `git describe --tags`, `gh pr list`, annotated tag creation, `git push`, `gh release create --draft` — are NOT exercised here. The fixtures supply a pre-fetched merged-prs.md, which is exactly the skill's documented fallback when `gh` is unavailable. The live git/gh path is deferred until a harness can provision a real remote; when it can, add a `deferred: true` eval that runs setup against a throwaway git repo and asserts the tag. What IS tested: version-bump correctness (minor / major / none), changelog rewrite, release-notes draft, and the approval gate.",
-  "evals": [
-    {
-      "id": 1,
-      "default": true,
-      "prompt": "time to cut the next release of the app under fixtures/release-minor/. there's no gh auth in this sandbox, so use the pre-fetched merged-prs.md sitting next to package.json for the changes since the last tag (v1.3.1) instead of gh pr list. bump the version, update the changelog, and get the release notes ready — but don't tag or push anything until I've looked at it.",
-      "expected_behavior": [
-        "Bumps package.json from 1.3.1 to 1.4.0 (feat -> MINOR; no breaking change present)",
-        "Rewrites CHANGELOG.md: moves Unreleased content into '## [1.4.0] - <UTC date>' with Added and Fixed entries carrying PR numbers (#214, #218), and re-opens an empty Unreleased heading",
-        "Drafts release notes (writes RELEASE_NOTES.md when gh is unavailable) for v1.4.0",
-        "Does NOT create a tag, push, or publish a GitHub release — stops at the approval gate and says approval is required"
-      ],
-      "expect": {
-        "artifact": [
-          {"path": "**/release-minor/package.json", "phrases": ["\"version\": \"1.4.0\""]},
-          {"path": "**/release-minor/CHANGELOG.md", "phrases": ["## [1.4.0]", "### Added", "### Fixed", "#214"]},
-          {"path": "**/RELEASE_NOTES.md", "phrases": ["1.4.0"]}
-        ],
-        "text": ["approval"]
-      },
-      "files": [
-        "fixtures/release-minor/package.json",
-        "fixtures/release-minor/CHANGELOG.md",
-        "fixtures/release-minor/merged-prs.md"
+ "skill_name": "releasing-a-version",
+ "notes": "Run each prompt in a fresh agent session WITH the skill installed, against a WRITABLE COPY of the fixture (the eval runner copies files[] into a fresh temp workdir per run; agents must never write into evals/fixtures/ source). Grade by reading the resulting workdir + the transcript; never grade the author's own memory.\n\nHeadless scope gap (documented, not silently skipped): the runner has no git repo and no authenticated `gh`, so the live paths \u2014 `git describe --tags`, `gh pr list`, annotated tag creation, `git push`, `gh release create --draft` \u2014 are NOT exercised here. The fixtures supply a pre-fetched merged-prs.md, which is exactly the skill's documented fallback when `gh` is unavailable. The live git/gh path is deferred until a harness can provision a real remote; when it can, add a `deferred: true` eval that runs setup against a throwaway git repo and asserts the tag. What IS tested: version-bump correctness (minor / major / none), changelog rewrite, release-notes draft, and the approval gate.",
+ "evals": [
+  {
+   "id": 1,
+   "default": true,
+   "prompt": "time to cut the next release of the app under fixtures/release-minor/. there's no gh auth in this sandbox, so use the pre-fetched merged-prs.md sitting next to package.json for the changes since the last tag (v1.3.1) instead of gh pr list. bump the version, update the changelog, and get the release notes ready \u2014 but don't tag or push anything until I've looked at it.",
+   "expected_behavior": [
+    "Bumps package.json from 1.3.1 to 1.4.0 (feat -> MINOR; no breaking change present)",
+    "Rewrites CHANGELOG.md: moves Unreleased content into '## [1.4.0] - <UTC date>' with Added and Fixed entries carrying PR numbers (#214, #218), and re-opens an empty Unreleased heading",
+    "Drafts release notes (writes RELEASE_NOTES.md when gh is unavailable) for v1.4.0",
+    "Does NOT create a tag, push, or publish a GitHub release \u2014 stops at the approval gate and says approval is required"
+   ],
+   "expect": {
+    "artifact": [
+     {
+      "path": "**/release-minor/package.json",
+      "phrases": [
+       "\"version\": \"1.4.0\""
       ]
-    },
-    {
-      "id": 2,
-      "prompt": "cut a release for fixtures/release-major/. no gh here — the changes since v1.4.2 are in merged-prs.md next to package.json. do the version bump, changelog, and notes, then stop for my sign-off before anything hits the remote.",
-      "expected_behavior": [
-        "Bumps package.json from 1.4.2 to 2.0.0 (feat! / BREAKING CHANGE -> MAJOR)",
-        "Records the change in CHANGELOG.md under a dated '## [2.0.0]' heading",
-        "Does NOT tag, push, or publish — stops at the approval gate"
-      ],
-      "expect": {
-        "artifact": [
-          {"path": "**/release-major/package.json", "phrases": ["\"version\": \"2.0.0\""]},
-          {"path": "**/release-major/CHANGELOG.md", "phrases": ["## [2.0.0]"]}
-        ],
-        "text": ["approval"]
-      },
-      "files": [
-        "fixtures/release-major/package.json",
-        "fixtures/release-major/CHANGELOG.md",
-        "fixtures/release-major/merged-prs.md"
+     },
+     {
+      "path": "**/release-minor/CHANGELOG.md",
+      "phrases": [
+       "## [1.4.0]",
+       "### Added",
+       "### Fixed",
+       "#214"
       ]
-    },
-    {
-      "id": 3,
-      "prompt": "can we ship a release of fixtures/no-changes/? last tag is v1.0.0 and the merged PRs since then are in merged-prs.md beside package.json. just bump whatever needs bumping and get the notes ready.",
-      "expected_behavior": [
-        "Recognizes the changes are only docs/chore/ci/style — no user-visible change — and reports 'nothing to release' instead of bumping",
-        "Leaves package.json at 1.0.0 (does not bump only to bump)",
-        "Does NOT create a tag, changelog release entry, or release notes"
-      ],
-      "expect": {
-        "artifact": [
-          {"path": "**/no-changes/package.json", "phrases": ["\"version\": \"1.0.0\""]}
-        ],
-        "text": ["nothing to release"]
-      },
-      "files": [
-        "fixtures/no-changes/package.json",
-        "fixtures/no-changes/CHANGELOG.md",
-        "fixtures/no-changes/merged-prs.md"
+     },
+     {
+      "path": "**/RELEASE_NOTES.md",
+      "phrases": [
+       "1.4.0"
       ]
-    }
-  ]
+     }
+    ],
+    "text": [
+     "approv"
+    ]
+   },
+   "files": [
+    "fixtures/release-minor/package.json",
+    "fixtures/release-minor/CHANGELOG.md",
+    "fixtures/release-minor/merged-prs.md"
+   ]
+  },
+  {
+   "id": 2,
+   "prompt": "cut a release for fixtures/release-major/. no gh here \u2014 the changes since v1.4.2 are in merged-prs.md next to package.json. do the version bump, changelog, and notes, then stop for my sign-off before anything hits the remote.",
+   "expected_behavior": [
+    "Bumps package.json from 1.4.2 to 2.0.0 (feat! / BREAKING CHANGE -> MAJOR)",
+    "Records the change in CHANGELOG.md under a dated '## [2.0.0]' heading",
+    "Does NOT tag, push, or publish \u2014 stops at the approval gate"
+   ],
+   "expect": {
+    "artifact": [
+     {
+      "path": "**/release-major/package.json",
+      "phrases": [
+       "\"version\": \"2.0.0\""
+      ]
+     },
+     {
+      "path": "**/release-major/CHANGELOG.md",
+      "phrases": [
+       "## [2.0.0]"
+      ]
+     }
+    ],
+    "text": [
+     "approval"
+    ]
+   },
+   "files": [
+    "fixtures/release-major/package.json",
+    "fixtures/release-major/CHANGELOG.md",
+    "fixtures/release-major/merged-prs.md"
+   ]
+  },
+  {
+   "id": 3,
+   "prompt": "can we ship a release of fixtures/no-changes/? last tag is v1.0.0 and the merged PRs since then are in merged-prs.md beside package.json. just bump whatever needs bumping and get the notes ready.",
+   "expected_behavior": [
+    "Recognizes the changes are only docs/chore/ci/style \u2014 no user-visible change \u2014 and reports 'nothing to release' instead of bumping",
+    "Leaves package.json at 1.0.0 (does not bump only to bump)",
+    "Does NOT create a tag, changelog release entry, or release notes"
+   ],
+   "expect": {
+    "artifact": [
+     {
+      "path": "**/no-changes/package.json",
+      "phrases": [
+       "\"version\": \"1.0.0\""
+      ]
+     }
+    ],
+    "text": [
+     "nothing to release"
+    ]
+   },
+   "files": [
+    "fixtures/no-changes/package.json",
+    "fixtures/no-changes/CHANGELOG.md",
+    "fixtures/no-changes/merged-prs.md"
+   ]
+  }
+ ]
 }
