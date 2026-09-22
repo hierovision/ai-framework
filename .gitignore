@@ -40,4 +40,8 @@ skills/capturing-ui-evidence/package*.json
 
 # === Deprecated docs (removed from the repo; never track) ===
 PLAN.md
-docs/handoffs/
+# Tracked handoff docs were lost in an earlier restructure; reviving the
+# convention (2026-09-21) — the fixed shape (done/verified/blocked/next) is
+# defined in docs/CONCEPTS.md and handoffs are session-boundary artifacts
+# worth versioning.
+# docs/handoffs/
