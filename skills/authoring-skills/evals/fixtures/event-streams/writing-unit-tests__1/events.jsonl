@@ -1,0 +1,5 @@
+{"type":"tool","part":{"type":"tool","tool":"read","state":{"status":"completed","input":{"filePath":"/work/.opencode/plans/feat-duration-format.md"}}}}
+{"type":"tool","part":{"type":"tool","tool":"write","state":{"status":"completed","input":{"filePath":"/work/tests/duration.test.js","content":"const { formatDuration } = require('../src/lib/duration');\nassert.throws(() => formatDuration(-5), RangeError);\n"}}}}
+{"type":"tool","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"npm run meaningfulness"}}}}
+{"type":"text","part":{"type":"text","text":"Authored tests/duration.test.js; the meaningfulness proof is green-on-fixed and red-on-broken. AC -> test mapping recorded. Then waits."}}
+{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":1900,"output":800}}}

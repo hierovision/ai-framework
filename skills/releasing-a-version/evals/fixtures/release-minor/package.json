@@ -1,0 +1,9 @@
+{
+  "name": "phasewave",
+  "version": "1.3.1",
+  "private": true,
+  "description": "Fixture package used by releasing-a-version evals",
+  "scripts": {
+    "test": "vitest run"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "skill_name": "releasing-a-version",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "bump the version and draft the release notes",
+      "expected_behavior": ["Drafts the skill and the release workflow"]
+    }
+  ]
+}

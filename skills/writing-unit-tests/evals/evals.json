@@ -4,6 +4,7 @@
   "evals": [
     {
       "id": 1,
+      "core": true,
       "prompt": "we just shipped feat-duration-format and have zero unit tests for the duration formatter. the plan's at .opencode/plans/feat-duration-format.md and it's approved. there's a seeded broken variant at src/lib/duration.broken.js you can use to prove the tests actually catch a break. repo is the working directory \u2014 write the unit tests",
       "expected_behavior": [
         "Reads the plan at .opencode/plans/feat-duration-format.md before writing any test \u2014 derives the cases from the Acceptance Criteria, not from guessing the module's behaviour",
@@ -17,6 +18,11 @@
         "Additive to the net: does not delete or weaken any existing test; if the broken variant was left in place by accident, restores it before finishing",
         "Presents a concise handoff: the test file(s) added, the AC -> test mapping, the meaningfulness proof evidence (red on broken, green on fixed), and full-suite status; then waits"
       ],
+      "expect": {
+        "artifact": [
+          {"path": "**/duration.test.js", "phrases": ["formatDuration", "RangeError"]}
+        ]
+      },
       "files": [
         "fixtures/phasewave/unit-duration/AGENTS.md",
         "fixtures/phasewave/unit-duration/package.json",

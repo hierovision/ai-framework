@@ -15,13 +15,17 @@
 #     Free's 90-day max; auto-expires — local prune per RM-001).
 #   - `concurrency` prevents overlapping weekly runs.
 #   - `--limit` / `--skill` subset sharding keeps a full run inside the minute budget.
-#   - AI_FRAMEWORK_FREE_TIER=1 forces the free (*-free) tier only — no Go/Zen paid usage.
+#   - Evals run on the direct-key lane (deepseek/deepseek-flash) per the
+#     2026-09-21 user directive (model-routing.md CI eval lane note).
 name: Behavioral Eval (weekly)
 
 on:
   schedule:
-    # Weekly Monday 06:06 UTC — NOT nightly (stays within 2,000 min/month).
-    - cron: '0 6 * * 1'
+    # Weekly Monday 10:30 UTC (6:30am ET) — off-peak for the direct-key lane
+    # (DeepSeek peak windows are 01-04 & 06-10 UTC weekdays; 06:00 sat exactly
+    # in peak = 2x input price, measured 2026-09-21). NOT nightly — stays
+    # within 2,000 CI min/month.
+    - cron: '30 10 * * 1'
   workflow_dispatch:
 
 # Least-privilege: read-only is all the eval runner needs.
@@ -36,6 +40,10 @@ concurrency:
 jobs:
   behavioral-eval:
     runs-on: ubuntu-latest
+    # Full weekly suite: ~63 evals at the measured ~100s/eval ~= 105 min
+    # (see reference/per-change-eval-sla.md). The 120 min ceiling is the AC10
+    # green-run budget; the ~105 min duration is expected, not a defect.
+    timeout-minutes: 150  # measured: ~74 min serial at ~57s/eval; 150 = 2x headroom. Suite sharding (--limit/--skill) is the option if a full run ever nears the ceiling
     steps:
       # SHA-pinned (supply-chain safety — see securing-ci skill).
       - name: Checkout
@@ -50,27 +58,92 @@ jobs:
       # script is the supported path (https://opencode.ai/docs/, retrieved
       # 2026-09-16). Found by the RM-002 AC5 live check: without this step the
       # workflow never ran a single eval (missing binary).
-      - name: Install opencode CLI
-        run: curl -fsSL https://opencode.ai/install | bash
+      # 2026-09-20: curl|bash queries the GitHub API internally and failed 403
+      # under runner-IP rate limiting — npm registry package instead, pinned
+      # to the locally validated version (event-stream shapes vary by CLI
+      # version; pinning removes that drift hazard).
+      - name: Install opencode CLI (pinned via npm)
+        env:
+          OPENCODE_VERSION: "1.18.18"
+        run: npm install --global "opencode-ai@${OPENCODE_VERSION}"
+
+      - name: Add opencode to PATH
+        run: echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+
+      # Fresh agents discover skills from the global opencode layout; without
+      # install.sh the CI agent runs bare and produces output outside the
+      # repo's conventions (see eval-per-change.yml's matching step, 2026-09-21).
+      # Trust boundary (security lens, 2026-09-21): install.sh is a
+      # repo-LOCAL script executed from the checked-out branch — the trust
+      # mechanism is branch protection on main, not remote pipelining.
+      - name: Install library skills + agents (global layout)
+        run: bash install.sh
 
       - name: Run behavioral evals (fresh agent per eval)
         env:
           # Repository-level secret ONLY (org-level secrets are unavailable on
           # GitHub Free private repos). Consumed by the runner; never echoed.
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          AI_FRAMEWORK_FREE_TIER: 1
+          # Direct-key lane (user directive 2026-09-21, model-routing.md):
+          # evals run on deepseek/deepseek-flash via the user's own DeepSeek
+          # account — bypasses free-gateway outages; ~$1-2/month at suite
+          # scale (measured 2026-09-21, plan History). Key is a repo secret,
+          # consumed by opencode's provider auth, never echoed.
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          # Continuation depth: premature-stop turns get a same-session
+          # finish-now nudge (logged); 2 gives the variance headroom the
+          # shakedown data asked for (clamp max 3 in the runner).
+          BEVAL_MAX_CONTINUATIONS: "2"
         run: |
           # --model is REQUIRED here: opencode's environment default on a fresh
           # runner is `big-pickle` (disabled at the gateway) — found by the
           # RM-002 AC5 live gate, 2026-09-16. The ID is a binding, kept in step
           # with reference/model-routing.md's free generalist (re-verify on
           # each routing pass).
-          python3 skills/authoring-skills/scripts/run_behavioral_eval.py --model opencode/nemotron-3-ultra-free
+          python3 skills/authoring-skills/scripts/run_behavioral_eval.py --model deepseek/deepseek-flash
+
+      - name: Build eval report artifacts
+        if: always()
+        run: |
+          python3 scripts/eval-report.py aggregate --logs-dir logs/ --out eval-report.json || true
+          python3 scripts/eval-report.py coverage-gaps --logs-dir logs/ --out coverage-gaps.json || true
+          python3 scripts/eval-report.py green-run-status --out green-run-status.json || true
+          python3 scripts/eval-report.py quota-projection --out quota-projection.json || true
 
       - name: Upload run logs (30-day retention)
         if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
         with:
           name: observe-run-logs
-          path: logs/
+          # Governance (security lens, 2026-09-21): eval-streams carry raw
+          # agent I/O; key redacted at persistence. Public-repo caveat.
+          path: |
+            logs/
+            !logs/eval-streams/**
           retention-days: 30
+
+      - name: Upload eval report artifacts (30-day retention)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
+        with:
+          name: eval-report-${{ github.run_id }}
+          path: |
+            eval-report.json
+            coverage-gaps.json
+            green-run-status.json
+            quota-projection.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: CI summary (report links)
+        if: always()
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          {
+            echo "### Eval Report"
+            echo "- [eval-report-${{ github.run_id }}]($RUN_URL#artifacts) artifact"
+            echo "### Coverage Gaps"
+            echo "- [coverage-gaps-${{ github.run_id }}]($RUN_URL#artifacts) artifact"
+            echo "### Steady-State Green Run"
+            echo "- [green-run-status-${{ github.run_id }}]($RUN_URL#artifacts) artifact"
+            echo "- [definition](reference/eval-green-run-definition.md)"
+          } >> "$GITHUB_STEP_SUMMARY"

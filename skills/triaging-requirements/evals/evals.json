@@ -4,6 +4,7 @@
   "evals": [
     {
       "id": 1,
+      "core": true,
       "prompt": "we've never had a real roadmap. here's the mess in docs/feature-ideas.md plus the open issues in TASK (Jira) plus a handful of stuff I pasted at the bottom of this chat. pull it all together into a roadmap and tell me what we should be doing first\n\n--- docs/feature-ideas.md (excerpt) ---\n## Project Overview\nTaskNest is a Vue 3 + TypeScript Progressive Web App for managing personal tasks and small-team projects. Helps users organize work into projects with due dates and reminders.\n\n## Planned Features\n### Per-Project Colors ⏳\nOptional per-project color for visual cues in the task list (red for urgent, blue for calm). Inherits workspace theme color when unset.\n### Due-Date Reminder ⏳\nVisual and optional email alert N hours before a task is due, giving users advance notice. Configurable per-user (0 to disable, 1–48 hours).\n### Push Notifications ⏳\nDevice push notifications for due and overdue items.\n### Built-in Emoji Reactions ⏳\nA small set of curated emoji quick-reactions on comments.\n### Offline / Local-only Mode ⏳\nUse the app without creating an account. Data stays on-device. Sign in later to sync.\n### Internationalization ⏳\nMulti-language support. Initial target languages: Spanish, Mandarin Chinese, Hindi.\n### Attach Tutorial Links ⏳\nAttach a YouTube or video link to a task or project as a reference.\n\n--- todo.md (excerpt) ---\n## Epic 2: Reminders (Due Alerts)\n`enableReminders` preference exists in schema but is completely unwired. When a task is due, user gets no alert — critical for deadline-driven work.\n- [ ] 2.1 Request Notification permission with opt-in flow (S)\n- [ ] 2.2 Send due reminder on task due (S)\n- [ ] 2.3 Send daily digest of overdue items (S)\n\n## Tech Debt\n- `defaultReminderLead` field exists in preferences schema and DB but is completely unwired — no UI, no scheduler reads it\n- Manifest icons duplicated between public/ and dev-dist/\n\n## Done\n- [x] Epic 1: Offline local-only mode (shipped)\n- [x] PWA install prompt UX\n\n--- pasted ---\n- bug: switching projects mid-task silently commits the current task as complete. users lose time tracking. seen twice this week\n- lighthouse PWA score dropped below our CI threshold, builds warn\n- someone asked for Apple Watch support lol",
       "expected_behavior": [
         "Detects that no ROADMAP.md exists at repo root and initializes it rather than overwriting",
@@ -17,6 +18,11 @@
         "Writes ROADMAP.md with the all-inclusive categorized list and points the user to the top-priority items",
         "Does not fabricate Jira data it couldn't fetch — states what was read and what wasn't"
       ],
+      "expect": {
+        "artifact": [
+          {"path": "**/ROADMAP.md", "phrases": ["Impact", "Urgency"]}
+        ]
+      },
       "files": []
     },
     {

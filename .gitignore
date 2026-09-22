@@ -2,11 +2,20 @@
 
 # reviewing-code: review artifact written to the repo root
 REVIEW.md
+# RM-003 pass 5: committed event-stream fixture replays reviewing-code's real
+# output name (REVIEW.md); re-include the fixture copy (the rule above is
+# basename-wide).
+!skills/authoring-skills/evals/fixtures/event-streams/**/REVIEW.md
 
 # Runtime-generated plans/agents when this library is consumed, or when the
 # free-tier council agent defs dropped in (designing-architecture,
 # FREE-TIER-COUNCIL). Comment out if you intend to track example plans/defs.
 .opencode/
+# Eval fixtures legitimately embed an .opencode/ project layout (the
+# workdir must look like a project for the eval prompt); un-ignore inside
+# skill eval fixtures only:
+!skills/*/evals/fixtures/**/.opencode/
+!skills/*/evals/fixtures/**/.opencode/**
 
 # === Run telemetry (observing-runs / RM-001) — never commit ===
 # JSONL run logs are git-ignored so per-run telemetry is never committed;
@@ -20,6 +29,9 @@ node_modules/
 dist/
 __pycache__/
 *.pyc
+
+# === Local agent scratch (must stay inside the repo worktree; never /tmp) ===
+.scratch/
 
 # Playwright installed into the capturing-ui-evidence skill dir per its
 # SKILL.md bootstrap (the installed skill is a symlink here) — environment

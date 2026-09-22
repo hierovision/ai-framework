@@ -4,6 +4,7 @@
   "evals": [
     {
       "id": 1,
+      "core": true,
       "prompt": "the roadmap puts feat-offline-queue at #1 (queue timer session events while offline, sync on reconnect). design the approach for it. the repo is the working directory — there's already a plan draft at .opencode/plans/feat-offline-queue.md from an earlier pass, revise it rather than blowing it away",
       "expected_behavior": [
         "Reads the roadmap entry (feat-offline-queue, the #1 item) and treats it as the single work item to plan — does not attempt to plan the whole roadmap",
@@ -18,6 +19,11 @@
         "Treats the item as user-facing (timer session UX, offline queue state) and follows the Step 5b gate BEFORE drafting — the plan's History records either the consult line ('UX consult via council-ux; N concerns — ...') or an honest dated deferral with the reason (e.g. subagent invocation unavailable in the harness), and the UX concerns are folded into the plan's ACs / Open Questions / Excluded (a user-facing item that silently skips the consult with no record is a finding)",
         "Makes zero implementation edits to source: the plan artifact is the only file written; no src/store, schema, or types file is touched by the skill"
       ],
+      "expect": {
+        "artifact": [
+          {"path": "**/feat-offline-queue.md", "phrases": ["Acceptance Criteria", "Files to Modify"]}
+        ]
+      },
       "files": ["fixtures/phasewave/AGENTS.md", "fixtures/phasewave/ROADMAP.md", "fixtures/phasewave/src/stores/focus-timer.ts", "fixtures/phasewave/src/supabase/client.ts", "fixtures/phasewave/db/schema.sql", "fixtures/phasewave/types/database.types.ts", "fixtures/phasewave/.opencode/plans/feat-offline-queue.md", "fixtures/phasewave/package.json"]
     },
     {
