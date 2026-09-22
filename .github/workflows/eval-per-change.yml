@@ -286,14 +286,14 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
         with:
           name: eval-logs-${{ matrix.skill }}
-          # Governance (security lens, 2026-09-21): eval-streams carry raw
-          # agent I/O — the API key is redacted at persistence (the runner),
-          # but streams may contain model outputs and repo content. Repo is
-          # PUBLIC: artifacts inherit repo visibility. If visibility ever
-          # changes, re-evaluate this exposure.
+          # Governance (security lens 2026-09-21, amended 2026-09-21 after
+          # merge): eval-streams are the diagnostic channel for red canaries
+          # (typed failures are diagnosed from the stream). Keys are
+          # redacted at persistence; the stream may still contain model
+          # outputs and repo content — repo is PUBLIC, artifacts inherit
+          # visibility. Excluding them blinded every CI failure diagnosis.
           path: |
             logs/
-            !logs/eval-streams/**
           retention-days: 30
           if-no-files-found: ignore
 

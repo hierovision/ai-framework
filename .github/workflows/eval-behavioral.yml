@@ -114,11 +114,11 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
         with:
           name: observe-run-logs
-          # Governance (security lens, 2026-09-21): eval-streams carry raw
-          # agent I/O; key redacted at persistence. Public-repo caveat.
+          # Governance: eval-streams are the diagnostic channel for red
+          # canaries; keys redacted at persistence; public-repo caveat
+          # (model outputs + repo content inside).
           path: |
             logs/
-            !logs/eval-streams/**
           retention-days: 30
 
       - name: Upload eval report artifacts (30-day retention)
