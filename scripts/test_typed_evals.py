@@ -252,6 +252,38 @@ def test_verify_mjs_expect_enforcement():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_cli_failure_output_carries_guidance():
+    """AC8 (rm-004): a rejected eval's error output carries fix guidance and
+    points at the eval-assertions reference — in plain English, with no raw
+    AC-id jargon (the reader is a contributor, not the design session)."""
+    repo, _skills, _manifest = _make_repo()
+    try:
+        # Make eval 1 changed but still legacy -> the CLI must reject it.
+        _write_json(os.path.join(repo, "skills", "demo-skill", "evals",
+                                 "evals.json"), {
+            "skill_name": "demo-skill",
+            "evals": [
+                {"id": 1, "prompt": "legacy prompt CHANGED",
+                 "expected_behavior": ["does a thing"]},
+                {"id": 2, "prompt": "typed prompt",
+                 "expect": {"text": ["does a typed thing"]}},
+            ],
+        })
+        r = subprocess.run(
+            [sys.executable, CHECK_TYPED, "--base", "HEAD", "--repo-root", repo],
+            capture_output=True, text=True)
+        out = r.stdout + r.stderr
+        assert r.returncode == 1, out
+        assert "eval-assertions.md" in out, (
+            "error output must point at the eval-assertions reference", out)
+        assert "expect" in out, ("error output must explain the fix", out)
+        assert "AC" not in out.replace("AC-RULE-ABSENT", ""), (
+            "error output must be plain English — no raw AC-id jargon", out)
+        print("PASS  CLI failure output: guidance + reference pointer, plain English")
+    finally:
+        shutil.rmtree(repo, ignore_errors=True)
+
+
 def main():
     tests = [
         test_expect_schema_closed_shape,
@@ -259,6 +291,7 @@ def main():
         test_base_semantics_unchanged_legacy_is_not_flagged,
         test_unresolvable_base_degrades_honestly,
         test_check_typed_cli_exit_codes,
+        test_cli_failure_output_carries_guidance,
         test_validate_skill_marker_and_expect_enforcement,
         test_verify_mjs_expect_enforcement,
     ]

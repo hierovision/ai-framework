@@ -1,0 +1,10 @@
+{
+  "skill_name": "build",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "implement the approved plan at .opencode/plans/pending-task.md",
+      "expected_behavior": ["Reads the plan first and implements only its scope", "Runs type-check + lint + unit tests + e2e in a fix-and-rerun loop", "Presents manual validation steps instead of self-certifying"]
+    }
+  ]
+}

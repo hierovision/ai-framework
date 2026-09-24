@@ -187,7 +187,8 @@ def collect_errors(base_ref, skills_root=None, repo_root=None, require_base=Fals
             if not has_expect(e):
                 errors.append(
                     f"{rel}: eval id={eid!r} is {status} but has no typed "
-                    f"'expect' block (AC17/AC19 migrate-on-touch)")
+                    f"'expect' block — new or changed evals must migrate to "
+                    f"typed assertions on touch")
     return errors, warnings
 
 
