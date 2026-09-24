@@ -4,7 +4,7 @@
  "evals": [
   {
    "id": 1,
-   "prompt": "ok I just spent an hour walking an agent through our release process again \u2014 bump the version in package.json, update CHANGELOG.md from merged PRs since the last tag, tag it, draft the gh release notes. I'm sick of re-explaining it. turn this into a skill so any agent can just do it. IMPORTANT: this is a one-shot session \u2014 I cannot answer questions back. Draft the complete skill now; for anything you would normally interview me about (versioning scheme, changelog format, whether tagging/pushing needs approval), make a reasonable choice and mark it as an explicit ASSUMPTION at the top of the skill instead of leaving it unstated. Do all work in this single session \u2014 write the SKILL.md and evals/evals.json files to disk in this session; do not end with an intention to write them later.",
+   "prompt": "ok I just spent an hour walking an agent through our release process again — bump the version in package.json, update CHANGELOG.md from merged PRs since the last tag, tag it, draft the gh release notes. I'm sick of re-explaining it. turn this into a skill so any agent can just do it. IMPORTANT: this is a one-shot session — I cannot answer questions back. Draft the complete skill now; for anything you would normally interview me about (versioning scheme, changelog format, whether tagging/pushing needs approval), make a reasonable choice and mark it as an explicit ASSUMPTION at the top of the skill instead of leaving it unstated. Do all work in this single session — write the SKILL.md and evals/evals.json files to disk in this session; do not end with an intention to write them later.",
    "expected_behavior": [
     "Restates the extracted release-workflow steps (bump version, changelog from merged PRs since the last tag, tag, gh release notes) for confirmation",
     "Lists unresolved specifics as explicit open questions or stated assumptions (versioning scheme, changelog format, whether tagging/pushing needs approval) instead of inventing them",
@@ -18,10 +18,8 @@
      {
       "path": "**/SKILL.md",
       "phrases": [
-       "changelog format",
-       "description:",
        "name:",
-       "versioning scheme"
+       "description:"
       ]
      },
      {
@@ -30,6 +28,10 @@
        "prompt"
       ]
      }
+    ],
+    "text": [
+     "versioning scheme",
+     "changelog format"
     ]
    },
    "files": []

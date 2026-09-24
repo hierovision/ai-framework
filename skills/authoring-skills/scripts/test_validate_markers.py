@@ -40,6 +40,10 @@ def _make_skill(name, evals):
 def _ev(eid, **markers):
     base = {"id": eid, "prompt": "p", "expected_behavior": ["x"]}
     base.update(markers)
+    # Pass 5 Layer-1 rule: a marked eval must also carry a typed `expect`
+    # block, so every marked fixture in this suite asserts the typed shape.
+    if markers:
+        base["expect"] = {"text": ["x"]}
     return base
 
 

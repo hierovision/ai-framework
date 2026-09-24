@@ -145,9 +145,16 @@ def test_coverage_gaps_default_and_core_arrays():
         assert "authoring-skills" not in gaps["no_default_marker"]
         assert "observing-runs" not in gaps["no_default_marker"]
         assert "designing-architecture" in gaps["no_default_marker"]
-        # core_covered entries name the canary eval id
+        # core_covered entries name the canary eval id — read back from each
+        # manifest's own `core: true` marker (authoring-skills migrated its
+        # canary #1→#2 in pass 6; the manifest is the source of truth, not a
+        # hardcoded id).
         for item in gaps["core_covered"]:
-            assert item["eval_id"] == 1, item
+            manifest = json.load(open(os.path.join(
+                HERE, "..", "skills", item["skill"], "evals", "evals.json")))
+            marked = [e["id"] for e in manifest.get("evals", [])
+                      if isinstance(e, dict) and e.get("core")]
+            assert item["eval_id"] in marked, (item, marked)
     finally:
         shutil.rmtree(d)
 

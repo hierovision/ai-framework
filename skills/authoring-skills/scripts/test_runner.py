@@ -337,7 +337,7 @@ FIXTURE_ROOT = os.path.normpath(
     os.path.join(HERE, "..", "evals", "fixtures", "event-streams"))
 
 CANARY_KEYS = {
-    ("authoring-skills", 1),
+    ("authoring-skills", 2),
     ("observing-runs", 1),
     ("designing-architecture", 1),
     ("implementing-features", 1),
@@ -438,7 +438,12 @@ def test_seven_canaries_replay_fixtures():
 
 
 def test_event_fixture_cli():
-    fixture = os.path.join(FIXTURE_ROOT, "authoring-skills__1")
+    # The --default selection resolves the manifest's `default` marker —
+    # authoring-skills' canary migrated #1→#2 in RM-003 pass 6 (ADR-0004:
+    # the marker is the source of truth), so the replayed fixture is the
+    # canary's own harvested/synthetic stream at fixtures/event-streams/
+    # authoring-skills__2.
+    fixture = os.path.join(FIXTURE_ROOT, "authoring-skills__2")
     logs = tempfile.mkdtemp(prefix="beval-fix-logs-")
     try:
         r = subprocess.run(
@@ -446,7 +451,7 @@ def test_event_fixture_cli():
              "--event-fixture", fixture, "--no-quarantine", "--logs-dir", logs],
             capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
-        assert "authoring-skills#1" in r.stdout and "PASS" in r.stdout, r.stdout
+        assert "authoring-skills#2" in r.stdout and "PASS" in r.stdout, r.stdout
         recs = _read_logs(logs)
         assert recs and recs[-1]["eval_pass"] is True, recs
     finally:

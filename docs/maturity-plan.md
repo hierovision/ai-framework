@@ -49,7 +49,7 @@ Strong on craft discipline, weak on measurement and formal governance.
 | Evaluation (structural) | L3 | `validate_skill.py`, offline `verify` suites, 21× `evals.json` |
 | Evaluation (behavioral) | L4 (2026-09-21) | Behavioral evals wired to CI: per-change matrix gate + weekly suite, typed assertions, retry/quarantine/continuation, report artifacts — RM-002 + RM-003 done. Full eval-history queryability in `query_runs.py`/`eval-report.py` |
 | Decision boundaries | L2 | Boundaries in prose (skill `STOP`s), not encoded/enforced in config |
-| Governance | L2 | Rules in prose (`council.md`, `git-workflow.md`); **no CONTRIBUTING/CODEOWNERS/SECURITY/ADR** (RM-004, incl. the three-tier repo-memory structure) |
+| Governance | L3 (2026-09-23) | Formal artifacts live: `CONTRIBUTING.md`, `.github/CODEOWNERS`, `SECURITY.md`, `docs/ADRs/` (founding set ADR-0001…0008 with maturity + routing table), `AGENTS.md` standing rules; three-tier repo memory per ADR-0008 (RM-004 done). Next: skill/agent registry manifest (RM-005), encoded boundaries (RM-008) |
 | Integration | L2–3 | GitHub issues/PRs/projects + opencode; eval gating is the first PR-level integration |
 | Observability | L4 (2026-09-21) | Run logs + eval scores + coverage gaps + green-run status queryable; per-attempt reliability trail persisted |
 | ROI math | L1 | Cost/cycle-time/error-rate tracking (RM-009); eval token/cost telemetry now flows into run logs |

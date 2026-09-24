@@ -4,7 +4,8 @@
 Run: python3 scripts/test_eval_workflows.py
 Exit 0 = eval-per-change.yml runs the marker-selected evals as a one-eval-per-job
 matrix (fail-fast, max-parallel) with an always-running report job, both eval
-workflows carry the node24 upload-artifact pin, and the weekly ceiling is 120.
+workflows carry the node24 upload-artifact pin, and the weekly ceiling is 150
+(measured budget, 2026-09-21).
 
 Structural only: this parses the YAML, it does not run GitHub Actions.
 """
@@ -78,11 +79,13 @@ def test_artifact_pin_node24_both_workflows():
     print("PASS  both eval workflows pin upload-artifact to the node24 SHA")
 
 
-def test_weekly_timeout_is_120():
+def test_weekly_timeout_is_150():
     jobs = _jobs(BEHAVIORAL)
     job = next(iter(jobs.values()))
-    assert job["timeout-minutes"] == 120, job["timeout-minutes"]
-    print("PASS  weekly eval-behavioral timeout-minutes == 120 (AC10 budget)")
+    # Measured ~74 min serial (2026-09-21); 150 = 2x headroom. The older
+    # 120-minute budget was superseded by the measured re-math (cleanup P2).
+    assert job["timeout-minutes"] == 150, job["timeout-minutes"]
+    print("PASS  weekly eval-behavioral timeout-minutes == 150 (measured budget)")
 
 
 def main():
@@ -90,7 +93,7 @@ def main():
         test_per_change_matrix_and_aggregation,
         test_per_change_selection_flags_and_cache,
         test_artifact_pin_node24_both_workflows,
-        test_weekly_timeout_is_120,
+        test_weekly_timeout_is_150,
     ]
     failed = 0
     for t in tests:

@@ -63,7 +63,10 @@ Closed form — enforced by both Layer-1 validators:
 
 `expected_behavior` is required only when `expect` is absent; when both are
 present `expect` wins at run time and `expected_behavior` is kept as
-human-readable intent.
+**non-asserted, human-readable intent** — a future reader can check it
+against what the typed assertions actually pin, but nothing runs it (an
+`expected_behavior` the typed assertions outgrew is intent rot: update it
+on touch or delete it).
 
 ## Class semantics and the nature rule
 
