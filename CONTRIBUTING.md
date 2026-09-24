@@ -57,6 +57,7 @@ The three-tier repo memory (ADR-0008; routing table in
 | A cross-session imperative | `AGENTS.md` |
 | A binding or structure decision | `docs/ADRs/` (with maturity status) |
 | An in-flight plan or session handoff | `.opencode/plans/` (tracked here; archived after essence-extraction) |
+| Registering a new/changed skill or persona | `registry.json` (repo root — validator-enforced; `scripts/registry.py --check` to inspect) |
 | Current state and next action | `docs/ROADMAP.md` |
 | A volatile fact (models, pricing, catalog) | `reference/*.md` (current-state only, dated) |
 

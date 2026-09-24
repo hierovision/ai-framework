@@ -181,6 +181,13 @@ def main():
         print(__doc__)
         sys.exit(2)
 
+    # RM-005: the repo-root registry.py is located for the --all registry
+    # cross-check below (single enforcement point — no separate CI gate,
+    # see ADR-0009). The loader is imported, never re-parsed here.
+    _repo_scripts = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                     "..", "..", "..", "scripts"))
+
     if args == ["--all"]:
         # realpath so a symlinked install (e.g. ~/.config/opencode/skills/...)
         # still resolves to the real repo's skills/ root (Layer 1 hermeticity:
@@ -192,6 +199,24 @@ def main():
             for d in os.listdir(skills_root)
             if os.path.isdir(os.path.join(skills_root, d))
         )
+        # RM-005 AC3: registry <-> repo sync is part of the --all library
+        # rule when the registry is present (consumer repos and single-dir
+        # fixture validations degrade honestly to not-checking it).
+        if os.path.isfile(os.path.join(_repo_scripts, "registry.py")):
+            if _repo_scripts not in sys.path:
+                sys.path.insert(0, _repo_scripts)
+            import registry as _registry
+            reg_errors = _registry.validate()
+            if reg_errors:
+                failed = True
+                print("FAIL  registry")
+                for e in reg_errors:
+                    print(f"      error: {e}")
+            else:
+                data = _registry.load()
+                n = len(data.get("skills") or []) + len(
+                    data.get("personas") or [])
+                print(f"OK    registry ({n} entries)")
 
     failed = False
     for skill_dir in args:

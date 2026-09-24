@@ -1,0 +1,271 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "name": "auditing-accessibility",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/auditing-accessibility/SKILL.md"
+    },
+    {
+      "name": "authoring-skills",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "skills/authoring-skills/SKILL.md"
+    },
+    {
+      "name": "capturing-ui-evidence",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/capturing-ui-evidence/SKILL.md"
+    },
+    {
+      "name": "correcting-ui",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/correcting-ui/SKILL.md"
+    },
+    {
+      "name": "debugging-test-failures",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/debugging-test-failures/SKILL.md"
+    },
+    {
+      "name": "deploying-to-azure-swa",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/deploying-to-azure-swa/SKILL.md"
+    },
+    {
+      "name": "deploying-with-supabase",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/deploying-with-supabase/SKILL.md"
+    },
+    {
+      "name": "designing-architecture",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "skills/designing-architecture/SKILL.md"
+    },
+    {
+      "name": "designing-cicd",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/designing-cicd/SKILL.md"
+    },
+    {
+      "name": "implementing-features",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "skills/implementing-features/SKILL.md"
+    },
+    {
+      "name": "managing-github-issues",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/managing-github-issues/SKILL.md"
+    },
+    {
+      "name": "observing-runs",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/observing-runs/SKILL.md"
+    },
+    {
+      "name": "optimizing-model-routing",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/optimizing-model-routing/SKILL.md"
+    },
+    {
+      "name": "refining-issue-acceptance",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/refining-issue-acceptance/SKILL.md"
+    },
+    {
+      "name": "releasing-a-version",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/releasing-a-version/SKILL.md"
+    },
+    {
+      "name": "reviewing-code",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "skills/reviewing-code/SKILL.md"
+    },
+    {
+      "name": "securing-ci",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/securing-ci/SKILL.md"
+    },
+    {
+      "name": "triaging-requirements",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "skills/triaging-requirements/SKILL.md"
+    },
+    {
+      "name": "validating-against-official-docs",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/validating-against-official-docs/SKILL.md"
+    },
+    {
+      "name": "validating-ui",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/validating-ui/SKILL.md"
+    },
+    {
+      "name": "writing-e2e-tests",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/writing-e2e-tests/SKILL.md"
+    },
+    {
+      "name": "writing-integration-tests",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L2",
+      "status": "active",
+      "boundary_ref": "skills/writing-integration-tests/SKILL.md"
+    },
+    {
+      "name": "writing-unit-tests",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "skills/writing-unit-tests/SKILL.md"
+    }
+  ],
+  "personas": [
+    {
+      "name": "architect",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "agents/architect.md"
+    },
+    {
+      "name": "council",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "agents/council.md"
+    },
+    {
+      "name": "council-architecture",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "agents/council-architecture.md"
+    },
+    {
+      "name": "council-performance",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "agents/council-performance.md"
+    },
+    {
+      "name": "council-product",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "agents/council-product.md"
+    },
+    {
+      "name": "council-security",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "agents/council-security.md"
+    },
+    {
+      "name": "council-ux",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "agents/council-ux.md"
+    },
+    {
+      "name": "curator",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "agents/curator.md"
+    },
+    {
+      "name": "implementer",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "agents/implementer.md"
+    },
+    {
+      "name": "planner",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L3",
+      "status": "active",
+      "boundary_ref": "agents/planner.md"
+    }
+  ]
+}
