@@ -75,7 +75,8 @@ def test_coverage_gaps_shape_and_quarantine():
         gaps = report.coverage_gaps(d)
         assert set(gaps) == {"zero_eval_skills", "deferred_evals",
                              "free_tier_excluded_evals", "quarantined_evals",
-                             "no_default_marker", "core_covered", "core_uncovered",
+                             "no_default_marker", "deferred_skills",
+                             "core_covered", "core_uncovered",
                              "smoke_uncovered", "legacy_assertion_evals",
                              "legacy_assertion_count"}, gaps
         # writing-unit-tests + observing-runs have eval records -> not zero.
@@ -87,6 +88,10 @@ def test_coverage_gaps_shape_and_quarantine():
         assert {"optimizing-model-routing", "validating-against-official-docs"} <= deferred_skills
         assert gaps["free_tier_excluded_evals"] == []
         assert gaps["quarantined_evals"][0]["key"] == "writing-unit-tests#3"
+        # RM-005 AC4: deferred_skills names registry-declared deferrals —
+        # empty today (no skill is deferred), distinct from deferred_evals
+        # (eval-level) and from no_default_marker (undeclared gaps).
+        assert gaps["deferred_skills"] == [], gaps["deferred_skills"]
     finally:
         shutil.rmtree(d)
 
@@ -159,6 +164,42 @@ def test_coverage_gaps_default_and_core_arrays():
         shutil.rmtree(d)
 
 
+def test_coverage_gaps_deferred_status():
+    """RM-005 AC4: a registry-declared deferral is a state, not a gap.
+
+    A skill with registry status=deferred is excluded from
+    `no_default_marker` and named in an explicit `deferred_skills` array;
+    an active skill without a `default` marker still shows up there.
+    """
+    d = tempfile.mkdtemp()
+    try:
+        sroot = os.path.join(d, "skills")
+        for s in ("alpha-active", "beta-deferred"):
+            os.makedirs(os.path.join(sroot, s, "evals"))
+            with open(os.path.join(sroot, s, "evals", "evals.json"), "w") as fh:
+                json.dump({"skill_name": s, "evals": [
+                    {"id": 1, "prompt": "p", "expected_behavior": ["x"]}]}, fh)
+        registry = {"version": 1, "skills": [
+            {"name": "alpha-active", "type": "skill", "owner": "@hierovision",
+             "maturity": "L2", "status": "active",
+             "boundary_ref": "skills/alpha-active/SKILL.md"},
+            {"name": "beta-deferred", "type": "skill", "owner": "@hierovision",
+             "maturity": "L1", "status": "deferred",
+             "boundary_ref": "skills/beta-deferred/SKILL.md"},
+        ], "personas": []}
+        gaps = report.coverage_gaps(d, skills_root=sroot, registry=registry)
+        assert gaps["no_default_marker"] == ["alpha-active"], gaps
+        assert gaps["deferred_skills"] == ["beta-deferred"], gaps
+        # without a registry (or absent file) the behavior degrades to the
+        # pre-registry shape: no deferred_skills array invention, plain gaps
+        gaps2 = report.coverage_gaps(d, skills_root=sroot, registry=None)
+        assert sorted(gaps2["no_default_marker"]) == [
+            "alpha-active", "beta-deferred"], gaps2
+        assert gaps2.get("deferred_skills") in ([], None), gaps2
+    finally:
+        shutil.rmtree(d)
+
+
 def test_coverage_gaps_legacy_assertion_backlog():
     """RM-003 pass 5 / AC18: prose-only evals appear in the migration backlog.
 
@@ -195,6 +236,7 @@ def main():
         test_query_runs_coverage_gaps_cli,
         test_green_run_status_not_achieved_and_recorded,
         test_quota_projection_under_guardrail,
+        test_coverage_gaps_deferred_status,
         test_coverage_gaps_legacy_assertion_backlog,
     ]
     failed = 0

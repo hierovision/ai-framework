@@ -25,6 +25,7 @@ Every ADR carries `## Status` with one of:
 | [ADR-0006](ADR-0006-persona-renames.md) | Agents renamed to personas | accepted 2026-09-21 |
 | [ADR-0007](ADR-0007-eval-lane-policy-amendment.md) | Eval-lane policy amendment (direct-key despite free-first default) | accepted 2026-09-21 |
 | [ADR-0008](ADR-0008-repo-memory-tiers.md) | Three-tier repo memory; plans tracked here; handoffs retired | accepted 2026-09-23 |
+| [ADR-0009](ADR-0009-registry-manifest.md) | Machine-readable skill/agent registry, validator-enforced | accepted 2026-09-24 |
 
 ## Where a decision goes
 

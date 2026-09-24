@@ -89,16 +89,19 @@ def aggregate_report(logs_dir):
     }
 
 
-def coverage_gaps(logs_dir, skills_root=None):
+def coverage_gaps(logs_dir, skills_root=None, registry="auto"):
     """AC3: delegate to query_runs' coverage-gaps implementation.
 
     Returns the three required arrays (`zero_eval_skills`, `deferred_evals`,
     `free_tier_excluded_evals`) plus `quarantined_evals`, pass-4
     `no_default_marker`, core coverage (`core_covered` / `core_uncovered`),
-    the retained `smoke_uncovered`, and the pass-5 typed-assertion migration
-    backlog (`legacy_assertion_evals` / `legacy_assertion_count`).
+    the retained `smoke_uncovered`, the pass-5 typed-assertion migration
+    backlog (`legacy_assertion_evals` / `legacy_assertion_count`), and the
+    RM-005 registry awareness (`deferred_skills` when a registry is in
+    play — declared deferrals are named, not hidden).
     """
-    return query_runs.coverage_gaps(logs_dir, skills_root=skills_root)
+    return query_runs.coverage_gaps(logs_dir, skills_root=skills_root,
+                                    registry=registry)
 
 
 def green_run_status(achieved=False, run_id=None, date=None, branch=None,

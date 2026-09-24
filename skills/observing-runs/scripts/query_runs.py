@@ -59,6 +59,13 @@ if _REPO_SCRIPTS not in sys.path:
     sys.path.insert(0, _REPO_SCRIPTS)
 from check_typed_evals import has_expect as _has_typed_expect  # noqa: E402
 
+# RM-005 AC4: the registry loader is the single source of truth for
+# registry entries (skills/personas status); coverage_gaps imports it —
+# it never hand-parses registry.json.
+from registry import load as _registry_load  # noqa: E402
+
+_REGISTRY_AUTO = "auto"
+
 
 def _iter_records(logs_dir):
     if not os.path.isdir(logs_dir):
@@ -181,7 +188,7 @@ def _iter_eval_manifests(skills_root):
             yield name, data
 
 
-def coverage_gaps(logs_dir, skills_root=None):
+def coverage_gaps(logs_dir, skills_root=None, registry=_REGISTRY_AUTO):
     """RM-003 AC3 coverage-gap report.
 
     The three required arrays (the contract):
@@ -191,7 +198,10 @@ def coverage_gaps(logs_dir, skills_root=None):
       free_tier_excluded_evals evals whose model_tier is go|zen (excluded in CI)
     Plus:
       quarantined_evals        evals at status=quarantined in quarantine.json
-      no_default_marker        skills without a `"default": true` eval
+      no_default_marker        active skills without a `"default": true` eval
+      deferred_skills          registry-declared skill deferrals (status
+                               "deferred") — named, not hidden (RM-005 AC4);
+                               omitted entirely when no registry is in play
       core_covered             six core skills that resolve a `"core": true`
                                canary `{skill, eval_id}`
       core_uncovered           core skills lacking a core-marked eval
@@ -200,7 +210,21 @@ def coverage_gaps(logs_dir, skills_root=None):
       legacy_assertion_evals   evals without a typed `expect` block — the
                                dated migrate-on-touch backlog (AC18)
       legacy_assertion_count   len(legacy_assertion_evals)
+    `registry`: "auto" (default) loads the repo registry when present and
+    degrades to no registry awareness when absent; None disables registry
+    awareness; a parsed registry dict may be passed directly.
     """
+    if registry == _REGISTRY_AUTO:
+        try:
+            registry = _registry_load()
+        except (OSError, ValueError, json.JSONDecodeError):
+            registry = None
+    status_by_skill = {}
+    if registry:
+        for e in registry.get("skills") or []:
+            if isinstance(e, dict) and e.get("name"):
+                status_by_skill[e["name"]] = e.get("status")
+
     if skills_root is None:
         skills_root = os.path.join(REPO_ROOT, "skills")
 
@@ -210,7 +234,7 @@ def coverage_gaps(logs_dir, skills_root=None):
             eval_record_skills.add(rec["skill"])
 
     zero_eval_skills, deferred_evals, free_tier_excluded_evals = [], [], []
-    no_default_marker = []
+    no_default_marker, deferred_skills = [], []
     legacy_assertion_evals = []
     manifests = {}
     for skill, data in _iter_eval_manifests(skills_root):
@@ -219,7 +243,11 @@ def coverage_gaps(logs_dir, skills_root=None):
         if skill not in eval_record_skills:
             zero_eval_skills.append(skill)
         evals = data.get("evals", [])
-        if not any(e.get("default") for e in evals):
+        if status_by_skill.get(skill) == "deferred":
+            # RM-005 AC4: a declared deferral is a state, not a gap —
+            # excluded from no_default_marker, named in deferred_skills.
+            deferred_skills.append(skill)
+        elif not any(e.get("default") for e in evals):
             no_default_marker.append(skill)
         for e in evals:
             tier = e.get("default_model_tier", default_tier)
@@ -271,6 +299,8 @@ def coverage_gaps(logs_dir, skills_root=None):
         "free_tier_excluded_evals": free_tier_excluded_evals,
         "quarantined_evals": quarantined_evals,
         "no_default_marker": sorted(no_default_marker),
+        **({"deferred_skills": sorted(deferred_skills)}
+           if status_by_skill else {}),
         "core_covered": core_covered,
         "core_uncovered": core_uncovered,
         "smoke_uncovered": smoke_uncovered,
