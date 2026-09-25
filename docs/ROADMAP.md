@@ -18,6 +18,22 @@ Note: No single standard exists for an "agentic dev lifecycle." We compose the a
 - Phase: delivery wave (see `docs/maturity-plan.md` §6).
 - "plan" in Source columns = `docs/maturity-plan.md`.
 
+## Swamp guards (how rows keep earning their place)
+
+- **A row earns its place with a trigger, not an aspiration**: every open
+  row cites what fires it — a dated wait, a signal from a real session,
+  or an unblocked dependency. Rows whose trigger has not fired yet are
+  legitimate table rows at their earned priority (bottom of the order is
+  a place, not a demotion); the backlog notes are only for items without
+  a trigger or an acceptance criterion yet.
+- **Volatile-layer items get verify-mechanics, not build-mechanics**:
+  artifacts that carry Layer-4 facts (dated pins, versions, provider
+  specifics) carry their anti-rot mechanic in the row itself — re-verify
+  on touch against current docs, CI drift alarm, dated headers.
+- **The roadmap prunes, it never just appends**: rows that lose relevance
+  are superseded or absorbed in place, with a dated note. The quarterly
+  ALM review (RM-011) is the standing pruning mechanism.
+
 ## Roadmap
 
 | ID | Category | Title | Priority | Phase | Status | Source | Acceptance |
@@ -27,12 +43,14 @@ Note: No single standard exists for an "agentic dev lifecycle." We compose the a
 | RM-003 | evaluation | Eval report artifact + dashboard | 2 | 1 | done | plan §5-B; implemented on `feat/rm-003-eval-report-gating` | Delivered 2026-09-21 (PR 23): per-run eval report + coverage-gap artifacts (30-day retention) with CI-summary links; per-change eval gating via changed-files → skill mapping (matrix, one canary per changed skill); three-layer gating (pre-commit hermetic validators / advisory pre-push / required PR check); typed-assertion protocol (action/artifact/text over `opencode run --format json` event streams) with Layer-1 enforcement; retry + quarantine + deterministic continuation; first green-run capture pending the next qualifying weekly run (earliest: 2026-09-22 10:30 UTC, recorded per AC4). Evals run on the direct-key lane (`deepseek/deepseek-flash`, user directive 2026-09-21) at ~$0.68/weekly run (off-peak, measured). Remaining open under RM-003 follow-ups: two canary assertion-tuning fixes (reviewing-code, releasing-a-version), first green-run record, legacy-assertion migration of ~75 evals (migrate-on-touch). |
 | RM-004 | governance | Formal governance artifacts | 2 | 2 | done | plan §5-C; repo audit (Governance L2); 2026-09-18 session | Delivered 2026-09-23 (feat/rm-004): the three-tier repo-memory structure live — (1) `AGENTS.md` standing rules (cross-session imperatives only); (2) `docs/ADRs/` founding set ADR-0001…0008 with `accepted`/`superseded`/`reversed` maturity + routing-table README; (3) plan lifecycle per ADR-0008 — plans and session handoffs are working artifacts in `.opencode/plans/` (tracked in this repo; the untracked-ledger gap closed), essence extracted before merge, archived after. `CONTRIBUTING.md` (gates matching ci.yml), `.github/CODEOWNERS`, `SECURITY.md` in place; `docs/handoffs/` retired (ADR-0008). RM-003 consolidation closed in the same pass: canary retype, error-guidance, SKILL body split, ledger reconcile; the two dated waits (first green-run record Mon 2026-09-28 10:30 UTC; fail-fast flip-back after two consecutive green runs) stay tracked under RM-003 follow-ups. |
 | RM-005 | governance | Skill/agent registry manifest | 2 | 2 | done | plan §5-D | Delivered 2026-09-24 (feat/rm-005, ADR-0009): repo-root `registry.json` — 33 entries (23 skills + 10 personas), each with owner (`@hierovision`), L1–L4 maturity (evidence-based promotion bar: evals green + real-loop use + independent review), status (`active`/`deferred`/`deprecated`), and a validator-resolved `boundary_ref`. Enforced by `validate_skill.py --all` cross-check (orphan/ghost/field/boundary-ref) inside `quality-gates`; loader `scripts/registry.py` is the single source of truth (no hand-parsing); `coverage_gaps` names declared deferrals in `deferred_skills` instead of `no_default_marker`. Canary markers stay in `evals.json`; model bindings stay in model-routing (registry references, never duplicates). Consumed by tooling; RM-008/009/011 gain their join table. |
-| RM-006 | integration | Adoptable CI/CD templates | 3 | 2 | backlog | plan §5-D; `skills/designing-cicd` | `templates/` YAML a consumer repo can copy to get evaluate→build→deploy golden path. |
+| RM-006 | integration | Adoptable CI/CD templates | 3 | 2 | backlog | plan §5-D; `skills/designing-cicd`; 2026-09-24 triage | `templates/` YAML a consumer repo can copy to get the evaluate→build→deploy golden path (pairs with `designing-cicd`; deploy-step templates encode `deploying-with-supabase` / `deploying-to-azure-swa`; hardening encodes `securing-ci`). Volatility disposition (2026-09-24): templates are Layer-3 artifacts with their Layer-4 facts (action SHAs, versions, provider keys) isolated inside each file — SHA-pinned, dated, current-state only, no changelogs; skill bodies cite, never quote. Anti-rot mechanic is part of the acceptance: dated header per template ("validated against current docs <date>"), re-verified on touch (when a template is actually copied/used), and a CI drift alarm (actionlint/yamllint on `templates/**`). **Trigger**: fires with the consumer-repo pilot (RM-012) — templates are built from what a real consumer exercise proves is needed, not speculatively. |
 | RM-007 | integration | PR annotations from eval + run logs | 3 | 3 | backlog | plan §5-D | PR checks annotate eval result + link run-log; regression blocks merge. |
 | RM-008 | decision-boundaries | Encoded boundary manifest per agent | 3 | 3 | backlog | plan §5-E; repo audit (Boundaries L2) | Each agent has decide/escalate/never manifest in config; enforced where automatable. |
 | RM-009 | roi-math | Cost/ROI tracker (4 numbers) | 4 | 3 | backlog | plan §5-F | Script reads run logs → hours×rate, error-rate Δ, cycle-time Δ, ramp-time avoided per project. |
 | RM-010 | human-in-the-loop | Standardized escalation/override artifact | 4 | 3 | backlog | plan §5-G; repo audit (HITL L3) | Every handoff emits consistent escalation-context payload + recorded-override entry. |
 | RM-011 | optimize | Drift detection + quarterly ALM reviews | 5 | 4 | backlog | plan §5-A/B; ALM | Behavioral drift score per skill tracked; quarterly stage-gate review held per owner. |
+| RM-012 | integration | Consumer-repo pilot — full loop in one real project | 4 | 3 | backlog | 2026-09-24 triage (user) | Install the framework into one real consumer project, run the complete loop there (plan → implement → verify → review), and harvest the drift, gaps, and byproducts back into skills (the mechanism that produced `releasing-a-version`). Acceptance: a dated harvest record — what drifted, what was missing, which skills gained evals/body corrections — folded into the library; RM-006's templates are scoped from what the exercise proves is needed. **Trigger**: fires when a real-world consumer exercise happens — the row exists so the session that happens in knows the loop's output contract; nothing to build until then. |
+| RM-013 | governance | Skill retirement flow (registry deprecated → removed) | 5 | 3 | backlog | 2026-09-24 triage (user); ADR-0009 | A documented, gated path from `status: deprecated` (ADR-0009) to fully retired: uninstalled by `install.sh`, evals moved out of the gate population (not silently skipped), references updated, registry entry retained with the supersession pointer. Acceptance: a retiring skill demonstrably leaves every gate (validator, per-change mapping, weekly suite) without a red suite or a silent drop — asserted by a retirement checklist + CI green after the removal. **Trigger**: fires on the first real retirement candidate (none exists today; the registry's `deprecated` status is ready for it). |
 
 ## Sequencing rationale
 Phase 1 (RM-001, RM-002, RM-003) is the fast win: observability + continuous
@@ -41,6 +59,12 @@ RM-005, RM-006) converts prose rules into enforced artifacts and ships reusable
 pipelines. Phase 3 (RM-007, RM-008, RM-009, RM-010) closes integration,
 boundary-encoding, ROI, and HITL consistency. Phase 4 (RM-011) is the
 optimizing loop.
+
+RM-012 (consumer-repo pilot) is the standing trigger-gated row: it sits at
+priority 4 not because it is unimportant but because its trigger — a real
+consumer exercise — has not fired; when it fires it becomes the natural
+scoping pass for RM-006. RM-013 keeps the library's lifecycle closed: what
+can be born through the registry can also retire through it.
 ## Next-session entry
 
 RM-001 through RM-005 are done. RM-005 delivered the registry: repo-root
