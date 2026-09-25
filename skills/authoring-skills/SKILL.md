@@ -383,8 +383,11 @@ When this library is consumed via symlinks (`~/.config/opencode/skills/*`
 consumer project. Decide per task: edit the source directly (and
 commit/PR in the skills repo) when the improvement is independent, or
 capture it as a handoff proposal when you are mid-feature-build and want
-to keep the feature branch scoped. Don't let framework tweaks ride along
-inside a feature PR unless they are required by that feature.
+to keep the feature branch scoped. In a framework exercise (a session
+working a target repo), the capture shape and promotion rules are owned
+by `reference/self-improvement.md` — candidates are captured, not fixed
+inline. Don't let framework tweaks ride along inside a feature PR
+unless they are required by that feature.
 
 ## Writing style essentials
 

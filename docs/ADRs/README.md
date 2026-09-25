@@ -26,6 +26,7 @@ Every ADR carries `## Status` with one of:
 | [ADR-0007](ADR-0007-eval-lane-policy-amendment.md) | Eval-lane policy amendment (direct-key despite free-first default) | accepted 2026-09-21 |
 | [ADR-0008](ADR-0008-repo-memory-tiers.md) | Three-tier repo memory; plans tracked here; handoffs retired | accepted 2026-09-23 |
 | [ADR-0009](ADR-0009-registry-manifest.md) | Machine-readable skill/agent registry, validator-enforced | accepted 2026-09-24 |
+| [ADR-0010](ADR-0010-two-way-exercise-loop.md) | Two-way exercise loop — framework candidates + target-repo uplift | accepted 2026-09-24 |
 
 ## Where a decision goes
 
@@ -36,5 +37,6 @@ The plan-lifecycle rule (ADR-0008) is the routing table:
 | Cross-session imperative | `AGENTS.md` | standing rule adopted |
 | Binding/structure decision | `docs/ADRs/` | decided (this directory) |
 | In-flight plan / session handoff | `.opencode/plans/` | essence extracted → `archive/` |
+| Improvement candidate / target-repo uplift | `reference/self-improvement.md` governs; captured in the target repo's `.opencode/exercise.md` | promoted at session close (issues / target-repo memory) → archived |
 | Current state + next action | `docs/ROADMAP.md` | every session boundary |
 | Volatile facts (models, pricing) | `reference/*.md` | re-verified every pass |

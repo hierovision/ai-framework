@@ -224,7 +224,9 @@ from the code — as scope creep until checked against the plan:
   the absence from `Files to Modify` otherwise. Record the request as a
   follow-up note (a `### Follow-ups` block under `## History`, or an
   `## Open Questions` entry) so the next triage / design pass can pick
-  it up without re-deriving it. Do not build it.
+  it up without re-deriving it; in a framework exercise, a
+  skill-improvement urge is captured as an exercise candidate per
+  `reference/self-improvement.md`, not a ride-along edit. Do not build it.
 - The **code** tempts a refactor ("the neighbor function is messy, clean
   it up"): refuse unless that refactor is the change the plan names.
   Record it as a follow-up. An implementer that quietly expands scope
