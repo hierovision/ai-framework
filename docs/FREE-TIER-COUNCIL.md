@@ -23,9 +23,9 @@ where one weak model is riskiest: **planning** and **review**.
 | planner (single-task) | `opencode/nemotron-3-ultra-free` | `planner` (glm-5.3 / claude-opus) |
 | chairman / council planner seat / generalist | `opencode/nemotron-3-ultra-free` | `planner` (glm-5.3 / claude-opus) |
 | coder (implement / test / debug) | `opencode/nemotron-3-ultra-free` | `implementer` (kimi-k2.7-code) |
-| devops / security (council-security) | `opencode/mimo-v2.5-free` | `triager` (mimo-v2.5) |
+| devops / security (council-security) | `opencode/mimo-v2.6-flash-free` | `triager` (mimo-v2.6) |
 | council-performance | `opencode/nemotron-3-ultra-free` | `debugger` / `reviewer` (nemotron) |
-| council-ux | `opencode/mimo-v2.5-free` | `debugger` / `reviewer` (mimo) |
+| council-ux | `opencode/mimo-v2.6-flash-free` | `debugger` / `reviewer` (mimo) |
 | council-architecture | `opencode/muse-spark-1.3-contributor-free` | `planner` (muse-spark) |
 | council-product | `opencode/ling-3.0-flash-fin-free` | `planner` / `triager` (ling) |
 
@@ -66,7 +66,7 @@ plan as the synthesized council result.
 ```markdown
 ---
 name: free-council-devops
-model: opencode/mimo-v2.5-free
+model: opencode/mimo-v2.6-flash-free
 tools: [read, glob, grep]
 ---
 
@@ -108,7 +108,7 @@ Be concrete: cite the AC or step and the feasibility gap. Do NOT edit anything
    (e.g. `designing-cicd`).
 2. Spawn **three** subagents in parallel:
       - `free-council-planner` (`opencode/nemotron-3-ultra-free`) — drafts the plan.
-      - `free-council-devops` (`opencode/mimo-v2.5-free`) — devops/security critique.
+      - `free-council-devops` (`opencode/mimo-v2.6-flash-free`) — devops/security critique.
       - `free-council-coder` (`opencode/nemotron-3-ultra-free`) — coding-
         feasibility critique.
 3. Planner folds B/C findings into a FINAL plan; disagreements go to Open
@@ -121,7 +121,7 @@ Be concrete: cite the AC or step and the feasibility gap. Do NOT edit anything
 1. Orchestrator receives the diff; loads `reviewing-code`.
 2. Spawn three subagents in parallel with the diff in context:
       - `free-council-coder` (`opencode/nemotron-3-ultra-free`) — coding review.
-     - `free-council-devops` (`opencode/mimo-v2.5-free`) — devops/security review.
+     - `free-council-devops` (`opencode/mimo-v2.6-flash-free`) — devops/security review.
      - `free-council-planner` (`opencode/nemotron-3-ultra-free`) — plan/architecture
        coherence + synthesis.
 3. Output: per-member findings + a consensus verdict + any unresolved
