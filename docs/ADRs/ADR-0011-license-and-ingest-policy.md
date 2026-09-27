@@ -53,7 +53,8 @@ provenance is recorded.
   `inspire` at best.
 - `ATTRIBUTION.md` becomes the single source of truth for all external
   provenance; the skill's `references/` directory carries a dated provenance
-  note per ADR-0009.
+  note per the plan's resolved Open Question 2 (2026-09-27; registry shape
+  unchanged per ADR-0009).
 - The new `sourcing-external-skills` skill (Phase 0.5) encodes these rules as
   executable gates.
 
