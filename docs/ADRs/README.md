@@ -27,6 +27,8 @@ Every ADR carries `## Status` with one of:
 | [ADR-0008](ADR-0008-repo-memory-tiers.md) | Three-tier repo memory; plans tracked here; handoffs retired | accepted 2026-09-23 |
 | [ADR-0009](ADR-0009-registry-manifest.md) | Machine-readable skill/agent registry, validator-enforced | accepted 2026-09-24 |
 | [ADR-0010](ADR-0010-two-way-exercise-loop.md) | Two-way exercise loop — framework candidates + target-repo uplift | accepted 2026-09-24 |
+| [ADR-0011](ADR-0011-license-and-ingest-policy.md) | License and ingest policy (MIT; allow-list / never-list; provenance) | accepted 2026-09-27 |
+| [ADR-0012](ADR-0012-untrusted-content-security-gate.md) | Untrusted-content security gate (pre-scan, script review, sign-off) | accepted 2026-09-27 |
 
 ## Where a decision goes
 
