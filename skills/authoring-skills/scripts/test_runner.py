@@ -729,6 +729,12 @@ def test_resolved_cause_and_model_resolution_detector():
     assert runner._resolved_cause("") == ""
     assert runner.is_model_resolution_error("dead session: UnknownError ref=err_1 (ProviderModelNotFoundError)")
     assert not runner.is_model_resolution_error("missing: text: phrase not found: 'Verdict'")
+    # 2026-09-28 weekly run: dead sessions caused by an external_directory
+    # auto-reject (the agent reached for a /tmp scratch dir) must also resolve.
+    ansi = "\x1b[93m\x1b[1m! \x1b[0mpermission requested: external_directory (/tmp/audit-report-iIL08P/*); auto-rejecting\n"
+    cause = runner._resolved_cause(ansi)
+    assert cause.startswith("external_directory auto-reject (/tmp/audit-report"), cause
+    assert runner.is_model_resolution_error(cause) is False
 
 
 def test_model_listed_and_preflight_model():
