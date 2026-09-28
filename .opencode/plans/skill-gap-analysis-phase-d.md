@@ -1,7 +1,9 @@
 # Phase D — adoption briefs (skill-gap-analysis program)
 
-Status: D1 authored + verified — landing PR open (sign-off pending); D2/D3
-briefed, pending dispatch.
+Status: D1 landed; D2 verified — landing PR open; D3 scoped, pending dispatch.
+D2's 37-minute opaque authoring pass is the evidence base for the
+subagent-supervision protocol (`.scratch/skill-gap-analysis/SUBAGENT-PROTOCOL.md`
++ the watchdog) tracked as RM-022.
 Created: 2026-09-28 · Wave scope confirmed by user 2026-09-28.
 Related: `.opencode/plans/skill-gap-analysis.md` (approved plan),
 `.opencode/plans/skill-gap-analysis-gap-map.md` (brief #1),
@@ -144,7 +146,7 @@ lives at `references/provenance.md`; the orchestrator files it into
 | Item | Status | Notes |
 |---|---|---|
 | D1 security review | verified — landing awaits sign-off | official runner 8/8; adversarial transcript clean; §D1 |
-| D2 threat modeling | briefed | dispatch after D1 sign-off |
+| D2 threat modeling | verified — landing PR open | author round 3 6/6; orchestrator re-run 6/6 (official runner, detached + polled under the supervision protocol); §D2 |
 | D3 supply-chain/IR | scoped | design at dispatch |
 
 ## History
@@ -154,3 +156,25 @@ lives at `references/provenance.md`; the orchestrator files it into
   the orchestrator (`validate_skill` OK; official runner 8/8; adversarial
   transcript shows no execution/egress and the injection reported; leak scan
   clean; provenance filed; registry L1 added). Landing PR open for sign-off.
+- 2026-09-28 — D2 authored by a visible subagent: 28 files (SKILL.md +
+  6 references + typed evals + 5 fixture scenarios). The pass converged
+  (round 1 6/6 → round 2 exposed real flakes → fixes → round 3 6/6) but was
+  **opaque**: three 11–13 min blocking eval calls with no heartbeat, and the
+  dispatch was cancelled mid-run by the user. Reconstruction (session event
+  stream + `/tmp` evidence) found no thrashing — the failure was
+  observability, plus two scope violations (global `~/.config/opencode/skills`
+  symlink installed and then removed for a baseline run). D2's transcript,
+  cost ($0.083) and tool histogram are in the session store; the round logs
+  are `/tmp/opencode/d2-eval-logs*/`.
+- 2026-09-28 — Subagent-supervision protocol adopted in response
+  (`.scratch/skill-gap-analysis/SUBAGENT-PROTOCOL.md` + `tools/watch_agent.py`):
+  bounded ≤10 min dispatches, a mandatory heartbeat file, no blocking call
+  over 180 s (detach eval rounds with a log and poll), explicit scope
+  prohibitions, and a watchdog that cross-checks the heartbeat against
+  opencode's event stream (flags STALLED / BLOCKING WAIT / LOOP / out-of-scope
+  mutation). Tracked as RM-022 for promotion into tested `scripts/` tooling.
+- 2026-09-28 — D2 independently re-verified under that protocol: official
+  runner `--skill modeling-threats` **6/6 PASS** (detached, JSONL-polled,
+  self-cleaning temporary global link); `validate_skill` OK; 26 manifests
+  resolve; typed-eval gate passes; leak scan clean; provenance complete.
+  Landing PR open for sign-off.
