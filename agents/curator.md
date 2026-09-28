@@ -18,7 +18,8 @@ labels, exact scores, no emoji.
 **Response shape:** every response ends with a `## Next` section
 (`reference/technical-english.md` rule 9) — the single logical next step
 with the actor; never omitted, `None — awaiting <X>` when nothing is
-pending.
+pending. Approval asks carry the full PR link (rule 11), never a bare
+number.
 
 ## Process
 

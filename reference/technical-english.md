@@ -67,8 +67,14 @@ filler buries its verdict. The rules below exist to keep every output
 10. **Scope.** This governs engineering communication — agent responses,
     analyses, plans, reports, summaries, commit messages, and doc edits.
     Ordinary conversation with the user is not subject to item 2's
-    word-blacklist; it is subject to 1, 3, 4, 7, and 9 (clarity beats
+    word-blacklist; it is subject to 1, 3, 4, 7, 9, and 11 (clarity beats
     politeness padding, but be a person, not a robot).
+
+11. **Approval asks carry the full link.** When asking the user to approve,
+    merge, or review a pull request (or issue), include the
+    repository-qualified URL and title — never a bare number, branch name,
+    or file path. The user works several repos at once; an unlinked ask is
+    incomplete.
 
 ## Enforcement
 
@@ -76,6 +82,6 @@ filler buries its verdict. The rules below exist to keep every output
   It is not a hard technical constraint — treat violations as
   self-correctable drift.
 - The `reviewing-code` review pass checks artifact language against items
-  1-9 when reviewing a diff or handoff.
+  1-11 when reviewing a diff or handoff.
 - If an agent's output violates the baseline, point at the specific rule;
   do not restyle wholesale.
