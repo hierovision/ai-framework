@@ -234,3 +234,16 @@ No DB, no generated types.
   entry. Five improvement candidates captured in
   `.scratch/skill-gap-analysis/subagent-issues.md` (one pre-dispatch, four
   from the run).
+- 2026-09-28 — Phase 0.5 landed: `sourcing-external-skills` (SKILL.md + 3
+  references + 7-eval manifest, typed `expect`, 7/7 use-case coverage) authored
+  under `authoring-skills`, then independently re-verified by a fresh session
+  under runner-real isolation (`deepseek/deepseek-flash`, CI continuation
+  policy): 7/7 evals pass, no wild-content execution, no network egress,
+  fixture hashes intact. Pre-landing fixes: eval-1 `expect` aligned to the
+  skill's own register schema; stale use-case-1 wording; residual fixture-name
+  leak; ADR-0011 allow/never lists restated in
+  `references/license-policy.md` (runner-reachable execution; ADR stays the
+  authority). Review: `approve-with-nits` (indent + handoff-template nits
+  fixed). Registry: L1 entry added. Deferred framework debt: the tested agent
+  can read the skill's `evals/` answer key under the installed layout —
+  sanitized staging belongs in `run_behavioral_eval.py`, tracked separately.

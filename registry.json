@@ -138,6 +138,14 @@
       "boundary_ref": "skills/securing-ci/SKILL.md"
     },
     {
+      "name": "sourcing-external-skills",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L1",
+      "status": "active",
+      "boundary_ref": "skills/sourcing-external-skills/SKILL.md"
+    },
+    {
       "name": "triaging-requirements",
       "type": "skill",
       "owner": "@hierovision",
