@@ -178,3 +178,6 @@ belongs in the adapted skill's own eval net at Phase D.
   D3 supply-chain/IR (house-authored). Inspiration items are consumed
   explicitly per the phase-d briefs (`.opencode/plans/skill-gap-analysis-phase-d.md`).
   D1 dispatched for authoring.
+- 2026-09-28 — D1 `reviewing-security` authored and independently verified
+  (official runner 8/8; adversarial transcript clean); landing PR open,
+  awaiting user sign-off.

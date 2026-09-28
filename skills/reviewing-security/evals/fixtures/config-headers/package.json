@@ -1,0 +1,12 @@
+{
+  "name": "checkout-web",
+  "private": true,
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "cors": "^2.8.5",
+    "jsonwebtoken": "*"
+  }
+}

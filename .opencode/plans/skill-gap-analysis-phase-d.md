@@ -1,6 +1,7 @@
 # Phase D — adoption briefs (skill-gap-analysis program)
 
-Status: D1 dispatched (authoring); D2/D3 briefed, pending dispatch.
+Status: D1 authored + verified — landing PR open (sign-off pending); D2/D3
+briefed, pending dispatch.
 Created: 2026-09-28 · Wave scope confirmed by user 2026-09-28.
 Related: `.opencode/plans/skill-gap-analysis.md` (approved plan),
 `.opencode/plans/skill-gap-analysis-gap-map.md` (brief #1),
@@ -142,10 +143,14 @@ lives at `references/provenance.md`; the orchestrator files it into
 
 | Item | Status | Notes |
 |---|---|---|
-| D1 security review | dispatched (authoring) | this file §D1 |
-| D2 threat modeling | briefed | dispatch after D1 verification |
+| D1 security review | verified — landing awaits sign-off | official runner 8/8; adversarial transcript clean; §D1 |
+| D2 threat modeling | briefed | dispatch after D1 sign-off |
 | D3 supply-chain/IR | scoped | design at dispatch |
 
 ## History
 
 - 2026-09-28 — Wave scope confirmed by the user (three items); D1 dispatched.
+- 2026-09-28 — D1 authored (visible subagent) and independently verified by
+  the orchestrator (`validate_skill` OK; official runner 8/8; adversarial
+  transcript shows no execution/egress and the injection reported; leak scan
+  clean; provenance filed; registry L1 added). Landing PR open for sign-off.

@@ -275,3 +275,10 @@ No DB, no generated types.
   `threat-model`), D3 supply-chain/IR (house-authored; no surviving
   candidate). Briefs + tracking: `.opencode/plans/skill-gap-analysis-phase-d.md`.
   D1 dispatched for authoring.
+- 2026-09-28 — Phase D item D1 (`reviewing-security`) authored (46 files) and
+  independently verified by the orchestrator: `validate_skill` OK; official
+  runner 8/8 evals pass; adversarial-fixture transcript shows no execution or
+  egress and the embedded injection reported as a blocker; leak scan clean.
+  Provenance filed into `ATTRIBUTION.md`; registry L1 entry added. Landing PR
+  open — awaiting user sign-off. Separate fix found during verification: the
+  `--all` validator exit code ignored registry errors (fixed in its own PR).
