@@ -23,7 +23,7 @@
     },
     {
       "id": 2,
-      "prompt": "set up supabase CI for our app: staging and prod, each its own project. we want migrations applied via `supabase db push` with a staging-canary (staging first, then prod), and a preview environment per PR using supabase branching. write the plan, don't run anything",
+      "prompt": "set up supabase CI for our app: staging and prod, each its own project. we want migrations applied via `supabase db push` with a staging-canary (staging first, then prod), and a preview environment per PR using supabase branching. write the plan, don't run anything. the repo is at fixtures/phasewave/supabase-ci/ — treat that directory as the repo root",
       "expected_behavior": [
         "Treats this as gated/design: produces a plan + drafted workflow, does NOT run `supabase db push`",
         "Names both environments (staging, production) as distinct Supabase projects with their own project-ref / DB URL",
@@ -34,13 +34,21 @@
         "Keeps audit logging (pgaudit) ON and treats config as code (config.toml applied via CLI)",
         "Cross-references designing-cicd (topology) and securing-ci (token hardening); ends with the approval question; STOP"
       ],
+      "expect": {
+        "artifact": [
+          {
+            "path": "**/supabase-ci.md",
+            "phrases": ["concurrency", "pgaudit"]
+          }
+        ]
+      },
       "files": [
         "fixtures/phasewave/supabase-ci/AGENTS.md"
       ]
     },
     {
       "id": 3,
-      "prompt": "a teammate wants to edit an already-applied supabase migration to fix a column type before pushing, instead of writing a new migration. is that ok? repo is the working directory",
+      "prompt": "a teammate wants to edit an already-applied supabase migration to fix a column type before pushing, instead of writing a new migration. is that ok? the repo is at fixtures/phasewave/supabase-ci/ — treat that directory as the repo root",
       "expected_behavior": [
         "Recognizes this as a forward-only violation: editing/reordering an applied migration desyncs `_supabase_migrations` history from the DB",
         "Refuses the edit-and-push approach and says to write a NEW migration that alters the column type instead",
@@ -48,6 +56,9 @@
         "Does not green-light the change; routes the correct approach (new migration) and stops at the explanation — does not run anything",
         "[fix-verified] Applies the forward-only rule to a column-type 'fix' even though the skill body's example is a different change (the agent applies the invariant, not the example wording)"
       ],
+      "expect": {
+        "text": ["forward-only", "new migration"]
+      },
       "files": [
         "fixtures/phasewave/supabase-ci/AGENTS.md"
       ]
