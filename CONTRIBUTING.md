@@ -9,7 +9,8 @@ flow.
 
 Branch names derive from the plan slug: `<type>/<name>`
 (`reference/git-workflow.md`). main is protected; merges are PRs,
-user-initiated. Trivial edits skip the plan, never the branch.
+user-initiated, squash-only. Trivial edits skip the plan, never the
+branch.
 
 ## The contribution flow (skill authoring)
 
