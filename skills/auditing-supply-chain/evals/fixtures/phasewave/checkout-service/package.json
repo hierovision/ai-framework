@@ -1,0 +1,15 @@
+{
+  "name": "checkout-service",
+  "version": "3.4.1",
+  "private": true,
+  "description": "Checkout API used by the storefront",
+  "dependencies": {
+    "express": "^4.19.2",
+    "lodash": "*",
+    "internal-auth": "github:acme/internal-auth#main",
+    "axios": "~1.7.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0"
+  }
+}

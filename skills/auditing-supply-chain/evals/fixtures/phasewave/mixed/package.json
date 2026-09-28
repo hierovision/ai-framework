@@ -1,0 +1,9 @@
+{
+  "name": "mixed-service",
+  "version": "0.9.0",
+  "private": true,
+  "dependencies": {
+    "express": "latest",
+    "minimist": "^1.2.0"
+  }
+}

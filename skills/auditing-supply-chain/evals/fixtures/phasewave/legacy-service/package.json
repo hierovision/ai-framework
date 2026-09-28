@@ -1,0 +1,10 @@
+{
+  "name": "legacy-service",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "lodahs": "^1.0.0",
+    "express": "*",
+    "request": "^2.88.0"
+  }
+}
