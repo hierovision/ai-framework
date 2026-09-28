@@ -172,15 +172,15 @@ For a user-facing item, invoke `council-ux` (subagent_type `council-ux`)
 
 **An empty result is a hard failure, never a silent skip.** The nested
 free-tier consult path can return an empty result with no visible error
-(`agents/council.md` → Known limitation documents the rule, the recovery
-path, and the model binding). Do not read an empty result as "no
-concerns". Attempt the documented fallback **once** — run the UX lens as
-the default agent with its bound model forced explicitly and the lens
-brief inline, verifying the run header before trusting the output. If
-the fallback also returns empty or cannot run, record an explicit
-`UX consult skipped — <reason>`, carry the consult as a residual for the
-runtime validation handoff (`validating-ui`), and proceed with the draft
-— one recovery attempt, never a retry loop, and never a silent loss.
+(`agents/council.md` → Known limitation documents the rule and the
+recovery; read it when reachable). Do not read an empty result as "no
+concerns". Attempt the fallback **once**, with no external read required:
+run the UX lens as a general subagent with the lens brief inline, and
+record which fallback form ran. If it also returns empty or cannot run,
+record an explicit `UX consult skipped — <reason>`, carry the consult as
+a residual for the runtime validation handoff (`validating-ui`), and
+proceed with the draft — one recovery attempt, never a retry loop, and
+never a silent loss.
 
 Fold each concern into the plan: a new or refined acceptance criterion
 (with a concrete verifier), an Open Question (with a proposed default),
