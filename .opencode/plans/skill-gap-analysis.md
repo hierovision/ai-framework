@@ -282,3 +282,6 @@ No DB, no generated types.
   Provenance filed into `ATTRIBUTION.md`; registry L1 entry added. Landing PR
   open — awaiting user sign-off. Separate fix found during verification: the
   `--all` validator exit code ignored registry errors (fixed in its own PR).
+- 2026-09-28 — Phase D item D1 (`reviewing-security`) **landed**: user sign-off
+  given; PR #40 squash-merged as `e0baae9`; registry L1 + ATTRIBUTION filed;
+  `install.sh` refreshed (25 skills linked). D2 dispatch next.

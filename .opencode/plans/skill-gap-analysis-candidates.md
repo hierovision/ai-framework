@@ -181,3 +181,5 @@ belongs in the adapted skill's own eval net at Phase D.
 - 2026-09-28 — D1 `reviewing-security` authored and independently verified
   (official runner 8/8; adversarial transcript clean); landing PR open,
   awaiting user sign-off.
+- 2026-09-28 — **D1 landed**: sign-off given; PR #40 squash-merged as
+  `e0baae9`. D2 (`threat-modeling`) next.

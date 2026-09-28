@@ -36,7 +36,7 @@
     },
     {
       "id": 2,
-      "prompt": "can you check my changes against the plan before I merge? the diff is in change.diff and the plan is .opencode/plans/feat-offline-queue.md (approved). repo is the working directory",
+      "prompt": "can you check my changes against the plan before I merge? the diff is in change.diff and the plan is .opencode/plans/feat-offline-queue.md (approved). the repo is at fixtures/phasewave/scenario-2-scope-breach/ — treat that directory as the repo root",
       "expected_behavior": [
         "Reads the plan at .opencode/plans/feat-offline-queue.md and change.diff before forming any finding",
         "Maps every diff hunk to the plan's Files to Modify (src/lib/offline-queue.ts, src/stores/focus-timer.ts): the in-scope queue/store edits map cleanly, BUT the diff ALSO edits db/schema.sql \u2014 a file NOT in Files to Modify",
@@ -49,6 +49,14 @@
         "Makes ZERO source edits \u2014 verify-review.js confirms source hashes unchanged",
         "[fix-verified] the grader accepts a legitimate missing-AC major even when it names an in-scope file (not just the planted schema.sql blocker) \u2014 missing-AC coverage is a real major, not a false positive; only a BLOCKER accusing correct in-scope code of a defect is rejected (grader narrowed to blockers-only after the round-1 over-strict guard)"
       ],
+      "expect": {
+        "artifact": [
+          {
+            "path": "**/REVIEW.md",
+            "phrases": ["request-changes", "schema.sql"]
+          }
+        ]
+      },
       "files": [
         "fixtures/phasewave/scenario-2-scope-breach/AGENTS.md",
         "fixtures/phasewave/scenario-2-scope-breach/package.json",
@@ -65,7 +73,7 @@
     },
     {
       "id": 3,
-      "prompt": "the implement pass just handed off for feat-session-sort \u2014 review the diff in change.diff against the approved plan at .opencode/plans/feat-session-sort.md. I want to merge this. repo is the working directory",
+      "prompt": "the implement pass just handed off for feat-session-sort \u2014 review the diff in change.diff against the approved plan at .opencode/plans/feat-session-sort.md. I want to merge this. the repo is at fixtures/phasewave/scenario-3-weakened-net/ — treat that directory as the repo root",
       "expected_behavior": [
         "Reads the plan and change.diff; maps hunks to Files to Modify (src/lib/session-list.js, tests/session-sort.test.js)",
         "Inspects the TEST NET specifically: detects that the diff makes a previously-failing test pass by WEAKENING the net \u2014 e.g. adding .skip / deleting an assertion / widening a tolerance / guarding with try-catch \u2014 rather than fixing the code (the cardinal rule from debugging-test-failures, cited in this skill's body)",
@@ -77,6 +85,14 @@
         "Makes ZERO source edits \u2014 verify-review.js confirms source hashes unchanged",
         "[fix-verified] the grader accepts a legitimate additional blocker against the unimplemented source (src/lib/session-list.js still unsorted) alongside the planted weakened-net blocker \u2014 real additional defects are not false positives (grader guard removed after the round-1 over-strict check)"
       ],
+      "expect": {
+        "artifact": [
+          {
+            "path": "**/REVIEW.md",
+            "phrases": ["request-changes", "session-sort.test"]
+          }
+        ]
+      },
       "files": [
         "fixtures/phasewave/scenario-3-weakened-net/AGENTS.md",
         "fixtures/phasewave/scenario-3-weakened-net/package.json",
@@ -90,7 +106,7 @@
     },
     {
       "id": 4,
-      "prompt": "review change.diff against the plan at .opencode/plans/feat-session-sort.md (approved) \u2014 is this good to merge? repo is the working directory",
+      "prompt": "review change.diff against the plan at .opencode/plans/feat-session-sort.md (approved) \u2014 is this good to merge? the repo is at fixtures/phasewave/scenario-4-design-defect/ — treat that directory as the repo root",
       "expected_behavior": [
         "Reads the WHOLE plan at .opencode/plans/feat-session-sort.md \u2014 Goal AND every Acceptance Criterion \u2014 and the change.diff",
         "Detects the plan-internal contradiction: the Goal states oldest-first/chronological (ascending) while AC1 specifies descending (newest-first); the diff correctly implements AC1 (descending) \u2014 so the code matches one side of a self-contradicting plan",
@@ -102,6 +118,14 @@
         "Does NOT manufacture a code-correctness blocker (the code is not the defect) and does NOT bury the design conflict among nits",
         "[fix-verified] the grader does NOT reject a missing-AC major that references a test file \u2014 only a BLOCKER targeting the code (without plan/design context) is rejected, since a code blocker would force request-changes and contradict the blocked-on-design verdict (grader narrowed from blocker+major to blocker-only after the round-1 over-strict guard)"
       ],
+      "expect": {
+        "artifact": [
+          {
+            "path": "**/REVIEW.md",
+            "phrases": ["blocked-on-design", "Goal"]
+          }
+        ]
+      },
       "files": [
         "fixtures/phasewave/scenario-4-design-defect/AGENTS.md",
         "fixtures/phasewave/scenario-4-design-defect/package.json",
@@ -116,7 +140,7 @@
     },
     {
       "id": 5,
-      "prompt": "review the change.diff for feat-shared-sessions against the plan at .opencode/plans/feat-shared-sessions.md (approved). the repo is the working directory \u2014 I want to ship this",
+      "prompt": "review the change.diff for feat-shared-sessions against the plan at .opencode/plans/feat-shared-sessions.md (approved). the the repo is at fixtures/phasewave/scenario-5-rls/ — treat that directory as the repo root \u2014 I want to ship this",
       "expected_behavior": [
         "Reads the plan and change.diff; detects the stack is vue-supabase from AGENTS.md and loads the matching review-time stack reference under the skill's own references/stacks/ (resolved against the skill dir, not the project) for the RLS-policy review concerns",
         "Maps hunks to Files to Modify (db/schema.sql policy section + src/stores/sessions.ts) \u2014 the edits ARE in scope (no scope-breach finding), but the RLS POLICY written in the diff is the defect",
@@ -129,6 +153,14 @@
         "[fix-verified] the grader accepts a review that flags a legitimate ADDITIONAL real defect beyond the planted RLS widening (e.g. an owner_id NOT NULL insert-failure blocker in sessions.ts) \u2014 a good review finding more real defects is NOT a false positive (grader fix after the round-1 over-strict guard)",
         "[fix-verified] correctly reads the BUNDLED vue-supabase stack reference for the RLS-policy review guidance rather than treating its absence as a project gap (regression check for the stack-ref-path resolution)"
       ],
+      "expect": {
+        "artifact": [
+          {
+            "path": "**/REVIEW.md",
+            "phrases": ["request-changes", "USING"]
+          }
+        ]
+      },
       "files": [
         "fixtures/phasewave/scenario-5-rls/AGENTS.md",
         "fixtures/phasewave/scenario-5-rls/package.json",
