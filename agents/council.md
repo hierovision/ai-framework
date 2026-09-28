@@ -50,9 +50,9 @@ your own.
 
 | Agent | Default (free) model | Lens |
 |-------|----------------------|------|
-| `council-security` | opencode/mimo-v2.5-free | Vulnerability analysis, edge cases, data safety |
+| `council-security` | opencode/mimo-v2.6-flash-free | Vulnerability analysis, edge cases, data safety |
 | `council-performance` | opencode/nemotron-3-ultra-free | Bottlenecks, N+1 queries, caching, scalability |
-| `council-ux` | opencode/mimo-v2.5-free | End-user UX + developer experience, component patterns |
+| `council-ux` | opencode/mimo-v2.6-flash-free | End-user UX + developer experience, component patterns |
 | `council-architecture` | opencode/muse-spark-1.3-contributor-free | Pattern alignment, tech debt, testability |
 | `council-product` | opencode/ling-3.0-flash-fin-free | Requirements fit, scope, priority, business logic gaps |
 
@@ -120,7 +120,7 @@ custom personas are rejected regardless of model:
    framing — inline the persona's key instructions in the prompt instead.
 2. **Paid council (Go/Zen):** `mode: all` on the council agents makes the
    personas primary-capable — `opencode run --agent council-security` resolves
-   the true persona + its bound model (`council-security · mimo-v2.5-free`
+   the true persona + its bound model (`council-security · mimo-v2.6-flash-free`
    header), and works cleanly on `opencode-go/` and `opencode/` models.
 3. In every case, verify each member's run header shows the intended
    `agent · model` line BEFORE synthesizing; a mismatch means the lens ran on
