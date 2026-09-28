@@ -10,6 +10,14 @@
       "boundary_ref": "skills/auditing-accessibility/SKILL.md"
     },
     {
+      "name": "auditing-supply-chain",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L1",
+      "status": "active",
+      "boundary_ref": "skills/auditing-supply-chain/SKILL.md"
+    },
+    {
       "name": "authoring-skills",
       "type": "skill",
       "owner": "@hierovision",
@@ -72,6 +80,14 @@
       "maturity": "L2",
       "status": "active",
       "boundary_ref": "skills/designing-cicd/SKILL.md"
+    },
+    {
+      "name": "handling-security-incidents",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L1",
+      "status": "active",
+      "boundary_ref": "skills/handling-security-incidents/SKILL.md"
     },
     {
       "name": "implementing-features",

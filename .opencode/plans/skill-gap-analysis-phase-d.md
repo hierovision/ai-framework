@@ -1,6 +1,6 @@
 # Phase D — adoption briefs (skill-gap-analysis program)
 
-Status: D1 landed; D2 verified — landing PR open; D3 scoped, pending dispatch.
+Status: D1 and D2 landed; D3 authored (two skills) — eval verification in flight.
 D2's 37-minute opaque authoring pass is the evidence base for the
 subagent-supervision protocol (`.scratch/skill-gap-analysis/SUBAGENT-PROTOCOL.md`
 + the watchdog) tracked as RM-022.
@@ -138,6 +138,18 @@ lives at `references/provenance.md`; the orchestrator files it into
 - **Inspiration only:** dcode (detect→respond loop), trailofbits (supply-chain
   audit practices — never-list; ideas only), ghost (scan→validate pattern
   noted in its reject entry).
+- **Decision (2026-09-28, at dispatch): TWO skills** —
+  `auditing-supply-chain` (the audit spine: untrusted chain material, triage of
+  every signal, read-only/offline) and `handling-security-incidents` (the NIST
+  SP 800-61 lifecycle: validate → timeline → severity → containment/
+  eradication/recovery → post-incident record; supply-chain incidents are the
+  primary worked case, the lifecycle general). Rationale: crisp boundaries
+  (different triggers, postures, artifacts, closure conditions); incident
+  handling arrives cold and does not require an audit, so there is no shared
+  artifact justifying a bundle; a single skill would straddle two disciplines
+  in its description and disclaim most of incident response's natural surface.
+  Rejected fallback: one `auditing-supply-chain` skill with a supply-chain-
+  scoped response pass (narrows incident response to one cause).
 - **Open design decision at dispatch:** one skill or two (audit vs response);
   decide with the authoring pass and record in this file.
 
@@ -147,7 +159,7 @@ lives at `references/provenance.md`; the orchestrator files it into
 |---|---|---|
 | D1 security review | landed (PR #40, `e0baae9`) | official runner 8/8; adversarial transcript clean; §D1 |
 | D2 threat modeling | verified — landing PR open | author round 3 6/6; orchestrator re-run 6/6 (official runner, detached + polled under the supervision protocol); §D2 |
-| D3 supply-chain/IR | scoped | design at dispatch |
+| D3 supply-chain/IR | verified 10/10 — landing PR open | `auditing-supply-chain` + `handling-security-incidents`; validator OK; 10 typed evals; §D3 |
 
 ## History
 
@@ -180,3 +192,20 @@ lives at `references/provenance.md`; the orchestrator files it into
   self-cleaning temporary global link); `validate_skill` OK; 26 manifests
   resolve; typed-eval gate passes; leak scan clean; provenance complete.
   Landing PR open for sign-off.
+- 2026-09-28 — D3 authored under the bounded-dispatch protocol (heartbeat
+  `d3-author.log`: START 22:10:46Z → DONE 22:16:21Z; **no model calls in the
+  authoring pass**): two skills — `auditing-supply-chain` (28 files) and
+  `handling-security-incidents` (21 files), both validator-OK, 10 typed evals
+  with workdir-relative prompts and self-contained fixtures. Decision and
+  rationale recorded in §D3.
+- 2026-09-28 — D3 independently verified under the same protocol (detached
+  official-runner round, JSONL-polled): 7/10 first pass; all three failures
+  were **expect-wording artefacts, not behaviour** — the artifacts carried the
+  routing tokens and the incident records carried
+  containment/eradication/recovery/post-incident. Corrections: dropped a
+  redundant text assertion (`auditing-supply-chain#2` — the artifact already
+  pins the sibling hand-offs), dropped the literal `out of scope` phrase
+  (`handling-security-incidents#3`), and `lessons` → `post-incident`
+  (`handling-security-incidents#5`). Re-verified 3/3 PASS → suite **10/10**.
+  Registry L1 ×2 added; provenance notes are house-authored (no
+  `ATTRIBUTION.md` row).

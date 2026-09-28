@@ -1,0 +1,5 @@
+02:00:03 backup-agent[812]: starting nightly backup job backup-nightly-db
+02:00:04 backup-agent[812]: destination s3://acme-backups-prod/db/ (allowlisted egress rule egress-allow-backups)
+02:00:41 backup-agent[812]: uploaded 48.2 GiB in 37s
+02:00:42 backup-agent[812]: backup-nightly-db completed status=ok
+02:01:00 cron[1]: job backup-nightly-db next run 2026-09-29T02:00:00Z

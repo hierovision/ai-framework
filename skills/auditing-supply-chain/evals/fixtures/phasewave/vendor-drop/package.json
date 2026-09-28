@@ -1,0 +1,9 @@
+{
+  "name": "pdf-utils",
+  "version": "0.0.3",
+  "description": "PDF helper",
+  "scripts": {
+    "postinstall": "node ./setup.js"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,6 @@
+2026-09-21T09:12:44Z sign checkout-service-1.4.0 key=release-signer-2025
+2026-09-22T11:02:10Z publish checkout-service-1.4.0
+2026-09-27T15:40:02Z sign checkout-service-1.4.1 key=release-signer-2025
+2026-09-27T15:41:33Z publish checkout-service-1.4.1
+2026-09-28T08:05:00Z ci-log-export uploaded to public paste (contains key=...)
+2026-09-28T09:30:00Z leak reported by external researcher
