@@ -269,3 +269,9 @@ No DB, no generated types.
   (register decision log + `logs/run-2026-09-28.jsonl` run ids). Baseline
   saturation noted on the review fixture. Phase D adoption design next
   (per-item user sign-off).
+- 2026-09-28 — Phase D wave scope confirmed by the user: three items — D1
+  `reviewing-security` (adapt `claude-code-owasp` + re-expressed review lens;
+  trailofbits as inspiration-only), D2 threat-modeling skill (adapt
+  `threat-model`), D3 supply-chain/IR (house-authored; no surviving
+  candidate). Briefs + tracking: `.opencode/plans/skill-gap-analysis-phase-d.md`.
+  D1 dispatched for authoring.
