@@ -729,11 +729,15 @@ def model_listed(output, model):
 
 
 def preflight_model(model):
-    """Verify the model binding resolves before a suite spends an hour.
+    """Best-effort catalog check before a suite; ADVISORY ONLY.
 
-    Returns `(True, "")` when listed, `(False, reason)` when the catalog is
-    reachable and the model is absent, and `(None, reason)` when the check
-    itself could not run (fail-open: never block a suite on the preflight).
+    Returns `(True, "")` when listed and `(False, reason)` / `(None, reason)`
+    otherwise — the caller must NOT block on this. 2026-09-28 CI finding:
+    `opencode models` is not a reliable oracle across environments — a CI
+    runner listed 12 gateway models and omitted `deepseek/deepseek-flash`
+    (the direct-key lane the suite actually uses, which resolves and runs
+    fine there). A listing gap therefore means "cannot tell", never "broken".
+    The behaviour-based guard is the consecutive-death early abort instead.
     """
     try:
         proc = subprocess.run(["opencode", "models"], capture_output=True,
@@ -744,7 +748,8 @@ def preflight_model(model):
     if model_listed(text, model):
         return True, ""
     return False, (f"model {model!r} is not in `opencode models` "
-                   f"({len(text.splitlines())} lines listed)")
+                   f"({len(text.splitlines())} lines listed; CI omits the "
+                   f"direct-key lane — advisory only)")
 
 
 def invoke_opencode(e, model=None, turn=None):
@@ -1042,19 +1047,16 @@ def main(argv=None):
             return stub_result(e, args.stub_output, _stub_calls)
         return invoke_opencode(e, model=args.model, turn=turn)
 
-    # Preflight the model binding before spending the suite (2026-09-28,
-    # RM-021): an unresolvable model fails EVERY eval in ~2s
-    # (ProviderModelNotFoundError) and reads as hundreds of regressions. Fail
-    # fast and distinctly; skipped in stub/fixture mode (no model call) and in
-    # offline dev runs. The check itself fails OPEN (never blocks a suite).
+    # Catalog preflight (2026-09-28, RM-021): ADVISORY only. `opencode models`
+    # is not a reliable oracle across environments (CI lists 12 gateway models
+    # and omits the direct-key lane the suite uses), so a listing gap must
+    # never block a suite. The real guard is the consecutive-death early abort
+    # in the loop below. Skipped in stub/fixture mode (no model call).
     if (args.model and not args.stub_output and not args.event_fixture
             and not args.no_preflight):
         ok, why = preflight_model(args.model)
-        if ok is False:
-            print(f"infra error: {why}", file=sys.stderr)
-            return 3
-        if ok is None:
-            print(f"warning: {why}", file=sys.stderr)
+        if ok is not True:
+            print(f"warning: preflight: {why}", file=sys.stderr)
 
     failed = 0
     infra_deaths = 0

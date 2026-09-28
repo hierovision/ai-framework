@@ -162,14 +162,17 @@ deepseek/deepseek-flash`, each turn dying in ~2 s at model resolution), the
 runner guards the suite so one broken catalog cannot read as hundreds of
 regressions:
 
-- **Preflight** — before a suite the runner checks the model against
-  `opencode models` and exits **3** with `infra error: model … not in …` when
-  it is absent. The check **fails open**: a preflight that cannot run itself
-  only warns. `--no-preflight` skips it (offline/dev runs).
+- **Preflight (advisory)** — before a suite the runner checks the model against
+  `opencode models` and prints a warning when it is absent. It never blocks:
+  `opencode models` is not a reliable oracle across environments — a CI runner
+  listed 12 gateway models and omitted `deepseek/deepseek-flash` while the
+  direct-key lane resolved and ran fine there. A listing gap means "cannot
+  tell", never "broken". `--no-preflight` skips it.
 - **Fresh-retry backoff** — `FRESH_RETRY_BACKOFF_SECONDS` (5 s, then 15 s)
   before each fresh retry; immediate retries re-hit the unloaded catalog.
-- **Early abort** — three consecutive model-resolution deaths stop the suite
-  with a clear message and exit **3**, instead of burning the run.
+- **Early abort** — the real guard: three consecutive model-resolution deaths
+  stop the suite with a clear message and exit **3**, instead of burning the
+  run.
 - **Quarantine integrity** — an infra death is never recorded as an eval
   failure; only content misses mark an eval flaky.
 
