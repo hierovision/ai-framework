@@ -1,0 +1,137 @@
+schema: threat-model/v1
+project: raster-import
+version: "2.1.0 @ e7d41b9"
+date: 2026-08-20
+prose: {path: threat-model.md, sha256: "a1b2c3d4e5f60718293a4b5c6d7e8f901a2b3c4d5e6f708192a3b4c5d6e7f809"}
+model_status: accepted
+triage_policy: strict
+confidence: {documented: 11, maintainer: 1, assumption: 0, inferred: 0}
+
+components:
+  - name: parser
+    scope: in
+    reachability_precondition: "reachable from the document bytes"
+    provenance: {kind: documented, source: "API reference"}
+  - name: scene
+    scope: in
+    provenance: {kind: documented, source: "API reference"}
+  - name: tools
+    scope: out
+    reason: "unsupported developer tooling"
+    provenance: {kind: documented, source: "README: tools"}
+
+entry_points:
+  - id: parse
+    component: parser
+    parameters:
+      - name: document
+        attacker_controllable: true
+        control_kinds: [data, size]
+        caller_must_enforce: "bound input size"
+        provenance: {kind: documented, source: "API reference"}
+      - name: path
+        attacker_controllable: false
+        control_kinds: [resource-name]
+        caller_must_enforce: "pass a trusted path"
+        provenance: {kind: documented, source: "API reference"}
+
+contract_dimensions:
+  - component: parser
+    dimension: recursive-topology
+    status: claimed
+    conditions: "nesting depth bounded by the format cap (256 levels)"
+    routes_to: "§11 PP-RECURSION"
+    provenance: {kind: documented, source: "format spec: nesting"}
+  - component: parser
+    dimension: numeric-domain
+    status: claimed
+    conditions: "supported sizes fail cleanly before integer wrap"
+    routes_to: "§11 PP-MEMSAFE"
+    provenance: {kind: documented, source: "format spec"}
+  - component: parser
+    dimension: resource-complexity
+    status: disclaimed
+    conditions: "no wall-clock timeout; caller caps elapsed time"
+    routes_to: "§12 DB-NO-TIMEOUT"
+    provenance: {kind: documented, source: "README FAQ"}
+
+properties_provided:
+  - id: PP-RECURSION
+    components: [parser]
+    tier: security-critical
+    conditions: "default build; nesting deeper than 256 is rejected"
+    violation_symptoms: [crash, stack-exhaustion]
+    voids: ["RASTER_FAST build flag — see §6"]
+    provenance: {kind: documented, source: "format spec: nesting"}
+  - id: PP-MEMSAFE
+    components: [parser]
+    tier: security-critical
+    conditions: "well-formed input; supported build"
+    violation_symptoms: [crash, oob-read, oob-write]
+    voids: []
+    provenance: {kind: documented, source: "API reference"}
+
+properties_disclaimed:
+  - id: DB-NO-TIMEOUT
+    components: [parser]
+    conditions: "any document; callers cap elapsed time"
+    tier: correctness-only
+    false_friend: false
+    provenance: {kind: documented, source: "README FAQ"}
+
+adversaries:
+  - name: document-author
+    scope: in
+    capabilities: [supply-document-bytes, choose-nesting-depth]
+    excluded_capabilities: [execute-in-host-process]
+    goals: [crash, resource-exhaustion]
+    provenance: {kind: documented, source: "SECURITY.md"}
+
+dependencies: []
+
+build_flags:
+  - name: RASTER_FAST
+    default: "off"
+    maintainer_stance: discouraged
+    affects_properties: [PP-RECURSION]
+    provenance: {kind: maintainer, date: "2026-07"}
+
+known_misuses:
+  - id: KM-FAST
+    components: [parser]
+    pattern: "parsing untrusted documents with RASTER_FAST enabled"
+    safer_alternative: "keep RASTER_FAST disabled for untrusted input"
+    provenance: {kind: maintainer, date: "2026-07"}
+
+known_non_findings: []
+
+downstream_responsibilities:
+  - id: DR-BOUNDS
+    statement: "bound input size and elapsed time"
+    provenance: {kind: documented, source: "README"}
+
+dispositions:
+  - VALID
+  - VALID-HARDENING
+  - "OUT-OF-MODEL: trusted-input"
+  - "OUT-OF-MODEL: adversary-not-in-scope"
+  - "OUT-OF-MODEL: unsupported-component"
+  - "OUT-OF-MODEL: non-default-build"
+  - "OUT-OF-MODEL: dependency-contract"
+  - "BY-DESIGN: property-disclaimed"
+  - KNOWN-NON-FINDING
+  - MODEL-GAP
+
+disposition_precedence:
+  - KNOWN-NON-FINDING
+  - "OUT-OF-MODEL: unsupported-component"
+  - "OUT-OF-MODEL: non-default-build"
+  - "OUT-OF-MODEL: dependency-contract"
+  - "OUT-OF-MODEL: trusted-input"
+  - "OUT-OF-MODEL: adversary-not-in-scope"
+  - "BY-DESIGN: property-disclaimed"
+  - VALID
+  - VALID-HARDENING
+  - MODEL-GAP
+
+open_questions: []

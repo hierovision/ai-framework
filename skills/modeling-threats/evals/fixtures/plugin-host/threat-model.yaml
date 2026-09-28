@@ -1,0 +1,145 @@
+schema: threat-model/v1
+project: plugin-host
+version: "3.0.2 @ c9a1f02"
+date: 2026-08-05
+prose: {path: threat-model.md, sha256: "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff"}
+model_status: accepted
+triage_policy: strict
+confidence: {documented: 12, maintainer: 1, assumption: 0, inferred: 0}
+
+components:
+  - name: loader
+    scope: in
+    provenance: {kind: documented, source: "API reference"}
+  - name: config-loader
+    scope: in
+    provenance: {kind: documented, source: "API reference"}
+  - name: contrib-examples
+    scope: out
+    reason: "unsupported sample plugins, not shipped"
+    provenance: {kind: documented, source: "README: contrib"}
+
+entry_points:
+  - id: loadPlugin
+    component: loader
+    parameters:
+      - name: name
+        attacker_controllable: false
+        control_kinds: [resource-name]
+        caller_must_enforce: "keep the plugin directory trusted"
+        provenance: {kind: documented, source: "API reference"}
+  - id: parseConfig
+    component: config-loader
+    parameters:
+      - name: text
+        attacker_controllable: false
+        control_kinds: [data]
+        caller_must_enforce: "pass trusted config text"
+        provenance: {kind: documented, source: "API reference"}
+
+contract_dimensions:
+  - component: config-loader
+    dimension: numeric-domain
+    status: claimed
+    conditions: "parseConfig truncates fractional digits to two decimals; intentional"
+    routes_to: "§11 CFG-ROUNDING"
+    provenance: {kind: documented, source: "API reference: parseConfig"}
+  - component: loader
+    dimension: resource-complexity
+    status: disclaimed
+    conditions: "no cap on plugin count; operator controls the directory"
+    routes_to: "§12 DB-NO-COUNT"
+    provenance: {kind: documented, source: "README"}
+
+properties_provided:
+  - id: CFG-ROUNDING
+    components: [config-loader]
+    tier: correctness-only
+    conditions: "parseConfig; two-decimal truncation is intentional"
+    violation_symptoms: [wrong-output]
+    voids: []
+    provenance: {kind: documented, source: "API reference: parseConfig"}
+  - id: LOADER-TRUST
+    components: [loader]
+    tier: security-critical
+    conditions: "plugin directory is operator-controlled"
+    violation_symptoms: [integrity-bypass]
+    voids: []
+    provenance: {kind: documented, source: "API reference: loadPlugin"}
+
+properties_disclaimed:
+  - id: DB-NO-COUNT
+    components: [loader]
+    conditions: "operator controls the directory"
+    tier: correctness-only
+    false_friend: false
+    provenance: {kind: documented, source: "README"}
+
+adversaries:
+  - name: operator
+    scope: in
+    capabilities: [choose-plugin-directory, supply-config-text]
+    excluded_capabilities: []
+    goals: [misconfiguration]
+    provenance: {kind: documented, source: "SECURITY.md"}
+  - name: network-attacker
+    scope: out
+    capabilities: []
+    excluded_capabilities: [send-input-to-host]
+    goals: []
+    provenance: {kind: documented, source: "SECURITY.md"}
+
+dependencies: []
+
+build_flags:
+  - name: PLUGIN_DEV
+    default: "off"
+    maintainer_stance: dev-only
+    affects_properties: [LOADER-TRUST]
+    provenance: {kind: maintainer, date: "2026-06"}
+
+known_misuses:
+  - id: KM-PRECISION
+    components: [config-loader]
+    pattern: "relying on fractional precision beyond two decimals"
+    safer_alternative: "parse precise values with the numeric API instead"
+    provenance: {kind: documented, source: "API reference"}
+
+known_non_findings:
+  - id: KNF-ROUND
+    components: [config-loader]
+    symptom: wrong-output
+    conditions: "parseConfig float precision loss; intentional two-decimal truncation"
+    discharged_by: [CFG-ROUNDING]
+    provenance: {kind: documented, source: "API reference: parseConfig"}
+
+downstream_responsibilities:
+  - id: DR-TRUST-DIR
+    statement: "keep the plugin directory operator-controlled"
+    provenance: {kind: documented, source: "README"}
+
+dispositions:
+  - VALID
+  - VALID-HARDENING
+  - "OUT-OF-MODEL: trusted-input"
+  - "OUT-OF-MODEL: adversary-not-in-scope"
+  - "OUT-OF-MODEL: unsupported-component"
+  - "OUT-OF-MODEL: non-default-build"
+  - "OUT-OF-MODEL: dependency-contract"
+  - "BY-DESIGN: property-disclaimed"
+  - KNOWN-NON-FINDING
+  - MODEL-GAP
+
+disposition_precedence:
+  - KNOWN-NON-FINDING
+  - "OUT-OF-MODEL: unsupported-component"
+  - "OUT-OF-MODEL: non-default-build"
+  - "OUT-OF-MODEL: dependency-contract"
+  - "OUT-OF-MODEL: trusted-input"
+  - "OUT-OF-MODEL: adversary-not-in-scope"
+  - "BY-DESIGN: property-disclaimed"
+  - VALID
+  - VALID-HARDENING
+  - MODEL-GAP
+
+open_questions: []
