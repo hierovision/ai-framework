@@ -700,6 +700,25 @@ def test_persist_streams_redacts_stderr_and_writes_it():
         shutil.rmtree(d)
 
 
+def test_last_record_drives_cli_summary_class():
+    """RM-021: the CLI summary reads the final run-log record so an infra death
+    prints as `infra error: ...` instead of a phantom `missing:` content miss."""
+    d = tempfile.mkdtemp()
+    try:
+        p = os.path.join(d, "run-x.jsonl")
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"outcome": "error", "detail": "fresh retry 1"}) + "\n")
+            fh.write("not json\n")
+            fh.write(json.dumps({"outcome": "error",
+                                 "detail": "dead session: UnknownError ref=err_z"}) + "\n")
+        rec = runner._last_record(p)
+        assert rec.get("outcome") == "error", rec
+        assert "dead session" in (rec.get("detail") or ""), rec
+        assert runner._last_record(os.path.join(d, "absent.jsonl")) == {}
+    finally:
+        shutil.rmtree(d)
+
+
 def main():
     tests = [
         test_assert_behavior,
@@ -730,6 +749,7 @@ def main():
         test_dead_session_error_signature_in_log,
         test_opencode_run_args_capture_server_logs,
         test_persist_streams_redacts_stderr_and_writes_it,
+        test_last_record_drives_cli_summary_class,
     ]
     failed = 0
     for t in tests:

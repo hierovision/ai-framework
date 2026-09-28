@@ -839,6 +839,23 @@ def stub_result(e, mode, calls):
     return _stub_typed_result(e)
 
 
+def _last_record(path):
+    """Last run-log record written to `path` (for the CLI summary class)."""
+    last = None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    try:
+                        last = json.loads(line)
+                    except ValueError:
+                        continue
+    except OSError:
+        return {}
+    return last or {}
+
+
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
     p = argparse.ArgumentParser(description="Run behavioral eval suite.")
@@ -973,8 +990,15 @@ def main(argv=None):
         print(f"{status}  {e['skill']}#{e['eval_id']}  -> {path}")
         if not passed:
             failed += 1
-            for m in missing:
-                print(f"      missing: {m[:120]}")
+            rec = _last_record(path)
+            if rec.get("outcome") == "error":
+                # Infra death, not a content miss: printing "missing: ..." here
+                # made a model/provider failure look like a failed assertion in
+                # CI logs (RM-021, 2026-09-28).
+                print(f"      infra error: {rec.get('detail') or 'dead session'}")
+            else:
+                for m in missing:
+                    print(f"      missing: {m[:120]}")
 
     if failed:
         print(f"\n{failed} eval(s) failed regression gate", file=sys.stderr)
