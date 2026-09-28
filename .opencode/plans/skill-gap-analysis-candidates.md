@@ -1,6 +1,7 @@
 # Candidate register — skill-gap-analysis (Phase B)
 
-Status: **brief #1 screening complete — shortlists await Phase C adjudication**
+Status: **brief #1 adjudication complete — verdicts recorded; Phase D
+adoption design next (per-item user sign-off required)**
 Created: 2026-09-28
 Scope of this pass: gap brief #1 — **application security engineering beyond
 CI** (threat modeling, authn/authz review, secrets, OWASP-class review,
@@ -60,6 +61,99 @@ Unreachable:   none
 Provenance:    none staged — nothing copied or adapted in this pass
 ```
 
+## Phase C — head-to-head adjudication
+
+Method: each shortlisted candidate ran under the fresh-agent protocol on two
+shared tasks (security review of a planted-issue fixture; threat model of a
+design brief) plus no-skill baselines; vetted content staged read-only in
+isolated workdirs on the direct-key lane; artifacts machine-graded against a
+planted ground truth and hand-verified (`ground truth` + streams under
+`.scratch/skill-gap-analysis/phase-c/`). One run-log record per run
+(`logs/run-2026-09-28.jsonl`, ids cited below).
+
+| Candidate | Review (recall/9, FP) | Threat (criteria/6) | Artifact delivery | Cost |
+|---|---|---|---|---|
+| claude-code-owasp | 9, 0 | 6 | both | $0.032 |
+| threat-model | 9, 0 | 6 | both | $0.033 |
+| defending-code | 9, 0 | 6 | both | $0.035 |
+| ghostsecurity | **FAIL — none** | 6 | review failed | $0.030 |
+| vbsec | **FAIL — none** | 6 | review failed | $0.028 |
+| baseline (no skill) | 9, 0 | 5 | both | $0.009 |
+
+**Fixture note (honest limit):** the no-skill baseline hit the review ceiling
+(9/9, 0 FP) — recall does not discriminate on this fixture. Verdicts below rest
+on discipline (entry-point→sink tracing, triage, severity+fix), coverage breadth
+(ASVS/Top 10/LLM/agentic mapping), artifact rigor (machine-readable threat
+outputs), and standalone robustness. A deeper multi-file adversarial fixture
+belongs in the adapted skill's own eval net at Phase D.
+
+## Decision log
+
+### 2026-09-28 — claude-code-owasp — adapt
+
+- Gates: license MIT (allow-list); security clean
+- Rubric: fit 3/3 × quality 3/3 → 9/9
+- Evidence: run `aa82c9bf-9052-4a7b-b844-65f93d3e9b2a` (review 9/9, FP 0);
+  run `efcec53b-352e-4261-8073-8e38720071f9` (threat 6/6); scan
+  `.scratch/skill-gap-analysis/scans/claude-code-owasp.json`
+- Reason: strongest review workflow — OWASP/ASVS + LLM/agentic coverage,
+  explicit triage rubric, severity+fix per finding; adapt into the house
+  security-review capability under Phase D conventions.
+- Decided by: orchestrator recommendation (Phase C record); adoption requires
+  per-item user sign-off (Phase D).
+
+### 2026-09-28 — threat-model (alpha-omega-security) — adapt
+
+- Gates: license MIT (allow-list); security clean
+- Rubric: fit 3/3 × quality 3/3 → 9/9
+- Evidence: run `caf8c0e0-7ae2-4820-89f2-1248d64e30af` (review 9/9, FP 0);
+  run `5420627c-df0c-4f1c-b714-19a1730bb6d1` (threat 6/6); scan
+  `.scratch/skill-gap-analysis/scans/threat-model.json`
+- Reason: dedicated threat-modeling procedure with contract-style
+  machine-readable artifacts and triage dispositions; adapt as the house
+  threat-modeling workflow.
+- Decided by: orchestrator recommendation (Phase C record); adoption requires
+  per-item user sign-off (Phase D).
+
+### 2026-09-28 — defending-code-reference-harness (anthropics) — inspire
+
+- Gates: license Apache-2.0 (no NOTICE file at pin); security clean
+- Rubric: fit 3/3 × quality 2/3 → 6/9
+- Evidence: run `0fd1a3d0-ddc6-42da-adab-dd20692fa4e5` (review 9/9, FP 0);
+  run `405ebeea-205f-42ad-9ffb-0ecadc897ce6` (threat 6/6); scan
+  `.scratch/skill-gap-analysis/scans/defending-code-reference-harness.json`
+- Reason: unmaintained upstream — no direct integration; the loop structure
+  (threat-model → scan → triage → patch → detect/respond) informs the adapted
+  design as ideas only.
+- Decided by: orchestrator recommendation (Phase C record).
+
+### 2026-09-28 — ghostsecurity/skills — reject
+
+- Gates: license Apache-2.0 (no NOTICE file at pin); security clean
+- Rubric: fit 3/3 × quality 2/3 → 6/9
+- Evidence: run `1a967f13-14cc-48e5-89cc-d6a186d379bc` (review FAIL — no
+  artifact; workflow wrote to `$HOME/.ghost` outside the workdir and its
+  CLI-ecosystem coupling stalled the pass); run
+  `3648f001-5828-469e-8915-d8a58f108198` (threat 6/6); scan
+  `.scratch/skill-gap-analysis/scans/ghostsecurity-skills.json`
+- Reason: fails standalone delivery under isolation; its multi-stage
+  validate→report pattern is noted as a possible input to the adapted design,
+  but the candidate itself does not land.
+- Decided by: orchestrator recommendation (Phase C record).
+
+### 2026-09-28 — vbsec — reject
+
+- Gates: license MIT (allow-list); security clean
+- Rubric: fit 3/3 × quality 2/3 → 6/9
+- Evidence: run `c1f9032e-4139-438a-be1e-12a351d3ea3d` (review FAIL — no
+  artifact; helper script ran, the pass stalled on out-of-workdir scratch and
+  ended with an empty result); run `831500b8-1af0-4d76-bef8-2c8395a61ee7`
+  (threat 6/6); scan `.scratch/skill-gap-analysis/scans/vbsec.json`
+- Reason: review workflow not robust under isolation; Vietnamese-first
+  authoring raises adaptation cost; threat coverage already selected via
+  `threat-model`.
+- Decided by: orchestrator recommendation (Phase C record).
+
 ## History
 
 - 2026-09-28 — Brief #1 screening pass complete: 12 candidates sourced,
@@ -67,3 +161,14 @@ Provenance:    none staged — nothing copied or adapted in this pass
   adjudication (head-to-head fresh-agent evals) — **requires explicit user
   sign-off to load candidate skills under the eval harness** (ADR-0012:
   wild content executes only with recorded sign-off).
+- 2026-09-28 — **User signed off** Phase C execution (session, 2026-09-28).
+  Head-to-head runs started for the 5 shortlisted candidates × 2 tasks
+  (security review of a planted-issue fixture; threat model of a design
+  brief) plus no-skill baselines; runs on the direct-key lane, isolated
+  workdirs, no external network from candidate content.
+- 2026-09-28 — Phase C complete for brief #1: 12 head-to-head runs recorded
+  (`logs/run-2026-09-28.jsonl`; ids in the decision log below). Verdicts —
+  adapt: `claude-code-owasp`, `threat-model`; inspire:
+  `defending-code-reference-harness`; reject: `ghostsecurity/skills`, `vbsec`.
+  Baseline saturation noted (the review fixture does not discriminate recall).
+  Next: Phase D adoption design for the two adapts (per-item user sign-off).
