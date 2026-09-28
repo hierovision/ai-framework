@@ -154,3 +154,27 @@ The weekly workflow writes it to `failure-taxonomy.json`; `failure-taxonomy`
 is also part of `all`. This is the artifact that showed weekly run
 36455843309's red as provider-driven: 44 dead streams, every one
 `UnknownError ref=err_*`, spread across the full hour rather than a burst.
+
+### Guards against an infra red
+
+Once the wrappers were resolved (`ProviderModelNotFoundError: Model not found:
+deepseek/deepseek-flash`, each turn dying in ~2 s at model resolution), the
+runner guards the suite so one broken catalog cannot read as hundreds of
+regressions:
+
+- **Preflight (advisory)** — before a suite the runner checks the model against
+  `opencode models` and prints a warning when it is absent. It never blocks:
+  `opencode models` is not a reliable oracle across environments — a CI runner
+  listed 12 gateway models and omitted `deepseek/deepseek-flash` while the
+  direct-key lane resolved and ran fine there. A listing gap means "cannot
+  tell", never "broken". `--no-preflight` skips it.
+- **Fresh-retry backoff** — `FRESH_RETRY_BACKOFF_SECONDS` (5 s, then 15 s)
+  before each fresh retry; immediate retries re-hit the unloaded catalog.
+- **Early abort** — the real guard: three consecutive model-resolution deaths
+  stop the suite with a clear message and exit **3**, instead of burning the
+  run.
+- **Quarantine integrity** — an infra death is never recorded as an eval
+  failure; only content misses mark an eval flaky.
+
+Exit codes: **1** = eval(s) failed the regression gate (content); **3** =
+infra (model unavailable / aborted), which is not a regression.

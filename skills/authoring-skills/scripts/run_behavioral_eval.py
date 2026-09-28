@@ -67,6 +67,15 @@ DETAIL_MAX = log_run.DETAIL_MAX
 
 # RM-003 AC9: one retry per eval on a *transient* failure, with backoff.
 RETRY_BACKOFF_SECONDS = (2, 5)
+# Fresh-session retry backoff (2026-09-28, RM-021): the dominant dead-session
+# class is model-catalog resolution failing right after a fresh runner starts;
+# immediate retries all re-hit the unloaded catalog (three attempts spanned 4s
+# in CI, each dying in ~2s). A short then longer wait lets resolution settle.
+FRESH_RETRY_BACKOFF_SECONDS = (5, 15)
+# The resolved cause the opencode server logs for that class. The event stream
+# carries only the wrapper (`UnknownError: Unexpected server error`); the real
+# error is `ProviderModelNotFoundError: Model not found: <id>`.
+MODEL_RESOLUTION_RE = re.compile(r"Model not found|ProviderModelNotFound", re.I)
 TRANSIENT_RE = re.compile(
     r"timeout|timed out|rate.?limit|too many requests|\b429\b|\b50[23]\b|"
     r"unavailable|connection (refused|reset|error)|econnreset|fetch failed",
@@ -199,7 +208,9 @@ def _error_signature(ctx):
             name = err.get("name") or "error"
             data = err.get("data") if isinstance(err.get("data"), dict) else {}
             ref = (data or {}).get("ref")
-            return name + (f" ref={ref}" if ref else "")
+            base = name + (f" ref={ref}" if ref else "")
+            cause = _resolved_cause(ctx.get("stderr") or "")
+            return base + (f" ({cause})" if cause else "")
     return "no events"
 
 
@@ -584,6 +595,8 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
         fresh = 0
         while (missing and fresh < max_fresh and _dead_session(ctx)):
             fresh += 1
+            delay = FRESH_RETRY_BACKOFF_SECONDS[min(fresh - 1, len(FRESH_RETRY_BACKOFF_SECONDS) - 1)]
+            sleep(delay)
             log_run.log_record({
                 "kind": "eval",
                 "skill": e["skill"],
@@ -628,7 +641,10 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
         if quarantine_path:
             if passed:
                 quarantine.record_success(quarantine_path, eval_key(e))
-            else:
+            elif not dead:
+                # An infra death is not eval flakiness (RM-021, 2026-09-28):
+                # quarantine must not mark an eval "watching" because the
+                # provider/model catalog failed to resolve.
                 quarantine.record_failure(quarantine_path, eval_key(e))
         return passed, missing, path
     finally:
@@ -684,6 +700,56 @@ def assert_ci_free_model(model):
         f"CI model must be `*-free` or the direct-key lane `{DIRECT_LANE_PREFIX}*` "
         f"(Model-cost policy, amended 2026-09-21), got {model!r}"
     )
+
+
+def _resolved_cause(stderr):
+    """Concrete error the opencode server logged, extracted from stderr.
+
+    `opencode run --print-logs` writes e.g.
+    `level=ERROR ... error="ProviderModelNotFoundError: Model not found: deepseek/deepseek-flash"`.
+    Returns the first quoted error (bounded), else the model-resolution class
+    name when the text matches it, else "".
+    """
+    m = re.search(r'error="([^"]{0,200})"', stderr or "")
+    if m:
+        return m.group(1)[:140]
+    if MODEL_RESOLUTION_RE.search(stderr or ""):
+        return "ProviderModelNotFoundError"
+    return ""
+
+
+def is_model_resolution_error(text):
+    """True when `text` names the model-resolution failure class."""
+    return bool(MODEL_RESOLUTION_RE.search(text or ""))
+
+
+def model_listed(output, model):
+    """True when `opencode models` output lists `model` as an exact line."""
+    return any(line.strip() == model for line in (output or "").splitlines())
+
+
+def preflight_model(model):
+    """Best-effort catalog check before a suite; ADVISORY ONLY.
+
+    Returns `(True, "")` when listed and `(False, reason)` / `(None, reason)`
+    otherwise — the caller must NOT block on this. 2026-09-28 CI finding:
+    `opencode models` is not a reliable oracle across environments — a CI
+    runner listed 12 gateway models and omitted `deepseek/deepseek-flash`
+    (the direct-key lane the suite actually uses, which resolves and runs
+    fine there). A listing gap therefore means "cannot tell", never "broken".
+    The behaviour-based guard is the consecutive-death early abort instead.
+    """
+    try:
+        proc = subprocess.run(["opencode", "models"], capture_output=True,
+                              text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"preflight skipped: `opencode models` failed ({exc})"
+    text = (proc.stdout or "") + (proc.stderr or "")
+    if model_listed(text, model):
+        return True, ""
+    return False, (f"model {model!r} is not in `opencode models` "
+                   f"({len(text.splitlines())} lines listed; CI omits the "
+                   f"direct-key lane — advisory only)")
 
 
 def invoke_opencode(e, model=None, turn=None):
@@ -887,8 +953,9 @@ def main(argv=None):
                    help="Run quarantined evals anyway (explicit opt-in).")
     p.add_argument("--max-retries", type=int, default=1,
                    help="Max transient-failure retries per eval (default 1).")
-    p.add_argument("--ci", action="store_true",
-                   help="Enforce free-tier-only (skip go/zen evals); also auto-enabled "
+    p.add_argument("--no-preflight", action="store_true",
+                   help="Skip the `opencode models` preflight (offline/dev runs).")
+    p.add_argument("--ci", action="store_true",                   help="Enforce free-tier-only (skip go/zen evals); also auto-enabled "
                         "by AI_FRAMEWORK_FREE_TIER or CI env.")
     p.add_argument("--model", default=None,
                    help="Concrete model ID for `opencode run --model` "
@@ -980,7 +1047,19 @@ def main(argv=None):
             return stub_result(e, args.stub_output, _stub_calls)
         return invoke_opencode(e, model=args.model, turn=turn)
 
+    # Catalog preflight (2026-09-28, RM-021): ADVISORY only. `opencode models`
+    # is not a reliable oracle across environments (CI lists 12 gateway models
+    # and omits the direct-key lane the suite uses), so a listing gap must
+    # never block a suite. The real guard is the consecutive-death early abort
+    # in the loop below. Skipped in stub/fixture mode (no model call).
+    if (args.model and not args.stub_output and not args.event_fixture
+            and not args.no_preflight):
+        ok, why = preflight_model(args.model)
+        if ok is not True:
+            print(f"warning: preflight: {why}", file=sys.stderr)
+
     failed = 0
+    infra_deaths = 0
     for e in selected:
         passed, missing, path = run_eval(e, get_output, logs_dir=args.logs_dir,
                                          model=args.model,
@@ -996,9 +1075,20 @@ def main(argv=None):
                 # made a model/provider failure look like a failed assertion in
                 # CI logs (RM-021, 2026-09-28).
                 print(f"      infra error: {rec.get('detail') or 'dead session'}")
+                infra_deaths = (infra_deaths + 1
+                                if is_model_resolution_error(rec.get("detail")) else 0)
             else:
+                infra_deaths = 0
                 for m in missing:
                     print(f"      missing: {m[:120]}")
+        else:
+            infra_deaths = 0
+        if infra_deaths >= 3:
+            # Every eval dies the same infra way in ~2s: stop instead of burning
+            # the suite and turning one broken catalog into hundreds of reds.
+            print("aborting: model resolution failed for 3 consecutive evals "
+                  "(infra, not a regression)", file=sys.stderr)
+            return 3
 
     if failed:
         print(f"\n{failed} eval(s) failed regression gate", file=sys.stderr)

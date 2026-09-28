@@ -146,7 +146,7 @@ def test_fresh_retry_on_dead_session():
     os.environ["BEVAL_MAX_CONTINUATIONS"] = "1"
     os.environ["BEVAL_MAX_FRESH_RETRIES"] = "1"
     try:
-        passed, missing, _ = runner.run_eval(e, stub, logs_dir=d)
+        passed, missing, _ = runner.run_eval(e, stub, logs_dir=d, sleep=lambda _s: None)
         assert passed, missing
         recs = _read_logs(d)
         assert any("fresh retry" in (r.get("detail") or "") for r in recs), recs
@@ -719,6 +719,95 @@ def test_last_record_drives_cli_summary_class():
         shutil.rmtree(d)
 
 
+def test_resolved_cause_and_model_resolution_detector():
+    """RM-021: the wrapped `UnknownError` stream must resolve to the concrete
+    cause from the captured server stderr, and the class must be detectable."""
+    cause = runner._resolved_cause(
+        'ts level=ERROR run=x message=failed ref=err_1 '
+        'error="ProviderModelNotFoundError: Model not found: deepseek/deepseek-flash. Did you mean"')
+    assert cause.startswith("ProviderModelNotFoundError: Model not found"), cause
+    assert runner._resolved_cause("") == ""
+    assert runner.is_model_resolution_error("dead session: UnknownError ref=err_1 (ProviderModelNotFoundError)")
+    assert not runner.is_model_resolution_error("missing: text: phrase not found: 'Verdict'")
+
+
+def test_model_listed_and_preflight_model():
+    """RM-021: fail fast (and distinctly) when the model is not in the catalog;
+    fail OPEN when the preflight itself cannot run."""
+    out = "opencode/x\ndeepseek/deepseek-flash\nopencode/y\n"
+    assert runner.model_listed(out, "deepseek/deepseek-flash")
+    assert not runner.model_listed(out, "deepseek/deepseek-flash-x")
+    original = runner.subprocess.run
+
+    class _P:
+        def __init__(self, s):
+            self.stdout, self.stderr = s, ""
+
+    try:
+        runner.subprocess.run = lambda *a, **k: _P(out)
+        assert runner.preflight_model("deepseek/deepseek-flash") == (True, "")
+        ok, why = runner.preflight_model("nope/nope")
+        assert ok is False and "nope/nope" in why, (ok, why)
+
+        def boom(*a, **k):
+            raise OSError("no binary")
+
+        runner.subprocess.run = boom
+        ok, why = runner.preflight_model("deepseek/deepseek-flash")
+        assert ok is None and "skipped" in why, (ok, why)
+    finally:
+        runner.subprocess.run = original
+
+
+def test_fresh_retry_backoff_uses_injected_sleep():
+    """RM-021: a fresh retry waits (the dead class is catalog resolution; the
+    immediate retries all re-hit it). The injected sleep keeps tests hermetic."""
+    e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["A"], "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    delays = []
+    calls = {"n": 0}
+
+    def stub(_e, turn=None):
+        calls["n"] += 1
+        return runner.EvalResult(raw=FATAL_STREAM if calls["n"] == 1 else "A")
+
+    old_fresh = os.environ.get("BEVAL_MAX_FRESH_RETRIES")
+    os.environ["BEVAL_MAX_FRESH_RETRIES"] = "1"
+    try:
+        passed, missing, _ = runner.run_eval(e, stub, logs_dir=d, sleep=delays.append)
+        assert passed, missing
+        assert delays == [float(runner.FRESH_RETRY_BACKOFF_SECONDS[0])], delays
+    finally:
+        if old_fresh is None:
+            os.environ.pop("BEVAL_MAX_FRESH_RETRIES", None)
+        else:
+            os.environ["BEVAL_MAX_FRESH_RETRIES"] = old_fresh
+        shutil.rmtree(d)
+
+
+def test_infra_death_does_not_quarantine_but_content_miss_does():
+    """RM-021: a dead session (infra) must not mark an eval flaky; a content
+    miss still must."""
+    d = tempfile.mkdtemp()
+    qp = os.path.join(d, "quarantine.json")
+    e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["A"], "model_tier": "go"}
+    old_fresh = os.environ.get("BEVAL_MAX_FRESH_RETRIES")
+    os.environ["BEVAL_MAX_FRESH_RETRIES"] = "0"
+    try:
+        runner.run_eval(e, lambda _e, turn=None: runner.EvalResult(raw=FATAL_STREAM),
+                        logs_dir=d, quarantine_path=qp, sleep=lambda _s: None)
+        assert "alpha#1" not in runner.quarantine.load(qp), runner.quarantine.load(qp)
+        runner.run_eval(e, lambda _e: "xyz", logs_dir=d, quarantine_path=qp,
+                        sleep=lambda _s: None)
+        assert "alpha#1" in runner.quarantine.load(qp), runner.quarantine.load(qp)
+    finally:
+        if old_fresh is None:
+            os.environ.pop("BEVAL_MAX_FRESH_RETRIES", None)
+        else:
+            os.environ["BEVAL_MAX_FRESH_RETRIES"] = old_fresh
+        shutil.rmtree(d)
+
+
 def main():
     tests = [
         test_assert_behavior,
@@ -750,6 +839,10 @@ def main():
         test_opencode_run_args_capture_server_logs,
         test_persist_streams_redacts_stderr_and_writes_it,
         test_last_record_drives_cli_summary_class,
+        test_resolved_cause_and_model_resolution_detector,
+        test_model_listed_and_preflight_model,
+        test_fresh_retry_backoff_uses_injected_sleep,
+        test_infra_death_does_not_quarantine_but_content_miss_does,
     ]
     failed = 0
     for t in tests:
