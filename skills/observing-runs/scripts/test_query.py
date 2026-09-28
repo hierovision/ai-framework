@@ -34,6 +34,14 @@ FIXTURE_LINES = [
     {"ts": "2026-01-01T00:04:00Z", "run_id": "d1", "kind": "skill", "skill": "delta",
      "model": None, "tokens_in": 0, "tokens_out": 0, "duration_ms": 0,
      "outcome": "success", "eval_pass": None, "detail": None},
+    # epsilon is an INFRA death (2026-09-28, RM-021): outcome=error with
+    # eval_pass=False (a final dead-session record). It must NOT count as a
+    # content failure in eval_rows / eval_pass_rate — it is reported as
+    # infra_error instead. Null tokens keep the cost aggregates untouched.
+    {"ts": "2026-01-01T00:05:00Z", "run_id": "e1", "kind": "eval", "skill": "epsilon",
+     "model": "deepseek/deepseek-flash", "tokens_in": None, "tokens_out": None,
+     "duration_ms": None, "outcome": "error", "eval_pass": False,
+     "detail": "dead session: UnknownError ref=err_x (ProviderModelNotFoundError)"},
 ]
 
 # Expected aggregates (computed by hand from the fixture above).
@@ -43,6 +51,7 @@ EXPECTED = {
     "eval_pass_rate": 0.5,
     "eval_rows": 2,
     "eval_passed": 1,
+    "infra_error": 1,
 }
 
 
@@ -112,7 +121,7 @@ def main():
         by_skill = {s["skill"]: s for s in result["skills"]}
 
         for skill, exp in EXPECTED.items():
-            if skill in ("eval_pass_rate", "eval_rows", "eval_passed"):
+            if skill in ("eval_pass_rate", "eval_rows", "eval_passed", "infra_error"):
                 continue
             got = by_skill[skill]
             for k, v in exp.items():
@@ -122,7 +131,7 @@ def main():
                 else:
                     print(f"PASS  skill {skill} {k} = {v}")
 
-        for k in ("eval_pass_rate", "eval_rows", "eval_passed"):
+        for k in ("eval_pass_rate", "eval_rows", "eval_passed", "infra_error"):
             if result[k] != EXPECTED[k]:
                 failed += 1
                 print(f"FAIL  {k}: expected {EXPECTED[k]}, got {result[k]}")

@@ -4,7 +4,9 @@
 Reads logs/run-<date>.jsonl files produced by log_run.py and reports:
   - per-skill token totals (cost/task) = tokens_in + tokens_out
   - mean duration_ms (latency) per skill
-  - eval-pass rate (eval_pass==true over eval-kind rows), overall + per skill
+  - eval-pass rate (eval_pass==true over CONTENT eval-kind rows; infra errors
+    with outcome=error are excluded and reported as their own count), overall
+    + per skill
 
 Plus a `prune` subcommand for bounded retention (RM-001 Retention):
   query_runs.py prune --older-than 30d [--archive] [--dry-run]
@@ -118,6 +120,7 @@ def aggregate(logs_dir):
     per_skill = {}  # skill -> {runs, tokens, tokens_known_runs, dur_sum, dur_known_runs}
     eval_rows = 0
     eval_pass = 0
+    infra_error = 0
 
     def skill_bucket(key):
         b = per_skill.get(key)
@@ -149,6 +152,13 @@ def aggregate(logs_dir):
             ep = rec.get("eval_pass")
             if ep is None:
                 continue
+            # Infra errors (outcome=error: a dead session whose model failed to
+            # resolve, etc.) are NOT eval verdicts — counting them as content
+            # failures depresses the pass rate and the drift signal
+            # (RM-021, 2026-09-28). Counted separately, excluded here.
+            if rec.get("outcome") == "error":
+                infra_error += 1
+                continue
             eval_rows += 1
             if ep is True:
                 eval_pass += 1
@@ -168,6 +178,7 @@ def aggregate(logs_dir):
         "eval_pass_rate": (eval_pass / eval_rows) if eval_rows else None,
         "eval_rows": eval_rows,
         "eval_passed": eval_pass,
+        "infra_error": infra_error,
     }
     return result
 
