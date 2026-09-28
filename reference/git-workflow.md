@@ -14,6 +14,11 @@ override the *naming* via their rules file; the *discipline* is fixed.
 - The merge itself is **user-initiated**: the agent pushes the branch,
   opens the PR, and the handoff reports "PR #N ready". The human (or an
   explicit "merge it" request) is the gate on the protected action.
+- **Squash-merge only.** A merge to main squashes the branch into one
+  commit: merge commits and rebase merges are disabled at the repository
+  (`allow_merge_commit=false`, `allow_rebase_merge=false`,
+  `allow_squash_merge=true`). Do not re-enable them; the PR title becomes
+  the main-history subject.
 
 ## All work requires a branch
 
@@ -60,5 +65,5 @@ override the *naming* via their rules file; the *discipline* is fixed.
    land as additional commits on the same branch (re-review), not as
    new PRs.
 4. Handoff reports the PR URL. Merging waits for the user ("merge it" /
-   the human clicks merge). Multi-session work resumes on the pushed
-   branch, never on a fresh one.
+   the human clicks merge) and is **squash-only** (`gh pr merge --squash`).
+   Multi-session work resumes on the pushed branch, never on a fresh one.
