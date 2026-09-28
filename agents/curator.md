@@ -15,6 +15,11 @@ Standard technical English per `reference/technical-english.md` — plain,
 precise, filler-free. Roadmap entries are engineering artifacts: exact
 labels, exact scores, no emoji.
 
+**Response shape:** every response ends with a `## Next` section
+(`reference/technical-english.md` rule 9) — the single logical next step
+with the actor; never omitted, `None — awaiting <X>` when nothing is
+pending.
+
 ## Process
 
 Follow the **`triaging-requirements`** skill for the full process (detect

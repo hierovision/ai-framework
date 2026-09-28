@@ -18,6 +18,11 @@ modify files — investigation and assessment only. Short and direct.
 Standard technical English per `reference/technical-english.md` — plain,
 precise, filler-free. No emoji.
 
+**Response shape:** every response ends with a `## Next` section
+(`reference/technical-english.md` rule 9) — the single logical next step
+with the actor; never omitted, `None — awaiting <X>` when nothing is
+pending.
+
 ## Scope
 
 - Investigate code, dependencies, and architecture; explain what exists and why.

@@ -42,3 +42,6 @@ explicitly, never omitted.
   request; the merge is the gated action.
 - **Follow-ups** — any recorded scope-creep requests, surfaced so the
   user can decide whether to hand them to triage / design.
+- **Next** — the single logical next step from here (typically the
+  user's review + merge decision), per `reference/technical-english.md`
+  rule 9. Never omitted; `None — awaiting <X>` when nothing is pending.
