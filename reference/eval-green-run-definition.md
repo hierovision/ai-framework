@@ -16,7 +16,12 @@ eval report dashboard (`green-run-status.json`) to qualify RM-003 AC4.
 A **steady-state green run** is a weekly `eval-behavioral` workflow run on
 `main` that satisfies all four conditions:
 
-1. **All included evals pass** — every `kind=eval` record has `eval_pass=true`
+1. **All included evals pass** — every final *content* verdict has
+   `eval_pass=true`; per-attempt annotations (`eval_pass=null`) and infra
+   errors (`outcome=error`: a dead session / unresolvable model) are not
+   content verdicts. A run with **any infra error is not green** — it means
+   the lane was unhealthy, so the suite's signal is incomplete (RM-021,
+   2026-09-28; `eval-report.py failure-taxonomy` reports the split).
    (evals excluded by default — `deferred:true`, CI free-tier `go|zen`, or
    quarantined — are not "included" and therefore not required to pass).
 2. **Zero quarantine flips** — no eval entered or left quarantine during the
