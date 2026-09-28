@@ -247,3 +247,10 @@ No DB, no generated types.
   fixed). Registry: L1 entry added. Deferred framework debt: the tested agent
   can read the skill's `evals/` answer key under the installed layout —
   sanitized staging belongs in `run_behavioral_eval.py`, tracked separately.
+- 2026-09-28 — Phase A produced: `.opencode/plans/skill-gap-analysis-gap-map.md`
+  — 24-skill pool audit (trigger boundary / closure / coverage baseline),
+  49-cell work-type × phase matrix with cited evidence, 13 ranked
+  candidate-search briefs. Status in the companion: awaiting user approval
+  (AC2). Phase B sourcing starts on approval.
+- 2026-09-28 — Gap map approved by the user; AC2 satisfied. Phase B sourcing
+  authorized — begins on the ranked briefs (brief #1: application security).
