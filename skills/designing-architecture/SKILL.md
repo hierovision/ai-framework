@@ -23,7 +23,7 @@ Design Progress:
 - [ ] 3. Detect stack & load the matching stack reference
 - [ ] 4. Research the codebase
 - [ ] 5. Extract goal, acceptance criteria, boundaries (ask if vague)
-- [ ] 5b. UX consult: council-ux on user-facing items (explicit skip note if none)
+- [ ] 5b. UX consult: council-ux on user-facing items (never a silent result — fallback or skip recorded)
 - [ ] 6. Draft the plan artifact (full format in references/plan-format.md)
 - [ ] 7. Self-check: every criterion is verifiable
 - [ ] 8. Present summary + approval question; STOP
@@ -170,6 +170,18 @@ For a user-facing item, invoke `council-ux` (subagent_type `council-ux`)
   time and council-ux is a text-only model; it judges the planned
   experience from the brief. Output is 3–5 concerns, advisory.
 
+**An empty result is a hard failure, never a silent skip.** The nested
+free-tier consult path can return an empty result with no visible error
+(`agents/council.md` → Known limitation documents the rule, the recovery
+path, and the model binding). Do not read an empty result as "no
+concerns" and do not proceed silently. Recover via that documented
+fallback — run the UX lens as the default agent with its bound model
+forced explicitly and the lens brief inline, verifying the run header
+before trusting the output. If the fallback cannot run, record an
+explicit `UX consult skipped — <reason>` and carry the consult as a
+residual for the runtime validation handoff (`validating-ui`). A design
+pass never silently loses the lens.
+
 Fold each concern into the plan: a new or refined acceptance criterion
 (with a concrete verifier), an Open Question (with a proposed default),
 the Approach paragraph, or an Excluded entry. A concern with no
@@ -177,9 +189,11 @@ verifiable plan-time resolution is recorded as a residual follow-up for
 the runtime validation handoff (`validating-ui`), never silently
 dropped. One consult round — no plan-time fix loop.
 
-Record the consult in `## History` (one line, dated): `UX consult via
-council-ux; N concerns — folded into ACs / Open Questions / Excluded /
-deferred to runtime validation`.
+Record the consult in `## History` (one line, dated) with its outcome:
+`UX consult via council-ux; N concerns — folded into ACs / Open
+Questions / Excluded / deferred to runtime validation`; a forced-model
+fallback names itself; a skip names the reason. Every consult ends in an
+explicit record — clean, fallback, or skip.
 
 ### Step 6 — Draft the plan artifact
 
