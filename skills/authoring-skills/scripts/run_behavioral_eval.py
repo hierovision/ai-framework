@@ -167,10 +167,31 @@ def is_transient(text):
     return bool(TRANSIENT_RE.search(text or ""))
 
 
+def _dead_session(ctx):
+    """True when the last invocation died without doing any work.
+
+    Two shapes observed in CI (2026-09-28):
+    - a stream whose only event is a provider error (e.g. `UnknownError` on a
+      resumed session whose previous turn ended on rejected tool calls);
+    - a stall with no events (timeout / connection error).
+
+    Content misses — an agent that acted and missed assertions — are NOT dead
+    sessions: those route to continuations/quarantine, never to a fresh retry.
+    """
+    events = ctx.get("events") or []
+    if events:
+        return all(ev.get("type") == "error" for ev in events)
+    return is_transient((ctx.get("raw") or "") + " " + (ctx.get("stderr") or ""))
+
+
 def assert_behavior(expected, output):
-    """Return the list of expected strings NOT found (case-insensitive substring)."""
-    out_l = (output or "").lower()
-    return [exp for exp in expected if exp.lower() not in out_l]
+    """Return the list of expected strings NOT found.
+
+    Case-insensitive substring after whitespace normalization (2026-09-28:
+    markdown line-wraps broke multi-word phrases like "manual validation").
+    """
+    out_l = _norm_ws(output).lower()
+    return [exp for exp in expected if _norm_ws(exp).lower() not in out_l]
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +322,17 @@ def _glob_match(value, pattern):
     return fnmatch.fnmatchcase(str(value), pattern)
 
 
+def _norm_ws(s):
+    """Collapse whitespace runs to single spaces for phrase matching.
+
+    2026-09-28: phrase assertions are case-insensitive substrings, so a
+    markdown line-wrap inside a phrase ("manual\\n   validation steps")
+    failed a semantic match. Normalizing whitespace makes phrase checks
+    robust to wrapping; it does not bridge any other wording difference.
+    """
+    return re.sub(r"\s+", " ", s or "")
+
+
 def assert_action(entries, events):
     """Return missing `action` predicates (tool name + argument globs)."""
     calls = extract_tool_calls(events)
@@ -344,14 +376,15 @@ def assert_artifact(entries, workdir, events=None):
     for entry in entries:
         path = entry.get("path")
         phrases = entry.get("phrases") or []
+        norms = [_norm_ws(p).lower() for p in phrases]
         found = False
         # Surface 1: workdir filesystem.
         for fp in _artifact_files(workdir, path):
             try:
-                content = open(fp, encoding="utf-8", errors="replace").read()
+                content = _norm_ws(open(fp, encoding="utf-8", errors="replace").read()).lower()
             except OSError:
                 continue
-            if all(p.lower() in content.lower() for p in phrases):
+            if all(p in content for p in norms):
                 found = True
                 break
         # Surface 2: write events (path glob + event content).
@@ -361,8 +394,8 @@ def assert_artifact(entries, workdir, events=None):
                     continue
                 if not _glob_match(call["args"].get("filePath"), path):
                     continue
-                content = str(call["args"].get("content") or "")
-                if all(p.lower() in content.lower() for p in phrases):
+                content = _norm_ws(str(call["args"].get("content") or "")).lower()
+                if all(p in content for p in norms):
                     found = True
                     break
         if not found:
@@ -372,9 +405,10 @@ def assert_artifact(entries, workdir, events=None):
 
 
 def assert_text(phrases, final_text):
-    """Return missing `text` key-phrases (case-insensitive substring)."""
-    low = (final_text or "").lower()
-    return [f"text: phrase not found: {p!r}" for p in phrases if p.lower() not in low]
+    """Return missing `text` key-phrases (case-insensitive, whitespace-normalized)."""
+    low = _norm_ws(final_text).lower()
+    return [f"text: phrase not found: {p!r}" for p in phrases
+            if _norm_ws(p).lower() not in low]
 
 
 def assert_expect(expect, ctx):
@@ -414,11 +448,18 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
     unavailable / connection error) is retried at most `max_retries` times
     with `RETRY_BACKOFF_SECONDS` backoff. `quarantine_path`, when set,
     records the final failure (or clears on success) — CI-owned only.
+
+    2026-09-28 resilience: a session that DIES with no work (a stream whose
+    only event is an error, or a stall with no events) is retried in a FRESH
+    session — bounded by `BEVAL_MAX_FRESH_RETRIES` (default 2, clamp 2) and
+    logged. Content misses never take this path. On failure, every turn's raw
+    stream is persisted for diagnosis.
     """
     result = get_output(e)
     try:
         ctx = build_context(result)
         missing = assert_eval(e, ctx)
+        turns = [("initial", result)]
         attempts = 0
         # Transient retry applies to NON-STREAM output only (stall strings,
         # legacy raw): a parseable event stream has no transient signature in
@@ -451,25 +492,64 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             result = get_output(e)
             ctx = build_context(result)
             missing = assert_eval(e, ctx)
+            turns.append((f"transient{attempts}", result))
         # Deterministic continuation policy (2026-09-21, the mechanical form
         # of an eval-run orchestrator): a turn that ends with MISSING
         # assertions and ZERO write/edit events is a premature stop — the
-        # agent ended mid-task. Continue the SAME opencode session once with
-        # an explicit finish-now nudge; bounded and logged per turn. The
-        # session id comes from the event stream itself.
+        # agent ended mid-task. Continue the SAME opencode session with an
+        # explicit finish-now nudge; bounded and logged per turn. The session
+        # id comes from the event stream itself. 2026-09-28: the policy runs
+        # per session — the initial session, and again after each fresh retry
+        # (a fresh session that then stalls deserves the same nudge).
         continuations = 0
         max_continuations = min(int(os.environ.get("BEVAL_MAX_CONTINUATIONS", "1")), 3)  # clamp: no runaway loops
-        while (missing and continuations < max_continuations
-               and not any(c["tool"] in ("write", "edit")
-                           for c in extract_tool_calls(ctx["events"]))):
-            session_id = next((ev.get("sessionID") for ev in ctx["events"]
-                               if ev.get("sessionID")), None)
-            if not session_id:
-                break
-            continuations += 1
-            nudge = ("Continue the task to completion in this session. Do the "
-                     "work now — write the required files with the write tool; "
-                     "do not end with a plan to write them later.")
+
+        def nudge_session():
+            """Same-session nudges for the CURRENT result (per-session budget)."""
+            nonlocal result, ctx, missing, continuations
+            used = 0
+            while (missing and used < max_continuations
+                   and not _dead_session(ctx)
+                   and not any(c["tool"] in ("write", "edit")
+                               for c in extract_tool_calls(ctx["events"]))):
+                session_id = next((ev.get("sessionID") for ev in ctx["events"]
+                                   if ev.get("sessionID")), None)
+                if not session_id:
+                    return
+                used += 1
+                continuations += 1
+                nudge = ("Continue the task to completion in this session. Do the "
+                         "work now — write the required files with the write tool; "
+                         "do not end with a plan to write them later.")
+                log_run.log_record({
+                    "kind": "eval",
+                    "skill": e["skill"],
+                    "agent": None,
+                    "model": model or e["model_tier"],
+                    "outcome": "error",
+                    "eval_pass": None,
+                    "detail": (f"continuation turn {continuations}: premature stop "
+                               f"(0 write events, session {session_id})")[:DETAIL_MAX],
+                }, logs_dir=logs_dir)
+                if isinstance(result, EvalResult):
+                    result.close()
+                result = get_output(e, {"session_id": session_id, "nudge": nudge})
+                ctx = build_context(result)
+                missing = assert_eval(e, ctx)
+                turns.append((f"continuation{continuations}", result))
+
+        nudge_session()
+
+        # Fresh-session retry on a dead session (2026-09-28): when a session
+        # dies with no work, resuming it cannot help — observed: a resumed
+        # session hard-fails with a provider UnknownError after a turn ends on
+        # rejected tool calls. Restart in a FRESH session instead; bounded
+        # (default 2, clamp 2) and logged per attempt. Never applied to
+        # content misses.
+        max_fresh = min(int(os.environ.get("BEVAL_MAX_FRESH_RETRIES", "2")), 2)
+        fresh = 0
+        while (missing and fresh < max_fresh and _dead_session(ctx)):
+            fresh += 1
             log_run.log_record({
                 "kind": "eval",
                 "skill": e["skill"],
@@ -477,19 +557,22 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
                 "model": model or e["model_tier"],
                 "outcome": "error",
                 "eval_pass": None,
-                "detail": (f"continuation turn {continuations}: premature stop "
-                           f"(0 write events, session {session_id})")[:DETAIL_MAX],
+                "detail": (f"fresh retry {fresh}: previous session died with no "
+                           f"work (fatal stream); restarting fresh")[:DETAIL_MAX],
             }, logs_dir=logs_dir)
             if isinstance(result, EvalResult):
                 result.close()
-            result = get_output(e, {"session_id": session_id, "nudge": nudge})
+            result = get_output(e)  # fresh session
             ctx = build_context(result)
             missing = assert_eval(e, ctx)
+            turns.append((f"fresh{fresh}", result))
+            nudge_session()  # a fresh session that stalls gets the same nudge
+
         passed = not missing
         detail = None
         if missing:
             detail = ("missing: " + " | ".join(missing))[:DETAIL_MAX]
-            _persist_event_stream(logs_dir, e, ctx)
+            _persist_event_streams(logs_dir, e, turns)
         rec = {
             "kind": "eval",
             "skill": e["skill"],
@@ -620,33 +703,34 @@ def invoke_opencode(e, model=None, turn=None):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _persist_event_stream(logs_dir, e, ctx):
-    """Save the raw event stream of a FAILED eval next to the run log.
+def _persist_event_streams(logs_dir, e, turns):
+    """Save EVERY turn's raw stream of a failed eval next to the run log.
 
-    Typed-assertion failures are diagnosed from the stream (what the agent
-    actually did); without persistence every failure needed a local repro.
-    Best-effort: never fails the eval because diagnostics could not be
-    written.
+    2026-09-28: only the final turn used to be persisted, which made the
+    resume-death class (initial turn ends, resumed session errors) impossible
+    to diagnose without a local repro. One file per turn, best-effort: never
+    fails the eval because diagnostics could not be written.
     """
-    if not ctx.get("raw"):
-        return
     if not logs_dir:
         logs_dir = "logs/"  # CI invokes the runner without --logs-dir
     try:
         d = os.path.join(logs_dir, "eval-streams")
         os.makedirs(d, exist_ok=True)
         slug = eval_key(e).replace("#", "__")
-        import time as _time
-        fn = os.path.join(d, f"{slug}-{_time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.jsonl")
-        raw = ctx["raw"]
-        # Redact provider credentials before persistence (security lens,
-        # 2026-09-21): streams can embed error text echoing env keys.
-        for env_key in ("DEEPSEEK_API_KEY", "OPENCODE_API_KEY", "OPENCODE_GO_API_KEY"):
-            secret = os.environ.get(env_key)
-            if secret and secret in raw:
-                raw = raw.replace(secret, "***")
-        with open(fn, "w", encoding="utf-8") as fh:
-            fh.write(raw)
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        for idx, (label, res) in enumerate(turns):
+            raw = getattr(res, "raw", "") or ""
+            if not raw:
+                continue
+            # Redact provider credentials before persistence (security lens,
+            # 2026-09-21): streams can embed error text echoing env keys.
+            for env_key in ("DEEPSEEK_API_KEY", "OPENCODE_API_KEY", "OPENCODE_GO_API_KEY"):
+                secret = os.environ.get(env_key)
+                if secret and secret in raw:
+                    raw = raw.replace(secret, "***")
+            fn = os.path.join(d, f"{slug}-{stamp}-turn{idx}-{label}.jsonl")
+            with open(fn, "w", encoding="utf-8") as fh:
+                fh.write(raw)
     except OSError:
         pass
 

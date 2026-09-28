@@ -97,6 +97,12 @@ def test_assert_behavior():
     assert miss == ["B"], miss
 
 
+FATAL_STREAM = (
+    '{"type":"error","timestamp":1,"sessionID":"ses_test",'
+    '"error":{"name":"UnknownError","data":{"message":"boom","ref":"err_x"}}}\n'
+)
+
+
 def test_run_eval_pass_and_fail():
     e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["A", "B"], "model_tier": "go"}
     d = tempfile.mkdtemp()
@@ -113,6 +119,133 @@ def test_run_eval_pass_and_fail():
         assert recs[-1]["eval_pass"] is False
         assert recs[-1]["outcome"] == "failure"
         assert "B" in (recs[-1]["detail"] or "")
+    finally:
+        shutil.rmtree(d)
+
+
+def test_fresh_retry_on_dead_session():
+    """2026-09-28: a session that dies with no work gets a fresh-session retry.
+
+    A dead-session stream (only an error event, e.g. provider UnknownError on
+    a resumed session) cannot be recovered by resuming; the runner must
+    restart in a fresh session, log the retry, and never apply this path to
+    content misses.
+    """
+    e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["A"], "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    calls = {"n": 0}
+
+    def stub(_e, turn=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return runner.EvalResult(raw=FATAL_STREAM)  # initial session dies
+        return runner.EvalResult(raw="A")  # fresh retry succeeds
+
+    old_cont = os.environ.get("BEVAL_MAX_CONTINUATIONS")
+    old_fresh = os.environ.get("BEVAL_MAX_FRESH_RETRIES")
+    os.environ["BEVAL_MAX_CONTINUATIONS"] = "1"
+    os.environ["BEVAL_MAX_FRESH_RETRIES"] = "1"
+    try:
+        passed, missing, _ = runner.run_eval(e, stub, logs_dir=d)
+        assert passed, missing
+        recs = _read_logs(d)
+        assert any("fresh retry" in (r.get("detail") or "") for r in recs), recs
+        assert calls["n"] == 2, calls  # dead sessions are not nudged; retried fresh
+    finally:
+        for k, v in (("BEVAL_MAX_CONTINUATIONS", old_cont),
+                     ("BEVAL_MAX_FRESH_RETRIES", old_fresh)):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        shutil.rmtree(d)
+
+
+CONTENT_STALL_STREAM = (
+    '{"type":"tool","sessionID":"ses_two","part":{"type":"tool","tool":"read",'
+    '"state":{"status":"completed","input":{"filePath":"x"}}}}\n'
+    '{"type":"text","sessionID":"ses_two","part":{"type":"text","text":"working"}}\n'
+)
+
+
+def test_nudge_applies_to_fresh_session():
+    """2026-09-28: a fresh attempt that stalls (0 writes) gets the same nudge."""
+    e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["A"], "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    calls = {"n": 0}
+
+    def stub(_e, turn=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return runner.EvalResult(raw=FATAL_STREAM)          # initial: dead
+        if calls["n"] == 2:
+            return runner.EvalResult(raw=CONTENT_STALL_STREAM)  # fresh: stalled
+        return runner.EvalResult(raw="A")                       # nudged: done
+
+    old_cont = os.environ.get("BEVAL_MAX_CONTINUATIONS")
+    old_fresh = os.environ.get("BEVAL_MAX_FRESH_RETRIES")
+    os.environ["BEVAL_MAX_CONTINUATIONS"] = "1"
+    os.environ["BEVAL_MAX_FRESH_RETRIES"] = "1"
+    try:
+        passed, missing, _ = runner.run_eval(e, stub, logs_dir=d)
+        assert passed, missing
+        recs = _read_logs(d)
+        assert any("continuation" in (r.get("detail") or "") for r in recs), recs
+        assert calls["n"] == 3, calls
+    finally:
+        for k, v in (("BEVAL_MAX_CONTINUATIONS", old_cont),
+                     ("BEVAL_MAX_FRESH_RETRIES", old_fresh)):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        shutil.rmtree(d)
+
+
+def test_all_turns_persisted_on_failure():
+    """2026-09-28: every turn's stream is persisted when an eval fails."""
+    e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["A"], "model_tier": "go"}
+    d = tempfile.mkdtemp()
+
+    def stub(_e, turn=None):
+        return runner.EvalResult(raw=FATAL_STREAM)
+
+    old_cont = os.environ.get("BEVAL_MAX_CONTINUATIONS")
+    old_fresh = os.environ.get("BEVAL_MAX_FRESH_RETRIES")
+    os.environ["BEVAL_MAX_CONTINUATIONS"] = "1"
+    os.environ["BEVAL_MAX_FRESH_RETRIES"] = "1"
+    try:
+        passed, missing, _ = runner.run_eval(e, stub, logs_dir=d)
+        assert not passed
+        streams = sorted(os.listdir(os.path.join(d, "eval-streams")))
+        assert len(streams) == 2, streams  # initial + fresh (dead -> no nudge)
+        assert any("turn0-initial" in s for s in streams), streams
+        assert any("turn1-fresh1" in s for s in streams), streams
+    finally:
+        for k, v in (("BEVAL_MAX_CONTINUATIONS", old_cont),
+                     ("BEVAL_MAX_FRESH_RETRIES", old_fresh)):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        shutil.rmtree(d)
+
+
+def test_phrases_survive_whitespace_wrapping():
+    """2026-09-28: phrase checks normalize whitespace (markdown line-wraps)."""
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, "SKILL.md"), "w") as fh:
+            fh.write("name: build\ndescription: x\n\npresent the plan's manual\n"
+                     "   validation steps to the user\n")
+        ctx = runner.build_context(runner.EvalResult(raw="", workdir=d))
+        ok = {"artifact": [{"path": "**/SKILL.md",
+                            "phrases": ["manual validation", "name:"]}]}
+        assert runner.assert_expect(ok, ctx) == [], runner.assert_expect(ok, ctx)
+        bad = {"artifact": [{"path": "**/SKILL.md", "phrases": ["manual sign-off"]}]}
+        assert runner.assert_expect(bad, ctx), "different wording must still fail"
+        assert runner.assert_text(["manual validation"],
+                                  "the manual\nvalidation handoff") == []
     finally:
         shutil.rmtree(d)
 
@@ -518,6 +651,10 @@ def main():
     tests = [
         test_assert_behavior,
         test_run_eval_pass_and_fail,
+        test_fresh_retry_on_dead_session,
+        test_nudge_applies_to_fresh_session,
+        test_all_turns_persisted_on_failure,
+        test_phrases_survive_whitespace_wrapping,
         test_cli_pass_branch,
         test_cli_fail_branch,
         test_deferred_excluded,
