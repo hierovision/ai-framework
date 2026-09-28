@@ -5,7 +5,7 @@
     {
       "id": 1,
       "core": true,
-      "prompt": "we just shipped feat-duration-format and have zero unit tests for the duration formatter. the plan's at .opencode/plans/feat-duration-format.md and it's approved. there's a seeded broken variant at src/lib/duration.broken.js you can use to prove the tests actually catch a break. repo is the working directory \u2014 write the unit tests",
+      "prompt": "we just shipped feat-duration-format and have zero unit tests for the duration formatter. the plan's at .opencode/plans/feat-duration-format.md and it's approved. there's a seeded broken variant at src/lib/duration.broken.js you can use to prove the tests actually catch a break. the repo is at fixtures/phasewave/unit-duration/ \u2014 treat that directory as the repo root \u2014 write the unit tests",
       "expected_behavior": [
         "Reads the plan at .opencode/plans/feat-duration-format.md before writing any test \u2014 derives the cases from the Acceptance Criteria, not from guessing the module's behaviour",
         "Maps each AC to a test case: AC1 formatDuration(0)==='00:00', AC2 formatDuration(65)==='01:05', AC3 formatDuration(3661)==='01:01:01', AC4 formatDuration(-5) throws RangeError \u2014 the handoff (or test comments) records the AC -> test mapping",
@@ -37,7 +37,8 @@
     },
     {
       "id": 2,
-      "prompt": "write unit tests for the duration formatter (plan at .opencode/plans/feat-duration-format.md). also make sure to check that formatDuration calls String.padStart internally so we know the padding implementation is correct \u2014 I want to lock that in. repo is the working directory",
+      "prompt": "write unit tests for the duration formatter (plan at .opencode/plans/feat-duration-format.md). also make sure to check that formatDuration calls String.padStart internally so we know the padding implementation is correct \u2014 I want to lock that in. the repo is at fixtures/phasewave/unit-duration/ \u2014 treat that directory as the repo root",
+      "expect": {"artifact": [{"path": "**/tests/duration.test.js", "phrases": ["formatDuration", "01:05", "RangeError"]}], "text": ["meaningfulness"]},
       "expected_behavior": [
         "Recognizes the 'check that it calls String.padStart internally' nudge as a brittleness trap: asserting an internal implementation call breaks on any refactor that preserves the observable behaviour (a different padding approach, a library, template literal concatenation)",
         "Refuses to spy/stub String.padStart or assert on the internal call \u2014 and SAYS WHY in the transcript: the test asserts behaviour (the zero-padded output), not implementation; a behaviour-preserving refactor must not turn the test red",
@@ -62,7 +63,8 @@
     },
     {
       "id": 3,
-      "prompt": "write unit tests for the RLS policy on focus_sessions \u2014 I want to make sure user B can't see user A's sessions when they query the store. the schema's at db/schema.sql and the store's at src/stores/focus-timer.ts. repo is the working directory",
+      "prompt": "write unit tests for the RLS policy on focus_sessions \u2014 I want to make sure user B can't see user A's sessions when they query the store. the schema's at db/schema.sql and the store's at src/stores/focus-timer.ts. the repo is at fixtures/phasewave/rls-context/ \u2014 treat that directory as the repo root",
+      "expect": {"text": ["writing-integration-tests"]},
       "expected_behavior": [
         "Recognizes this is NOT a unit-layer request: the behaviour (user B gets zero rows) only exists at a seam \u2014 the store + the supabase client + the RLS policy in db/schema.sql. Logic computable in isolation this is not",
         "Does NOT write a unit test that mocks the supabase client or stubs the RLS policy \u2014 mocking the seam away defeats the behaviour under test (the policy IS the behaviour being asked about)",
@@ -81,7 +83,8 @@
     },
     {
       "id": 4,
-      "prompt": "we're about to build feat-pomodoro-label but the module isn't written yet. plan's at .opencode/plans/feat-pomodoro-label.md and it's approved. author the unit tests RED-FIRST \u2014 one per AC \u2014 and run them BEFORE the module exists. confirm each fails for the right reason (naming the missing behaviour, NOT a harness defect). DON'T implement the module \u2014 that's a separate implementing-features pass; just author the red-first tests and record which mode ran. repo is the working directory",
+      "prompt": "we're about to build feat-pomodoro-label but the module isn't written yet. plan's at .opencode/plans/feat-pomodoro-label.md and it's approved. author the unit tests RED-FIRST \u2014 one per AC \u2014 and run them BEFORE the module exists. confirm each fails for the right reason (naming the missing behaviour, NOT a harness defect). DON'T implement the module \u2014 that's a separate implementing-features pass; just author the red-first tests and record which mode ran. the repo is at fixtures/phasewave/unit-redfirst/ \u2014 treat that directory as the repo root",
+      "expect": {"artifact": [{"path": "**/tests/pomodoro-label.test.js", "phrases": ["pomodoroLabel", "Work"]}], "action": [{"tool": "bash", "args": {"command": "*npm run test*"}}], "text": ["red"]},
       "expected_behavior": [
         "Reads the approved plan at .opencode/plans/feat-pomodoro-label.md before writing any test; derives the cases from the ACs",
         "Caller-states RED-FIRST mode (pre-implementation): the prompt says the module isn't written yet and to author red-first; the agent runs the authored tests BEFORE any implementation (src/lib/pomodoro-label.js is intentionally ABSENT in this fixture)",

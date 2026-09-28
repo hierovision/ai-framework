@@ -4,7 +4,8 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "we need integration tests for the focus_sessions RLS isolation. plan's at .opencode/plans/feat-sessions-rls.md, approved. I want to prove user B can't see user A's sessions when they query the store. there's a seeded broken leaky policy at db/policies.broken.js you can use to prove the test catches a leak. repo is the working directory \u2014 write the integration test",
+      "prompt": "we need integration tests for the focus_sessions RLS isolation. plan's at .opencode/plans/feat-sessions-rls.md, approved. I want to prove user B can't see user A's sessions when they query the store. there's a seeded broken leaky policy at db/policies.broken.js you can use to prove the test catches a leak. the repo is at fixtures/phasewave/rls-seam/ \u2014 treat that directory as the repo root \u2014 write the integration test",
+      "expect": {"artifact": [{"path": "**/tests/rls.test.js", "phrases": ["createFocusTimerStore", "authUid"]}], "action": [{"tool": "bash", "args": {"command": "*meaningfulness*"}}]},
       "expected_behavior": [
         "Reads the plan at .opencode/plans/feat-sessions-rls.md before writing \u2014 derives the test from the ACs, not from guessing",
         "Classifies the behaviour as integration: the isolation lives at the DB + client seam (the store is a thin passthrough); real store, faked transport at the outermost boundary",
@@ -37,7 +38,8 @@
     },
     {
       "id": 2,
-      "prompt": "write the integration test for the offline outbox replay. plan's at .opencode/plans/feat-offline-replay.md, approved. when the user was offline we queued 3 session mutations and I want to prove they all replay to the client in order on reconnect, none dropped. there's a seeded broken outbox at src/lib/outbox.broken.js to prove the test catches a drop. repo is the working directory",
+      "prompt": "write the integration test for the offline outbox replay. plan's at .opencode/plans/feat-offline-replay.md, approved. when the user was offline we queued 3 session mutations and I want to prove they all replay to the client in order on reconnect, none dropped. there's a seeded broken outbox at src/lib/outbox.broken.js to prove the test catches a drop. the repo is at fixtures/phasewave/outbox-replay/ \u2014 treat that directory as the repo root",
+      "expect": {"artifact": [{"path": "**/tests/outbox.test.js", "phrases": ["_reset", "sync"]}], "text": ["replay"]},
       "expected_behavior": [
         "Reads the plan at .opencode/plans/feat-offline-replay.md before writing \u2014 derives the test from the ACs",
         "Classifies the behaviour as integration: replay lives at the outbox + client seam; real outbox + store, faked transport at the outermost boundary",
@@ -67,7 +69,8 @@
     },
     {
       "id": 3,
-      "prompt": "we need integration tests for the duration formatter \u2014 formatDuration in src/lib/duration.js. want to make sure it formats correctly end to end through the whole stack. plan's at .opencode/plans/feat-duration-format.md. repo is the working directory",
+      "prompt": "we need integration tests for the duration formatter \u2014 formatDuration in src/lib/duration.js. want to make sure it formats correctly end to end through the whole stack. plan's at .opencode/plans/feat-duration-format.md. the repo is at fixtures/phasewave/pure-context/ \u2014 treat that directory as the repo root",
+      "expect": {"text": ["writing-unit-tests"]},
       "expected_behavior": [
         "Recognizes this is NOT an integration-layer request: formatDuration is a pure function (no I/O, no store, no DOM, no collaborators) \u2014 logic computable in isolation. There is no seam to integrate",
         "Does NOT write an integration test that manufactures a fake seam (e.g. faking a store/client the function does not touch) \u2014 manufacturing a seam where none exists is a vacant test at the wrong layer",
@@ -84,7 +87,8 @@
     },
     {
       "id": 4,
-      "prompt": "we're about to build feat-share-session but the store action isn't written yet. plan's at .opencode/plans/feat-share-session.md and it's approved. author the integration test RED-FIRST \u2014 it drives the REAL store (createShareStore) through the FAKED client (createClient with authUid) and calls store.shareSession \u2014 and run it BEFORE the action exists. confirm it fails for the right reason (naming the missing seam behaviour, NOT a harness defect). DON'T implement the action \u2014 that's a separate implementing-features pass; just author the red-first test and record which mode ran. repo is the working directory",
+      "prompt": "we're about to build feat-share-session but the store action isn't written yet. plan's at .opencode/plans/feat-share-session.md and it's approved. author the integration test RED-FIRST \u2014 it drives the REAL store (createShareStore) through the FAKED client (createClient with authUid) and calls store.shareSession \u2014 and run it BEFORE the action exists. confirm it fails for the right reason (naming the missing seam behaviour, NOT a harness defect). DON'T implement the action \u2014 that's a separate implementing-features pass; just author the red-first test and record which mode ran. the repo is at fixtures/phasewave/int-redfirst/ \u2014 treat that directory as the repo root",
+      "expect": {"artifact": [{"path": "**/tests/share.test.js", "phrases": ["shareSession"]}], "action": [{"tool": "bash", "args": {"command": "*npm run test*"}}], "text": ["red-first"]},
       "expected_behavior": [
         "Reads the approved plan at .opencode/plans/feat-share-session.md before writing; derives the test from the ACs",
         "Classifies the behaviour as integration (the share lives at the store + client seam; real store, faked transport at the edge)",

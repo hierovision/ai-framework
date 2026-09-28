@@ -4,7 +4,8 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "add e2e for the focus timer journey. plan's at .opencode/plans/feat-timer-journey.md, approved. an authenticated user starts a timer, sees the remaining indicator, completes it, sees the completed state. we have playwright set up already with an auth fixture at e2e/fixtures/auth.ts. repo is the working directory \u2014 write the spec",
+      "prompt": "add e2e for the focus timer journey. plan's at .opencode/plans/feat-timer-journey.md, approved. an authenticated user starts a timer, sees the remaining indicator, completes it, sees the completed state. we have playwright set up already with an auth fixture at e2e/fixtures/auth.ts. the repo is at fixtures/phasewave/timer-journey/ \u2014 treat that directory as the repo root \u2014 write the spec",
+      "expect": {"artifact": [{"path": "**/e2e/timer.spec.ts", "phrases": ["getByRole", "toBeVisible"]}], "text": ["AC1"]},
       "expected_behavior": [
         "Reads the plan at .opencode/plans/feat-timer-journey.md before writing \u2014 derives the journey from the ACs",
         "Classifies the behaviour as e2e: the start/complete/observe journey is only observable through the real UI",
@@ -33,7 +34,8 @@
     },
     {
       "id": 2,
-      "prompt": "write the e2e spec for the offline PWA journey. plan's at .opencode/plans/feat-offline-journey.md, approved. user goes offline, starts a timer, sees a queued indicator, comes back online, sees it sync. auth fixture's at e2e/fixtures/auth.ts. repo is the working directory",
+      "prompt": "write the e2e spec for the offline PWA journey. plan's at .opencode/plans/feat-offline-journey.md, approved. user goes offline, starts a timer, sees a queued indicator, comes back online, sees it sync. auth fixture's at e2e/fixtures/auth.ts. the repo is at fixtures/phasewave/offline-journey/ \u2014 treat that directory as the repo root",
+      "expect": {"artifact": [{"path": "**/e2e/offline.spec.ts", "phrases": ["setOffline", "toBeVisible"]}], "text": ["sync"]},
       "expected_behavior": [
         "Reads the plan at .opencode/plans/feat-offline-journey.md before writing \u2014 derives the journey from the ACs",
         "Writes e2e/offline.spec.ts as ONE journey",
@@ -62,7 +64,8 @@
     },
     {
       "id": 3,
-      "prompt": "write e2e tests for the duration formatter \u2014 formatDuration in src/lib/duration.js. I want to drive a real browser to confirm it formats durations correctly. plan's at .opencode/plans/feat-duration-format.md. repo is the working directory",
+      "prompt": "write e2e tests for the duration formatter \u2014 formatDuration in src/lib/duration.js. I want to drive a real browser to confirm it formats durations correctly. plan's at .opencode/plans/feat-duration-format.md. the repo is at fixtures/phasewave/pure-context-e2e/ \u2014 treat that directory as the repo root",
+      "expect": {"text": ["writing-unit-tests"]},
       "expected_behavior": [
         "Recognizes this is NOT an e2e-layer request: formatDuration is a pure function (no I/O, no store, no DOM, no UI) \u2014 logic computable in isolation. There is no user journey through the real UI to observe",
         "Does NOT write a Playwright spec that spins up a real browser to test a pure function \u2014 that is a wrong-layer e2e (slow, brittle, and the browser adds nothing the function's own return does not already provide)",
@@ -79,7 +82,8 @@
     },
     {
       "id": 4,
-      "prompt": "we're about to build feat-export-journey but the export screen/route isn't built yet. plan's at .opencode/plans/feat-export-journey.md and it's approved. author the e2e spec RED-FIRST \u2014 an authenticated user navigates to /export and clicks Export sessions \u2014 and confirm it would go red against the pre-feature app (the /export route is absent) for the right reason (naming the missing UI behaviour, NOT a spec-harness defect). DON'T implement the route \u2014 that's a separate implementing-features pass; just author the red-first spec and record which mode ran (real-browser red is the SAME deferred validation already in place). repo is the working directory",
+      "prompt": "we're about to build feat-export-journey but the export screen/route isn't built yet. plan's at .opencode/plans/feat-export-journey.md and it's approved. author the e2e spec RED-FIRST \u2014 an authenticated user navigates to /export and clicks Export sessions \u2014 and confirm it would go red against the pre-feature app (the /export route is absent) for the right reason (naming the missing UI behaviour, NOT a spec-harness defect). DON'T implement the route \u2014 that's a separate implementing-features pass; just author the red-first spec and record which mode ran (real-browser red is the SAME deferred validation already in place). the repo is at fixtures/phasewave/e2e-redfirst/ \u2014 treat that directory as the repo root",
+      "expect": {"artifact": [{"path": "**/e2e/export.spec.ts", "phrases": ["getByRole", "export"]}], "text": ["red-first"]},
       "expected_behavior": [
         "Reads the approved plan at .opencode/plans/feat-export-journey.md before writing; derives the journey from the ACs",
         "Classifies the behaviour as e2e (the export journey is only observable through the real UI)",
