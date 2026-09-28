@@ -1,0 +1,14 @@
+diff --git a/src/settings.js b/src/settings.js
+--- a/src/settings.js
++++ b/src/settings.js
+@@ -1,5 +1,7 @@
+ const logo = require("./logo");
+ 
+ function renderSettings(user) {
+-  return { header: "Settings" };
++  return {
++    header: logo.headerFor(user),
++  };
+ }
+ 
+ module.exports = { renderSettings };

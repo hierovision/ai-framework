@@ -1,0 +1,16 @@
+{
+  "url": "https://ops.example.invalid/settings",
+  "violations": [
+    {
+      "id": "image-alt",
+      "impact": "critical",
+      "help": "Images must have alternate text",
+      "nodes": [
+        {
+          "target": ["#logo"],
+          "failureSummary": "Fix any of the following: Element does not have an alt attribute"
+        }
+      ]
+    }
+  ]
+}

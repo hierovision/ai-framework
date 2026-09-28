@@ -172,3 +172,12 @@ belongs in the adapted skill's own eval net at Phase D.
   `defending-code-reference-harness`; reject: `ghostsecurity/skills`, `vbsec`.
   Baseline saturation noted (the review fixture does not discriminate recall).
   Next: Phase D adoption design for the two adapts (per-item user sign-off).
+- 2026-09-28 — **Phase D confirmed** by the user: three-item wave — D1
+  security review (adapt `claude-code-owasp`; re-expressed review lens;
+  trailofbits inspiration-only), D2 threat modeling (adapt `threat-model`),
+  D3 supply-chain/IR (house-authored). Inspiration items are consumed
+  explicitly per the phase-d briefs (`.opencode/plans/skill-gap-analysis-phase-d.md`).
+  D1 dispatched for authoring.
+- 2026-09-28 — D1 `reviewing-security` authored and independently verified
+  (official runner 8/8; adversarial transcript clean); landing PR open,
+  awaiting user sign-off.
