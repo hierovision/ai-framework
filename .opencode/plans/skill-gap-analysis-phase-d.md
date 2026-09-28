@@ -145,7 +145,7 @@ lives at `references/provenance.md`; the orchestrator files it into
 
 | Item | Status | Notes |
 |---|---|---|
-| D1 security review | verified — landing awaits sign-off | official runner 8/8; adversarial transcript clean; §D1 |
+| D1 security review | landed (PR #40, `e0baae9`) | official runner 8/8; adversarial transcript clean; §D1 |
 | D2 threat modeling | verified — landing PR open | author round 3 6/6; orchestrator re-run 6/6 (official runner, detached + polled under the supervision protocol); §D2 |
 | D3 supply-chain/IR | scoped | design at dispatch |
 
@@ -156,6 +156,8 @@ lives at `references/provenance.md`; the orchestrator files it into
   the orchestrator (`validate_skill` OK; official runner 8/8; adversarial
   transcript shows no execution/egress and the injection reported; leak scan
   clean; provenance filed; registry L1 added). Landing PR open for sign-off.
+- 2026-09-28 — D1 **landed**: sign-off given; PR #40 squash-merged as
+  `e0baae9`. D2 dispatch next.
 - 2026-09-28 — D2 authored by a visible subagent: 28 files (SKILL.md +
   6 references + typed evals + 5 fixture scenarios). The pass converged
   (round 1 6/6 → round 2 exposed real flakes → fixes → round 3 6/6) but was
