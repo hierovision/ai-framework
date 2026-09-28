@@ -38,7 +38,7 @@
   },
   {
    "id": 2,
-   "prompt": "here's our existing 'build' skill, it's just 6 lines pointing at an agent file and the knowledge isn't portable. improve it so the skill itself carries the workflow: read plan from .opencode/plans/pending-task.md, implement only whats in the plan, then type-check + lint + unit tests + e2e must all pass before presenting manual validation steps to me. keep it working for agents that don't have our agent files",
+   "prompt": "here's our existing 'build' skill (stub at fixtures/build-baseline/), it's just 6 lines pointing at an agent file and the knowledge isn't portable. improve it so the skill itself carries the workflow: read plan from .opencode/plans/pending-task.md, implement only whats in the plan, then type-check + lint + unit tests + e2e must all pass before presenting manual validation steps to me. keep it working for agents that don't have our agent files",
    "expected_behavior": [
     "Preserves the existing skill name and directory unchanged",
     "Establishes or confirms evals and a baseline of the current skill's behavior before rewriting",

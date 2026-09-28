@@ -80,14 +80,17 @@ on touch or delete it).
   and every `args` glob matches the corresponding `state.input` value (string
   form; `fnmatch` semantics, `*` crosses path separators).
 - **`artifact`** matches when a file matching `path` exists under the run
-  workdir and its content contains every phrase (case-insensitive substring).
+  workdir and its content contains every phrase (case-insensitive substring
+  after whitespace normalization — phrase checks collapse whitespace runs, so
+  markdown line-wraps cannot break a multi-word phrase; 2026-09-28).
 - **`text`** matches when the final response text contains every phrase
-  (case-insensitive substring).
+  (case-insensitive substring after whitespace normalization).
 
 ## Legacy `expected_behavior`
 
 An eval without `expect` runs the legacy path: each `expected_behavior` string
-must appear (case-insensitive substring) in the final response text. It is the
+must appear (case-insensitive substring after whitespace normalization) in the
+final response text. It is the
 `text` class by definition, and is flagged `legacy_assertion` in
 `coverage-gaps.legacy_assertion_evals` for migration. Migrate on touch: any
 eval that fails, is touched, or is selected as a canary migrates to a typed
