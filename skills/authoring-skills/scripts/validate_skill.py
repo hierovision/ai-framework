@@ -188,6 +188,11 @@ def main():
         os.path.join(os.path.dirname(os.path.realpath(__file__)),
                      "..", "..", "..", "scripts"))
 
+    # Exit-status flag: initialized once, before any check, so a registry
+    # failure under `--all` cannot be erased by the per-skill loop below
+    # (2026-09-28 fix: a reset before the loop made registry errors exit 0).
+    failed = False
+
     if args == ["--all"]:
         # realpath so a symlinked install (e.g. ~/.config/opencode/skills/...)
         # still resolves to the real repo's skills/ root (Layer 1 hermeticity:
@@ -218,7 +223,6 @@ def main():
                     data.get("personas") or [])
                 print(f"OK    registry ({n} entries)")
 
-    failed = False
     for skill_dir in args:
         errors, warnings = validate(skill_dir)
         name = os.path.basename(os.path.normpath(skill_dir))
