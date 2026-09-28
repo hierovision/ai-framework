@@ -369,7 +369,8 @@ def test_model_flag_and_ci_guard():
     """
     args = runner.opencode_run_args("/tmp/x", "prompt p",
                                     model="opencode/nemotron-3-ultra-free")
-    assert args == ["run", "--dir", "/tmp/x",
+    assert args == ["run", "--print-logs", "--log-level", "ERROR",
+                    "--dir", "/tmp/x",
                     "--model", "opencode/nemotron-3-ultra-free",
                     "--format", "json", "prompt p"], args
     # no model -> no --model flag (opencode default; developer-local runs only)
@@ -647,6 +648,58 @@ def test_typed_stub_synthesis():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_dead_session_error_signature_in_log():
+    """RM-021 (2026-09-28): a dead session's final record is outcome=error
+    (infra) with the actual provider signature in `detail`, not the opaque
+    "fatal stream", so infra is separable from content misses."""
+    e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["A"], "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    old_fresh = os.environ.get("BEVAL_MAX_FRESH_RETRIES")
+    os.environ["BEVAL_MAX_FRESH_RETRIES"] = "0"
+    try:
+        passed, missing, _ = runner.run_eval(
+            e, lambda _e, turn=None: runner.EvalResult(raw=FATAL_STREAM), logs_dir=d)
+        assert not passed
+        rec = _read_logs(d)[-1]
+        assert rec["outcome"] == "error", rec
+        assert "UnknownError" in (rec["detail"] or ""), rec["detail"]
+        assert "ref=err_x" in (rec["detail"] or ""), rec["detail"]
+    finally:
+        if old_fresh is None:
+            os.environ.pop("BEVAL_MAX_FRESH_RETRIES", None)
+        else:
+            os.environ["BEVAL_MAX_FRESH_RETRIES"] = old_fresh
+        shutil.rmtree(d)
+
+
+def test_opencode_run_args_capture_server_logs():
+    """RM-021: `opencode run --print-logs --log-level ERROR` so a dead session's
+    server-side err_* cause lands on stderr and is persisted."""
+    args = runner.opencode_run_args("/tmp/x", "p", model="deepseek/deepseek-flash")
+    assert "--print-logs" in args, args
+    assert args[args.index("--log-level") + 1] == "ERROR", args
+
+
+def test_persist_streams_redacts_stderr_and_writes_it():
+    """RM-021: the captured server-log stderr is persisted redacted — the
+    diagnostic channel never writes the provider key."""
+    d = tempfile.mkdtemp()
+    os.environ["DEEPSEEK_API_KEY"] = "sk-secret-123"
+    try:
+        e = {"skill": "alpha", "eval_id": 1}
+        res = runner.EvalResult(raw=FATAL_STREAM, stderr="ERROR boom key=sk-secret-123")
+        runner._persist_event_streams(d, e, [("initial", res)])
+        sd = os.path.join(d, "eval-streams")
+        logs = [f for f in os.listdir(sd) if f.endswith("-stderr.log")]
+        assert logs, os.listdir(sd)
+        body = open(os.path.join(sd, logs[0]), encoding="utf-8").read()
+        assert "sk-secret-123" not in body, body
+        assert "***" in body, body
+    finally:
+        os.environ.pop("DEEPSEEK_API_KEY", None)
+        shutil.rmtree(d)
+
+
 def main():
     tests = [
         test_assert_behavior,
@@ -674,6 +727,9 @@ def main():
         test_seven_canaries_replay_fixtures,
         test_event_fixture_cli,
         test_typed_stub_synthesis,
+        test_dead_session_error_signature_in_log,
+        test_opencode_run_args_capture_server_logs,
+        test_persist_streams_redacts_stderr_and_writes_it,
     ]
     failed = 0
     for t in tests:

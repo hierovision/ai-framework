@@ -228,6 +228,46 @@ def test_coverage_gaps_legacy_assertion_backlog():
         shutil.rmtree(d)
 
 
+def test_failure_taxonomy_splits_infra_and_content():
+    """RM-021 (2026-09-28): infra errors (dead sessions) must be separable from
+    content misses, with the upstream error signature aggregated by NAME (not
+    one entry per ref) and the refs kept as a bounded sample."""
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, "run-2026-09-28.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"ts": "2026-09-28T06:00:00Z", "run_id": "a",
+                                 "kind": "eval", "skill": "alpha", "outcome": "error",
+                                 "eval_pass": False,
+                                 "detail": "dead session: UnknownError ref=err_1"}) + "\n")
+            fh.write(json.dumps({"ts": "2026-09-28T06:01:00Z", "run_id": "b",
+                                 "kind": "eval", "skill": "beta", "outcome": "failure",
+                                 "eval_pass": False, "detail": "missing: x"}) + "\n")
+            fh.write(json.dumps({"ts": "2026-09-28T06:02:00Z", "run_id": "c",
+                                 "kind": "eval", "skill": "gamma", "outcome": "success",
+                                 "eval_pass": True, "detail": None}) + "\n")
+        sd = os.path.join(d, "eval-streams")
+        os.makedirs(sd)
+        dead = ('{"type":"error","sessionID":"s1","error":{"name":"UnknownError",'
+                '"data":{"message":"Unexpected server error.","ref":"err_1"}}}\n')
+        acted = ('{"type":"tool_use","sessionID":"s2","part":{"type":"tool","tool":"read",'
+                 '"state":{"status":"completed"}}}\n'
+                 '{"type":"text","sessionID":"s2","part":{"type":"text","text":"x"}}\n')
+        for name, body in (("alpha__1-a.jsonl", dead), ("beta__1-b.jsonl", acted),
+                           ("alpha__1-c.jsonl", dead)):
+            with open(os.path.join(sd, name), "w", encoding="utf-8") as fh:
+                fh.write(body)
+        out = report.failure_taxonomy(d)
+        assert out["records"] == 3 and out["pass"] == 1, out
+        assert out["infra_error"] == 1 and out["content_failure"] == 1, out
+        assert out["failure_streams"] == 3, out
+        assert out["dead_streams"] == 2 and out["acted_streams"] == 1, out
+        assert out["error_signatures"] == {"UnknownError": 2}, out
+        assert out["error_ref_count"] == {"UnknownError": 2}, out
+        assert out["error_ref_samples"]["UnknownError"][:1] == ["err_1"], out
+    finally:
+        shutil.rmtree(d)
+
+
 def main():
     tests = [
         test_aggregate_report_per_run_scores,
@@ -238,6 +278,7 @@ def main():
         test_quota_projection_under_guardrail,
         test_coverage_gaps_deferred_status,
         test_coverage_gaps_legacy_assertion_backlog,
+        test_failure_taxonomy_splits_infra_and_content,
     ]
     failed = 0
     for t in tests:

@@ -184,6 +184,40 @@ def _dead_session(ctx):
     return is_transient((ctx.get("raw") or "") + " " + (ctx.get("stderr") or ""))
 
 
+def _error_signature(ctx):
+    """Compact, failure-only signature of a dead session's cause.
+
+    2026-09-28 (RM-021): the run log used to say only "fatal stream", which
+    hid the actual provider/opencode error. 44/117 persisted failure streams
+    in weekly run 36455843309 carried exactly one event —
+    `UnknownError: Unexpected server error ... ref=err_*` — and that cause is
+    what the report must aggregate. Returns e.g. `UnknownError ref=err_abc`.
+    """
+    for ev in (ctx.get("events") or []):
+        if ev.get("type") == "error":
+            err = ev.get("error") or {}
+            name = err.get("name") or "error"
+            data = err.get("data") if isinstance(err.get("data"), dict) else {}
+            ref = (data or {}).get("ref")
+            return name + (f" ref={ref}" if ref else "")
+    return "no events"
+
+
+def _redact(text):
+    """Strip provider credentials from diagnostic text before persistence.
+
+    2026-09-28: extracted from `_persist_event_streams` so server-log capture
+    (stderr) passes through the same redaction as event streams — error text
+    can echo env values.
+    """
+    out = text or ""
+    for env_key in ("DEEPSEEK_API_KEY", "OPENCODE_API_KEY", "OPENCODE_GO_API_KEY"):
+        secret = os.environ.get(env_key)
+        if secret and secret in out:
+            out = out.replace(secret, "***")
+    return out
+
+
 def assert_behavior(expected, output):
     """Return the list of expected strings NOT found.
 
@@ -557,8 +591,8 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
                 "model": model or e["model_tier"],
                 "outcome": "error",
                 "eval_pass": None,
-                "detail": (f"fresh retry {fresh}: previous session died with no "
-                           f"work (fatal stream); restarting fresh")[:DETAIL_MAX],
+                "detail": (f"fresh retry {fresh}: session died with no work "
+                           f"({_error_signature(ctx)}); restarting fresh")[:DETAIL_MAX],
             }, logs_dir=logs_dir)
             if isinstance(result, EvalResult):
                 result.close()
@@ -569,16 +603,24 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             nudge_session()  # a fresh session that stalls gets the same nudge
 
         passed = not missing
+        dead = bool(missing) and _dead_session(ctx)
         detail = None
         if missing:
-            detail = ("missing: " + " | ".join(missing))[:DETAIL_MAX]
+            if dead:
+                # Infra failure, not a content miss: keep the cause visible and
+                # separable from `failure` so the report/green-run signals are
+                # not polluted by provider errors (RM-021, 2026-09-28).
+                detail = (f"dead session: {_error_signature(ctx)} — "
+                          f"no work produced")[:DETAIL_MAX]
+            else:
+                detail = ("missing: " + " | ".join(missing))[:DETAIL_MAX]
             _persist_event_streams(logs_dir, e, turns)
         rec = {
             "kind": "eval",
             "skill": e["skill"],
             "agent": None,
             "model": model or e["model_tier"],
-            "outcome": "success" if passed else "failure",
+            "outcome": "success" if passed else ("error" if dead else "failure"),
             "eval_pass": passed,
             "detail": detail,
         }
@@ -608,11 +650,15 @@ def opencode_run_args(tmp, prompt, model=None):
     RM-002 AC5 live gate, 2026-09-16. Omitted only for developer-local runs
     that intentionally use the environment default.
     """
-    args = ["run", "--dir", tmp]
+    args = ["run", "--print-logs", "--log-level", "ERROR", "--dir", tmp]
     if model:
         args += ["--model", model]
     # RM-003 pass 5: capture the newline-delimited JSON event stream so typed
     # `action`/`artifact` predicates can observe tool events (AC21).
+    # 2026-09-28 (RM-021 observability): ALSO capture opencode's own server log
+    # on stderr at ERROR level, so a dead-session `UnknownError ... ref=err_*`
+    # (an opencode-server error with no client-visible cause) is resolvable
+    # from the uploaded artifact instead of "check server logs" with no logs.
     args += ["--format", "json", prompt]
     return args
 
@@ -719,18 +765,20 @@ def _persist_event_streams(logs_dir, e, turns):
         slug = eval_key(e).replace("#", "__")
         stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
         for idx, (label, res) in enumerate(turns):
-            raw = getattr(res, "raw", "") or ""
-            if not raw:
-                continue
-            # Redact provider credentials before persistence (security lens,
-            # 2026-09-21): streams can embed error text echoing env keys.
-            for env_key in ("DEEPSEEK_API_KEY", "OPENCODE_API_KEY", "OPENCODE_GO_API_KEY"):
-                secret = os.environ.get(env_key)
-                if secret and secret in raw:
-                    raw = raw.replace(secret, "***")
-            fn = os.path.join(d, f"{slug}-{stamp}-turn{idx}-{label}.jsonl")
-            with open(fn, "w", encoding="utf-8") as fh:
-                fh.write(raw)
+            raw = _redact(getattr(res, "raw", "") or "")
+            err = _redact(getattr(res, "stderr", "") or "")
+            if raw:
+                fn = os.path.join(d, f"{slug}-{stamp}-turn{idx}-{label}.jsonl")
+                with open(fn, "w", encoding="utf-8") as fh:
+                    fh.write(raw)
+            # Server-log capture (2026-09-28, RM-021): `opencode run
+            # --print-logs` writes the resolving cause of an err_* ref to
+            # stderr; persist it (redacted, bounded) so a dead session is
+            # diagnosable from the uploaded artifact alone.
+            if err:
+                efn = os.path.join(d, f"{slug}-{stamp}-turn{idx}-{label}-stderr.log")
+                with open(efn, "w", encoding="utf-8") as fh:
+                    fh.write(err[:8192])
     except OSError:
         pass
 

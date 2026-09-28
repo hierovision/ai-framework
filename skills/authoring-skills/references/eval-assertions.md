@@ -12,6 +12,7 @@ Reference for the closed typed-assertion protocol in `evals/evals.json`
 - Class semantics and the nature rule
 - Legacy `expected_behavior`
 - Fixture replay (`--event-fixture`)
+- Diagnosing a red run (failure taxonomy)
 
 ## The event stream (`opencode run --format json`)
 
@@ -109,3 +110,47 @@ fixtures live under `evals/fixtures/event-streams/<skill>__<eval-id>/`.
 When an eval carries both, `expect` is the asserted contract; `expected_behavior` is
 retained as HUMAN-READABLE INTENT and is **not cross-checked at runtime**.
 It can rot silently — update it alongside `expect` or delete it.
+
+## Diagnosing a red run (failure taxonomy)
+
+A red eval is one of two classes, and the run log now says which (RM-021,
+2026-09-28):
+
+- **Content miss** — `outcome: "failure"`, `detail: "missing: <assertions>"`.
+  The agent acted (tool events present) and the contract was not met. Routes
+  to nudge/continuation and quarantine; never to a fresh-session retry.
+- **Infra error** — `outcome: "error"`, `detail: "dead session: <ErrorName>
+  ref=err_* — no work produced"`. Every event in the turn is `type:error`
+  (a provider/opencode-server error), so resuming cannot help: the runner
+  restarts a **fresh session** (`fresh retry N`, bounded by
+  `BEVAL_MAX_FRESH_RETRIES`, clamp 2) and logs each attempt. The signature in
+  `detail` is the actual cause — not the old opaque "fatal stream".
+
+Every turn of a failed eval is persisted beside the run log, redacted:
+
+```
+logs/eval-streams/<skill>__<id>-<UTCstamp>-turn<N>-<label>.jsonl   # event stream
+logs/eval-streams/<skill>__<id>-<UTCstamp>-turn<N>-<label>-stderr.log
+```
+
+The `-stderr.log` is the point of the diagnostic channel: the runner invokes
+`opencode run --print-logs --log-level ERROR`, so the server-side cause behind
+an `err_*` ref lands on stderr and is uploaded with the artifact (redacted of
+provider keys, capped 8 KiB). Without it, `UnknownError ... Check server logs`
+has no logs to check.
+
+Aggregate the picture without downloading streams by hand:
+
+```bash
+python3 scripts/eval-report.py failure-taxonomy --logs-dir logs/ --print
+```
+
+It reports `infra_error` vs `content_failure` from the run records, then
+classifies the persisted streams (`dead_streams` = all-error streams,
+`acted_streams` = streams with tool events) and aggregates
+`error_signatures` by error **name** with a sampled `error_ref_samples` list
+(the count is the signal; a ref lets an operator pull the matching server log).
+The weekly workflow writes it to `failure-taxonomy.json`; `failure-taxonomy`
+is also part of `all`. This is the artifact that showed weekly run
+36455843309's red as provider-driven: 44 dead streams, every one
+`UnknownError ref=err_*`, spread across the full hour rather than a burst.
