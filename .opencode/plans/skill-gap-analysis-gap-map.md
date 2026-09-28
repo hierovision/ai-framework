@@ -201,4 +201,6 @@ Coverage baseline: evals typed/legacy; `use-cases` present or `—`.
 
 - 2026-09-28 — Gap map produced by the Phase A read-only audit (24-skill pool
   inventory; `pt`/`pln`/`choredomino`/`clcnext` inspected read-only; 49-cell
-  matrix; 13 ranked candidate-search briefs). **User approval pending (AC2).**
+  matrix; 13 ranked candidate-search briefs).
+- 2026-09-28 — **User approved** the map (session, 2026-09-28); AC2 satisfied.
+  Phase B sourcing proceeds on the ranked briefs.

@@ -252,3 +252,5 @@ No DB, no generated types.
   49-cell work-type × phase matrix with cited evidence, 13 ranked
   candidate-search briefs. Status in the companion: awaiting user approval
   (AC2). Phase B sourcing starts on approval.
+- 2026-09-28 — Gap map approved by the user; AC2 satisfied. Phase B sourcing
+  authorized — begins on the ranked briefs (brief #1: application security).
