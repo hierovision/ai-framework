@@ -4,7 +4,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "our CI has `permissions: write-all`, echoes the deploy token for debugging, and pins actions to @main/@head. harden it: minimal permissions, no secret in logs, and pinned actions. repo is the working directory, workflow is .github/workflows/ci.yml",
+      "prompt": "our CI has `permissions: write-all`, echoes the deploy token for debugging, and pins actions to @main/@head. harden it: minimal permissions, no secret in logs, and pinned actions. the repo is at fixtures/phasewave/ci-hardening/ — treat that directory as the repo root (workflow: .github/workflows/ci.yml)",
       "expected_behavior": [
         "Reads the current .github/workflows/ci.yml before changing anything",
         "Replaces `permissions: write-all` with a minimal explicit block (e.g. `contents: read`, `id-token: write` only if OIDC is used)",
@@ -14,6 +14,22 @@
         "Does NOT rewrite source or run anything (the skill is gated) — stops at presenting the hardened workflow + findings + approval question",
         "[fix-verified] Produces minimal-permissions + no-secret-echo + pinned-actions, even though the skill body's example uses different action names (the agent applies the hardening invariants, not pattern-matches the example)"
       ],
+      "expect": {
+        "action": [
+          {
+            "tool": "bash",
+            "args": {
+              "command": "*verify-ci-security.cjs*"
+            }
+          }
+        ],
+        "artifact": [
+          {
+            "path": "**/.github/workflows/ci.yml",
+            "phrases": ["contents: read", "checkout@"]
+          }
+        ]
+      },
       "files": [
         "fixtures/phasewave/ci-hardening/AGENTS.md",
         "fixtures/phasewave/ci-hardening/.github/workflows/ci.yml",
@@ -22,7 +38,7 @@
     },
     {
       "id": 2,
-      "prompt": "we store our prod supabase deploy token as a repo-wide secret and use it from a PAT. is that ok? we also want PR tests to actually block merges. repo is the working directory",
+      "prompt": "we store our prod supabase deploy token as a repo-wide secret and use it from a PAT. is that ok? we also want PR tests to actually block merges. the repo is at fixtures/phasewave/ci-hardening/ — treat that directory as the repo root",
       "expected_behavior": [
         "Flags the prod deploy token as a repo-wide secret — it should be an ENVIRONMENT secret (only the gated `production` environment can read it)",
         "Recommends OIDC over the static PAT where the cloud/Supabase supports it (short-lived token, no static credential in secrets); if OIDC unsupported, says keep the token least-privilege + rotated",
@@ -30,13 +46,16 @@
         "Does not edit the workflow (read-only/harden posture) — explains the findings and stops; routes implementation to implementing-features and diff-review to reviewing-code",
         "[fix-verified] Applies environment-scoping + OIDC + required-check rules to a Supabase/PAT scenario even though the skill body example is Azure (the agent applies the invariants, not the example wording)"
       ],
+      "expect": {
+        "text": ["OIDC", "required status check"]
+      },
       "files": [
         "fixtures/phasewave/ci-hardening/AGENTS.md"
       ]
     },
     {
       "id": 3,
-      "prompt": "a teammate wants to pin our third-party actions to @latest so we always get the newest features. push back if needed. repo is the working directory",
+      "prompt": "a teammate wants to pin our third-party actions to @latest so we always get the newest features. push back if needed. the repo is at fixtures/phasewave/ci-hardening/ — treat that directory as the repo root",
       "expected_behavior": [
         "Refuses @latest (and @main/@head) — a floating ref runs whatever upstream publishes next, a supply-chain risk",
         "Recommends pinning to a commit SHA (gold standard, with a `# vX.Y.Z` comment) or at minimum a major tag",
@@ -44,6 +63,9 @@
         "Does not change the workflow without being asked; stops at the explanation",
         "[fix-verified] Applies the SHA/tag-pin rule to a '@latest' request even though the skill body example uses @main (the agent applies the invariant, not the example wording)"
       ],
+      "expect": {
+        "text": ["SHA", "floating"]
+      },
       "files": [
         "fixtures/phasewave/ci-hardening/AGENTS.md"
       ]
