@@ -11,6 +11,10 @@ owner) with the RM-003 report surface:
   green-run-status   AC4 dashboard state: the first steady-state green run
                      candidate on main, or "not yet achieved" + reason
   quota-projection   AC11 monthly-minute projection vs the 1,800 min guardrail
+  failure-taxonomy   RM-021 observability: split red evals into infra errors
+                     (dead sessions) vs content misses, with the upstream
+                     error signatures (e.g. UnknownError ref=err_*) read from
+                     the persisted eval-streams
 
 The scripts are the single source of truth for the schema; this module never
 redefines run-log field names. All CLI output is JSON.
@@ -182,6 +186,79 @@ def _emit(obj, out_path=None, do_print=False):
         print(json.dumps(obj, indent=2))
 
 
+def _read_stream(path):
+    """Parse a persisted NDJSON eval stream, tolerating malformed lines."""
+    events = []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except ValueError:
+                    events.append({"type": "<unparsed>"})
+    except OSError:
+        return []
+    return events
+
+
+def failure_taxonomy(logs_dir):
+    """Diagnose WHY an eval run went red: infrastructure vs content.
+
+    RM-021 observability (2026-09-28). Weekly run 36455843309 failed 119/123
+    evals yet the run log alone could not say how many were provider/opencode
+    errors (dead sessions) versus content misses, nor which upstream error
+    dominated. This reads the run records (`outcome` error/failure) and the
+    persisted `logs/eval-streams/*.jsonl`: a stream whose events are all
+    `error` is a dead session, and its error event yields the signature
+    (`UnknownError ref=err_*`) the report aggregates. Read-only; no schema
+    change — the run-log remains owned by observing-runs.
+    """
+    records = [r for r in query_runs._iter_records(logs_dir) if r.get("kind") == "eval"]
+    pass_n = sum(1 for r in records if r.get("eval_pass"))
+    infra = sum(1 for r in records if r.get("outcome") == "error")
+    content = sum(1 for r in records if r.get("outcome") == "failure")
+    signatures = {}
+    refs = {}
+    streams = dead = acted = 0
+    stream_dir = os.path.join(logs_dir, "eval-streams")
+    if os.path.isdir(stream_dir):
+        for name in sorted(os.listdir(stream_dir)):
+            if not name.endswith(".jsonl"):
+                continue
+            streams += 1
+            events = _read_stream(os.path.join(stream_dir, name))
+            types = [e.get("type") for e in events]
+            if types and all(t == "error" for t in types):
+                dead += 1
+                for ev in events:
+                    err = ev.get("error") if isinstance(ev.get("error"), dict) else {}
+                    data = err.get("data") if isinstance(err.get("data"), dict) else {}
+                    sig = (err.get("name") or "error")
+                    signatures[sig] = signatures.get(sig, 0) + 1
+                    if data.get("ref"):
+                        refs.setdefault(sig, []).append(data["ref"])
+            elif any(t in ("tool", "tool_use") for t in types):
+                acted += 1
+    return {
+        "generated_at": _now_iso(),
+        "records": len(records),
+        "pass": pass_n,
+        "infra_error": infra,
+        "content_failure": content,
+        "failure_streams": streams,
+        "dead_streams": dead,
+        "acted_streams": acted,
+        "error_signatures": dict(sorted(signatures.items(), key=lambda kv: -kv[1])),
+        # distinct server-side refs per signature: the count is the signal, the
+        # sampled refs let an operator pull the matching opencode server log.
+        "error_ref_samples": {k: v[:5] for k, v in refs.items()},
+        "error_ref_count": {k: len(v) for k, v in refs.items()},
+    }
+
+
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
     # SUPPRESS so a value passed before the subcommand is not clobbered by the
@@ -224,6 +301,11 @@ def main(argv=None):
     q.add_argument("--out", default=None)
     q.add_argument("--print", action="store_true")
 
+    ft = sub.add_parser("failure-taxonomy", parents=[common],
+                        help="Infra-vs-content failure split + error signatures (RM-021).")
+    ft.add_argument("--out", default=None)
+    ft.add_argument("--print", action="store_true")
+
     allp = sub.add_parser("all", parents=[common],
                           help="Write all four artifacts to an output dir.")
     allp.add_argument("--out-dir", default=".")
@@ -249,6 +331,8 @@ def main(argv=None):
         _emit(status, args.out, args.print)
     elif args.cmd == "quota-projection":
         _emit(quota_projection(skills_root), args.out, args.print)
+    elif args.cmd == "failure-taxonomy":
+        _emit(failure_taxonomy(logs_dir), args.out, args.print)
     elif args.cmd == "all":
         out_dir = args.out_dir
         os.makedirs(out_dir, exist_ok=True)
@@ -257,6 +341,7 @@ def main(argv=None):
             "coverage-gaps.json": coverage_gaps(logs_dir, skills_root),
             "green-run-status.json": green_run_status(),
             "quota-projection.json": quota_projection(skills_root),
+            "failure-taxonomy.json": failure_taxonomy(logs_dir),
         }
         for name, obj in artifacts.items():
             path = os.path.join(out_dir, name)

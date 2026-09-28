@@ -108,6 +108,10 @@ jobs:
           python3 scripts/eval-report.py coverage-gaps --logs-dir logs/ --out coverage-gaps.json || true
           python3 scripts/eval-report.py green-run-status --out green-run-status.json || true
           python3 scripts/eval-report.py quota-projection --out quota-projection.json || true
+          # RM-021 observability: infra (dead sessions) vs content misses, with
+          # the upstream error signature (e.g. UnknownError ref=err_*) so the
+          # red count is diagnosable without downloading the streams by hand.
+          python3 scripts/eval-report.py failure-taxonomy --logs-dir logs/ --out failure-taxonomy.json || true
 
       - name: Upload run logs (30-day retention)
         if: always()
@@ -131,6 +135,7 @@ jobs:
             coverage-gaps.json
             green-run-status.json
             quota-projection.json
+            failure-taxonomy.json
           retention-days: 30
           if-no-files-found: ignore
 
@@ -143,6 +148,8 @@ jobs:
             echo "- [eval-report-${{ github.run_id }}]($RUN_URL#artifacts) artifact"
             echo "### Coverage Gaps"
             echo "- [coverage-gaps-${{ github.run_id }}]($RUN_URL#artifacts) artifact"
+            echo "### Failure Taxonomy (infra vs content)"
+            echo "- [failure-taxonomy-${{ github.run_id }}]($RUN_URL#artifacts) artifact"
             echo "### Steady-State Green Run"
             echo "- [green-run-status-${{ github.run_id }}]($RUN_URL#artifacts) artifact"
             echo "- [definition](reference/eval-green-run-definition.md)"
