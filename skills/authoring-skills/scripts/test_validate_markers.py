@@ -93,6 +93,46 @@ def test_non_boolean_marker_rejected():
         shutil.rmtree(d)
 
 
+def test_all_exit_code_honors_registry_errors():
+    """Regression (2026-09-28): `--all` must exit 1 on registry errors.
+
+    A `failed = False` reset sitting before the per-skill loop erased the
+    registry failure, so `--all` printed `FAIL  registry` but exited 0.
+    The fake registry module isolates the registry path; `validate` is
+    stubbed so only registry errors can influence the exit code.
+    """
+    import contextlib
+    import io
+    import types
+
+    fake = types.ModuleType("registry")
+    fake.validate = lambda: ["orphan: skills/zzz/ has no registry entry"]
+    fake.load = lambda: {"skills": [], "personas": []}
+    had = sys.modules.get("registry")
+    sys.modules["registry"] = fake
+    old_validate = validate_skill.validate
+    validate_skill.validate = lambda d: ([], [])
+    old_argv = sys.argv
+    sys.argv = ["validate_skill.py", "--all"]
+    buf = io.StringIO()
+    code = None
+    try:
+        with contextlib.redirect_stdout(buf):
+            try:
+                validate_skill.main()
+            except SystemExit as e:
+                code = e.code
+    finally:
+        sys.argv = old_argv
+        validate_skill.validate = old_validate
+        if had is None:
+            sys.modules.pop("registry", None)
+        else:
+            sys.modules["registry"] = had
+    assert code == 1, f"expected exit 1 on registry errors, got {code!r}"
+    assert "FAIL  registry" in buf.getvalue(), buf.getvalue()
+
+
 def main():
     tests = [
         test_valid_markers_pass,
@@ -100,6 +140,7 @@ def main():
         test_core_on_non_default_non_first_rejected,
         test_core_skill_must_carry_core,
         test_non_boolean_marker_rejected,
+        test_all_exit_code_honors_registry_errors,
     ]
     failed = 0
     for t in tests:
