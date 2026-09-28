@@ -71,6 +71,11 @@ Available stack references:
   Read when the project is Vue 3 + Pinia + Supabase (Postgres + Auth +
   RLS) with a PWA / offline outbox. Applies schema-first planning,
   generated-types handling, RLS planning, and offline/PWA checks.
+- nextjs-supabase → [references/stacks/nextjs-supabase.md](references/stacks/nextjs-supabase.md)
+  Read when the project is Next.js (App Router) + Supabase (Postgres +
+  Auth + RLS) with `@supabase/ssr` cookie sessions. Applies schema-first
+  planning, generated-types handling, RLS planning, SSR auth checks, and
+  the hybrid server/client data-access decisions.
 
 ### Step 4 — Research the codebase
 
@@ -271,3 +276,8 @@ it declares success from a written, verifiable, approved plan artifact.
   — schema-first planning, generated-types handling, RLS planning, and
   offline/PWA checks for Vue 3 + Supabase stacks. Read at Step 3 when
   the project's rules file declares stack `vue-supabase`.
+- [references/stacks/nextjs-supabase.md](references/stacks/nextjs-supabase.md)
+  — schema-first planning, generated-types handling, RLS planning, SSR
+  auth (`@supabase/ssr`), and the hybrid server/client data-access
+  pattern for Next.js App Router + Supabase stacks. Read at Step 3 when
+  the project's rules file declares stack `nextjs-supabase`.
