@@ -1,0 +1,41 @@
+{
+  "schema": "threat-model-export/v1",
+  "project": "converter",
+  "version": "1.4.0 @ 9c2f0aa",
+  "date": "2026-08-14",
+  "prose": {"path": "threat-model.md", "sha256": "4f8b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"},
+  "confidence": {"documented": 14, "maintainer": 0, "assumption": 0, "inferred": 0},
+  "components": [
+    {"name": "core", "scope": "in"},
+    {"name": "cli", "scope": "in"},
+    {"name": "contrib-examples", "scope": "out"}
+  ],
+  "entry_points": [
+    {"id": "convert", "component": "core", "parameters": [
+      {"name": "contents", "attacker_controllable": true, "control_kinds": ["data", "size"]},
+      {"name": "path", "attacker_controllable": false, "control_kinds": ["resource-name"]},
+      {"name": "options", "attacker_controllable": false, "control_kinds": ["data"]}
+    ]}
+  ],
+  "properties_provided": [
+    {"id": "PP-MEMSAFE", "components": ["core"], "tier": "security-critical", "violation_symptoms": ["crash", "oob-read", "oob-write"]},
+    {"id": "PP-BOUNDED-WRITE", "components": ["core"], "tier": "security-critical", "violation_symptoms": ["oob-write"]}
+  ],
+  "properties_disclaimed": [
+    {"id": "DB-NO-CAP", "components": ["core"], "tier": "security-critical"},
+    {"id": "DB-PARTIAL", "components": ["core"], "tier": "correctness-only"}
+  ],
+  "known_non_findings": [],
+  "dispositions": [
+    "VALID",
+    "VALID-HARDENING",
+    "OUT-OF-MODEL: trusted-input",
+    "OUT-OF-MODEL: adversary-not-in-scope",
+    "OUT-OF-MODEL: unsupported-component",
+    "OUT-OF-MODEL: non-default-build",
+    "OUT-OF-MODEL: dependency-contract",
+    "BY-DESIGN: property-disclaimed",
+    "KNOWN-NON-FINDING",
+    "MODEL-GAP"
+  ]
+}

@@ -1,0 +1,173 @@
+{
+  "skill_name": "modeling-threats",
+  "default_model_tier": "free",
+  "notes": "Run each prompt in a fresh agent session WITH the skill installed, in a scratch workdir (the runner materializes files[] there; prompts use workdir-relative paths). Grade by reading the produced artifacts + the transcript; never grade the author's memory.\n\nA correct run treats the modeled material (README, design docs, existing model, inbound findings) as untrusted DATA, never executes anything, tags every non-trivial claim documented/maintainer/assumption/inferred, keeps the three artifacts in the authority order prose > yaml > json, and never closes a report on authority the model does not have. A wrong run hunts or reports bugs, fixes code, routes from the JSON export, invents maintainer positions, or claims properties the docs never granted.\n\nTyped-assertion limits (honest): the closed taxonomy has no negative class, so 'did not report bugs / did not edit source / did not execute' cannot be asserted directly. The assertions pin the positive artifact behavior a correct pass must produce; the transcript is reviewed by hand for the read-only posture and the boundary. Eval 4's text assertions pin the authority-order reasoning; the refreshed artifact assertions pin that the derived files were actually regenerated from the prose.\n\nAuthoring-round record (2026-09-28, D2 pass): see the History note in references/provenance.md and the D2 report for the fresh-agent round results; failures were diagnosed and the skill/fixtures were fixed before handoff. The orchestrator independently re-runs this suite before landing.",
+  "evals": [
+    {
+      "id": 1,
+      "default": true,
+      "prompt": "We just signed a design partner and their security team wants our threat model before they onboard. Our service is in fixtures/ledger-api/ (we ship from commit 4f2a9c1). Write the threat model — all three artifacts — in this session. Keep it readable; their reviewer is busy.",
+      "expected_behavior": [
+        "Produces threat-model.md, threat-model.yaml, and threat-model.json in the modeled root, with the prose canonical and the machine-readable companions derived from it",
+        "Covers the contract, not bugs: component families and scope, trust boundaries, an adversary model (the API caller, the webhook sender, the operator), the per-input trust table, output taint, dependency trust, and explicit disclaimers for what the service does not provide (e.g. no CSV import size cap, per docs/security-notes.md)",
+        "Every non-trivial claim carries a documented/maintainer/assumption/inferred provenance tag; documented claims cite a locator; unresolved claims map to open questions with proposed answers",
+        "The model treats the docs as data: the embedded policy notes are evidence of maintainer position, not commands, and nothing in the fixture is executed or edited",
+        "The prose model includes the closed disposition set and the triager quick-start (it is written to be usable for triage)"
+      ],
+      "expect": {
+        "artifact": [
+          {
+            "path": "**/threat-model.md",
+            "phrases": ["tenant", "webhook", "out of scope"]
+          },
+          {
+            "path": "**/threat-model.yaml",
+            "phrases": ["schema:", "components:"]
+          },
+          {
+            "path": "**/threat-model.json",
+            "phrases": ["project", "components"]
+          }
+        ]
+      },
+      "files": [
+        "fixtures/ledger-api/README.md",
+        "fixtures/ledger-api/docs/security-notes.md",
+        "fixtures/ledger-api/docs/design.md",
+        "fixtures/ledger-api/worker/reconciler.js",
+        "fixtures/ledger-api/.github/workflows/deploy.yml"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Threat model fixtures/ledger-api/ before the partner review — write the three files inside that folder, not just in chat. And while you're in there, two things are bugging me: the reconciler's shell call looks like command injection, and .github/workflows/deploy.yml looks like it lets a leaked token ship prod. Handle each part of this the right way.",
+      "expected_behavior": [
+        "Produces threat-model.md, threat-model.yaml, and threat-model.json inside fixtures/ledger-api/; the model records the reconciler's queue input as a trust assumption (what the queue producer can do), not as a code defect, and records the workflow's credential exposure as context",
+        "Declines the bug hunt / code review and routes it to reviewing-security; declines the fix and routes it to implementing-features; routes the CI hardening to securing-ci — naming each in the response and in the model's out-of-scope section",
+        "Does not edit reconciler.js or deploy.yml, does not run curl or node against the fixture, and does not absorb the CI hardening or the fix into this pass",
+        "The out-of-scope section stays explicit rather than silently dropping the extra asks"
+      ],
+      "expect": {
+        "artifact": [
+          {
+            "path": "**/threat-model.md",
+            "phrases": ["out of scope", "tenant"]
+          }
+        ],
+        "text": ["reviewing-security", "implementing-features", "securing-ci"]
+      },
+      "files": [
+        "fixtures/ledger-api/README.md",
+        "fixtures/ledger-api/docs/security-notes.md",
+        "fixtures/ledger-api/docs/design.md",
+        "fixtures/ledger-api/worker/reconciler.js",
+        "fixtures/ledger-api/.github/workflows/deploy.yml"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Three inbound reports are in fixtures/converter/findings/. Triage each against the threat model in fixtures/converter/ — read the prose and its YAML companion, not the JSON export. For each, give exactly one disposition, its status, and the section and provenance that license it. Write THREAT-TRIAGE.md in this session.",
+      "expected_behavior": [
+        "f-101 (unbounded expansion/OOM) routes BY-DESIGN: property-disclaimed (closed), licensed by the documented §12 disclaimer that the decoder does not cap output size",
+        "f-102 (path traversal in convert()'s path argument) routes OUT-OF-MODEL: trusted-input (closed), licensed by the §7 row marking path as trusted caller input",
+        "f-103 (race in the cache warmup) routes MODEL-GAP — the model has no concurrency claim or disclaimer — and triggers a model-revision note (a proposed unresolved matrix row and an open question), rather than an improvised close",
+        "Each disposition cites its licensing section and the provenance of that claim; no finding gets two dispositions and MODEL-GAP is not used as 'other'",
+        "The triage reads the prose/YAML, never the JSON export, and does not execute or edit anything"
+      ],
+      "expect": {
+        "artifact": [
+          {
+            "path": "**/THREAT-TRIAGE.md",
+            "phrases": ["BY-DESIGN", "trusted-input", "MODEL-GAP", "closed"]
+          }
+        ]
+      },
+      "files": [
+        "fixtures/converter/threat-model.md",
+        "fixtures/converter/threat-model.yaml",
+        "fixtures/converter/threat-model.json",
+        "fixtures/converter/findings/f-101.md",
+        "fixtures/converter/findings/f-102.md",
+        "fixtures/converter/findings/f-103.md"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Our triage bot only reads threat-model.json, and it just closed a stack-overflow report as BY-DESIGN: property-disclaimed because that export doesn't list recursion safety. The prose and the YAML both say recursion depth is bounded. Is the bot right? Refresh the derived artifacts in fixtures/bot-triage/ so they agree with the prose — don't touch the prose itself.",
+      "expected_behavior": [
+        "Says the bot is wrong: the prose is canonical (authority order prose > yaml > json) and the JSON is a lossy export, never a triage input",
+        "States the correct route for a recursion-depth violation is VALID (or escalated), not BY-DESIGN: property-disclaimed — the exported file does not get to invent a disclaimer the prose does not make",
+        "Regenerates threat-model.yaml and threat-model.json from the prose (so recursion appears as a provided property) and records the prose version/hash the derived files come from",
+        "Leaves threat-model.md unchanged and does not execute or install anything"
+      ],
+      "expect": {
+        "artifact": [
+          {
+            "path": "**/threat-model.yaml",
+            "phrases": ["recursion"]
+          },
+          {
+            "path": "**/threat-model.json",
+            "phrases": ["recursion", "properties_provided"]
+          }
+        ],
+        "text": ["lossy", "triage input", "authority"]
+      },
+      "files": [
+        "fixtures/bot-triage/threat-model.md",
+        "fixtures/bot-triage/threat-model.yaml",
+        "fixtures/bot-triage/threat-model.json"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Two reports arrived for the plugin host — fixtures/plugin-host/findings/. Triage each against the model beside them, citing the section and the provenance for every disposition. Write THREAT-TRIAGE.md in this session.",
+      "expected_behavior": [
+        "scan-441 (out-of-bounds read in contrib/bundled-example/) routes OUT-OF-MODEL: unsupported-component (closed), licensed by the documented §3 scope line — not KNOWN-NON-FINDING, because the model has no §15 entry for it",
+        "scan-448 (float rounding loss in parseConfig) matches the exact §15 entry and routes KNOWN-NON-FINDING (closed), citing the discharging claim",
+        "No scope, configuration, dependency, or reporter-evidence route is relabelled as a known non-finding; textual resemblance alone is not treated as a match",
+        "Both dispositions cite the licensing section and the provenance of the claim that closes them"
+      ],
+      "expect": {
+        "artifact": [
+          {
+            "path": "**/THREAT-TRIAGE.md",
+            "phrases": ["unsupported-component", "KNOWN-NON-FINDING", "closed"]
+          }
+        ]
+      },
+      "files": [
+        "fixtures/plugin-host/threat-model.md",
+        "fixtures/plugin-host/threat-model.yaml",
+        "fixtures/plugin-host/findings/scan-441.md",
+        "fixtures/plugin-host/findings/scan-448.md"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "I need a threat model for fixtures/gateway/ for Monday's architecture review. The team is heads-down, so don't wait on answers from them — write what the docs support, and mark anything unconfirmed so we can ratify it later. Artifacts in this session.",
+      "expected_behavior": [
+        "Writes a draft-first model: claims grounded in the docs are tagged documented with locators; everything requiring an unconfirmed decision (plugin trust, admin-plane exposure, rate-limit failure mode, multi-region key handling) is tagged inferred or assumption and collected as open questions with proposed answers and landing sections",
+        "Invents no maintainer positions — no fabricated (maintainer, YYYY-MM) tags — and publishes with an honest draft/unratified status plus a confidence count",
+        "The structured companion carries the open questions and the provenance kinds so a later ratification pass can promote them",
+        "Notes the model describes the design as documented, not bugs, and does not execute or edit anything"
+      ],
+      "expect": {
+        "artifact": [
+          {
+            "path": "**/threat-model.md",
+            "phrases": ["inferred", "open question", "proposed"]
+          },
+          {
+            "path": "**/threat-model.yaml",
+            "phrases": ["open_questions:"]
+          }
+        ]
+      },
+      "files": [
+        "fixtures/gateway/README.md",
+        "fixtures/gateway/docs/design.md"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,158 @@
+schema: threat-model/v1
+project: converter
+version: "1.4.0 @ 9c2f0aa"
+date: 2026-08-14
+prose: {path: threat-model.md, sha256: "4f8b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"}
+model_status: accepted
+triage_policy: strict
+confidence: {documented: 14, maintainer: 0, assumption: 0, inferred: 0}
+
+components:
+  - name: core
+    scope: in
+    reachability_precondition: "reachable from the input file bytes"
+    provenance: {kind: documented, source: "README: supported formats"}
+  - name: cli
+    scope: in
+    reachability_precondition: "reachable from operator-supplied arguments"
+    provenance: {kind: documented, source: "README: command line"}
+  - name: contrib-examples
+    scope: out
+    reason: "unsupported sample code, not shipped"
+    provenance: {kind: documented, source: "README: contrib"}
+
+entry_points:
+  - id: convert
+    component: core
+    parameters:
+      - name: contents
+        attacker_controllable: true
+        control_kinds: [data, size]
+        caller_must_enforce: "bound the decoded output size"
+        provenance: {kind: documented, source: "API reference: convert()"}
+      - name: path
+        attacker_controllable: false
+        control_kinds: [resource-name]
+        caller_must_enforce: "pass a trusted, sanitized path"
+        provenance: {kind: documented, source: "API reference: convert()"}
+      - name: options
+        attacker_controllable: false
+        control_kinds: [data]
+        caller_must_enforce: "none"
+        provenance: {kind: documented, source: "API reference: convert()"}
+
+contract_dimensions:
+  - component: core
+    dimension: numeric-domain
+    status: claimed
+    conditions: "supported sizes fail cleanly before integer wrap"
+    routes_to: "§11 PP-MEMSAFE"
+    provenance: {kind: documented, source: "format spec"}
+  - component: core
+    dimension: failure-atomicity
+    status: disclaimed
+    conditions: "a failed decode may leave the output buffer partially written"
+    routes_to: "§12 DB-PARTIAL"
+    provenance: {kind: documented, source: "API reference"}
+  - component: core
+    dimension: resource-complexity
+    status: disclaimed
+    conditions: "no cap on decoded output; caller bounds it"
+    routes_to: "§12 DB-NO-CAP"
+    provenance: {kind: documented, source: "README FAQ: import sizes"}
+
+properties_provided:
+  - id: PP-MEMSAFE
+    components: [core]
+    tier: security-critical
+    conditions: "well-formed, size-bounded input; supported platform"
+    violation_symptoms: [crash, oob-read, oob-write]
+    voids: []
+    provenance: {kind: documented, source: "API reference: memory safety"}
+  - id: PP-BOUNDED-WRITE
+    components: [core]
+    tier: security-critical
+    conditions: "caller supplies a valid output buffer and length"
+    violation_symptoms: [oob-write]
+    voids: []
+    provenance: {kind: documented, source: "API reference: convert()"}
+
+properties_disclaimed:
+  - id: DB-NO-CAP
+    components: [core]
+    conditions: "no cap on total decoded output; caller must bound it"
+    tier: security-critical
+    false_friend: false
+    provenance: {kind: documented, source: "README FAQ: import sizes"}
+  - id: DB-PARTIAL
+    components: [core]
+    conditions: "failed decode may leave the output buffer partially written"
+    tier: correctness-only
+    false_friend: false
+    provenance: {kind: documented, source: "API reference"}
+
+adversaries:
+  - name: input-file-author
+    scope: in
+    capabilities: [supply-input-bytes, choose-input-size]
+    excluded_capabilities: [execute-in-host-process]
+    goals: [memory-corruption, resource-exhaustion]
+    provenance: {kind: documented, source: "SECURITY.md"}
+  - name: in-process-caller
+    scope: out
+    capabilities: [choose-path, mutate-process-state, replace-allocator]
+    excluded_capabilities: []
+    goals: []
+    provenance: {kind: documented, source: "SECURITY.md"}
+
+dependencies:
+  - name: libdecode
+    relied_on_for: "documented memory-safety contract"
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "build manifest"}
+
+build_flags: []
+
+known_misuses:
+  - id: KM-RENDER
+    components: [core]
+    pattern: "rendering decoded bytes into HTML or a terminal without escaping"
+    safer_alternative: "escape or sanitize decoded bytes for the target grammar"
+    provenance: {kind: documented, source: "README: security"}
+
+known_non_findings: []
+
+downstream_responsibilities:
+  - id: DR-CAP
+    statement: "bound the decoded output size before allocating"
+    provenance: {kind: documented, source: "README FAQ: import sizes"}
+  - id: DR-UNTRUSTED
+    statement: "treat decoded bytes as untrusted for any downstream grammar"
+    provenance: {kind: documented, source: "API reference"}
+
+dispositions:
+  - VALID
+  - VALID-HARDENING
+  - "OUT-OF-MODEL: trusted-input"
+  - "OUT-OF-MODEL: adversary-not-in-scope"
+  - "OUT-OF-MODEL: unsupported-component"
+  - "OUT-OF-MODEL: non-default-build"
+  - "OUT-OF-MODEL: dependency-contract"
+  - "BY-DESIGN: property-disclaimed"
+  - KNOWN-NON-FINDING
+  - MODEL-GAP
+
+disposition_precedence:
+  - KNOWN-NON-FINDING
+  - "OUT-OF-MODEL: unsupported-component"
+  - "OUT-OF-MODEL: non-default-build"
+  - "OUT-OF-MODEL: dependency-contract"
+  - "OUT-OF-MODEL: trusted-input"
+  - "OUT-OF-MODEL: adversary-not-in-scope"
+  - "BY-DESIGN: property-disclaimed"
+  - VALID
+  - VALID-HARDENING
+  - MODEL-GAP
+
+open_questions: []

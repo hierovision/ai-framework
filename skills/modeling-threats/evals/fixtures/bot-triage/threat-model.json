@@ -1,0 +1,38 @@
+{
+  "schema": "threat-model-export/v1",
+  "project": "raster-import",
+  "version": "2.1.0 @ e7d41b9",
+  "date": "2026-07-30",
+  "prose": {"path": "threat-model.md", "sha256": "0badc0de0badc0de0badc0de0badc0de0badc0de0badc0de0badc0de0badc0de"},
+  "confidence": {"documented": 9, "maintainer": 0, "assumption": 0, "inferred": 0},
+  "components": [
+    {"name": "parser", "scope": "in"},
+    {"name": "scene", "scope": "in"},
+    {"name": "tools", "scope": "out"}
+  ],
+  "entry_points": [
+    {"id": "parse", "component": "parser", "parameters": [
+      {"name": "document", "attacker_controllable": true, "control_kinds": ["data", "size"]},
+      {"name": "path", "attacker_controllable": false, "control_kinds": ["resource-name"]}
+    ]}
+  ],
+  "properties_provided": [
+    {"id": "PP-MEMSAFE", "components": ["parser"], "tier": "security-critical", "violation_symptoms": ["crash", "oob-read", "oob-write"]}
+  ],
+  "properties_disclaimed": [
+    {"id": "DB-NO-TIMEOUT", "components": ["parser"], "tier": "correctness-only"}
+  ],
+  "known_non_findings": [],
+  "dispositions": [
+    "VALID",
+    "VALID-HARDENING",
+    "OUT-OF-MODEL: trusted-input",
+    "OUT-OF-MODEL: adversary-not-in-scope",
+    "OUT-OF-MODEL: unsupported-component",
+    "OUT-OF-MODEL: non-default-build",
+    "OUT-OF-MODEL: dependency-contract",
+    "BY-DESIGN: property-disclaimed",
+    "KNOWN-NON-FINDING",
+    "MODEL-GAP"
+  ]
+}
