@@ -4,7 +4,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "our CI has `permissions: write-all`, echoes the deploy token for debugging, and pins actions to @main/@head. harden it: minimal permissions, no secret in logs, and pinned actions. repo is the working directory, workflow is .github/workflows/ci.yml",
+      "prompt": "our CI has `permissions: write-all`, echoes the deploy token for debugging, and pins actions to @main/@head. harden it: minimal permissions, no secret in logs, and pinned actions. the repo is at fixtures/phasewave/ci-hardening/ — treat that directory as the repo root (workflow: .github/workflows/ci.yml)",
       "expected_behavior": [
         "Reads the current .github/workflows/ci.yml before changing anything",
         "Replaces `permissions: write-all` with a minimal explicit block (e.g. `contents: read`, `id-token: write` only if OIDC is used)",
@@ -14,6 +14,22 @@
         "Does NOT rewrite source or run anything (the skill is gated) — stops at presenting the hardened workflow + findings + approval question",
         "[fix-verified] Produces minimal-permissions + no-secret-echo + pinned-actions, even though the skill body's example uses different action names (the agent applies the hardening invariants, not pattern-matches the example)"
       ],
+      "expect": {
+        "action": [
+          {
+            "tool": "bash",
+            "args": {
+              "command": "*verify-ci-security.cjs*"
+            }
+          }
+        ],
+        "artifact": [
+          {
+            "path": "**/.github/workflows/ci.yml",
+            "phrases": ["contents: read", "checkout@"]
+          }
+        ]
+      },
       "files": [
         "fixtures/phasewave/ci-hardening/AGENTS.md",
         "fixtures/phasewave/ci-hardening/.github/workflows/ci.yml",

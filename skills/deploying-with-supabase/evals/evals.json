@@ -4,7 +4,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "our supabase deploy workflow pushes migrations inside a matrixed deploy job with no serialization (see .github/workflows/deploy.yml). fix it so only ONE `supabase db push` runs at a time per environment, migrations run BEFORE the app serves traffic, and there's no parallel-push matrix. repo is the working directory",
+      "prompt": "our supabase deploy workflow pushes migrations inside a matrixed deploy job with no serialization (see .github/workflows/deploy.yml). fix it so only ONE `supabase db push` runs at a time per environment, migrations run BEFORE the app serves traffic, and there's no parallel-push matrix. the repo is at fixtures/phasewave/supabase-ci/ — treat that directory as the repo root",
       "expected_behavior": [
         "Reads the current .github/workflows/deploy.yml before changing anything",
         "Recognizes the defect: `supabase db push` runs inside a matrixed `deploy` job (parallel pushes corrupt migration history) with no `concurrency`",
@@ -15,6 +15,22 @@
         "Does NOT actually run `supabase db push` (the skill is gated) — stops at presenting the corrected config + approval question",
         "[fix-verified] Produces a serialized migrate job that deploy needs, even though the skill body's example uses a different project name / token var (the agent applies the Supabase invariants, not pattern-matches the example)"
       ],
+      "expect": {
+        "action": [
+          {
+            "tool": "bash",
+            "args": {
+              "command": "*verify-supabase.cjs*"
+            }
+          }
+        ],
+        "artifact": [
+          {
+            "path": "**/.github/workflows/deploy.yml",
+            "phrases": ["concurrency", "migrate"]
+          }
+        ]
+      },
       "files": [
         "fixtures/phasewave/supabase-ci/AGENTS.md",
         "fixtures/phasewave/supabase-ci/.github/workflows/deploy.yml",
