@@ -397,7 +397,8 @@ where did it diverge and why" from the plan file alone.
 Present a **concise** handoff to the user and wait. The required
 sections — what changed, acceptance-criteria status, red evidence,
 rebalancing outcome, coverage-gate outcome, runtime-validation outcome,
-manual validation steps, plan state, PR readiness, follow-ups — are
+manual validation steps, plan state, PR readiness, follow-ups, next
+step — are
 templated in [references/handoff-template.md](references/handoff-template.md);
 load it at this step. Two rules bind every handoff: never self-certify a
 criterion that needs human eyes (mark it `manual — steps below`), and

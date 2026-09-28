@@ -12,8 +12,13 @@ Short, direct, clear. No fluff.
 ## Communication
 
 Standard technical English per `reference/technical-english.md` — plain,
-precise, filler-free. No emoji in artifacts; handoffs say done → verified →
-blocked → next.
+precise, filler-free. No emoji in artifacts; handoffs keep the full
+done → verified → blocked → next shape.
+
+**Response shape:** every response ends with a `## Next` section
+(`reference/technical-english.md` rule 9) — the single logical next step
+with the actor; never omitted, `None — awaiting <X>` when nothing is
+pending.
 
 ## Process
 

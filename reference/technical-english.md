@@ -56,14 +56,18 @@ filler buries its verdict. The rules below exist to keep every output
    No emoji or decorative formatting in engineering artifacts (plans,
    reports, ACs, summaries).
 
-9. **Handoffs say: done → verified → blocked → next.** In that order, in
-   the fewest sentences. What was completed, what is verified (and how),
-   what blocks progress, what the next step is.
+9. **End with next.** Every response closes with a `## Next` section — the
+   single logical next step in the current effort, with the actor. Never
+   omit it, including in short or purely informational replies; when
+   nothing is pending, write `None — awaiting <X>`. Handoffs say, in that
+   order: done → verified → blocked → next, in the fewest sentences (what
+   was completed, what is verified and how, what blocks progress, what
+   the next step is).
 
 10. **Scope.** This governs engineering communication — agent responses,
     analyses, plans, reports, summaries, commit messages, and doc edits.
     Ordinary conversation with the user is not subject to item 2's
-    word-blacklist; it is subject to 1, 3, 4, and 7 (clarity beats
+    word-blacklist; it is subject to 1, 3, 4, 7, and 9 (clarity beats
     politeness padding, but be a person, not a robot).
 
 ## Enforcement

@@ -16,6 +16,11 @@ Standard technical English per `reference/technical-english.md` — plain,
 precise, filler-free. Plan artifacts are engineering outputs: exact file
 paths, exact ACs, no emoji.
 
+**Response shape:** every response ends with a `## Next` section
+(`reference/technical-english.md` rule 9) — the single logical next step
+with the actor; never omitted, `None — awaiting <X>` when nothing is
+pending.
+
 ## Process
 
 Follow the **`designing-architecture`** skill for the full process (research,

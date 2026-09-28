@@ -17,6 +17,11 @@ Standard technical English per `reference/technical-english.md` — plain,
 precise, filler-free. Syntheses are engineering outputs: name the
 disagreement, the risk, and the recommendation; no emoji.
 
+**Response shape:** every response ends with a `## Next` section
+(`reference/technical-english.md` rule 9) — the single logical next step
+with the actor; never omitted, `None — awaiting <X>` when nothing is
+pending.
+
 ## Trigger Phrases
 
 - "summon the council"

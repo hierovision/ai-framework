@@ -66,5 +66,6 @@ The three-tier repo memory (ADR-0008; routing table in
 
 Engineering artifacts follow `reference/technical-english.md`: plain
 words, the shared vocabulary verbatim, exact numbers, uncertainty labeled
-(`unverified` / `vendor-stated` / `assumed`), and the fixed handoff shape
-done → verified → blocked → next.
+(`unverified` / `vendor-stated` / `assumed`). Every response closes with a
+`## Next` section; handoffs keep the fixed shape done → verified →
+blocked → next.
