@@ -713,6 +713,13 @@ def _resolved_cause(stderr):
     m = re.search(r'error="([^"]{0,200})"', stderr or "")
     if m:
         return m.group(1)[:140]
+    # opencode auto-rejects writes outside the run workdir (`external_directory`);
+    # the rejected turn then ends with no work and the stream carries only the
+    # UnknownError wrapper. Seen in the 2026-09-28 weekly run (RM-021).
+    m = re.search(r"permission requested: external_directory \(([^)]{0,120})\)"
+                  r"[^\n]*auto-reject", stderr or "")
+    if m:
+        return f"external_directory auto-reject ({m.group(1)})"
     if MODEL_RESOLUTION_RE.search(stderr or ""):
         return "ProviderModelNotFoundError"
     return ""
