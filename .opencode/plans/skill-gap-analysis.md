@@ -259,3 +259,13 @@ No DB, no generated types.
   `.opencode/plans/skill-gap-analysis-candidates.md`. Phase C adjudication
   pending explicit sign-off (candidate skills would load under the eval
   harness).
+- 2026-09-28 — Phase C signed off by the user; head-to-head adjudication
+  started for brief #1 (5 finalists × 2 tasks + no-skill baselines, direct-key
+  lane, isolated workdirs, no external egress from candidate content).
+  Verdicts land in the candidate register's decision log.
+- 2026-09-28 — Phase C complete (brief #1): verdicts — adapt:
+  `claude-code-owasp`, `threat-model`; inspire:
+  `defending-code-reference-harness`; reject: `ghostsecurity/skills`, `vbsec`
+  (register decision log + `logs/run-2026-09-28.jsonl` run ids). Baseline
+  saturation noted on the review fixture. Phase D adoption design next
+  (per-item user sign-off).
