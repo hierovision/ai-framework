@@ -254,3 +254,8 @@ No DB, no generated types.
   (AC2). Phase B sourcing starts on approval.
 - 2026-09-28 — Gap map approved by the user; AC2 satisfied. Phase B sourcing
   authorized — begins on the ranked briefs (brief #1: application security).
+- 2026-09-28 — Phase B, brief #1 screened: 12 candidates sourced, pre-scanned,
+  license-gated, rubric-screened (5 shortlist, 2 inspire, 5 reject) — see
+  `.opencode/plans/skill-gap-analysis-candidates.md`. Phase C adjudication
+  pending explicit sign-off (candidate skills would load under the eval
+  harness).
