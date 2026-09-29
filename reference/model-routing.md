@@ -110,6 +110,15 @@ The free generalist was validated 2026-07-26 by a clean, no-tool head-to-head ev
   measured **59 min wall and ~$1.8** (allowance-equivalent, provider-reported);
   the runner records measured `cost` per eval so future numbers need no price
   tables. **Requires workspace region = Global** (set 2026-09-29).
+  **Nested-subagent caveat (found 2026-09-29):** a skill that spawns a
+  free-tier-bound subagent (e.g. `designing-architecture` Step 5b consults the
+  `council` lenses; `validating-ui` consults `council-ux`) dies in CI — the free
+  tier rejects calls made outside the OpenCode client
+  (`AI_APICallError: OpenCode's free tier can only be used from within
+  OpenCode`), which surfaces as a dead session. Both eval workflows therefore
+  export `OPENCODE_CONFIG_CONTENT` from `scripts/ci-lane-overrides.py`, binding
+  every `*-free` agent to the lane model **in CI only**; local runs keep the
+  free tier.
 - **Direct-key lane** (user's own DeepSeek API key, approved 2026-09-18): config prefix `deepseek/`. Billed directly by DeepSeek to the user's own balance — check that balance separately from opencode. `deepseek/deepseek-flash` = V4.1-Flash (live-probed: text, vision, tool calls). `deepseek/deepseek-v4-pro` also routes live (AA 36, no vision). Off-peak half price during 01:00–04:00 and 06:00–10:00 UTC Mon–Fri; all other hours (i.e. the full ET working day) off-peak.
 - Go can fall back to Zen balance when limits hit ("Use balance" in the console). `AI_FRAMEWORK_FREE_TIER=1` forces the free tier even when a Go/Zen key is present.
 

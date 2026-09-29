@@ -124,6 +124,11 @@ jobs:
           if [ "${{ github.event.schedule }}" = "30 10 1 * *" ] || [ "${{ inputs.full }}" = "true" ]; then
             DEFAULT_ARG=""
           fi
+          # Nested subagents (council lenses etc.) are bound to FREE-tier models
+          # locally; in CI the free tier rejects calls outside the OpenCode client
+          # ("OpenCode's free tier can only be used from within OpenCode") and the
+          # eval session dies. CI-only override to the lane model.
+          export OPENCODE_CONFIG_CONTENT="$(python3 scripts/ci-lane-overrides.py --model opencode-go/gpt-6-luna)"
           SKILL_ARGS=""
           for s in ${{ matrix.shard.skills }}; do SKILL_ARGS="$SKILL_ARGS --skill $s"; done
           python3 skills/authoring-skills/scripts/run_behavioral_eval.py \

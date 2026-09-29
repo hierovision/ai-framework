@@ -88,12 +88,38 @@ def test_weekly_timeout_is_150():
     print("PASS  weekly eval-behavioral timeout-minutes == 150 (measured budget)")
 
 
+def test_lane_and_nested_agent_override():
+    """Both eval workflows (2026-09-29): run the Go lane model and export a
+    ci-lane-overrides OPENCODE_CONFIG_CONTENT.
+
+    Nested subagents (council lenses) are free-tier bound; in CI the free tier
+    rejects calls outside the OpenCode client ("…can only be used from within
+    OpenCode"), which killed designing-architecture#1 twice. Structural check
+    only: the workflows must name the lane model and export the override.
+    """
+    import subprocess
+    for path in (PER_CHANGE, BEHAVIORAL):
+        text = open(path, encoding="utf-8").read()
+        assert "opencode-go/gpt-6-luna" in text, f"{path}: lane model missing"
+        assert "scripts/ci-lane-overrides.py --model opencode-go/gpt-6-luna" in text, \
+            f"{path}: nested-agent override export missing"
+        assert "DEEPSEEK_API_KEY" not in text, f"{path}: direct-key secret still referenced"
+    out = subprocess.run([sys.executable, os.path.join(HERE, "ci-lane-overrides.py"),
+                          "--model", "opencode-go/gpt-6-luna"], capture_output=True,
+                         text=True, check=True).stdout
+    import json
+    cfg = json.loads(out)
+    assert cfg["agent"]["council-ux"]["model"] == "opencode-go/gpt-6-luna", cfg
+    assert "council-architecture" in cfg["agent"] and "architect" in cfg["agent"], cfg
+
+
 def main():
     tests = [
         test_per_change_matrix_and_aggregation,
         test_per_change_selection_flags_and_cache,
         test_artifact_pin_node24_both_workflows,
         test_weekly_timeout_is_150,
+        test_lane_and_nested_agent_override,
     ]
     failed = 0
     for t in tests:
