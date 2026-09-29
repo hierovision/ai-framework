@@ -13,6 +13,7 @@ figure was imaginary and is superseded.
 - Matrix execution
 - Stall headroom
 - Quota model
+- Probe → extrapolate (measure small, project the suite)
 - Guardrail
 - Three-layer cost
 - Concurrency evidence
@@ -100,6 +101,28 @@ job ceiling absorbs a stall on the small selected set.
 - `per_change_min_used` = 7 x 15 assumed PRs/month.
 - `projected_monthly` = sum of the two monthly buckets (~619 min, well under
   the 1,800 guardrail).
+
+## Probe → extrapolate (measure small, project the suite)
+
+Never size a suite by running the suite — that spends the allowance to learn a
+number a probe can estimate (RM-021, 2026-09-29). The loop:
+
+1. **Probe small.** One eval, or one model call, on the candidate lane.
+2. **Every run self-measures.** The runner writes `tokens_in`, `tokens_out`,
+   and `duration_ms` (from the stream's `step-finish` events) into every eval
+   record — they were `null` before 2026-09-29, so no run could answer "what
+   does this cost?". Evidence now accumulates for free as a by-product.
+3. **Project, with confidence stated.**
+   `python3 scripts/eval-report.py suite-projection --logs-dir logs/ --evals N
+   --model <id> [--price-in X --price-out Y]` returns the per-eval means and
+   the projected tokens / wall-minutes / cost for N evals, labelled
+   `low (n<5) | medium (n<20) | high (n>=20)`. Infra deaths (`outcome=error`,
+   ~2 s) are excluded — they would understate a real run.
+4. **Re-measure as runs happen.** The first real run of the chosen lane adds
+   samples and sharpens the projection; sizing improves every time anything
+   runs, with no separate measurement pass.
+
+A projection off one probe is an estimate, not a result — label it so.
 
 ## Guardrail
 

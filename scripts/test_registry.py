@@ -74,7 +74,10 @@ def test_repo_registry_complete_and_valid():
         if f.endswith(".md"))
     assert sorted(e["name"] for e in entries["skills"]) == skill_dirs
     assert sorted(e["name"] for e in entries["personas"]) == persona_files
-    assert len(all_e) == 33, len(all_e)
+    # Derived, not frozen: a hard-coded total rotted every time a skill landed
+    # (33 -> 38 by 2026-09-29). The two set-equality assertions above are the
+    # completeness check; this only asserts the halves add up.
+    assert len(all_e) == len(skill_dirs) + len(persona_files), len(all_e)
     for e in all_e:
         for field in ("name", "type", "owner", "maturity", "status",
                       "boundary_ref"):

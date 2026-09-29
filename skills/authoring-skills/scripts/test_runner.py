@@ -814,6 +814,29 @@ def test_infra_death_does_not_quarantine_but_content_miss_does():
         shutil.rmtree(d)
 
 
+def test_eval_record_carries_measured_tokens_and_duration():
+    """RM-021 (2026-09-29): a run's record carries MEASURED tokens + wall time,
+    so suite cost/time projections come from evidence — never from running the
+    full suite to size it. Both step-finish shapes must be counted."""
+    stream = (
+        '{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":1200,"output":340}}}\n'
+        '{"type":"step-finish","part":{"type":"step-finish","tokens":{"input":800,"output":160}}}\n'
+        '{"type":"text","part":{"type":"text","text":"A"}}\n'
+    )
+    e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["A"], "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    try:
+        passed, missing, _ = runner.run_eval(
+            e, lambda _e: runner.EvalResult(raw=stream), logs_dir=d, sleep=lambda _s: None)
+        assert passed, missing
+        rec = _read_logs(d)[-1]
+        assert rec["tokens_in"] == 2000, rec
+        assert rec["tokens_out"] == 500, rec
+        assert isinstance(rec["duration_ms"], int) and rec["duration_ms"] >= 0, rec
+    finally:
+        shutil.rmtree(d)
+
+
 def main():
     tests = [
         test_assert_behavior,
@@ -849,6 +872,7 @@ def main():
         test_model_listed_and_preflight_model,
         test_fresh_retry_backoff_uses_injected_sleep,
         test_infra_death_does_not_quarantine_but_content_miss_does,
+        test_eval_record_carries_measured_tokens_and_duration,
     ]
     failed = 0
     for t in tests:

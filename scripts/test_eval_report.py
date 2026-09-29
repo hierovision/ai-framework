@@ -217,12 +217,19 @@ def test_coverage_gaps_legacy_assertion_backlog():
         for migrated in (("authoring-skills", 1), ("observing-runs", 1),
                          ("designing-architecture", 1), ("implementing-features", 1),
                          ("reviewing-code", 1), ("triaging-requirements", 1),
-                         ("writing-unit-tests", 1)):
+                         ("writing-unit-tests", 1),
+                         # RM-021 batch 3 (2026-09-28) migrated the test trio.
+                         ("writing-unit-tests", 2), ("writing-unit-tests", 3),
+                         ("writing-unit-tests", 4), ("writing-integration-tests", 1),
+                         ("writing-integration-tests", 2), ("writing-integration-tests", 3),
+                         ("writing-integration-tests", 4), ("writing-e2e-tests", 1),
+                         ("writing-e2e-tests", 2), ("writing-e2e-tests", 3),
+                         ("writing-e2e-tests", 4)):
             assert migrated not in keys, migrated
         # A known prose-only eval is present with a migrate-on-touch reason.
-        assert ("writing-unit-tests", 2) in keys, sorted(keys)
+        assert ("debugging-test-failures", 1) in keys, sorted(keys)
         entry = next(x for x in backlog
-                     if x["skill"] == "writing-unit-tests" and x["eval_id"] == 2)
+                     if x["skill"] == "debugging-test-failures" and x["eval_id"] == 1)
         assert "migrate on touch" in entry["reason"], entry
     finally:
         shutil.rmtree(d)
@@ -268,6 +275,45 @@ def test_failure_taxonomy_splits_infra_and_content():
         shutil.rmtree(d)
 
 
+def test_suite_projection_from_measured_samples():
+    """RM-021 (2026-09-29): project tokens/cost/wall-time from measured
+    per-eval records (small probe -> extrapolate), with confidence from n."""
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, "run-2026-09-29.jsonl"), "w", encoding="utf-8") as fh:
+            for i, (ti, to, du) in enumerate([(1000, 200, 60000), (3000, 400, 120000)]):
+                fh.write(json.dumps({
+                    "ts": "2026-09-29T00:0%d:00Z" % i, "run_id": "r%d" % i,
+                    "kind": "eval", "skill": "alpha",
+                    "model": "opencode-go/deepseek-v4.1-flash", "outcome": "success",
+                    "eval_pass": True, "tokens_in": ti, "tokens_out": to,
+                    "duration_ms": du}) + "\n")
+        out = report.suite_projection(d, 10, model="opencode-go/deepseek-v4.1-flash",
+                                      price_in=0.20, price_out=1.20)
+        assert out["samples"] == 2 and out["evals"] == 10, out
+        assert out["per_eval"]["tokens_in"] == 2000, out
+        assert out["per_eval"]["tokens_out"] == 300, out
+        assert out["per_eval"]["duration_ms"] == 90000, out
+        assert out["projected"]["tokens_in"] == 20000, out
+        assert out["projected"]["wall_minutes"] == 15.0, out
+        expected_cost = round(((2000 / 1e6) * 0.20 + (300 / 1e6) * 1.20) * 10, 4)
+        assert abs(out["projected"]["cost_usd"] - expected_cost) < 1e-6, out
+        assert out["confidence"].startswith("low"), out
+        assert report.suite_projection(d, 10, model="nope/other")["samples"] == 0
+        # An infra death (outcome=error, ~2s) must not drag the averages down.
+        with open(os.path.join(d, "run-2026-09-29.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "ts": "2026-09-29T00:09:00Z", "run_id": "rx", "kind": "eval",
+                "skill": "alpha", "model": "opencode-go/deepseek-v4.1-flash",
+                "outcome": "error", "eval_pass": False,
+                "tokens_in": None, "tokens_out": None, "duration_ms": 2000}) + "\n")
+        after = report.suite_projection(d, 10, model="opencode-go/deepseek-v4.1-flash")
+        assert after["samples"] == 2, after
+        assert after["per_eval"]["duration_ms"] == 90000, after
+    finally:
+        shutil.rmtree(d)
+
+
 def main():
     tests = [
         test_aggregate_report_per_run_scores,
@@ -279,6 +325,7 @@ def main():
         test_coverage_gaps_deferred_status,
         test_coverage_gaps_legacy_assertion_backlog,
         test_failure_taxonomy_splits_infra_and_content,
+        test_suite_projection_from_measured_samples,
     ]
     failed = 0
     for t in tests:

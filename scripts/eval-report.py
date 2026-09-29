@@ -15,6 +15,9 @@ owner) with the RM-003 report surface:
                      (dead sessions) vs content misses, with the upstream
                      error signatures (e.g. UnknownError ref=err_*) read from
                      the persisted eval-streams
+  suite-projection   RM-021 planning: project a suite's tokens / cost /
+                     wall-time from the measured per-eval records (small
+                     probe -> extrapolate; never run the full suite to size it)
 
 The scripts are the single source of truth for the schema; this module never
 redefines run-log field names. All CLI output is JSON.
@@ -259,6 +262,54 @@ def failure_taxonomy(logs_dir):
     }
 
 
+def suite_projection(logs_dir, evals, model=None, price_in=None, price_out=None):
+    """Project a suite's tokens / cost / wall-time from MEASURED per-eval data.
+
+    RM-021 (2026-09-29): never run a full suite to size it — run a small probe,
+    let every run record its measured tokens + duration (the runner now writes
+    both), then extrapolate here. Confidence is reported from the sample count;
+    a projection off one sample is an estimate, not a result.
+    """
+    records = [r for r in query_runs._iter_records(logs_dir) if r.get("kind") == "eval"]
+    if model:
+        records = [r for r in records if r.get("model") == model]
+    # Content verdicts only: infra deaths (outcome=error) run ~2s and would
+    # understate a real suite's wall time and tokens.
+    final = [r for r in records
+             if r.get("eval_pass") is not None and r.get("outcome") != "error"]
+    t_in = [r["tokens_in"] for r in final if isinstance(r.get("tokens_in"), int)]
+    t_out = [r["tokens_out"] for r in final if isinstance(r.get("tokens_out"), int)]
+    dur = [r["duration_ms"] for r in final if isinstance(r.get("duration_ms"), int)]
+
+    def mean(xs):
+        return (sum(xs) / len(xs)) if xs else None
+
+    m_in, m_out, m_dur = mean(t_in), mean(t_out), mean(dur)
+    projected = {}
+    if m_in is not None:
+        projected["tokens_in"] = round(m_in * evals)
+    if m_out is not None:
+        projected["tokens_out"] = round(m_out * evals)
+    if m_dur is not None:
+        projected["wall_minutes"] = round(m_dur * evals / 60000, 1)
+    if price_in is not None and m_in is not None:
+        projected["cost_usd"] = round(((m_in / 1e6) * price_in
+                                       + ((m_out or 0) / 1e6) * (price_out or 0)) * evals, 4)
+    n = len(final)
+    return {
+        "generated_at": _now_iso(),
+        "samples": n,
+        "evals": evals,
+        "model": model,
+        "per_eval": {"tokens_in": m_in, "tokens_out": m_out, "duration_ms": m_dur},
+        "projected": projected,
+        "confidence": "low (n<5)" if n < 5 else ("medium (n<20)" if n < 20 else "high (n>=20)"),
+        "basis": ("measured eval records carrying tokens_in/tokens_out/duration_ms "
+                  "(the runner writes them from step-finish events); extrapolate from a "
+                  "small probe — never run the full suite to size it"),
+    }
+
+
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
     # SUPPRESS so a value passed before the subcommand is not clobbered by the
@@ -306,6 +357,15 @@ def main(argv=None):
     ft.add_argument("--out", default=None)
     ft.add_argument("--print", action="store_true")
 
+    sp = sub.add_parser("suite-projection", parents=[common],
+                        help="Project suite tokens/cost/wall-time from measured probes (RM-021).")
+    sp.add_argument("--evals", type=int, required=True, help="Suite size to project.")
+    sp.add_argument("--model", default=None, help="Restrict to one model's records.")
+    sp.add_argument("--price-in", type=float, default=None, help="USD per 1M input tokens.")
+    sp.add_argument("--price-out", type=float, default=None, help="USD per 1M output tokens.")
+    sp.add_argument("--out", default=None)
+    sp.add_argument("--print", action="store_true")
+
     allp = sub.add_parser("all", parents=[common],
                           help="Write all four artifacts to an output dir.")
     allp.add_argument("--out-dir", default=".")
@@ -333,6 +393,10 @@ def main(argv=None):
         _emit(quota_projection(skills_root), args.out, args.print)
     elif args.cmd == "failure-taxonomy":
         _emit(failure_taxonomy(logs_dir), args.out, args.print)
+    elif args.cmd == "suite-projection":
+        _emit(suite_projection(logs_dir, args.evals, model=args.model,
+                               price_in=args.price_in, price_out=args.price_out),
+              args.out, args.print)
     elif args.cmd == "all":
         out_dir = args.out_dir
         os.makedirs(out_dir, exist_ok=True)
