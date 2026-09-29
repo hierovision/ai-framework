@@ -118,7 +118,14 @@ The free generalist was validated 2026-07-26 by a clean, no-tool head-to-head ev
   OpenCode`), which surfaces as a dead session. Both eval workflows therefore
   export `OPENCODE_CONFIG_CONTENT` from `scripts/ci-lane-overrides.py`, binding
   every `*-free` agent to the lane model **in CI only**; local runs keep the
-  free tier.
+  free tier. **Sandbox caveat (measured 2026-09-29):** 108 `external_directory`
+  auto-rejects in one full run (66 into the CI checkout, 33 into agent-chosen
+  `/tmp`) ended turns with 0 writes → premature stop → dead session → infra
+  failure. Both fixes ship: the runner appends the **absolute** target root to
+  every eval prompt ("write every artifact inside it, never write outside it"),
+  and the CI override adds `permission.external_directory {"/tmp/**": "allow"}`
+  (ephemeral runner; unmatched paths keep the default so the checkout stays out
+  of reach).
 - **Direct-key lane** (user's own DeepSeek API key, approved 2026-09-18): config prefix `deepseek/`. Billed directly by DeepSeek to the user's own balance — check that balance separately from opencode. `deepseek/deepseek-flash` = V4.1-Flash (live-probed: text, vision, tool calls). `deepseek/deepseek-v4-pro` also routes live (AA 36, no vision). Off-peak half price during 01:00–04:00 and 06:00–10:00 UTC Mon–Fri; all other hours (i.e. the full ET working day) off-peak.
 - Go can fall back to Zen balance when limits hit ("Use balance" in the console). `AI_FRAMEWORK_FREE_TIER=1` forces the free tier even when a Go/Zen key is present.
 
