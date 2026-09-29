@@ -125,6 +125,9 @@ def test_lane_and_nested_agent_override():
     cfg = json.loads(out)
     assert cfg["agent"]["council-ux"]["model"] == "opencode-go/deepseek-v4.1-flash", cfg
     assert "architect" in cfg["agent"], cfg
+    # /tmp allowance (CI ephemeral): agents use /tmp scratch, and those writes
+    # were auto-rejected (33 in one run) -> zero-write turns.
+    assert cfg["permission"]["external_directory"]["/tmp/**"] == "allow", cfg
 
 
 def main():

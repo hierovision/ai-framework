@@ -863,6 +863,20 @@ def test_eval_record_carries_measured_tokens_and_duration():
     finally:
         shutil.rmtree(d)
 
+def test_augment_prompt_gives_absolute_root():
+    """RM-021 (2026-09-29): an eval prompt must carry the materialized ABSOLUTE
+    target root plus a write-only-there instruction. Relative paths let agents
+    resolve artifacts against the installed skill checkout (or /tmp), which were
+    auto-rejected as external_directory — 108 zero-write turns in one full run."""
+    files = ["fixtures/phasewave/unit-duration/AGENTS.md",
+             "fixtures/phasewave/unit-duration/tests/x.test.js"]
+    out = runner.augment_prompt("write the tests", "/tmp/beval-abc", files)
+    assert "/tmp/beval-abc/fixtures/phasewave/unit-duration" in out, out
+    assert "never write outside it" in out, out
+    out2 = runner.augment_prompt("p", "/w", ["a/b/one.md", "a/c/two.md"])
+    assert "/w/a" in out2, out2
+    assert runner.augment_prompt("p", "/w", []) == "p"
+
 
 def main():
     tests = [
@@ -900,6 +914,7 @@ def main():
         test_fresh_retry_backoff_uses_injected_sleep,
         test_infra_death_does_not_quarantine_but_content_miss_does,
         test_eval_record_carries_measured_tokens_and_duration,
+        test_augment_prompt_gives_absolute_root,
     ]
     failed = 0
     for t in tests:

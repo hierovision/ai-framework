@@ -691,6 +691,33 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             result.close()
 
 
+def augment_prompt(prompt, workdir, files):
+    """Append the ABSOLUTE target root to an eval prompt.
+
+    2026-09-29 (RM-021): the prompt fix that replaced "repo is the working
+    directory" used a RELATIVE fixture path, but agents still resolved artifact
+    paths against the installed skill's checkout (or a /tmp habit) and were
+    auto-rejected as `external_directory` — 108 such rejects in one full run
+    (66 into the CI checkout, 33 into agent-chosen /tmp), each ending a turn
+    with 0 writes (premature stop -> dead session -> infra failure). Handing
+    the agent the materialized ABSOLUTE path, plus an explicit "write only
+    here", removes the ambiguity at its source.
+    """
+    rels = [os.path.dirname(f) for f in (files or []) if f]
+    root = None
+    if rels:
+        try:
+            root = os.path.commonpath(rels)
+        except ValueError:
+            root = None
+    if not root:
+        return prompt
+    abs_root = os.path.join(workdir, root)
+    return (f"{prompt}\n\nTarget repo root (absolute): {abs_root}. Treat that "
+            f"directory as the repo root, write every artifact inside it, and "
+            f"never write outside it.")
+
+
 def opencode_run_args(tmp, prompt, model=None):
     """argv for one fresh-agent invocation (after `opencode`) — pure, hermetic.
 
@@ -834,7 +861,8 @@ def invoke_opencode(e, model=None, turn=None):
             if model:
                 argv += ["--model", model]
         else:
-            argv = ["opencode"] + opencode_run_args(tmp, e["prompt"], model=model)
+            argv = ["opencode"] + opencode_run_args(
+                    tmp, augment_prompt(e["prompt"], tmp, e.get("files")), model=model)
         try:
             proc = subprocess.Popen(
                 argv,
