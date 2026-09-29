@@ -4,11 +4,14 @@ Catalogs, docs free list, and liveness probes: retrieved and live-verified
 2026-09-25 (AA v4.3.2 leaderboard + targeted pages fetched same-day,
 independently run; the 2026-09-18 full sweep stands for unchanged rows —
 spot-checks show ±1 drift). **2026-09-29 pass (Go candidacy + CI eval lane):**
-region set to Global → `opencode-go/deepseek-v4.1-flash` re-probes live and
-becomes the CI eval lane (direct DeepSeek key retired from CI); Go liveness
-probe of 21 candidates (20 live; `muse-spark-1.3-contributor` APIError);
-AA Intelligence + median t/s refreshed for the Go shortlist. See Provider
-notes. 2026-09-25 pass: `mimo-v2.5-free` failed
+region set to Global → `opencode-go/deepseek-*` re-probe live; both eval
+workflows move off the direct DeepSeek key to the Go flat-rate lane, finally
+bound to **`opencode-go/gpt-6-luna`** after candidate probes
+(`mimo-v2.6-flash` rejected on measured wall time); weekly depth reduced to one
+default eval per skill, full suite monthly. Go liveness probe of 21 candidates
+(20 live; `muse-spark-1.3-contributor` APIError); AA Intelligence + median t/s
+refreshed for the Go shortlist. See Provider notes. 2026-09-25 pass:
+`mimo-v2.5-free` failed
 liveness ×3 in live probes (catalog+docs-listed but non-routable —
 `err_a7f91717`, `err_029b18e6`, `err_db97c0cc`) → free council security/ux
 seats moved to `mimo-v2.6-flash-free` (live ✓; family reading MiMo-V2.6-Pro
