@@ -6,6 +6,7 @@ Run: python3 scripts/test_eval_report.py
 Exit 0 = aggregate per-run scores, the four coverage-gap arrays, the green-run
 status shape, and the quota projection are correct.
 """
+import glob
 import importlib.util
 import json
 import os
@@ -344,7 +345,7 @@ def test_merge_eval_logs_concatenates_runs_and_quarantine():
         assert summary["run_records"] == 2, summary
         assert summary["quarantine_keys"] == 1, summary
         assert sorted(x["run_id"] for x in
-                      (json.loads(l) for l in open(os.path.join(out, "run-merged.jsonl")))) == ["a1", "b1"]
+                      (json.loads(l) for l in glob.glob(os.path.join(out, "run-*.jsonl")) for l in open(l))) == ["a1", "b1"]
         q = json.load(open(os.path.join(out, "quarantine.json")))
         assert q["alpha#1"]["fail_count"] == 2, q
         assert q["alpha#1"]["last_fail"] == "2026-09-29", q

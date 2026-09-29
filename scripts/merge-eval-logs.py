@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import sys
+import time
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -29,7 +30,10 @@ import quarantine  # single source of truth for quarantine shape
 def merge(out_dir, shard_dirs):
     os.makedirs(out_dir, exist_ok=True)
     run_records = 0
-    merged_path = os.path.join(out_dir, "run-merged.jsonl")
+    # Date-stamped name, matching the runner's convention: the report tools
+    # glob `run-<date>.jsonl` (2026-09-29: a `run-merged.jsonl` name made the
+    # weekly run's OWN failure-taxonomy artifact read 0 records).
+    merged_path = os.path.join(out_dir, time.strftime("run-%Y-%m-%d.jsonl", time.gmtime()))
     with open(merged_path, "w", encoding="utf-8") as out:
         for d in shard_dirs:
             for path in sorted(glob.glob(os.path.join(d, "run-*.jsonl"))):
