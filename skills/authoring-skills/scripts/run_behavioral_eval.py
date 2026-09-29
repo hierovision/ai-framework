@@ -523,8 +523,8 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
     logged. Content misses never take this path. On failure, every turn's raw
     stream is persisted for diagnosis.
     """
-    result = get_output(e)
     started = time.monotonic()
+    result = get_output(e)
     try:
         ctx = build_context(result)
         missing = assert_eval(e, ctx)

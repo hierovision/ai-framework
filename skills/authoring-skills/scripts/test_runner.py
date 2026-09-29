@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNNER = os.path.join(HERE, "run_behavioral_eval.py")
@@ -841,13 +842,19 @@ def test_eval_record_carries_measured_tokens_and_duration():
     e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["A"], "model_tier": "go"}
     d = tempfile.mkdtemp()
     try:
+        def slow_stub(_e, turn=None):
+            time.sleep(0.02)  # the timer must cover the model call, not just the tail
+            return runner.EvalResult(raw=stream)
+
         passed, missing, _ = runner.run_eval(
-            e, lambda _e: runner.EvalResult(raw=stream), logs_dir=d, sleep=lambda _s: None)
+            e, slow_stub, logs_dir=d, sleep=lambda _s: None)
         assert passed, missing
         rec = _read_logs(d)[-1]
         assert rec["tokens_in"] == 2000, rec
         assert rec["tokens_out"] == 500, rec
-        assert isinstance(rec["duration_ms"], int) and rec["duration_ms"] >= 0, rec
+        # Regression: the timer used to start AFTER get_output, so a real call's
+        # wall time was ~1 ms. It must cover the invocation.
+        assert rec["duration_ms"] >= 20, rec
     finally:
         shutil.rmtree(d)
 
