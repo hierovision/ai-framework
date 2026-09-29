@@ -180,11 +180,37 @@ def test_check_cli():
     print("PASS  registry --check CLI: 0 in-sync, 1 with an orphan")
 
 
+def test_agent_bash_permission_maps_have_catch_all():
+    """An agent whose `bash` permission is a pattern map must carry a `*` rule.
+
+    opencode evaluates the LAST matching rule (customize-opencode), so a map
+    without a catch-all leaves unmatched commands at the tool default instead of
+    the intended ask/deny. 2026-09-29: the planner moved from `bash: ask` to a
+    read-only allowlist + deny list.
+    """
+    import yaml
+    agents_dir = os.path.join(REPO_ROOT, "agents")
+    checked = 0
+    for name in sorted(os.listdir(agents_dir)):
+        if not name.endswith(".md"):
+            continue
+        raw = open(os.path.join(agents_dir, name), encoding="utf-8").read()
+        fm = yaml.safe_load(raw.split("---", 2)[1])
+        bash = (fm.get("permission") or {}).get("bash")
+        if isinstance(bash, dict):
+            checked += 1
+            assert "*" in bash, f"{name}: bash permission map needs a '*' catch-all"
+            bad = {k: v for k, v in bash.items() if v not in ("allow", "ask", "deny")}
+            assert not bad, f"{name}: invalid bash actions {bad}"
+    assert checked >= 1, "expected at least one agent with a bash map (planner)"
+
+
 def main():
     tests = [
         test_repo_registry_complete_and_valid,
         test_validate_detects_sync_defects,
         test_check_cli,
+        test_agent_bash_permission_maps_have_catch_all,
     ]
     failed = 0
     for t in tests:
