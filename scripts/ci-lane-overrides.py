@@ -14,7 +14,7 @@ therefore inject `OPENCODE_CONFIG_CONTENT` with the lane model for every agent
 whose binding ends in `-free`. Local runs keep the free tier; only CI is
 overridden.
 
-Usage:  ci-lane-overrides.py --model opencode-go/gpt-6-luna [--repo .]
+Usage:  ci-lane-overrides.py --model opencode-go/deepseek-v4.1-flash [--repo .]
 Output: one-line JSON for OPENCODE_CONFIG_CONTENT.
 """
 import argparse
@@ -35,7 +35,14 @@ def overrides(repo, lane_model):
         bound = m.group(1)
         if bound.endswith("-free"):
             agents[os.path.basename(path)[:-3]] = {"model": lane_model}
-    return {"agent": agents}
+    return {
+        "agent": agents,
+        # CI runners are ephemeral, and agents legitimately use /tmp scratch
+        # (`/tmp/audit-report-*`, `/tmp/capture-evidence-*`): 33 auto-rejects in
+        # one full run ended turns with 0 writes. Allow /tmp only; unmatched
+        # paths keep opencode's default (the CI checkout stays out of reach).
+        "permission": {"external_directory": {"/tmp/**": "allow"}},
+    }
 
 
 def main(argv=None):

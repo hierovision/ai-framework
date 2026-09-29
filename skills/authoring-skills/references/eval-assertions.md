@@ -155,6 +155,21 @@ is also part of `all`. This is the artifact that showed weekly run
 36455843309's red as provider-driven: 44 dead streams, every one
 `UnknownError ref=err_*`, spread across the full hour rather than a burst.
 
+### The dominant infra class: `external_directory` auto-rejects
+
+Measured on a full sharded run (2026-09-29): 133 infra records / 56 dead
+streams, of which **108 were `external_directory` auto-rejects** — 66 into the
+CI checkout (an agent resolving artifact paths against the *installed skill
+repo* rather than its eval workdir) and 33 into agent-chosen `/tmp` scratch.
+Each reject ends a turn with 0 writes, which the runner sees as a premature
+stop, then a dead session, then an infra failure. Two guards ship:
+
+- the runner **appends the materialized absolute target root** to every eval
+  prompt (`augment_prompt`) with "write every artifact inside it, never write
+  outside it" — prompts themselves stay path-relative and portable;
+- the CI override allows `/tmp/**` for `external_directory` (ephemeral runner;
+  unmatched paths keep the default).
+
 ### Guards against an infra red
 
 Once the wrappers were resolved (`ProviderModelNotFoundError: Model not found:
