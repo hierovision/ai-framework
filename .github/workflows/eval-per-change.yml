@@ -22,7 +22,7 @@
 #
 # Cost/quota (AC11, see reference/per-change-eval-sla.md):
 #   - Eval lane = opencode-go flat-rate (user directive 2026-09-29):
-#     opencode-go/gpt-6-luna, OPENCODE_API_KEY. No direct API key.
+#     opencode-go/deepseek-v4.1-flash, OPENCODE_API_KEY. No direct API key.
 #   - docs-only change -> 0 evals, exits immediately.
 #   - skill change -> 1-2 default canaries; harness change -> <=6 core evals.
 #   - quota guardrail fails fast above the 1,800 min/month projection.
@@ -262,7 +262,7 @@ jobs:
         env:
           # Repository-level secret ONLY; consumed by the runner, never echoed.
           # Eval lane (user directive 2026-09-29): opencode-go flat-rate,
-          # `opencode-go/gpt-6-luna` (same model as the weekly — measured 3/3
+          # `opencode-go/deepseek-v4.1-flash` (same model as the weekly — measured 3/3
           # canary probes, 34s light / 168s heavy, cheapest adequate). See
           # reference/model-routing.md.
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
@@ -274,14 +274,14 @@ jobs:
           # Nested subagents (council lenses etc.) are FREE-tier bound; in CI the
           # free tier rejects calls outside the OpenCode client and the eval
           # session dies. CI-only override of those agents to the lane model.
-          export OPENCODE_CONFIG_CONTENT="$(python3 scripts/ci-lane-overrides.py --model opencode-go/gpt-6-luna)"
+          export OPENCODE_CONFIG_CONTENT="$(python3 scripts/ci-lane-overrides.py --model opencode-go/deepseek-v4.1-flash)"
           set -euo pipefail
           RUNNER="skills/authoring-skills/scripts/run_behavioral_eval.py"
           if [ "${{ matrix.mode }}" = "core" ]; then
-            python3 "$RUNNER" --model opencode-go/gpt-6-luna \
+            python3 "$RUNNER" --model opencode-go/deepseek-v4.1-flash \
               --core --skill "${{ matrix.skill }}"
           else
-            python3 "$RUNNER" --model opencode-go/gpt-6-luna \
+            python3 "$RUNNER" --model opencode-go/deepseek-v4.1-flash \
               --default --skill "${{ matrix.skill }}"
           fi
 

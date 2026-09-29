@@ -116,14 +116,14 @@ def test_lane_and_nested_agent_override():
                 found += 1
                 assert "OPENCODE_CONFIG_CONTENT" in run and "ci-lane-overrides.py" in run, \
                     f"{path}/{step.get('name')}: runner step lacks the nested-agent override"
-                assert "opencode-go/gpt-6-luna" in run, \
+                assert "opencode-go/deepseek-v4.1-flash" in run, \
                     f"{path}/{step.get('name')}: lane model missing in the runner step"
     assert found >= 2, f"expected a runner step in both workflows, found {found}"
     out = subprocess.run([sys.executable, os.path.join(HERE, "ci-lane-overrides.py"),
-                          "--model", "opencode-go/gpt-6-luna"], capture_output=True,
+                          "--model", "opencode-go/deepseek-v4.1-flash"], capture_output=True,
                          text=True, check=True).stdout
     cfg = json.loads(out)
-    assert cfg["agent"]["council-ux"]["model"] == "opencode-go/gpt-6-luna", cfg
+    assert cfg["agent"]["council-ux"]["model"] == "opencode-go/deepseek-v4.1-flash", cfg
     assert "architect" in cfg["agent"], cfg
 
 
