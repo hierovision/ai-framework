@@ -9,6 +9,7 @@ workflows carry the node24 upload-artifact pin, and the weekly ceiling is 150
 
 Structural only: this parses the YAML, it does not run GitHub Actions.
 """
+import json
 import os
 import sys
 
@@ -88,12 +89,51 @@ def test_weekly_timeout_is_150():
     print("PASS  weekly eval-behavioral timeout-minutes == 150 (measured budget)")
 
 
+def test_lane_and_nested_agent_override():
+    """Both eval workflows (2026-09-29): the step that RUNS the runner must also
+    export the nested-agent override, name the Go lane model, and not reference
+    DEEPSEEK_API_KEY.
+
+    Caught a real bug: the export was first injected into an unrelated
+    `set -euo pipefail` step (the changed-files step), so CI still ran the
+    free-bound council consult and died with "…free tier can only be used from
+    within OpenCode". Structural check: same step, same `run` block.
+    """
+    import subprocess
+    found = 0
+    for path in (PER_CHANGE, BEHAVIORAL):
+        doc = yaml.safe_load(open(path, encoding="utf-8"))
+        text = open(path, encoding="utf-8").read()
+        assert "DEEPSEEK_API_KEY" not in text, f"{path}: direct-key secret referenced"
+        for job in doc["jobs"].values():
+            for step in job.get("steps", []):
+                run = step.get("run") or ""
+                # Only steps that actually INVOKE the runner with a model need
+                # the override; the `--list` matrix-selection step makes no model
+                # call (and would otherwise trip this check).
+                if "run_behavioral_eval.py" not in run or "--model" not in run:
+                    continue
+                found += 1
+                assert "OPENCODE_CONFIG_CONTENT" in run and "ci-lane-overrides.py" in run, \
+                    f"{path}/{step.get('name')}: runner step lacks the nested-agent override"
+                assert "opencode-go/deepseek-v4.1-flash" in run, \
+                    f"{path}/{step.get('name')}: lane model missing in the runner step"
+    assert found >= 2, f"expected a runner step in both workflows, found {found}"
+    out = subprocess.run([sys.executable, os.path.join(HERE, "ci-lane-overrides.py"),
+                          "--model", "opencode-go/deepseek-v4.1-flash"], capture_output=True,
+                         text=True, check=True).stdout
+    cfg = json.loads(out)
+    assert cfg["agent"]["council-ux"]["model"] == "opencode-go/deepseek-v4.1-flash", cfg
+    assert "architect" in cfg["agent"], cfg
+
+
 def main():
     tests = [
         test_per_change_matrix_and_aggregation,
         test_per_change_selection_flags_and_cache,
         test_artifact_pin_node24_both_workflows,
         test_weekly_timeout_is_150,
+        test_lane_and_nested_agent_override,
     ]
     failed = 0
     for t in tests:

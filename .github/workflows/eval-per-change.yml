@@ -261,15 +261,20 @@ jobs:
       - name: Run selected eval
         env:
           # Repository-level secret ONLY; consumed by the runner, never echoed.
-          # Eval lane (user directive 2026-09-29): opencode-go flat-rate, same
-          # model family the suite already ran — see model-routing.md. Probe
-          # basis: ~31.1k in / 3.1k out tokens per eval (~$1.4 per 105 evals).
+          # Eval lane (user directive 2026-09-29): opencode-go flat-rate,
+          # `opencode-go/deepseek-v4.1-flash` (same model as the weekly — measured 3/3
+          # canary probes, 34s light / 168s heavy, cheapest adequate). See
+          # reference/model-routing.md.
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           # Continuation depth: premature-stop turns get a same-session
           # finish-now nudge (logged); 2 gives the variance headroom the
           # shakedown data asked for (clamp max 3 in the runner).
           BEVAL_MAX_CONTINUATIONS: "2"
         run: |
+          # Nested subagents (council lenses etc.) are FREE-tier bound; in CI the
+          # free tier rejects calls outside the OpenCode client and the eval
+          # session dies. CI-only override of those agents to the lane model.
+          export OPENCODE_CONFIG_CONTENT="$(python3 scripts/ci-lane-overrides.py --model opencode-go/deepseek-v4.1-flash)"
           set -euo pipefail
           RUNNER="skills/authoring-skills/scripts/run_behavioral_eval.py"
           if [ "${{ matrix.mode }}" = "core" ]; then

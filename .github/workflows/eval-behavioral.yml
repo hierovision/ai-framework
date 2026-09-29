@@ -6,7 +6,7 @@
 #     the hermetic per-PR gate in ci.yml.
 #
 # 2026-09-29 — sharded for wall time, on the Go eval lane:
-#   - Lane model: `opencode-go/gpt-6-luna` (user directive 2026-09-29). Chosen
+#   - Lane model: `opencode-go/deepseek-v4.1-flash` (user directive 2026-09-29). Chosen
 #     over the initial `opencode-go/deepseek-v4.1-flash` and over
 #     `mimo-v2.6-flash` on measured evidence: 3/3 canary probes pass, 34 s on a
 #     light eval (vs 70 s), 168 s on the heavy one (vs 147 s), AA 37 intel at
@@ -124,10 +124,15 @@ jobs:
           if [ "${{ github.event.schedule }}" = "30 10 1 * *" ] || [ "${{ inputs.full }}" = "true" ]; then
             DEFAULT_ARG=""
           fi
+          # Nested subagents (council lenses etc.) are bound to FREE-tier models
+          # locally; in CI the free tier rejects calls outside the OpenCode client
+          # ("OpenCode's free tier can only be used from within OpenCode") and the
+          # eval session dies. CI-only override to the lane model.
+          export OPENCODE_CONFIG_CONTENT="$(python3 scripts/ci-lane-overrides.py --model opencode-go/deepseek-v4.1-flash)"
           SKILL_ARGS=""
           for s in ${{ matrix.shard.skills }}; do SKILL_ARGS="$SKILL_ARGS --skill $s"; done
           python3 skills/authoring-skills/scripts/run_behavioral_eval.py \
-            --model opencode-go/gpt-6-luna --logs-dir logs $DEFAULT_ARG $SKILL_ARGS
+            --model opencode-go/deepseek-v4.1-flash --logs-dir logs $DEFAULT_ARG $SKILL_ARGS
 
       - name: Upload shard logs (30-day retention)
         if: always()

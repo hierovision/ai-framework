@@ -129,10 +129,11 @@ A projection off one probe is an estimate, not a result — label it so.
 (slowest shard ~58 min), **4.68 M in / 0.33 M out tokens**, **~$1.8**
 allowance-equivalent, 52/107 verdicts passing, 133 infra records. Depth policy
 (user directive 2026-09-29): **weekly = default per skill (26 evals ≈ ¼ the
-cost and ~15 min); monthly = full suite**. The lane model is now
-`opencode-go/gpt-6-luna` (measured 3/3 probes pass; 34 s light / 168 s heavy vs
-DeepSeek's 70 s / 147 s; AA 37 at $0.10/$0.50 per M); `mimo-v2.6-flash` is the
-allowance-first alt but measured 2× slower. **Cost is now measured, not
+cost and ~15 min); monthly = full suite**. The lane model is
+`opencode-go/deepseek-v4.1-flash`: `gpt-6-luna` probed well (34 s / 168 s) but
+failed 3/3 CI canaries of `designing-architecture#1` (premature stops → dead
+sessions), and `mimo-v2.6-flash` measured 2× slower — both rejected. The saving
+is the reduced depth, not a cheaper model. **Cost is now measured, not
 estimated** — the runner records provider-reported `cost` per eval, so
 `suite-projection` reports `cost_basis: measured …` and no price table is
 needed.
