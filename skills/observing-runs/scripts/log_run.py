@@ -51,6 +51,9 @@ FIELD_TYPES = {
     "tokens_in": (int, type(None)),
     "tokens_out": (int, type(None)),
     "duration_ms": (int, type(None)),
+    # Measured USD cost reported by the provider stream (opencode step-finish
+    # `cost`). Null when unknown — never fabricated as 0 (2026-09-29).
+    "cost": (float, int, type(None)),
     "outcome": str,
     "eval_pass": (bool, type(None)),
     "detail": (str, type(None)),
@@ -102,6 +105,7 @@ def build_record(rec):
     out.setdefault("tokens_in", None)
     out.setdefault("tokens_out", None)
     out.setdefault("duration_ms", None)
+    out.setdefault("cost", None)
     out.setdefault("eval_pass", None)
     out.setdefault("detail", None)
     return out

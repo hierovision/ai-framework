@@ -856,6 +856,7 @@ def test_eval_record_carries_measured_tokens_and_duration():
         rec = _read_logs(d)[-1]
         assert rec["tokens_in"] == 2000, rec
         assert rec["tokens_out"] == 500, rec
+        assert rec["cost"] == 0.002, rec  # measured, provider-reported
         # Regression: the timer used to start AFTER get_output, so a real call's
         # wall time was ~1 ms. It must cover the invocation.
         assert rec["duration_ms"] >= 20, rec

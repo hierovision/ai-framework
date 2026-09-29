@@ -28,12 +28,13 @@ field names elsewhere.
 | `tokens_in` | int \| null | no | null | cost / ROI (RM-009); null when unknown, never 0-by-default |
 | `tokens_out` | int \| null | no | null | cost / ROI (RM-009); null when unknown, never 0-by-default |
 | `duration_ms` | int \| null | no | null | speed / latency; null when unknown, never 0-by-default |
+| `cost` | float \| null | no | null | **measured USD** reported by the provider stream (`opencode` step-finish `cost`); null when unknown, never 0-by-default — the authoritative allowance/spend figure, no price table needed |
 | `outcome` | enum `success`\|`failure`\|`error`\|`stopped` | **yes** | — | quality / regression |
 | `eval_pass` | bool \| null | no | null | eval-kind pass/fail (drift) |
 | `detail` | string \| null | no | null | **failure-only**, capped 512 chars |
 
 `required` = must be present in the caller's record (no safe default).
-`auto` = filled by `log_run.py` when absent. All twelve keys are present
+`auto` = filled by `log_run.py` when absent. All thirteen keys are present
 in every written line.
 
 ### Legacy `0` compatibility (2026-09-13)

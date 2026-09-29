@@ -280,11 +280,12 @@ def suite_projection(logs_dir, evals, model=None, price_in=None, price_out=None)
     t_in = [r["tokens_in"] for r in final if isinstance(r.get("tokens_in"), int)]
     t_out = [r["tokens_out"] for r in final if isinstance(r.get("tokens_out"), int)]
     dur = [r["duration_ms"] for r in final if isinstance(r.get("duration_ms"), int)]
+    costs = [r["cost"] for r in final if isinstance(r.get("cost"), (int, float))]
 
     def mean(xs):
         return (sum(xs) / len(xs)) if xs else None
 
-    m_in, m_out, m_dur = mean(t_in), mean(t_out), mean(dur)
+    m_in, m_out, m_dur, m_cost = mean(t_in), mean(t_out), mean(dur), mean(costs)
     projected = {}
     if m_in is not None:
         projected["tokens_in"] = round(m_in * evals)
@@ -292,16 +293,23 @@ def suite_projection(logs_dir, evals, model=None, price_in=None, price_out=None)
         projected["tokens_out"] = round(m_out * evals)
     if m_dur is not None:
         projected["wall_minutes"] = round(m_dur * evals / 60000, 1)
-    if price_in is not None and m_in is not None:
+    if m_cost is not None:
+        # Provider-reported cost is authoritative (it already accounts for
+        # cache writes/reads) — prefer it over any price table (2026-09-29).
+        projected["cost_usd"] = round(m_cost * evals, 4)
+        projected["cost_basis"] = "measured (provider-reported cost per eval)"
+    elif price_in is not None and m_in is not None:
         projected["cost_usd"] = round(((m_in / 1e6) * price_in
                                        + ((m_out or 0) / 1e6) * (price_out or 0)) * evals, 4)
+        projected["cost_basis"] = "estimated (tokens x given prices)"
     n = len(final)
     return {
         "generated_at": _now_iso(),
         "samples": n,
         "evals": evals,
         "model": model,
-        "per_eval": {"tokens_in": m_in, "tokens_out": m_out, "duration_ms": m_dur},
+        "per_eval": {"tokens_in": m_in, "tokens_out": m_out,
+                     "duration_ms": m_dur, "cost_usd": m_cost},
         "projected": projected,
         "confidence": "low (n<5)" if n < 5 else ("medium (n<20)" if n < 20 else "high (n>=20)"),
         "basis": ("measured eval records carrying tokens_in/tokens_out/duration_ms "
