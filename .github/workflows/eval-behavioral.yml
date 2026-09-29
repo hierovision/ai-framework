@@ -6,13 +6,19 @@
 #     the hermetic per-PR gate in ci.yml.
 #
 # 2026-09-29 — sharded for wall time, on the Go eval lane:
-#   - Why shard: measured 70-300 s per eval on the Go lane (probe 2026-09-29:
-#     writing-unit-tests#1 70 s, implementing-features#1 147 s,
-#     auditing-accessibility#1 295 s incl. retries) = ~4-6 h serial for the
-#     ~111-eval suite, over the 150-min job timeout and the 120-min green-run
+#   - Lane model: `opencode-go/gpt-6-luna` (user directive 2026-09-29). Chosen
+#     over the initial `opencode-go/deepseek-v4.1-flash` and over
+#     `mimo-v2.6-flash` on measured evidence: 3/3 canary probes pass, 34 s on a
+#     light eval (vs 70 s), 168 s on the heavy one (vs 147 s), AA 37 intel at
+#     $0.10/$0.50 per M; mimo measured 2x slower on the same light eval (141 s)
+#     which risks the shard timeout. Alt: mimo-v2.6-flash (cheaper, slower).
+#   - Depth: weekly = default per skill (26 evals); monthly = full suite (111).
+#   - Why shard: a full pass measured 70-300 s per eval (probe 2026-09-29) =
+#     ~4-6 h serial, over the 150-min job timeout and the 120-min green-run
 #     budget. Six measured-weight shards run in parallel, so the RUN wall time
-#     is the slowest shard (~50-60 min), not the sum.
-#   - Cost is not the constraint: a 105-eval suite measures ~$1.4 of usage
+#     is the slowest shard, not the sum — a full sharded run measured 59 min.
+#   - Cost: measured, not estimated — the runner records provider-reported
+#     `cost` per eval; the first full sharded run measured ~$1.8
 #     (the allowance-equivalent) — see reference/per-change-eval-sla.md.
 #   - The report job concatenates the shard run logs (they share the
 #     date-stamped filename) and merges quarantine state; shards are disjoint
@@ -33,9 +39,19 @@ name: Behavioral Eval (weekly)
 
 on:
   schedule:
-    # Weekly Monday 10:30 UTC (6:30am ET) — off-peak for the provider lane.
+    # Mondays 10:30 UTC — DEFAULT DEPTH (one default eval per skill, 26 evals,
+    # ~10-15 min). Off-peak for the provider lane.
     - cron: '30 10 * * 1'
+    # 1st of the month 10:30 UTC — FULL suite (all 111 included evals), sharded.
+    # Depth policy 2026-09-29 (user directive): weekly is the cheap canary pass;
+    # the full sweep runs monthly. Measured: full suite ~$1.8 and 59 min wall.
+    - cron: '30 10 1 * *'
   workflow_dispatch:
+    inputs:
+      full:
+        description: 'Run the full suite instead of one default eval per skill'
+        type: boolean
+        default: false
 
 # Least-privilege: read-only is all the eval runner needs.
 permissions:
@@ -102,10 +118,16 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           BEVAL_MAX_CONTINUATIONS: "2"
         run: |
+          # Depth: weekly = one default eval per skill; monthly (or a manual
+          # `full` dispatch) = the whole included suite.
+          DEFAULT_ARG="--default"
+          if [ "${{ github.event.schedule }}" = "30 10 1 * *" ] || [ "${{ inputs.full }}" = "true" ]; then
+            DEFAULT_ARG=""
+          fi
           SKILL_ARGS=""
           for s in ${{ matrix.shard.skills }}; do SKILL_ARGS="$SKILL_ARGS --skill $s"; done
           python3 skills/authoring-skills/scripts/run_behavioral_eval.py \
-            --model opencode-go/deepseek-v4.1-flash --logs-dir logs $SKILL_ARGS
+            --model opencode-go/gpt-6-luna --logs-dir logs $DEFAULT_ARG $SKILL_ARGS
 
       - name: Upload shard logs (30-day retention)
         if: always()

@@ -4,11 +4,14 @@ Catalogs, docs free list, and liveness probes: retrieved and live-verified
 2026-09-25 (AA v4.3.2 leaderboard + targeted pages fetched same-day,
 independently run; the 2026-09-18 full sweep stands for unchanged rows —
 spot-checks show ±1 drift). **2026-09-29 pass (Go candidacy + CI eval lane):**
-region set to Global → `opencode-go/deepseek-v4.1-flash` re-probes live and
-becomes the CI eval lane (direct DeepSeek key retired from CI); Go liveness
-probe of 21 candidates (20 live; `muse-spark-1.3-contributor` APIError);
-AA Intelligence + median t/s refreshed for the Go shortlist. See Provider
-notes. 2026-09-25 pass: `mimo-v2.5-free` failed
+region set to Global → `opencode-go/deepseek-*` re-probe live; both eval
+workflows move off the direct DeepSeek key to the Go flat-rate lane, finally
+bound to **`opencode-go/gpt-6-luna`** after candidate probes
+(`mimo-v2.6-flash` rejected on measured wall time); weekly depth reduced to one
+default eval per skill, full suite monthly. Go liveness probe of 21 candidates
+(20 live; `muse-spark-1.3-contributor` APIError); AA Intelligence + median t/s
+refreshed for the Go shortlist. See Provider notes. 2026-09-25 pass:
+`mimo-v2.5-free` failed
 liveness ×3 in live probes (catalog+docs-listed but non-routable —
 `err_a7f91717`, `err_029b18e6`, `err_db97c0cc`) → free council security/ux
 seats moved to `mimo-v2.6-flash-free` (live ✓; family reading MiMo-V2.6-Pro
@@ -94,19 +97,19 @@ The free generalist was validated 2026-07-26 by a clean, no-tool head-to-head ev
 - **Go** ($10/mo flat): Open models only. Config prefix `opencode-go/`. Escalation tier — used when the free default is insufficient or unavailable (vision, peak coding). Limits: $12/5hr, $30/wk, $60/mo. `hy3` and `hy3-preview` are Go flat-rate models. `kimi-k2.7-code` confirmed live on Go — **user directive (2026-09-18): Go-only; the broken Zen upstream is no longer probed or tracked** (Go's "Use balance" Zen fallback covers credit exhaustion). New on Go 2026-09-18: `qwen3.8-max` (AA 45, live-probed clean) and `qwen3.8-flash`.
 - **Zen** (pay-as-you-go): Full catalog including proprietary models. Config prefix `opencode/`. Workspace model-access toggles gate individual models — "Model is disabled" means a workspace toggle, not a gateway death (resolved 2026-09-18 by enabling opus-5, sonnet-5, sol, luna, big-pickle). `qwen3.7-*` is Go-only — bind it as a Go escalation, never as a Zen one. `muse-spark-1.3` (paid flagship, AA 48) routes live with no toggle — distinct from the contributor-free variant and its training-terms caveat.
 - **CI eval lane (user directive 2026-09-29)**: behavioral evals in CI run on
-  the **Go flat-rate** lane — `opencode-go/deepseek-v4.1-flash`, authenticated
-  by the repo's `OPENCODE_API_KEY`. The user's direct DeepSeek API key is **no
-  longer used by CI**. Rationale: same model family the suite already ran
-  (results stay comparable), no per-run marginal cost inside the Go allotment,
-  and no personal-key spend. Measured (2-eval probe 2026-09-29 via
-  `eval-report suite-projection`): ~31.1k in / 3.1k out tokens per eval →
-  **~$1.4 per 105-eval suite** at DeepSeek list prices (the allowance-equivalent;
-  Go meters underlying usage) and ~70 s/eval on a small skill. Policy: RM-002
-  now allows `*-free`, `opencode-go/*` (flat-rate) or the legacy `deepseek/*`;
-  Zen PAYG stays banned. **Requires workspace region = Global** (set
-  2026-09-29). Free-lane evidence stands and was re-measured: the free
-  generalists stall on long multi-turn loops (~11 min/eval effective, 240 s
-  timeouts, dead sessions) — unfit as the eval substrate.
+  the **Go flat-rate** lane — **`opencode-go/gpt-6-luna`**, authenticated by the
+  repo's `OPENCODE_API_KEY`. The user's direct DeepSeek API key is **no longer
+  used by CI**. Chosen on measured evidence (2-3 eval probes 2026-09-29) over
+  `opencode-go/deepseek-v4.1-flash` (the first candidate) and
+  `opencode-go/mimo-v2.6-flash`: **3/3 probes pass**, 34 s on a light eval
+  (vs 70 s), 168 s on the heavy one (vs 147 s); AA 37 intelligence at
+  $0.10/$0.50 per M. mimo measured **2× slower** on the same light eval
+  (141 s) — rejected on wall time; it remains the allowance-first alt
+  (AA 38, $0.14/$0.28). Depth policy: **weekly = default per skill (26 evals);
+  monthly = full suite (111)**, six measured-weight shards. A full sharded run
+  measured **59 min wall and ~$1.8** (allowance-equivalent, provider-reported);
+  the runner records measured `cost` per eval so future numbers need no price
+  tables. **Requires workspace region = Global** (set 2026-09-29).
 - **Direct-key lane** (user's own DeepSeek API key, approved 2026-09-18): config prefix `deepseek/`. Billed directly by DeepSeek to the user's own balance — check that balance separately from opencode. `deepseek/deepseek-flash` = V4.1-Flash (live-probed: text, vision, tool calls). `deepseek/deepseek-v4-pro` also routes live (AA 36, no vision). Off-peak half price during 01:00–04:00 and 06:00–10:00 UTC Mon–Fri; all other hours (i.e. the full ET working day) off-peak.
 - Go can fall back to Zen balance when limits hit ("Use balance" in the console). `AI_FRAMEWORK_FREE_TIER=1` forces the free tier even when a Go/Zen key is present.
 

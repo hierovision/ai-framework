@@ -124,13 +124,18 @@ number a probe can estimate (RM-021, 2026-09-29). The loop:
 
 A projection off one probe is an estimate, not a result — label it so.
 
-**Measured constants — Go eval lane (2026-09-29, 2-eval probe on
-`opencode-go/deepseek-v4.1-flash`):** ~31.1k input / 3.1k output tokens per
-eval (~3.3 M / 0.32 M per 105-eval suite) → **~$1.4 per suite** at DeepSeek
-list prices ($0.30/$1.20 per M, the allowance-equivalent) — cost is *not* the
-constraint. **~70 s/eval** on a small skill; the core canary measured ~3.7
-min/eval including one 240 s stall, so **wall time is** the constraint for a
-full weekly run — shard the suite rather than raise the budget blindly.
+**Measured constants — Go eval lane (2026-09-29).** Full sharded suite
+(`opencode-go/deepseek-v4.1-flash`, 6 shards, 111 evals): **59 min run wall**
+(slowest shard ~58 min), **4.68 M in / 0.33 M out tokens**, **~$1.8**
+allowance-equivalent, 52/107 verdicts passing, 133 infra records. Depth policy
+(user directive 2026-09-29): **weekly = default per skill (26 evals ≈ ¼ the
+cost and ~15 min); monthly = full suite**. The lane model is now
+`opencode-go/gpt-6-luna` (measured 3/3 probes pass; 34 s light / 168 s heavy vs
+DeepSeek's 70 s / 147 s; AA 37 at $0.10/$0.50 per M); `mimo-v2.6-flash` is the
+allowance-first alt but measured 2× slower. **Cost is now measured, not
+estimated** — the runner records provider-reported `cost` per eval, so
+`suite-projection` reports `cost_basis: measured …` and no price table is
+needed.
 
 ## Guardrail
 
