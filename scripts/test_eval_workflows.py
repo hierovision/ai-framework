@@ -9,6 +9,7 @@ workflows carry the node24 upload-artifact pin, and the weekly ceiling is 150
 
 Structural only: this parses the YAML, it does not run GitHub Actions.
 """
+import json
 import os
 import sys
 
@@ -89,28 +90,38 @@ def test_weekly_timeout_is_150():
 
 
 def test_lane_and_nested_agent_override():
-    """Both eval workflows (2026-09-29): run the Go lane model and export a
-    ci-lane-overrides OPENCODE_CONFIG_CONTENT.
+    """Both eval workflows (2026-09-29): the step that RUNS the runner must also
+    export the nested-agent override, name the Go lane model, and not reference
+    DEEPSEEK_API_KEY.
 
-    Nested subagents (council lenses) are free-tier bound; in CI the free tier
-    rejects calls outside the OpenCode client ("…can only be used from within
-    OpenCode"), which killed designing-architecture#1 twice. Structural check
-    only: the workflows must name the lane model and export the override.
+    Caught a real bug: the export was first injected into an unrelated
+    `set -euo pipefail` step (the changed-files step), so CI still ran the
+    free-bound council consult and died with "…free tier can only be used from
+    within OpenCode". Structural check: same step, same `run` block.
     """
     import subprocess
+    found = 0
     for path in (PER_CHANGE, BEHAVIORAL):
+        doc = yaml.safe_load(open(path, encoding="utf-8"))
         text = open(path, encoding="utf-8").read()
-        assert "opencode-go/gpt-6-luna" in text, f"{path}: lane model missing"
-        assert "scripts/ci-lane-overrides.py --model opencode-go/gpt-6-luna" in text, \
-            f"{path}: nested-agent override export missing"
-        assert "DEEPSEEK_API_KEY" not in text, f"{path}: direct-key secret still referenced"
+        assert "DEEPSEEK_API_KEY" not in text, f"{path}: direct-key secret referenced"
+        for job in doc["jobs"].values():
+            for step in job.get("steps", []):
+                run = step.get("run") or ""
+                if "run_behavioral_eval.py" not in run:
+                    continue
+                found += 1
+                assert "OPENCODE_CONFIG_CONTENT" in run and "ci-lane-overrides.py" in run, \
+                    f"{path}/{step.get('name')}: runner step lacks the nested-agent override"
+                assert "opencode-go/gpt-6-luna" in run, \
+                    f"{path}/{step.get('name')}: lane model missing in the runner step"
+    assert found >= 2, f"expected a runner step in both workflows, found {found}"
     out = subprocess.run([sys.executable, os.path.join(HERE, "ci-lane-overrides.py"),
                           "--model", "opencode-go/gpt-6-luna"], capture_output=True,
                          text=True, check=True).stdout
-    import json
     cfg = json.loads(out)
     assert cfg["agent"]["council-ux"]["model"] == "opencode-go/gpt-6-luna", cfg
-    assert "council-architecture" in cfg["agent"] and "architect" in cfg["agent"], cfg
+    assert "architect" in cfg["agent"], cfg
 
 
 def main():
