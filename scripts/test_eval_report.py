@@ -293,7 +293,7 @@ def test_suite_projection_from_measured_samples():
                     "kind": "eval", "skill": "alpha",
                     "model": "opencode-go/deepseek-v4.1-flash", "outcome": "success",
                     "eval_pass": True, "tokens_in": ti, "tokens_out": to,
-                    "duration_ms": du}) + "\n")
+                    "duration_ms": du, "cost": 0.01}) + "\n")
         out = report.suite_projection(d, 10, model="opencode-go/deepseek-v4.1-flash",
                                       price_in=0.20, price_out=1.20)
         assert out["samples"] == 2 and out["evals"] == 10, out
@@ -302,8 +302,10 @@ def test_suite_projection_from_measured_samples():
         assert out["per_eval"]["duration_ms"] == 90000, out
         assert out["projected"]["tokens_in"] == 20000, out
         assert out["projected"]["wall_minutes"] == 15.0, out
-        expected_cost = round(((2000 / 1e6) * 0.20 + (300 / 1e6) * 1.20) * 10, 4)
-        assert abs(out["projected"]["cost_usd"] - expected_cost) < 1e-6, out
+        # measured provider-reported cost wins over the price table
+        assert out["projected"]["cost_usd"] == 0.1, out
+        assert out["projected"]["cost_basis"].startswith("measured"), out
+        assert out["per_eval"]["cost_usd"] == 0.01, out
         assert out["confidence"].startswith("low"), out
         assert report.suite_projection(d, 10, model="nope/other")["samples"] == 0
         # An infra death (outcome=error, ~2s) must not drag the averages down.

@@ -481,7 +481,7 @@ def assert_eval(e, ctx):
 
 
 def _token_totals(turns):
-    """Sum (input, output) tokens across every turn's step-finish events.
+    """Sum (input, output, cost) across every turn's step-finish events.
 
     2026-09-29 (RM-021): the run log's tokens_in/tokens_out were always null,
     so neither the per-eval cost of a run nor a suite projection could be
@@ -489,6 +489,7 @@ def _token_totals(turns):
     figure to extrapolate from — small probe, measured answer.
     """
     ti = to = 0
+    cost = 0.0
     for _label, res in turns or []:
         events, _errors = parse_event_stream(getattr(res, "raw", "") or "")
         for ev in events:
@@ -500,7 +501,14 @@ def _token_totals(turns):
             tk = part.get("tokens") or {}
             ti += int(tk.get("input") or 0)
             to += int(tk.get("output") or 0)
-    return (ti or None), (to or None)
+            # Providers report measured cost per step; prefer it over any
+            # price table (2026-09-29). Cache-write input can dominate, so
+            # token sums alone under-report some models (gpt-6-luna).
+            try:
+                cost += float(part.get("cost") or 0.0)
+            except (TypeError, ValueError):
+                pass
+    return (ti or None), (to or None), (round(cost, 6) if cost else None)
 
 
 def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
@@ -652,7 +660,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             else:
                 detail = ("missing: " + " | ".join(missing))[:DETAIL_MAX]
             _persist_event_streams(logs_dir, e, turns)
-        tok_in, tok_out = _token_totals(turns)
+        tok_in, tok_out, tok_cost = _token_totals(turns)
         rec = {
             "kind": "eval",
             "skill": e["skill"],
@@ -666,6 +674,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             "tokens_in": tok_in,
             "tokens_out": tok_out,
             "duration_ms": int((time.monotonic() - started) * 1000),
+            "cost": tok_cost,
         }
         path = log_run.log_record(rec, logs_dir=logs_dir)
         if quarantine_path:

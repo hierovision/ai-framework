@@ -839,8 +839,8 @@ def test_eval_record_carries_measured_tokens_and_duration():
     so suite cost/time projections come from evidence — never from running the
     full suite to size it. Both step-finish shapes must be counted."""
     stream = (
-        '{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":1200,"output":340}}}\n'
-        '{"type":"step-finish","part":{"type":"step-finish","tokens":{"input":800,"output":160}}}\n'
+        '{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":1200,"output":340},"cost":0.0012}}\n'
+        '{"type":"step-finish","part":{"type":"step-finish","tokens":{"input":800,"output":160},"cost":0.0008}}\n'
         '{"type":"text","part":{"type":"text","text":"A"}}\n'
     )
     e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["A"], "model_tier": "go"}
@@ -856,6 +856,7 @@ def test_eval_record_carries_measured_tokens_and_duration():
         rec = _read_logs(d)[-1]
         assert rec["tokens_in"] == 2000, rec
         assert rec["tokens_out"] == 500, rec
+        assert rec["cost"] == 0.002, rec  # measured, provider-reported
         # Regression: the timer used to start AFTER get_output, so a real call's
         # wall time was ~1 ms. It must cover the invocation.
         assert rec["duration_ms"] >= 20, rec
