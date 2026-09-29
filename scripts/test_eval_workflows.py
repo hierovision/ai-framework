@@ -108,7 +108,10 @@ def test_lane_and_nested_agent_override():
         for job in doc["jobs"].values():
             for step in job.get("steps", []):
                 run = step.get("run") or ""
-                if "run_behavioral_eval.py" not in run:
+                # Only steps that actually INVOKE the runner with a model need
+                # the override; the `--list` matrix-selection step makes no model
+                # call (and would otherwise trip this check).
+                if "run_behavioral_eval.py" not in run or "--model" not in run:
                     continue
                 found += 1
                 assert "OPENCODE_CONFIG_CONTENT" in run and "ci-lane-overrides.py" in run, \
