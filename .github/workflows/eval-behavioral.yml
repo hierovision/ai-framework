@@ -5,26 +5,35 @@
 #   - designing-cicd: expensive live-agent job on a weekly schedule, separate from
 #     the hermetic per-PR gate in ci.yml.
 #
+# 2026-09-29 — sharded for wall time, on the Go eval lane:
+#   - Why shard: measured 70-300 s per eval on the Go lane (probe 2026-09-29:
+#     writing-unit-tests#1 70 s, implementing-features#1 147 s,
+#     auditing-accessibility#1 295 s incl. retries) = ~4-6 h serial for the
+#     ~111-eval suite, over the 150-min job timeout and the 120-min green-run
+#     budget. Six measured-weight shards run in parallel, so the RUN wall time
+#     is the slowest shard (~50-60 min), not the sum.
+#   - Cost is not the constraint: a 105-eval suite measures ~$1.4 of usage
+#     (the allowance-equivalent) — see reference/per-change-eval-sla.md.
+#   - The report job concatenates the shard run logs (they share the
+#     date-stamped filename) and merges quarantine state; shards are disjoint
+#     by skill, so stream filenames never collide.
+#
 # Free-tier adherence (verified against official docs — see plan rm-002):
-#   - GitHub Free private repos: 2,000 runner min/month. A nightly full run of ~63
-#     evals would exceed that, so this runs WEEKLY (`0 6 * * 1`) + manual dispatch.
+#   - GitHub Free private repos: 2,000 runner min/month. Sharding spends more
+#     minutes per run (6 jobs) but each is short; the weekly schedule + manual
+#     dispatch only keeps it inside the budget (see per-change-eval-sla.md).
 #   - `permissions: contents: read` — read-only is all the runner needs.
 #   - Model access uses a REPOSITORY-level secret (org-level secrets are NOT
 #     available to private Free repos). Consumed via ${{ secrets.* }}, never echoed.
-#   - Run logs uploaded as an artifact with `retention-days: 30` (within GitHub
-#     Free's 90-day max; auto-expires — local prune per RM-001).
+#   - Run logs uploaded as artifacts with `retention-days: 30`.
 #   - `concurrency` prevents overlapping weekly runs.
-#   - `--limit` / `--skill` subset sharding keeps a full run inside the minute budget.
-#   - Evals run on the direct-key lane (deepseek/deepseek-flash) per the
-#     2026-09-21 user directive (model-routing.md CI eval lane note).
+#   - Eval lane (user directive 2026-09-29): opencode-go flat-rate,
+#     `opencode-go/deepseek-v4.1-flash`, authenticated by OPENCODE_API_KEY.
 name: Behavioral Eval (weekly)
 
 on:
   schedule:
-    # Weekly Monday 10:30 UTC (6:30am ET) — off-peak for the direct-key lane
-    # (DeepSeek peak windows are 01-04 & 06-10 UTC weekdays; 06:00 sat exactly
-    # in peak = 2x input price, measured 2026-09-21). NOT nightly — stays
-    # within 2,000 CI min/month.
+    # Weekly Monday 10:30 UTC (6:30am ET) — off-peak for the provider lane.
     - cron: '30 10 * * 1'
   workflow_dispatch:
 
@@ -40,10 +49,25 @@ concurrency:
 jobs:
   behavioral-eval:
     runs-on: ubuntu-latest
-    # Full weekly suite: ~63 evals at the measured ~100s/eval ~= 105 min
-    # (see reference/per-change-eval-sla.md). The 120 min ceiling is the AC10
-    # green-run budget; the ~105 min duration is expected, not a defect.
-    timeout-minutes: 150  # measured: ~74 min serial at ~57s/eval; 150 = 2x headroom. Suite sharding (--limit/--skill) is the option if a full run ever nears the ceiling
+    # Each shard is ~50-60 min measured-weight; 150 is comfortable headroom.
+    timeout-minutes: 150
+    name: evals (${{ matrix.shard.name }})
+    strategy:
+      fail-fast: false   # a red shard must not hide the others' data
+      matrix:
+        shard:
+          - name: implement
+            skills: "implementing-features observing-runs managing-github-issues triaging-requirements"
+          - name: security
+            skills: "reviewing-security sourcing-external-skills authoring-skills"
+          - name: ui
+            skills: "correcting-ui capturing-ui-evidence validating-ui auditing-accessibility refining-issue-acceptance"
+          - name: threat-supply
+            skills: "modeling-threats auditing-supply-chain handling-security-incidents releasing-a-version"
+          - name: test-trio
+            skills: "debugging-test-failures writing-e2e-tests writing-integration-tests writing-unit-tests"
+          - name: design-deploy
+            skills: "reviewing-code designing-architecture designing-cicd deploying-to-azure-swa deploying-with-supabase securing-ci"
     steps:
       # SHA-pinned (supply-chain safety — see securing-ci skill).
       - name: Checkout
@@ -54,14 +78,8 @@ jobs:
           python3 --version
           pip3 install --quiet pyyaml
 
-      # opencode is NOT preinstalled on GitHub-hosted runners; the docs install
-      # script is the supported path (https://opencode.ai/docs/, retrieved
-      # 2026-09-16). Found by the RM-002 AC5 live check: without this step the
-      # workflow never ran a single eval (missing binary).
-      # 2026-09-20: curl|bash queries the GitHub API internally and failed 403
-      # under runner-IP rate limiting — npm registry package instead, pinned
-      # to the locally validated version (event-stream shapes vary by CLI
-      # version; pinning removes that drift hazard).
+      # opencode is NOT preinstalled on GitHub-hosted runners; pinned via npm
+      # (the curl|bash path failed 403 under runner-IP rate limiting, 2026-09-20).
       - name: Install opencode CLI (pinned via npm)
         env:
           OPENCODE_VERSION: "1.18.18"
@@ -70,66 +88,68 @@ jobs:
       - name: Add opencode to PATH
         run: echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
 
-      # Fresh agents discover skills from the global opencode layout; without
-      # install.sh the CI agent runs bare and produces output outside the
-      # repo's conventions (see eval-per-change.yml's matching step, 2026-09-21).
-      # Trust boundary (security lens, 2026-09-21): install.sh is a
-      # repo-LOCAL script executed from the checked-out branch — the trust
-      # mechanism is branch protection on main, not remote pipelining.
+      # Fresh agents discover skills from the global opencode layout.
+      # Trust boundary: install.sh is a repo-LOCAL script from the checked-out
+      # branch — the trust mechanism is branch protection on main.
       - name: Install library skills + agents (global layout)
         run: bash install.sh
 
-      - name: Run behavioral evals (fresh agent per eval)
+      - name: Run shard evals (fresh agent per eval)
         env:
-          # Repository-level secret ONLY (org-level secrets are unavailable on
-          # GitHub Free private repos). Consumed by the runner; never echoed.
-          # Eval lane (user directive 2026-09-29): opencode-go flat-rate.
-          # Evals run on opencode-go/deepseek-v4.1-flash — same model family
-          # the suite already ran, now on the Go allotment instead of the
-          # user's direct DeepSeek API key. Measured on a 2-eval probe
-          # (2026-09-29): ~31.1k in / 3.1k out tokens per eval -> ~$1.4 per
-          # 105-eval suite at DeepSeek list prices (the allowance-equivalent);
-          # ~70s per eval on a small skill. Requires workspace region =
-          # Global (set 2026-09-29) — see reference/model-routing.md.
+          # Repository-level secret ONLY. Consumed by the runner; never echoed.
+          # Eval lane (user directive 2026-09-29): opencode-go flat-rate,
+          # same model family the suite already ran — no personal API key.
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          # Continuation depth: premature-stop turns get a same-session
-          # finish-now nudge (logged); 2 gives the variance headroom the
-          # shakedown data asked for (clamp max 3 in the runner).
           BEVAL_MAX_CONTINUATIONS: "2"
         run: |
-          # --model is REQUIRED here: opencode's environment default on a fresh
-          # runner is `big-pickle` (disabled at the gateway) — found by the
-          # RM-002 AC5 live gate, 2026-09-16. The ID is a binding, kept in step
-          # with reference/model-routing.md's CI eval lane (re-verify on each
-          # routing pass).
-          python3 skills/authoring-skills/scripts/run_behavioral_eval.py --model opencode-go/deepseek-v4.1-flash
+          SKILL_ARGS=""
+          for s in ${{ matrix.shard.skills }}; do SKILL_ARGS="$SKILL_ARGS --skill $s"; done
+          python3 skills/authoring-skills/scripts/run_behavioral_eval.py \
+            --model opencode-go/deepseek-v4.1-flash --logs-dir logs $SKILL_ARGS
+
+      - name: Upload shard logs (30-day retention)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
+        with:
+          name: eval-logs-shard-${{ matrix.shard.name }}
+          path: logs/
+          retention-days: 30
+
+  report:
+    needs: [behavioral-eval]
+    if: always()   # artifacts + reporting must survive a red shard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+
+      - name: Download all shard logs
+        uses: actions/download-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
+        with:
+          pattern: eval-logs-shard-*
+          path: shards
+
+      - name: Merge shard logs (run records + quarantine + streams)
+        run: |
+          python3 scripts/merge-eval-logs.py --out logs \
+            $(find shards -maxdepth 2 -type d -name logs | tr '\n' ' ')
 
       - name: Build eval report artifacts
-        if: always()
         run: |
           python3 scripts/eval-report.py aggregate --logs-dir logs/ --out eval-report.json || true
           python3 scripts/eval-report.py coverage-gaps --logs-dir logs/ --out coverage-gaps.json || true
           python3 scripts/eval-report.py green-run-status --out green-run-status.json || true
           python3 scripts/eval-report.py quota-projection --out quota-projection.json || true
-          # RM-021 observability: infra (dead sessions) vs content misses, with
-          # the upstream error signature (e.g. UnknownError ref=err_*) so the
-          # red count is diagnosable without downloading the streams by hand.
           python3 scripts/eval-report.py failure-taxonomy --logs-dir logs/ --out failure-taxonomy.json || true
 
-      - name: Upload run logs (30-day retention)
-        if: always()
+      - name: Upload merged run logs (30-day retention)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
         with:
           name: observe-run-logs
-          # Governance: eval-streams are the diagnostic channel for red
-          # canaries; keys redacted at persistence; public-repo caveat
-          # (model outputs + repo content inside).
-          path: |
-            logs/
+          path: logs/
           retention-days: 30
 
       - name: Upload eval report artifacts (30-day retention)
-        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (node24)
         with:
           name: eval-report-${{ github.run_id }}

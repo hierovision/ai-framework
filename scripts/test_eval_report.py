@@ -26,6 +26,11 @@ _QS = importlib.util.spec_from_file_location("query_runs", QUERY)
 query_runs = importlib.util.module_from_spec(_QS)
 _QS.loader.exec_module(query_runs)
 
+_MERGE = importlib.util.spec_from_file_location(
+    "merge_eval_logs", os.path.join(HERE, "merge-eval-logs.py"))
+merge_eval_logs = importlib.util.module_from_spec(_MERGE)
+_MERGE.loader.exec_module(merge_eval_logs)
+
 FIXTURE_LINES = [
     {"ts": "2026-09-17T06:00:00Z", "run_id": "r1", "kind": "eval",
      "skill": "writing-unit-tests", "model": "free", "tokens_in": 800,
@@ -314,6 +319,40 @@ def test_suite_projection_from_measured_samples():
         shutil.rmtree(d)
 
 
+def test_merge_eval_logs_concatenates_runs_and_quarantine():
+    """Weekly sharding (2026-09-29): shard run logs share the date-stamped
+    filename, so they must be CONCATENATED, not overwritten; quarantine state
+    merges by key (max fail_count, latest last_fail)."""
+    d = tempfile.mkdtemp()
+    a, b, out = (os.path.join(d, x) for x in ("a", "b", "out"))
+    os.makedirs(a)
+    os.makedirs(b)
+    try:
+        for path, rec in ((os.path.join(a, "run-2026-09-29.jsonl"),
+                           {"run_id": "a1", "kind": "eval", "skill": "alpha", "eval_pass": True}),
+                          (os.path.join(b, "run-2026-09-29.jsonl"),
+                           {"run_id": "b1", "kind": "eval", "skill": "beta", "eval_pass": False})):
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec) + "\n")
+        with open(os.path.join(a, "quarantine.json"), "w", encoding="utf-8") as fh:
+            json.dump({"alpha#1": {"fail_count": 1, "first_fail": "2026-09-28",
+                                   "last_fail": "2026-09-28", "status": "watching"}}, fh)
+        with open(os.path.join(b, "quarantine.json"), "w", encoding="utf-8") as fh:
+            json.dump({"alpha#1": {"fail_count": 2, "first_fail": "2026-09-27",
+                                   "last_fail": "2026-09-29", "status": "quarantined"}}, fh)
+        summary = merge_eval_logs.merge(out, [a, b])
+        assert summary["run_records"] == 2, summary
+        assert summary["quarantine_keys"] == 1, summary
+        assert sorted(x["run_id"] for x in
+                      (json.loads(l) for l in open(os.path.join(out, "run-merged.jsonl")))) == ["a1", "b1"]
+        q = json.load(open(os.path.join(out, "quarantine.json")))
+        assert q["alpha#1"]["fail_count"] == 2, q
+        assert q["alpha#1"]["last_fail"] == "2026-09-29", q
+        assert q["alpha#1"]["first_fail"] == "2026-09-27", q
+    finally:
+        shutil.rmtree(d)
+
+
 def main():
     tests = [
         test_aggregate_report_per_run_scores,
@@ -326,6 +365,7 @@ def main():
         test_coverage_gaps_legacy_assertion_backlog,
         test_failure_taxonomy_splits_infra_and_content,
         test_suite_projection_from_measured_samples,
+        test_merge_eval_logs_concatenates_runs_and_quarantine,
     ]
     failed = 0
     for t in tests:
