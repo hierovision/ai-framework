@@ -83,12 +83,15 @@ jobs:
         env:
           # Repository-level secret ONLY (org-level secrets are unavailable on
           # GitHub Free private repos). Consumed by the runner; never echoed.
-          # Direct-key lane (user directive 2026-09-21, model-routing.md):
-          # evals run on deepseek/deepseek-flash via the user's own DeepSeek
-          # account — bypasses free-gateway outages; ~$1-2/month at suite
-          # scale (measured 2026-09-21, plan History). Key is a repo secret,
-          # consumed by opencode's provider auth, never echoed.
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          # Eval lane (user directive 2026-09-29): opencode-go flat-rate.
+          # Evals run on opencode-go/deepseek-v4.1-flash — same model family
+          # the suite already ran, now on the Go allotment instead of the
+          # user's direct DeepSeek API key. Measured on a 2-eval probe
+          # (2026-09-29): ~31.1k in / 3.1k out tokens per eval -> ~$1.4 per
+          # 105-eval suite at DeepSeek list prices (the allowance-equivalent);
+          # ~70s per eval on a small skill. Requires workspace region =
+          # Global (set 2026-09-29) — see reference/model-routing.md.
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           # Continuation depth: premature-stop turns get a same-session
           # finish-now nudge (logged); 2 gives the variance headroom the
           # shakedown data asked for (clamp max 3 in the runner).
@@ -97,9 +100,9 @@ jobs:
           # --model is REQUIRED here: opencode's environment default on a fresh
           # runner is `big-pickle` (disabled at the gateway) — found by the
           # RM-002 AC5 live gate, 2026-09-16. The ID is a binding, kept in step
-          # with reference/model-routing.md's free generalist (re-verify on
-          # each routing pass).
-          python3 skills/authoring-skills/scripts/run_behavioral_eval.py --model deepseek/deepseek-flash
+          # with reference/model-routing.md's CI eval lane (re-verify on each
+          # routing pass).
+          python3 skills/authoring-skills/scripts/run_behavioral_eval.py --model opencode-go/deepseek-v4.1-flash
 
       - name: Build eval report artifacts
         if: always()

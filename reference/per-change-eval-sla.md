@@ -124,6 +124,14 @@ number a probe can estimate (RM-021, 2026-09-29). The loop:
 
 A projection off one probe is an estimate, not a result — label it so.
 
+**Measured constants — Go eval lane (2026-09-29, 2-eval probe on
+`opencode-go/deepseek-v4.1-flash`):** ~31.1k input / 3.1k output tokens per
+eval (~3.3 M / 0.32 M per 105-eval suite) → **~$1.4 per suite** at DeepSeek
+list prices ($0.30/$1.20 per M, the allowance-equivalent) — cost is *not* the
+constraint. **~70 s/eval** on a small skill; the core canary measured ~3.7
+min/eval including one 240 s stall, so **wall time is** the constraint for a
+full weekly run — shard the suite rather than raise the budget blindly.
+
 ## Guardrail
 
 The per-change workflow reads `quota-projection.json` at start and fails fast
