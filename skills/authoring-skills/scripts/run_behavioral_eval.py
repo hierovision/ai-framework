@@ -511,6 +511,29 @@ def _token_totals(turns):
     return (ti or None), (to or None), (round(cost, 6) if cost else None)
 
 
+_WRITE_ISH_RE = re.compile(
+    r"(?:^|[\s;&|])(?:>>|<<|>|tee\b|mkdir\b|cp\b|mv\b|rm\b|sed\s+-i|dd\b|truncate\b)")
+
+
+def _has_work_activity(ctx):
+    """True when a turn produced work.
+
+    2026-09-29: counting ONLY write/edit tool calls misfired — agents routinely
+    write artifacts via bash (`cat > f`, heredocs, node scripts), so a turn with
+    21-26 tool_use events and real output was judged "0 write events" and nudged
+    repeatedly, ending in dead sessions recorded as INFRA failures. Count any
+    write/edit call, or a bash command that writes.
+    """
+    for call in extract_tool_calls(ctx.get("events") or []):
+        if call["tool"] in ("write", "edit"):
+            return True
+        if call["tool"] == "bash":
+            cmd = (call.get("args") or {}).get("command") or ""
+            if _WRITE_ISH_RE.search(cmd):
+                return True
+    return False
+
+
 def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
              sleep=time.sleep, quarantine_path=None):
     """Run one eval via `get_output(e)`, assert, and write a run-log record.
@@ -535,7 +558,8 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
     result = get_output(e)
     try:
         ctx = build_context(result)
-        missing = assert_eval(e, ctx)
+        best_missing = assert_eval(e, ctx)
+        missing = best_missing
         turns = [("initial", result)]
         attempts = 0
         # Transient retry applies to NON-STREAM output only (stall strings,
@@ -569,6 +593,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             result = get_output(e)
             ctx = build_context(result)
             missing = assert_eval(e, ctx)
+            best_missing = missing if len(missing) < len(best_missing) else best_missing
             turns.append((f"transient{attempts}", result))
         # Deterministic continuation policy (2026-09-21, the mechanical form
         # of an eval-run orchestrator): a turn that ends with MISSING
@@ -580,15 +605,20 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
         # (a fresh session that then stalls deserves the same nudge).
         continuations = 0
         max_continuations = min(int(os.environ.get("BEVAL_MAX_CONTINUATIONS", "1")), 3)  # clamp: no runaway loops
+        # Legacy evals carry prose `expected_behavior` only (no typed `expect`):
+        # those substrings can never match, so every turn is "missing" and the
+        # retry budget just burns turns into dead sessions (2026-09-29). Cap
+        # them at one nudge; the migration backlog removes the class entirely.
+        if not (isinstance(e.get("expect"), dict) and e["expect"]):
+            max_continuations = min(max_continuations, 1)
 
         def nudge_session():
             """Same-session nudges for the CURRENT result (per-session budget)."""
-            nonlocal result, ctx, missing, continuations
+            nonlocal result, ctx, missing, continuations, best_missing
             used = 0
-            while (missing and used < max_continuations
+            while (best_missing and used < max_continuations
                    and not _dead_session(ctx)
-                   and not any(c["tool"] in ("write", "edit")
-                               for c in extract_tool_calls(ctx["events"]))):
+                   and not _has_work_activity(ctx)):
                 session_id = next((ev.get("sessionID") for ev in ctx["events"]
                                    if ev.get("sessionID")), None)
                 if not session_id:
@@ -596,7 +626,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
                 used += 1
                 continuations += 1
                 nudge = ("Continue the task to completion in this session. Do the "
-                         "work now — write the required files with the write tool; "
+                         "work now — write the required files (any tool is fine); "
                          "do not end with a plan to write them later.")
                 log_run.log_record({
                     "kind": "eval",
@@ -613,6 +643,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
                 result = get_output(e, {"session_id": session_id, "nudge": nudge})
                 ctx = build_context(result)
                 missing = assert_eval(e, ctx)
+                best_missing = missing if len(missing) < len(best_missing) else best_missing
                 turns.append((f"continuation{continuations}", result))
 
         nudge_session()
@@ -625,7 +656,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
         # content misses.
         max_fresh = min(int(os.environ.get("BEVAL_MAX_FRESH_RETRIES", "2")), 2)
         fresh = 0
-        while (missing and fresh < max_fresh and _dead_session(ctx)):
+        while (best_missing and fresh < max_fresh and _dead_session(ctx)):
             fresh += 1
             delay = FRESH_RETRY_BACKOFF_SECONDS[min(fresh - 1, len(FRESH_RETRY_BACKOFF_SECONDS) - 1)]
             sleep(delay)
@@ -644,13 +675,17 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             result = get_output(e)  # fresh session
             ctx = build_context(result)
             missing = assert_eval(e, ctx)
+            best_missing = missing if len(missing) < len(best_missing) else best_missing
             turns.append((f"fresh{fresh}", result))
             nudge_session()  # a fresh session that stalls gets the same nudge
 
-        passed = not missing
-        dead = bool(missing) and _dead_session(ctx)
+        # Grade the BEST turn, not the last: a productive turn followed by a
+        # dead continuation was recorded as an infra failure even though the
+        # work was done (2026-09-29).
+        passed = not best_missing
+        dead = bool(best_missing) and _dead_session(ctx)
         detail = None
-        if missing:
+        if best_missing:
             if dead:
                 # Infra failure, not a content miss: keep the cause visible and
                 # separable from `failure` so the report/green-run signals are
@@ -658,7 +693,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
                 detail = (f"dead session: {_error_signature(ctx)} — "
                           f"no work produced")[:DETAIL_MAX]
             else:
-                detail = ("missing: " + " | ".join(missing))[:DETAIL_MAX]
+                detail = ("missing: " + " | ".join(best_missing))[:DETAIL_MAX]
             _persist_event_streams(logs_dir, e, turns)
         tok_in, tok_out, tok_cost = _token_totals(turns)
         rec = {
