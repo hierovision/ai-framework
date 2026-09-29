@@ -34,7 +34,7 @@
 #   - Run logs uploaded as artifacts with `retention-days: 30`.
 #   - `concurrency` prevents overlapping weekly runs.
 #   - Eval lane (user directive 2026-09-29): opencode-go flat-rate,
-#     `opencode-go/deepseek-v4.1-flash`, authenticated by OPENCODE_API_KEY.
+#     `opencode-go/gpt-6-luna`, authenticated by OPENCODE_API_KEY.
 name: Behavioral Eval (weekly)
 
 on:
