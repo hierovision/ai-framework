@@ -877,6 +877,74 @@ def test_augment_prompt_gives_absolute_root():
     assert "/w/a" in out2, out2
     assert runner.augment_prompt("p", "/w", []) == "p"
 
+def _tool_stream(tool, **inp):
+    return json.dumps({"type": "tool", "sessionID": "ses_test",
+                       "part": {"type": "tool", "tool": tool,
+                                "state": {"status": "completed", "input": inp}}}) + "\n"
+
+
+def test_has_work_activity_counts_bash_writes():
+    """RM-021 (2026-09-29): a turn that writes via bash IS work. Counting only
+    write/edit calls misjudged such turns "0 write events" and nudged them into
+    dead sessions, which were then recorded as INFRA failures."""
+    def ctx(cmd):
+        return runner.build_context(runner.EvalResult(raw=_tool_stream("bash", command=cmd)))
+    assert runner._has_work_activity(ctx("echo hi > out.txt")), "redirect"
+    assert runner._has_work_activity(ctx("cat <<'EOF' > evidence.json")), "heredoc"
+    assert runner._has_work_activity(ctx("mkdir -p evidence && cp a b")), "mkdir/cp"
+    assert not runner._has_work_activity(ctx("ls -la && grep -rn x .")), "read-only bash"
+    w = runner.build_context(runner.EvalResult(raw=_tool_stream("write", filePath="/w/a.md")))
+    assert runner._has_work_activity(w), "write tool"
+
+
+def test_bash_writes_suppress_the_zero_write_nudge():
+    """A turn that wrote via bash must not be nudged as a 'premature stop'."""
+    e = {"skill": "alpha", "eval_id": 1, "expect": {"text": ["ZZZ"]}, "model_tier": "go"}
+    stream = (_tool_stream("bash", command="echo x > f")
+              + '{"type":"text","sessionID":"ses_test",'
+                '"part":{"type":"text","text":"wrote it"}}\n')
+    d = tempfile.mkdtemp()
+    calls = {"n": 0}
+
+    def stub(_e, turn=None):
+        calls["n"] += 1
+        return runner.EvalResult(raw=stream)
+
+    try:
+        passed, missing, _ = runner.run_eval(e, stub, logs_dir=d, sleep=lambda _s: None)
+        assert not passed
+        assert calls["n"] == 1, f"nudged a turn that did work: {calls}"
+    finally:
+        shutil.rmtree(d)
+
+
+def test_legacy_eval_capped_at_one_nudge():
+    """RM-021: a legacy eval (prose `expected_behavior`, no typed `expect`) can
+    never satisfy the substring matcher — extra nudges only burn turns into dead
+    sessions. Cap at one nudge."""
+    e = {"skill": "alpha", "eval_id": 1,
+         "expected_behavior": ["a prose sentence that will not match"], "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    calls = {"n": 0}
+
+    def stub(_e, turn=None):
+        calls["n"] += 1
+        return runner.EvalResult(raw='{"type":"text","sessionID":"ses_test",'
+                                     '"part":{"type":"text","text":"..."}}\n')
+
+    old = os.environ.get("BEVAL_MAX_CONTINUATIONS")
+    os.environ["BEVAL_MAX_CONTINUATIONS"] = "3"
+    try:
+        passed, missing, _ = runner.run_eval(e, stub, logs_dir=d, sleep=lambda _s: None)
+        assert not passed
+        assert calls["n"] == 2, f"expected initial + exactly 1 nudge, got {calls}"
+    finally:
+        if old is None:
+            os.environ.pop("BEVAL_MAX_CONTINUATIONS", None)
+        else:
+            os.environ["BEVAL_MAX_CONTINUATIONS"] = old
+        shutil.rmtree(d)
+
 
 def main():
     tests = [
@@ -915,6 +983,9 @@ def main():
         test_infra_death_does_not_quarantine_but_content_miss_does,
         test_eval_record_carries_measured_tokens_and_duration,
         test_augment_prompt_gives_absolute_root,
+        test_has_work_activity_counts_bash_writes,
+        test_bash_writes_suppress_the_zero_write_nudge,
+        test_legacy_eval_capped_at_one_nudge,
     ]
     failed = 0
     for t in tests:
