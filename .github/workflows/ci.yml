@@ -58,6 +58,25 @@ jobs:
           node skills/managing-github-issues/evals/fixtures/unit.test.mjs
           node skills/refining-issue-acceptance/evals/fixtures/unit.test.mjs
 
+      # Offline unit suites — hermetic: no model calls, no secrets, seconds to
+      # run. Gated here because these are the gates that catch measurement /
+      # reporting drift; a frozen registry count and a migrated-eval assertion
+      # both shipped un-gated on 2026-09-28/29 (RM-021).
+      - name: Offline unit suites (hermetic, no model calls)
+        run: |
+          pip install --quiet pyyaml
+          python3 skills/observing-runs/scripts/test_query.py
+          python3 skills/observing-runs/scripts/test_log.py
+          python3 skills/observing-runs/scripts/test_prune.py
+          python3 skills/authoring-skills/scripts/test_runner.py
+          python3 scripts/test_eval_report.py
+          python3 scripts/test_typed_evals.py
+          python3 scripts/test_registry.py
+          python3 scripts/test_changed_files.py
+          python3 scripts/test_quarantine.py
+          python3 scripts/test_stall_timeout.py
+          python3 scripts/test_eval_workflows.py
+
       - name: Offline eval verifiers
         run: |
           node skills/managing-github-issues/evals/fixtures/verify.mjs

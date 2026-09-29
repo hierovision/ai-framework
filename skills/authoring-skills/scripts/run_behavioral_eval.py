@@ -480,6 +480,29 @@ def assert_eval(e, ctx):
     return assert_behavior(e.get("expected_behavior", []), ctx["final_text"])
 
 
+def _token_totals(turns):
+    """Sum (input, output) tokens across every turn's step-finish events.
+
+    2026-09-29 (RM-021): the run log's tokens_in/tokens_out were always null,
+    so neither the per-eval cost of a run nor a suite projection could be
+    computed from evidence. Sampling one eval now yields a real per-eval token
+    figure to extrapolate from — small probe, measured answer.
+    """
+    ti = to = 0
+    for _label, res in turns or []:
+        events, _errors = parse_event_stream(getattr(res, "raw", "") or "")
+        for ev in events:
+            part = ev.get("part") if isinstance(ev.get("part"), dict) else ev
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") not in ("step-finish", "step_finish"):
+                continue
+            tk = part.get("tokens") or {}
+            ti += int(tk.get("input") or 0)
+            to += int(tk.get("output") or 0)
+    return (ti or None), (to or None)
+
+
 def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
              sleep=time.sleep, quarantine_path=None):
     """Run one eval via `get_output(e)`, assert, and write a run-log record.
@@ -500,6 +523,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
     logged. Content misses never take this path. On failure, every turn's raw
     stream is persisted for diagnosis.
     """
+    started = time.monotonic()
     result = get_output(e)
     try:
         ctx = build_context(result)
@@ -628,6 +652,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             else:
                 detail = ("missing: " + " | ".join(missing))[:DETAIL_MAX]
             _persist_event_streams(logs_dir, e, turns)
+        tok_in, tok_out = _token_totals(turns)
         rec = {
             "kind": "eval",
             "skill": e["skill"],
@@ -636,6 +661,11 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             "outcome": "success" if passed else ("error" if dead else "failure"),
             "eval_pass": passed,
             "detail": detail,
+            # Measured, not guessed (2026-09-29): every run teaches the
+            # extrapolation a real per-eval token + wall-time figure.
+            "tokens_in": tok_in,
+            "tokens_out": tok_out,
+            "duration_ms": int((time.monotonic() - started) * 1000),
         }
         path = log_run.log_record(rec, logs_dir=logs_dir)
         if quarantine_path:

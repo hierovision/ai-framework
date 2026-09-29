@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNNER = os.path.join(HERE, "run_behavioral_eval.py")
@@ -19,6 +20,21 @@ RUNNER = os.path.join(HERE, "run_behavioral_eval.py")
 spec = importlib.util.spec_from_file_location("run_behavioral_eval", RUNNER)
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)  # also imports RM-001's log_run (AC2)
+
+
+def _hermetic_env():
+    """Env without CI-mode triggers for runner subprocesses.
+
+    GitHub Actions sets CI=true, and the runner infers ci_mode from it
+    (`args.ci or AI_FRAMEWORK_FREE_TIER or CI` in run_behavioral_eval.py),
+    which filters the synthetic go-tier fixtures out of the selection. These
+    tests assert non-CI stub/list behaviour, so they must control the flag
+    explicitly — the new CI gate (2026-09-29) exposed two that passed locally
+    and failed under CI=true.
+    """
+    return {k: v for k, v in os.environ.items()
+            if k not in ("CI", "AI_FRAMEWORK_FREE_TIER")}
+
 
 
 def _make_skills_root():
@@ -256,7 +272,7 @@ def test_cli_pass_branch():
     try:
         r = subprocess.run([sys.executable, RUNNER, "--skills-root", root,
                             "--logs-dir", logs, "--stub-output", "ALL"],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, env=_hermetic_env())
         assert r.returncode == 0, r.stderr
         recs = _read_logs(logs)
         assert len(recs) == 2, f"expected 2 non-deferred records, got {len(recs)}"
@@ -272,7 +288,7 @@ def test_cli_fail_branch():
     try:
         r = subprocess.run([sys.executable, RUNNER, "--skills-root", root,
                             "--logs-dir", logs, "--stub-output", ":MISS:"],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, env=_hermetic_env())
         assert r.returncode != 0, "omitting an expected behavior must fail the gate"
         recs = _read_logs(logs)
         assert recs and all(x["eval_pass"] is False for x in recs)
@@ -293,7 +309,7 @@ def test_deferred_excluded():
         # --list omits the deferred eval from the runnable set, but must
         # SURFACE that deferred evals were excluded (no silent coverage drop).
         r = subprocess.run([sys.executable, RUNNER, "--list", "--skills-root", root],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, env=_hermetic_env())
         assert r.returncode == 0
         assert "included evals: 2" in r.stdout, r.stdout
         assert "alpha#2" not in r.stdout, "deferred eval must not be listed by default"
@@ -310,11 +326,11 @@ def test_subset_sharding():
     try:
         # --limit 1 runs only the first included eval
         r = subprocess.run([sys.executable, RUNNER, "--list", "--skills-root", root,
-                            "--limit", "1"], capture_output=True, text=True)
+                            "--limit", "1"], capture_output=True, text=True, env=_hermetic_env())
         assert "included evals: 1" in r.stdout, r.stdout
         r2 = subprocess.run([sys.executable, RUNNER, "--skills-root", root, "--logs-dir", logs,
                              "--limit", "1", "--stub-output", "ALL"],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, env=_hermetic_env())
         assert r2.returncode == 0, r2.stderr
         recs = _read_logs(logs)
         assert len(recs) == 1, f"--limit 1 must run exactly one eval, got {len(recs)}"
@@ -324,7 +340,7 @@ def test_subset_sharding():
         try:
             r3 = subprocess.run([sys.executable, RUNNER, "--skills-root", root, "--logs-dir", logs2,
                                  "--skill", "beta", "--stub-output", "ALL"],
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, env=_hermetic_env())
             assert r3.returncode == 0, r3.stderr
             recs2 = _read_logs(logs2)
             assert len(recs2) == 1 and recs2[0]["skill"] == "beta"
@@ -436,12 +452,12 @@ def test_cli_list_default_and_core():
     root = _make_marker_skills_root()
     try:
         r = subprocess.run([sys.executable, RUNNER, "--list", "--default",
-                            "--skills-root", root], capture_output=True, text=True)
+                            "--skills-root", root], capture_output=True, text=True, env=_hermetic_env())
         assert r.returncode == 0, r.stderr
         default_lines = [l for l in r.stdout.splitlines() if "#" in l]
         assert len(default_lines) == 4, r.stdout  # one per skill (fallback included)
         r2 = subprocess.run([sys.executable, RUNNER, "--list", "--core",
-                             "--skills-root", root], capture_output=True, text=True)
+                             "--skills-root", root], capture_output=True, text=True, env=_hermetic_env())
         assert r2.returncode == 0, r2.stderr
         core_lines = [l for l in r2.stdout.splitlines() if "#" in l]
         assert len(core_lines) == 2, r2.stdout
@@ -583,7 +599,7 @@ def test_event_fixture_cli():
         r = subprocess.run(
             [sys.executable, RUNNER, "--default", "--skill", "authoring-skills",
              "--event-fixture", fixture, "--no-quarantine", "--logs-dir", logs],
-            capture_output=True, text=True)
+            capture_output=True, text=True, env=_hermetic_env())
         assert r.returncode == 0, r.stdout + r.stderr
         assert "authoring-skills#2" in r.stdout and "PASS" in r.stdout, r.stdout
         recs = _read_logs(logs)
@@ -599,7 +615,7 @@ def test_event_fixture_cli():
         r2 = subprocess.run(
             [sys.executable, RUNNER, "--default", "--skill", "authoring-skills",
              "--event-fixture", empty, "--no-quarantine", "--logs-dir", logs2],
-            capture_output=True, text=True)
+            capture_output=True, text=True, env=_hermetic_env())
         assert r2.returncode == 1, r2.stdout + r2.stderr
     finally:
         shutil.rmtree(empty, ignore_errors=True)
@@ -630,7 +646,7 @@ def test_typed_stub_synthesis():
         r = subprocess.run(
             [sys.executable, RUNNER, "--skills-root", root, "--logs-dir", logs,
              "--stub-output", "ALL", "--no-quarantine"],
-            capture_output=True, text=True)
+            capture_output=True, text=True, env=_hermetic_env())
         assert r.returncode == 0, r.stdout + r.stderr
         recs = _read_logs(logs)
         assert recs and all(x["eval_pass"] is True for x in recs), recs
@@ -639,7 +655,7 @@ def test_typed_stub_synthesis():
         r2 = subprocess.run(
             [sys.executable, RUNNER, "--skills-root", root, "--logs-dir", logs2,
              "--stub-output", ":MISS:", "--no-quarantine"],
-            capture_output=True, text=True)
+            capture_output=True, text=True, env=_hermetic_env())
         assert r2.returncode == 1, r2.stdout + r2.stderr
         shutil.rmtree(logs, ignore_errors=True)
         shutil.rmtree(logs2, ignore_errors=True)
@@ -814,6 +830,35 @@ def test_infra_death_does_not_quarantine_but_content_miss_does():
         shutil.rmtree(d)
 
 
+def test_eval_record_carries_measured_tokens_and_duration():
+    """RM-021 (2026-09-29): a run's record carries MEASURED tokens + wall time,
+    so suite cost/time projections come from evidence — never from running the
+    full suite to size it. Both step-finish shapes must be counted."""
+    stream = (
+        '{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":1200,"output":340}}}\n'
+        '{"type":"step-finish","part":{"type":"step-finish","tokens":{"input":800,"output":160}}}\n'
+        '{"type":"text","part":{"type":"text","text":"A"}}\n'
+    )
+    e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["A"], "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    try:
+        def slow_stub(_e, turn=None):
+            time.sleep(0.02)  # the timer must cover the model call, not just the tail
+            return runner.EvalResult(raw=stream)
+
+        passed, missing, _ = runner.run_eval(
+            e, slow_stub, logs_dir=d, sleep=lambda _s: None)
+        assert passed, missing
+        rec = _read_logs(d)[-1]
+        assert rec["tokens_in"] == 2000, rec
+        assert rec["tokens_out"] == 500, rec
+        # Regression: the timer used to start AFTER get_output, so a real call's
+        # wall time was ~1 ms. It must cover the invocation.
+        assert rec["duration_ms"] >= 20, rec
+    finally:
+        shutil.rmtree(d)
+
+
 def main():
     tests = [
         test_assert_behavior,
@@ -849,6 +894,7 @@ def main():
         test_model_listed_and_preflight_model,
         test_fresh_retry_backoff_uses_injected_sleep,
         test_infra_death_does_not_quarantine_but_content_miss_does,
+        test_eval_record_carries_measured_tokens_and_duration,
     ]
     failed = 0
     for t in tests:
