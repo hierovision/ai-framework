@@ -710,25 +710,28 @@ def opencode_run_args(tmp, prompt, model=None):
 
 
 DIRECT_LANE_PREFIX = "deepseek/"  # user's own API key lane (model-routing.md)
+GO_LANE_PREFIX = "opencode-go/"   # Go flat-rate lane — the CI eval lane (2026-09-29)
 
 
 def assert_ci_free_model(model):
-    """Model-cost policy (RM-002, amended 2026-09-21 by user directive).
+    """Model-cost policy (RM-002; amended 2026-09-21 and 2026-09-29).
 
-    CI selects only: `*-free` ($0 opencode tier) or the direct-key lane
-    (`deepseek/*` — the user's own DeepSeek account, billed directly).
-    Rationale: the free-tier gateway's 2026-09-20/21 outage (24h+; free
-    models unable to serve even trivial prompts while the direct lane
-    stayed healthy) plus the free generalist's inability to pass the
-    core canaries made the free tier unfit as the eval substrate. The
-    direct-key lane is ~$1-2/month at suite scale — see the 2026-09-21
-    budget measurement in the RM-003 plan History.
+    CI may select only lanes with no per-run marginal cost:
+      - `*-free` — the $0 opencode tier;
+      - `opencode-go/*` — the Go flat-rate tier ($10/mo allowance) — the CI
+        eval lane since 2026-09-29, when the user directive moved evals off
+        their personal DeepSeek API key;
+      - `deepseek/*` — the legacy direct-key lane, retained for
+        developer-local runs.
+    Zen pay-as-you-go (`opencode/*`, non-free) is never allowed in CI.
     """
-    if model.endswith("-free") or model.startswith(DIRECT_LANE_PREFIX):
+    if (model.endswith("-free") or model.startswith(GO_LANE_PREFIX)
+            or model.startswith(DIRECT_LANE_PREFIX)):
         return
     raise ValueError(
-        f"CI model must be `*-free` or the direct-key lane `{DIRECT_LANE_PREFIX}*` "
-        f"(Model-cost policy, amended 2026-09-21), got {model!r}"
+        f"CI model must be `*-free`, `{GO_LANE_PREFIX}*` (flat-rate) or the "
+        f"legacy direct-key lane `{DIRECT_LANE_PREFIX}*` (Model-cost policy, "
+        f"amended 2026-09-29), got {model!r}"
     )
 
 

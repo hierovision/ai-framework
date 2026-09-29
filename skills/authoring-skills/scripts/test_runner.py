@@ -392,15 +392,19 @@ def test_model_flag_and_ci_guard():
     # no model -> no --model flag (opencode default; developer-local runs only)
     args2 = runner.opencode_run_args("/tmp/x", "prompt p", model=None)
     assert "--model" not in args2, args2
-    # CI mode must refuse a paid-tier model and refuse to run model-less
-    for bad in ("opencode-go/kimi-k3", "opencode/claude-sonnet-5"):
+    # CI mode must refuse a pay-as-you-go Zen model and refuse to run model-less;
+    # the zero-marginal-cost lanes (*-free, opencode-go flat-rate, the legacy
+    # deepseek direct-key lane) are accepted (eval lane = Go, 2026-09-29).
+    for bad in ("opencode/claude-sonnet-5", "opencode/glm-5.3"):
         try:
             runner.assert_ci_free_model(bad)
             raise SystemExit(f"assert_ci_free_model accepted {bad}")
         except ValueError:
             pass
     runner.assert_ci_free_model("opencode/nemotron-3-ultra-free")  # ok
-    print("PASS  --model selects the eval model; CI mode enforces *-free only")
+    runner.assert_ci_free_model("opencode-go/deepseek-v4.1-flash")  # ok (eval lane)
+    runner.assert_ci_free_model("deepseek/deepseek-flash")  # ok (legacy direct key)
+    print("PASS  --model selects the eval model; CI mode enforces the free/Go lanes")
 
 
 def test_default_marker_selection_and_fallback():

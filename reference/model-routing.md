@@ -3,7 +3,12 @@
 Catalogs, docs free list, and liveness probes: retrieved and live-verified
 2026-09-25 (AA v4.3.2 leaderboard + targeted pages fetched same-day,
 independently run; the 2026-09-18 full sweep stands for unchanged rows —
-spot-checks show ±1 drift). 2026-09-25 pass: `mimo-v2.5-free` failed
+spot-checks show ±1 drift). **2026-09-29 pass (Go candidacy + CI eval lane):**
+region set to Global → `opencode-go/deepseek-v4.1-flash` re-probes live and
+becomes the CI eval lane (direct DeepSeek key retired from CI); Go liveness
+probe of 21 candidates (20 live; `muse-spark-1.3-contributor` APIError);
+AA Intelligence + median t/s refreshed for the Go shortlist. See Provider
+notes. 2026-09-25 pass: `mimo-v2.5-free` failed
 liveness ×3 in live probes (catalog+docs-listed but non-routable —
 `err_a7f91717`, `err_029b18e6`, `err_db97c0cc`) → free council security/ux
 seats moved to `mimo-v2.6-flash-free` (live ✓; family reading MiMo-V2.6-Pro
@@ -88,7 +93,20 @@ The free generalist was validated 2026-07-26 by a clean, no-tool head-to-head ev
 - **Free tier** ($0): `opencode/*-free` catalog entries (subset of Zen catalog) **that are docs-listed and live-verified**. Default tier — used for every role where a live free model exists. No financial consequence. Catalog-vs-docs mismatches stand: `deepseek-v4-flash-free` and `muse-spark-1.2-contributor-free` are catalog-listed but NOT docs free-listed — excluded from candidacy (the 2026-09-02 failure pattern).
 - **Go** ($10/mo flat): Open models only. Config prefix `opencode-go/`. Escalation tier — used when the free default is insufficient or unavailable (vision, peak coding). Limits: $12/5hr, $30/wk, $60/mo. `hy3` and `hy3-preview` are Go flat-rate models. `kimi-k2.7-code` confirmed live on Go — **user directive (2026-09-18): Go-only; the broken Zen upstream is no longer probed or tracked** (Go's "Use balance" Zen fallback covers credit exhaustion). New on Go 2026-09-18: `qwen3.8-max` (AA 45, live-probed clean) and `qwen3.8-flash`.
 - **Zen** (pay-as-you-go): Full catalog including proprietary models. Config prefix `opencode/`. Workspace model-access toggles gate individual models — "Model is disabled" means a workspace toggle, not a gateway death (resolved 2026-09-18 by enabling opus-5, sonnet-5, sol, luna, big-pickle). `qwen3.7-*` is Go-only — bind it as a Go escalation, never as a Zen one. `muse-spark-1.3` (paid flagship, AA 48) routes live with no toggle — distinct from the contributor-free variant and its training-terms caveat.
-- **CI eval lane (user directive 2026-09-21)**: behavioral evals in CI run on the direct-key lane (`deepseek/deepseek-flash`) — RM-002's free-only model-cost policy is amended to `*-free` OR `deepseek/*`. Evidence: the 2026-09-20/21 free-gateway outage (24h+; free models unable to serve trivial prompts while the direct lane stayed at 2.6s) and the free generalist's canary pass-rates. Budget: ~$0.68/weekly run off-peak (measured 2026-09-21, 7-canary sample extrapolated); weekly cron moved 06:00 → 10:30 UTC (out of DeepSeek's 06-10 UTC peak window = 2x input price). Single-lane risk: no eval-model fallback — documented; a fallback chain is a possible later feature.
+- **CI eval lane (user directive 2026-09-29)**: behavioral evals in CI run on
+  the **Go flat-rate** lane — `opencode-go/deepseek-v4.1-flash`, authenticated
+  by the repo's `OPENCODE_API_KEY`. The user's direct DeepSeek API key is **no
+  longer used by CI**. Rationale: same model family the suite already ran
+  (results stay comparable), no per-run marginal cost inside the Go allotment,
+  and no personal-key spend. Measured (2-eval probe 2026-09-29 via
+  `eval-report suite-projection`): ~31.1k in / 3.1k out tokens per eval →
+  **~$1.4 per 105-eval suite** at DeepSeek list prices (the allowance-equivalent;
+  Go meters underlying usage) and ~70 s/eval on a small skill. Policy: RM-002
+  now allows `*-free`, `opencode-go/*` (flat-rate) or the legacy `deepseek/*`;
+  Zen PAYG stays banned. **Requires workspace region = Global** (set
+  2026-09-29). Free-lane evidence stands and was re-measured: the free
+  generalists stall on long multi-turn loops (~11 min/eval effective, 240 s
+  timeouts, dead sessions) — unfit as the eval substrate.
 - **Direct-key lane** (user's own DeepSeek API key, approved 2026-09-18): config prefix `deepseek/`. Billed directly by DeepSeek to the user's own balance — check that balance separately from opencode. `deepseek/deepseek-flash` = V4.1-Flash (live-probed: text, vision, tool calls). `deepseek/deepseek-v4-pro` also routes live (AA 36, no vision). Off-peak half price during 01:00–04:00 and 06:00–10:00 UTC Mon–Fri; all other hours (i.e. the full ET working day) off-peak.
 - Go can fall back to Zen balance when limits hit ("Use balance" in the console). `AI_FRAMEWORK_FREE_TIER=1` forces the free tier even when a Go/Zen key is present.
 
@@ -98,7 +116,13 @@ The UI iteration loop requires a model that can read screenshots. Tiered strateg
 
 - **`vision-critic-fast`** (iteration passes): defaults to **MiniMax M3** on Go's flat rate (natively multimodal, cheapest option). Zen fast passes: **gpt-5.4-mini** (alt **gemini-3.8-flash**, AA 41). As of 2026-09-13 `gemini-3-flash`, `gemini-3.1-pro`, `gemini-3.5-flash(-lite)`, and `gemini-3.6-flash` are disabled at the gateway; **gemini-3.8-flash is the gemini vision option** — user directive (2026-09-18): `gemini-3.7-flash` is superseded by 3.8-flash and no longer considered (toggle never flipped, no candidate value). **M3 is not yet confirmed for UI-CSS judgment specifically** (its multimodal wins are on SVG-Bench / BrowseComp, not UI critique); evaluate in the `correcting-ui` eval loop before relying on it.
 - **`vision-critic-final`** (sign-off): **deepseek/deepseek-flash** via the direct-key lane (user directive 2026-09-18, eliminating claude-sonnet-5 entirely). Basis: live-probed vision (image probe described correctly), vendor-documented image support, and a 2026-09-18 side-by-side against sonnet-5 showing parity-or-better on UI-mock critique (including computed WCAG contrast ratios) and exact chart reading. **Acceptance gate:** the first real-page `validating-ui`/`correcting-ui` cycle validates the seat. Alt: **gemini-3.8-flash** (AA 41, natively multimodal).
-- **`deepseek-v4.1-flash` on opencode's own tiers** is China-gated (2026-09-18) — **user directive (2026-09-18): opencode-tier DeepSeek (`opencode-go/deepseek-*`, `opencode/deepseek-*`) is no longer tracked or probed in future passes; DeepSeek escalation lives exclusively on the direct-key lane.**
+- **`deepseek-v4.1-flash` on opencode's own tiers** was region-gated (2026-09-18:
+  "This Go model requires Global regions"). The user set the workspace region to
+  **Global on 2026-09-29**; all three `opencode-go/deepseek-*` IDs re-probe
+  live (rc=0), and `opencode-go/deepseek-v4.1-flash` is now the **CI eval
+  lane** (see Provider notes). The 2026-09-18 "no longer tracked or probed"
+  directive is retired with the gate; the direct-key lane remains for the
+  user's local work.
 
 **No free multimodal model exists**, so vision defaults to the Go escalation (M3).
 
