@@ -232,11 +232,11 @@ def test_coverage_gaps_legacy_assertion_backlog():
                          ("writing-e2e-tests", 2), ("writing-e2e-tests", 3),
                          ("writing-e2e-tests", 4)):
             assert migrated not in keys, migrated
-        # A known prose-only eval is present with a migrate-on-touch reason.
-        assert ("debugging-test-failures", 1) in keys, sorted(keys)
-        entry = next(x for x in backlog
-                     if x["skill"] == "debugging-test-failures" and x["eval_id"] == 1)
-        assert "migrate on touch" in entry["reason"], entry
+        # Any prose-only eval still in the backlog carries the reason. Do NOT
+        # hardcode an example: every migration rots it (batch 5 migrated the
+        # previous example, debugging-test-failures#1, and turned this test red).
+        assert backlog, "the un-migrated evals must be visible"
+        assert "migrate on touch" in backlog[0]["reason"], backlog[0]
     finally:
         shutil.rmtree(d)
 
