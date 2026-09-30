@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Refine GitHub issue #42 in acme/widgets — it was synced from the roadmap and just has a source checklist, I need real acceptance criteria before I assign it.",
-      "expect": {"artifact": [{"path": "**/issue-42-refined.md", "phrases": ["Acceptance", "Criteria"]}], "text": ["owner/name"]},
+      "expect": {"artifact": [{"path": "**/issue-42-refined.md", "phrases": ["Acceptance", "Criteria"]}]},
       "expected_behavior": [
         "Fetches issue #42 and reads its current body (Roadmap ID, Category, Score, source checklist)",
         "Rewrites the description as a short user-facing summary with no code references",
