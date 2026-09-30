@@ -4,7 +4,8 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "capture the current state of the submit button on the dashboard. mobile + desktop. i need screenshots + the computed CSS that's actually applied, including which rule set each property and what overrode it. the views need a session — auth fixture's at auth/auth.mjs. repo is the working directory. dashboard's on http://localhost:5173/dashboard. stack's vue-supabase.",
+      "prompt": "capture the current state of the submit button on the dashboard. mobile + desktop. i need screenshots + the computed CSS that's actually applied, including which rule set each property and what overrode it. the views need a session \u2014 auth fixture's at auth/auth.mjs. the repo is at fixtures/phasewave/real-app-route/ \u2014 treat that directory as the repo root. dashboard's on http://localhost:5173/dashboard. stack's vue-supabase.",
+      "expect": {"artifact": [{"path": "**/evidence/evidence.json", "phrases": ["schema_version"]}], "action": [{"tool": "bash", "args": {"command": "*capture.mjs*"}}]},
       "expected_behavior": [
         "Reads the project rules file (AGENTS.md) — detects stack vue-supabase and loads the matching capture-stack reference (references/stacks/vue-supabase.md) before capturing",
         "Classifies the target as app mode: a running route on a dev-server URL, route /dashboard",
@@ -37,7 +38,8 @@
     },
     {
       "id": 2,
-      "prompt": "grab screenshots + computed CSS for the submit button component in isolation — harness is at harness/index.html, no app context. mobile + desktop. give me the same structured evidence shape a full route would, output the artifact + inventory. repo is the working directory. don't interpret it, just capture.",
+      "prompt": "grab screenshots + computed CSS for the submit button component in isolation \u2014 harness is at harness/index.html, no app context. mobile + desktop. give me the same structured evidence shape a full route would, output the artifact + inventory. the repo is at fixtures/phasewave/isolated-component/ \u2014 treat that directory as the repo root. don't interpret it, just capture.",
+      "expect": {"artifact": [{"path": "**/evidence/evidence.json", "phrases": ["schema_version"]}], "action": [{"tool": "bash", "args": {"command": "*capture.mjs*"}}], "text": ["real"]},
       "expected_behavior": [
         "Classifies the target as component mode: an isolated component harness HTML entry loaded over file:// (no dev server, no auth fixture)",
         "INVOKES scripts/capture.mjs with --mode component --target harness/index.html, --selectors (role:button[Submit]), --viewports 375x667,1280x720, --out — does NOT reimplement capture",
@@ -60,7 +62,8 @@
     },
     {
       "id": 3,
-      "prompt": "capture evidence for the .legacy-action button but my target selector is a bare CSS class — flag it if that's fragile. also confirm the capture's deterministic (run it twice, same result) and that the computed profile is curated not dumped. harness at harness/index.html. repo is the working directory.",
+      "prompt": "capture evidence for the .legacy-action button but my target selector is a bare CSS class \u2014 flag it if that's fragile. also confirm the capture's deterministic (run it twice, same result) and that the computed profile is curated not dumped. harness at harness/index.html. the repo is at fixtures/phasewave/determinism-curation/ \u2014 treat that directory as the repo root.",
+      "expect": {"artifact": [{"path": "**/evidence/evidence.json", "phrases": ["schema_version"]}], "action": [{"tool": "bash", "args": {"command": "*capture.mjs*"}}], "text": ["determinism"]},
       "expected_behavior": [
         "Classifies the target as component mode against harness/index.html and recognizes the bare-CSS selector (css:.legacy-action) is a LAST-RESORT address",
         "INVOKES scripts/capture.mjs with --mode component --target harness/index.html --selectors css:.legacy-action; the emitted entry has target_kind='css' AND fragile=true (flagged so the fixer knows the address was fragile)",
