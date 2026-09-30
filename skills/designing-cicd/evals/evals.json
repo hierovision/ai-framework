@@ -4,7 +4,8 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "phasewave's CI deploys to prod but migrations run AFTER the deploy (see .github/workflows/ci.yml in the repo root). fix the topology so migrations run before the deploy that serves traffic, add concurrency so only one prod deploy runs at a time (queue it, don't cancel an in-flight one), and gate prod with a protected `production` environment. the repo is the working directory",
+      "prompt": "phasewave's CI deploys to prod but migrations run AFTER the deploy (see .github/workflows/ci.yml in the repo root). fix the topology so migrations run before the deploy that serves traffic, add concurrency so only one prod deploy runs at a time (queue it, don't cancel an in-flight one), and gate prod with a protected `production` environment. the repo is at fixtures/phasewave/cicd-migrate/ \u2014 treat that directory as the repo root",
+      "expect": {"artifact": [{"path": "**/.github/workflows/ci.yml", "phrases": ["workflow_dispatch"]}], "text": ["topology"]},
       "expected_behavior": [
         "Reads the current .github/workflows/ci.yml before changing anything (not from memory)",
         "Recognizes the cardinal defect: `deploy` does not `needs` the `migrate` job (migrate-before-deploy violated) — and fixes the ordering so `deploy` `needs: [migrate]` (or migrate runs before deploy in the DAG)",
@@ -23,7 +24,8 @@
     },
     {
       "id": 2,
-      "prompt": "design the CI/CD topology for our new API service. we want: a validation gate that runs tests + build on every PR, and a prod deploy that fires only on merge to main behind a manual promotion button with required human review. no schema migrations yet. repo is the working directory; write the plan, don't implement it",
+      "prompt": "design the CI/CD topology for our new API service. we want: a validation gate that runs tests + build on every PR, and a prod deploy that fires only on merge to main behind a manual promotion button with required human review. no schema migrations yet. the repo is at fixtures/phasewave/cicd-migrate/ \u2014 treat that directory as the repo root; write the plan, don't implement it",
+      "expect": {"artifact": [{"path": "**/.opencode/plans/cicd-topology.md", "phrases": ["topology"]}], "text": ["validating-against-official-docs"]},
       "expected_behavior": [
         "Treats this as design-only: produces a topology/plan, does NOT write the workflow into .github/ or commit",
         "Selects triggers correctly: `pull_request` for the validation gate (test+build) — explicitly NOT the prod deploy trigger (PR refs can't hold protected secrets)",
@@ -41,6 +43,7 @@
     {
       "id": 3,
       "prompt": "can you add GitHub Actions to run our unit tests on every pull request? just the tests, nothing else",
+      "expect": {"artifact": [{"path": "**/.github/workflows/ci.yml", "phrases": ["actions/checkout"]}], "text": ["topology"]},
       "expected_behavior": [
         "Recognizes this is the narrow PR-validation slice, NOT a full release pipeline — scopes to a `pull_request`-triggered test (and build) job only",
         "Does NOT invent a prod deploy, environment, or migration job that the user didn't ask for (resists scope creep)",

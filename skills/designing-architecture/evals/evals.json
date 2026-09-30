@@ -5,7 +5,7 @@
     {
       "id": 1,
       "core": true,
-      "prompt": "the roadmap puts feat-offline-queue at #1 (queue timer session events while offline, sync on reconnect). design the approach for it. the repo is the working directory — there's already a plan draft at .opencode/plans/feat-offline-queue.md from an earlier pass, revise it rather than blowing it away",
+      "prompt": "the roadmap puts feat-offline-queue at #1 (queue timer session events while offline, sync on reconnect). design the approach for it. the repo is at fixtures/phasewave/ \u2014 treat that directory as the repo root \u2014 there's already a plan draft at .opencode/plans/feat-offline-queue.md from an earlier pass, revise it rather than blowing it away",
       "expected_behavior": [
         "Reads the roadmap entry (feat-offline-queue, the #1 item) and treats it as the single work item to plan — does not attempt to plan the whole roadmap",
         "Reads the project rules file (AGENTS.md) for plan path config and stack, and writes the plan to .opencode/plans/feat-offline-queue.md (the configured path), not an arbitrary location",
@@ -28,7 +28,8 @@
     },
     {
       "id": 2,
-      "prompt": "I want users to be able to share a timer with someone else. can you design the approach for that? the repo is the working directory",
+      "prompt": "I want users to be able to share a timer with someone else. can you design the approach for that? the repo is at fixtures/phasewave/ \u2014 treat that directory as the repo root",
+      "expect": {"text": ["default", "plan"]},
       "expected_behavior": [
         "Recognizes the request is too vague to plan and asks clarifying questions before drafting — does not silently pick a single definition of 'share' and run with it",
         "Questions target the dimensions that actually split the design: read-only link vs co-control; public link vs authenticated sharee; single sharee vs group; real-time vs snapshot",
@@ -43,6 +44,7 @@
     {
       "id": 3,
       "prompt": "next up from the roadmap-ish list: add teams so a user can share a focus session playlist with their team. it'll need new tables. design the approach",
+      "expect": {"artifact": [{"path": "**/.opencode/plans/feat-team-playlist-sharing.md", "phrases": ["Open Questions"]}], "text": ["Approve this plan"]},
       "expected_behavior": [
         "Detects the project stack as vue-supabase from AGENTS.md and loads the vue-supabase stack reference, applying its planning concerns (schema-first, generated DB types, RLS impact, offline/PWA)",
         "Treats db/schema.sql as the source of truth and records the new tables (e.g. teams, team_members, shared playlists) in the Schema/Type Impacts section, not buried only in file-change notes",
@@ -59,7 +61,8 @@
     },
     {
       "id": 4,
-      "prompt": "next maintenance item: add a data-retention job that purges focus-session events older than 90 days. it runs on a schedule server-side — no UI involved. design the approach. the repo is the working directory",
+      "prompt": "next maintenance item: add a data-retention job that purges focus-session events older than 90 days. it runs on a schedule server-side \u2014 no UI involved. design the approach. the repo is at fixtures/phasewave/ \u2014 treat that directory as the repo root",
+      "expect": {"artifact": [{"path": "**/.opencode/plans/chore-focus-session-retention.md", "phrases": ["Open Questions"]}], "text": ["Approve this plan"]},
       "expected_behavior": [
         "Recognizes the item has no user-facing UI (server-side scheduled job) and does NOT invoke the council-ux subagent — no consultation is a finding only when UI is absent is itself the assertion: the consult must be skipped, not invented",
         "Records the explicit skip in the plan's History: 'no user-facing UI — council-ux consult skipped' (or equivalent explicit negative) — a silent skip with no record is a finding",
