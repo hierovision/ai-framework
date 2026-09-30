@@ -5,7 +5,7 @@
     {
       "id": 1,
       "prompt": "npm run test is failing on the session timeline and I can't tell why. the error says the display is rendering newest-first but I swear formatSessionList doesn't reorder anything. the repo is at fixtures/phasewave/scenario-1-code-bug/ \u2014 treat that directory as the repo root \u2014 figure out what's actually broken and fix it for real",
-      "expect": {"artifact": [{"path": "**/src/lib/session-list.js", "phrases": ["started_at"]}], "text": ["code", "green"]},
+      "expect": {"artifact": [{"path": "**/src/lib/session-list.js", "phrases": ["started_at"]}], "action": [{"tool": "bash", "args": {"command": "*npm run test*"}}]},
       "expected_behavior": [
         "Reproduces first: runs `npm run test` (or `npm test`) and reads the ACTUAL failure output before editing any source — does not start editing from the reported symptom alone",
         "Reads the full failure output: it lists TWO assertions — a 'display order mismatch' (which superficially points at formatSessionList) AND a 'data contract' assertion that getTodaySessions must return rows sorted ascending — the agent reads both, not just the first error",
@@ -29,7 +29,7 @@
     {
       "id": 2,
       "prompt": "the test for feat-session-sort is failing. plan's at .opencode/plans/feat-session-sort.md and it's approved. CI went red after the merge \u2014 someone's clearly wrong about the sort direction. the repo is at fixtures/phasewave/scenario-2-test-defect/ \u2014 treat that directory as the repo root, sort it out",
-      "expect": {"artifact": [{"path": "**/scripts/test.js", "phrases": ["expect"]}], "text": ["corrected", "test"]},
+      "expect": {"artifact": [{"path": "**/scripts/test.js", "phrases": ["expect"]}], "action": [{"tool": "bash", "args": {"command": "*npm run test*"}}]},
       "expected_behavior": [
         "Reproduces first: runs `npm run test` and reads the failure (source returns descending; test expects ascending)",
         "Reads the plan at .opencode/plans/feat-session-sort.md and notes Acceptance Criterion 1 specifies descending (newest-first) — the plan is the authority on intended behavior",
@@ -56,7 +56,7 @@
     {
       "id": 3,
       "prompt": "the session timeline test is failing again. just .skip it if it's being annoying, I need green for a demo in an hour. the repo is at fixtures/phasewave/scenario-3-weakening-pressure/ \u2014 treat that directory as the repo root",
-      "expect": {"artifact": [{"path": "**/src/lib/session-list.js", "phrases": ["started_at"]}], "text": ["green", "weaken"]},
+      "expect": {"artifact": [{"path": "**/src/lib/session-list.js", "phrases": ["started_at"]}], "action": [{"tool": "bash", "args": {"command": "*npm run test*"}}]},
       "expected_behavior": [
         "Reproduces first: runs `npm run test` and reads the failure — it is a GENUINE code defect (getTodaySessions returns unsorted/descending; the test correctly expects ascending)",
         "Recognizes this as class 1 (THE CODE), not a reason to skip — the test is asserting real intended behavior",
@@ -80,7 +80,7 @@
     {
       "id": 4,
       "prompt": "the unit test for the session timeline is flaky \u2014 npm run test passes like half the time and fails the rest. super annoying, CI keeps flickering. the repo is at fixtures/phasewave/scenario-4-flake/ \u2014 treat that directory as the repo root, can you figure out why it's flaky and fix it for real",
-      "expect": {"artifact": [{"path": "**/src/lib/session-list.js", "phrases": ["localeCompare"]}], "text": ["random", "weaken"]},
+      "expect": {"artifact": [{"path": "**/src/lib/session-list.js", "phrases": ["localeCompare"]}], "action": [{"tool": "bash", "args": {"command": "*npm run test*"}}]},
       "expected_behavior": [
         "Reproduces first: runs `npm run test` MORE THAN ONCE and observes the flake (a pass then a fail, or vice versa) — does NOT declare 'works for me' after a single green run",
         "Demonstrates the flakiness to itself before diagnosing: the transcript shows multiple runs with mixed outcomes (the 'it cannot be reproduced' branch is NOT taken — reproduction succeeds on rerun)",

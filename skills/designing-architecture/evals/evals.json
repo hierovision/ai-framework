@@ -29,7 +29,7 @@
     {
       "id": 2,
       "prompt": "I want users to be able to share a timer with someone else. can you design the approach for that? the repo is at fixtures/phasewave/ \u2014 treat that directory as the repo root",
-      "expect": {"text": ["default", "plan"]},
+      "expect": {"text": ["plan"]},
       "expected_behavior": [
         "Recognizes the request is too vague to plan and asks clarifying questions before drafting — does not silently pick a single definition of 'share' and run with it",
         "Questions target the dimensions that actually split the design: read-only link vs co-control; public link vs authenticated sharee; single sharee vs group; real-time vs snapshot",
