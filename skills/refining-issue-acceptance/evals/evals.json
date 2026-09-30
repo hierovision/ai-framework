@@ -4,6 +4,7 @@
     {
       "id": 1,
       "prompt": "Refine GitHub issue #42 in acme/widgets — it was synced from the roadmap and just has a source checklist, I need real acceptance criteria before I assign it.",
+      "expect": {"artifact": [{"path": "**/issue-42-refined.md", "phrases": ["Acceptance", "Criteria"]}]},
       "expected_behavior": [
         "Fetches issue #42 and reads its current body (Roadmap ID, Category, Score, source checklist)",
         "Rewrites the description as a short user-facing summary with no code references",
@@ -20,6 +21,7 @@
     {
       "id": 2,
       "prompt": "This issue is too vague to build: 'make the signup form better'. Turn it into a proper spec with testable acceptance criteria and a clear description.",
+      "expect": {"artifact": [{"path": "**/signup-refined-body.md", "phrases": ["Acceptance", "Criteria"]}]},
       "expected_behavior": [
         "Treats the plain issue (no source checklist) as valid input and still produces ACs",
         "Writes behavioral ACs (e.g. inline errors on empty fields, no record created) rather than implementation steps",
@@ -35,6 +37,7 @@
     {
       "id": 3,
       "prompt": "Add acceptance criteria to issue #42 and tighten the title. Don't push anything to GitHub until I've looked at the proposed body.",
+      "expect": {"artifact": [{"path": "**/issue-42-proposed-body.md", "phrases": ["Acceptance", "Criteria"]}]},
       "expected_behavior": [
         "Defaults to --dry-run and prints the proposed title + refined body + validation result",
         "Does NOT run --apply (no live edit) without explicit confirmation",
@@ -51,6 +54,7 @@
     {
       "id": 4,
       "prompt": "Prove the refine-issue.mjs validation helpers (findLeaks, analyzeAcs, validateRefined) behave correctly — run the unit suite.",
+      "expect": {"action": [{"tool": "bash", "args": {"command": "*unit.test.mjs*"}}], "text": ["tag"]},
       "expected_behavior": [
         "node skills/refining-issue-acceptance/evals/fixtures/unit.test.mjs exits 0",
         "findLeaks flags code context (class/const/src/import) but not plain prose ('export to CSV', 'import records', 'class roster', 'function room')",

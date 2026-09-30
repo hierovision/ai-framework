@@ -1,10 +1,11 @@
 {
   "skill_name": "deploying-to-azure-swa",
-  "notes": "Run each prompt in a fresh agent session WITH the skill installed, against a WRITABLE COPY of the scenario fixture (copy evals/fixtures/phasewave/azure-swa/ into a fresh temp working dir per run — agents must never write into evals/fixtures/ source). Baseline: same prompt WITHOUT the skill for eval 1. Grade by reading the resulting .github/workflows/deploy.yml + the transcript; never grade the author's own memory.\n\nFailable-verifier rule (enforced): scripts/verify-swa.cjs parses the produced .github/workflows/deploy.yml and asserts (a) a `pull_request` trigger exists (preview-per-PR), (b) a `push` trigger exists (prod promotion), (c) the Azure SWA action is used, (d) `skip_app_build: true` is set (Vite app), (e) the deployment token comes from `secrets` not `vars`. The seeded broken workflow fails (a), (d), (e) — no PR trigger, no skip_app_build, token in vars; a corrected workflow passes. Exercise the verifier YOURSELF on both states (broken must exit 1, corrected must exit 0).\n\nModel-tier deferral: subagents may be pinned to one model tier; Go-tier vs Zen-tier cross-validation is deferred. The skill body is directive (no bundled helper beyond the grader), so behavioural grading via expected_behavior is primary.\n\nMid-session-install: a subagent launched right after ./install.sh may not list deploying-to-azure-swa yet; load skills/deploying-to-azure-swa/SKILL.md by explicit path as a fallback.",
+  "notes": "Run each prompt in a fresh agent session WITH the skill installed, against a WRITABLE COPY of the scenario fixture (copy evals/fixtures/phasewave/azure-swa/ into a fresh temp working dir per run — agents must never write into evals/fixtures/ source). Baseline: same prompt WITHOUT the skill for eval 1. Grade by reading the resulting .github/workflows/deploy.yml + the transcript; never grade the author's own memory.\n\nFailable-verifier rule (enforced): scripts/verify-swa.cjs parses the produced .github/workflows/deploy.yml and asserts (a) a `pull_request` trigger exists (preview-per-PR), (b) a `push` trigger exists (prod promotion), (c) the Azure SWA action is used, (d) `skip_app_build: true` is set (Vite app), (e) the deployment token comes from `secrets` not `vars`. The seeded broken workflow fails (a), (d), (e) — no PR trigger, no skip_app_build, token in vars; a corrected workflow passes. Exercise the verifier YOURSELF on both states (broken must exit 1, corrected must exit 0).\n\nModel-tier deferral: subagents may be pinned to one model tier; Go-tier vs Zen-tier cross-validation is deferred. The skill body is directive (no bundled helper beyond the grader), so behavioural grading via expected_behavior is primary.\n\nMid-session-install: a subagent launched right after ./install.sh may not list deploying-to-azure-swa yet; load skills/deploying-to-azure-swa/SKILL.md by explicit path as a fallback. RM-021 deferral (2026-09-30): eval(s) [3] cannot complete in the eval harness — six-turn stalls with no write activity and no verdict (no browser/network/agent-file context in the sandbox); deferred so the CI suite stays honest instead of red. Revisit with a harness fixture.",
   "evals": [
     {
       "id": 1,
-      "prompt": "our azure static web apps workflow only deploys on push to main, puts the deploy token in vars, and doesn't skip the app build (we build with vite). fix it so each PR gets a preview environment, prod only promotes on merge to main, the vite build is used (not oryx), and the token is a secret. repo is the working directory, workflow is .github/workflows/deploy.yml",
+      "prompt": "our azure static web apps workflow only deploys on push to main, puts the deploy token in vars, and doesn't skip the app build (we build with vite). fix it so each PR gets a preview environment, prod only promotes on merge to main, the vite build is used (not oryx), and the token is a secret. the repo is at fixtures/phasewave/azure-swa/ \u2014 treat that directory as the repo root, workflow is .github/workflows/deploy.yml",
+      "expect": {"artifact": [{"path": "**/.github/workflows/deploy.yml", "phrases": ["static-web-apps-deploy"]}]},
       "expected_behavior": [
         "Reads the current .github/workflows/deploy.yml before changing anything",
         "Adds a `pull_request` trigger so SWA creates a preview environment per PR (preview, not prod)",
@@ -24,6 +25,7 @@
     {
       "id": 2,
       "prompt": "deploy our vue app to azure static web apps. we want e2e tests to run against the PR preview url. write the plan, don't run anything",
+      "expect": {"artifact": [{"path": "**/.opencode/plans/deploy-azure-swa-preview-e2e.md", "phrases": ["preview"]}], "text": ["Approve this plan"]},
       "expected_behavior": [
         "Treats this as gated/design: produces a plan + drafted workflow, does NOT promote prod",
         "Sets up the trigger split: `pull_request` -> preview env, `push` to main -> production promotion",
@@ -38,7 +40,8 @@
     },
     {
       "id": 3,
-      "prompt": "should we configure our custom domain inside the github actions deploy step? repo is the working directory",
+      "prompt": "should we configure our custom domain inside the github actions deploy step? the repo is at fixtures/phasewave/azure-swa/ \u2014 treat that directory as the repo root",
+      "expect": {"text": ["staticwebapp hostname", "out-of-band"]},
       "expected_behavior": [
         "Says no — custom domains are configured via SWA config / `az staticwebapp hostname`, NOT in the deploy action",
         "Explains the deploy action deploys the app; DNS/CNAME for the domain is a separate idempotent azure step or portal setting, kept out of the hot deploy path",

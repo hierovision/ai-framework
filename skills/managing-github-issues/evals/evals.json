@@ -4,6 +4,7 @@
     {
       "id": 1,
       "prompt": "I have an established ROADMAP.md at skills/managing-github-issues/evals/fixtures/sample-roadmap.md. Dry-run a sync to GitHub issues — tell me exactly how many issues would be created and confirm none are for done or skipped items.",
+      "expect": {"action": [{"tool": "bash", "args": {"command": "*sync-issues*"}}], "text": ["dry-run"]},
       "expected_behavior": [
         "Reports exactly 6 planned creates (2 features + 1 bug + 1 debt + 2 chores)",
         "Every planned create carries a `roadmap-id:<id>` dedup label plus a category label",
@@ -20,6 +21,7 @@
     {
       "id": 2,
       "prompt": "Prove the sync-issues.mjs pure helpers (parseRoadmap, findSourceFiles, findSectionHints, extractChecklist, buildBody, isBacked, priorityForScore, findOpenTableSourcesCol) behave correctly — run the unit suite.",
+      "expect": {"text": ["PASS", "planned creates"]},
       "expected_behavior": [
         "node skills/managing-github-issues/evals/fixtures/unit.test.mjs exits 0",
         "parseRoadmap extracts open-table rows with score/status/sourcesRaw",

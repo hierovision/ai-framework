@@ -28,6 +28,7 @@
     {
       "id": 2,
       "prompt": "run the roadmap pass again — we shipped the reminders epic last week and there are new issues on TASK (Jira) since last triage. I pulled an export for you since you don't have creds: evals/fixtures/jira-export.json. ROADMAP.md is already at the repo root, don't blow it away",
+      "expect": {"artifact": [{"path": "**/ROADMAP.md", "phrases": ["Roadmap"]}]},
       "expected_behavior": [
         "Reads the existing ROADMAP.md and merges; does not regenerate from scratch or overwrite history",
         "[fix-verified] Treats the supplied export file as the tracker source: loads the Jira stack reference for its issue-to-item mapping but skips the auth/fetch sections, and counts the source as resolved for closure purposes",
@@ -44,6 +45,7 @@
     {
       "id": 3,
       "prompt": "here's a pile of requests from sales/last-quarter.md, can you triage against the existing roadmap and use our rubric? we want reach x confidence / effort, lower-confidence stuff should sink. don't add anything below ~0.4 unless I say so",
+      "expect": {"artifact": [{"path": "**/ROADMAP.md", "phrases": ["Roadmap"]}]},
       "expected_behavior": [
         "Switches to the user-supplied RICE-style rubric (reach x confidence / effort) instead of the skill's impact x urgency default, and states clearly which rubric is in effect",
         "[fix-verified] Re-scores ALL still-open items under the new rubric (the rubric-change exception to the don't-re-score rule) and preserves each prior score in Notes as 'prev: <old> (<old-rubric>)'",
