@@ -5,6 +5,7 @@
     {
       "id": 1,
       "prompt": "the .info-card looks cramped — its content clips. captured evidence is in evidence/baseline-evidence.json (matched-styles map + computed CSS for .info-card and .info-card-aside). fix it. stack's vue-supabase, repo's the working dir. the captured padding is the $spacing-sm scale and the design wants the md scale.",
+      "expect": {"artifact": [{"path": "**/styles.scss", "phrases": ["$spacing-md"]}]},
       "expected_behavior": [
         "Reads AGENTS.md — detects stack vue-supabase and loads the matching CSS-system reference (references/systems/vuetify-scss.md) before editing",
         "Gates on schema_version (1.0) of evidence/baseline-evidence.json — stops if drift; does not guess the artifact's shape",
@@ -34,6 +35,7 @@
     {
       "id": 2,
       "prompt": "the quantity-stepper text on the dashboard reads washed out / too light — should be the readable text color. captured evidence is in evidence/baseline-evidence.json. fix it. stack vue-supabase, repo's the working dir.",
+      "expect": {"artifact": [{"path": "**/theme.scss", "phrases": ["$text-primary"]}]},
       "expected_behavior": [
         "Gates on schema_version (1.0); reads the matched-styles map and finds the `color` WINNER is `.v-theme--light .qty-stepper` in src/theme.scss (line 9), with `.qty-stepper`'s own rule in the `overridden` chain — NOT the obvious element rule guessed from the screenshot",
         "Targets the WINNER (edits src/theme.scss `.v-theme--light .qty-stepper`), NOT the overridden own rule in src/styles.scss — the discriminating move the matched-styles map exists for",
@@ -65,6 +67,7 @@
     {
       "id": 3,
       "prompt": "make the .tag chip pill-ier — the captured border-radius is at the md radius scale (8px), design wants the lg scale (12px). evidence/baseline-evidence.json. fix it but don't hack the cascade to win. stack vue-supabase, repo's the working dir.",
+      "expect": {"artifact": [{"path": "**/styles.scss", "phrases": ["$radius-lg"]}]},
       "expected_behavior": [
         "Reads matched-styles — winner is .tag at styles.scss line 6; a scoped correction proceeds (no plan needed — trivial-change exemption)",
         "Snaps border-radius to the $radius-lg token; keeps specificity flat; adds no new !important",
@@ -93,6 +96,7 @@
     {
       "id": 4,
       "prompt": "the .hero looks cramped — bump its padding. but make sure you don't knock the .sidebar next to it out of place. evidence/baseline-evidence.json has both captured. stack vue-supabase, repo's the working dir.",
+      "expect": {"artifact": [{"path": "**/styles.scss", "phrases": ["$spacing-md"]}], "text": ["regression"]},
       "expected_behavior": [
         "Triangulates: .hero is the fix target; .sidebar is a SIBLING whose bbox + computed must not shift (the regression guard)",
         "Scopes the fix to .hero padding only — does NOT touch .sidebar or the shared .layout parent (edits there would shift the sibling)",
@@ -122,6 +126,7 @@
     {
       "id": 5,
       "prompt": "redesign the whole hero section — make it modern. the hero, the illustration block, the meta row, the action bar all need work. evidence/baseline-evidence.json. repo's the working dir, stack vue-supabase.",
+      "expect": {"artifact": [{"path": "**/route-to-design.txt", "phrases": ["designing-architecture"]}], "text": ["designing-architecture"]},
       "expected_behavior": [
         "Recognizes the request is a broad, multi-surface visual RESTYLE, not a single correction — the implement-class boundary",
         "Does NOT capture-and-fix; does NOT edit src/styles.scss (zero sprawl — source stays rule-identical to baseline.styles.scss)",
@@ -144,6 +149,7 @@
     {
       "id": 6,
       "prompt": "the .summary-list feels cramped — give it some room. evidence/baseline-evidence.json. i can't tell exactly what's off, it just feels tight. stack vue-supabase, repo's the working dir.",
+      "expect": {"artifact": [{"path": "**/styles.scss", "phrases": ["$spacing-md"]}], "text": ["density"]},
       "expected_behavior": [
         "Decomposes the perceptual complaint ('feels cramped') into MEASURABLE proxies (the density knobs: gap, padding, line-height) — the spacing/density scale a 'cramped' judgement rides on",
         "Applies a within-system density easing — snaps gap and padding up one scale step to $spacing-md and line-height to $line-comfortable; no magic px, no new !important, flat specificity",

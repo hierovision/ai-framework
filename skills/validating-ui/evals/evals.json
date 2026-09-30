@@ -5,6 +5,7 @@
     {
       "id": 1,
       "prompt": "validate the runtime UI of the changed flow in this repo (working directory; stack: vue-supabase; dev-server e2e gate at http://localhost:3001; suite already green). The change: deleting a phase sound and saving must not crash the dialog close (teardown). The project has an e2e spec whose journey opens the dialog with the edit form open but never closes it. Plan ACs: closing the dialog with the edit form open runs the close/teardown path without console errors or warnings. Run the in-loop runtime validation for this change.",
+      "expect": {"artifact": [{"path": "**/*.journey.mjs", "phrases": ["getByRole"]}], "text": ["journey"]},
       "expected_behavior": [
         "Loads the project rules file (AGENTS.md) and the skill's stack reference (references/stacks/vue-supabase.md) — detects stack vue-supabase",
         "Identifies the changed flow (dialog close / teardown with the edit form open) from the ACs + diff; does NOT skip (the change has visible UI)",
@@ -28,6 +29,7 @@
     {
       "id": 2,
       "prompt": "the implement loop reached the runtime-validation step for a change with NO visible UI (a pure store-internal refactor; nothing renders differently). The suite is green. Run the in-loop runtime validation for this change.",
+      "expect": {"text": ["no visible UI", "negative"]},
       "expected_behavior": [
         "Applies the no-visible-UI rule (Step 2): skips the harness with an EXPLICIT 'no visible UI' note in the run summary — the explicit negative is the closure signal; does NOT invent a flow and does NOT run smoke.mjs",
         "Does not invoke council-ux for an empty flow (nothing to review)",
