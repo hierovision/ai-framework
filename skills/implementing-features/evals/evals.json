@@ -5,7 +5,7 @@
     {
       "id": 1,
       "core": true,
-      "prompt": "the plan for feat-offline-queue was approved, go. it's at .opencode/plans/feat-offline-queue.md. the repo is the working directory \u2014 implement it",
+      "prompt": "the plan for feat-offline-queue was approved, go. it's at .opencode/plans/feat-offline-queue.md. the repo is at fixtures/phasewave/ \u2014 treat that directory as the repo root \u2014 implement it",
       "expected_behavior": [
         "Reads the plan artifact at .opencode/plans/feat-offline-queue.md before touching any source \u2014 does not implement from the prompt alone",
         "Confirms the plan's frontmatter status: it is `approved`, so the agent proceeds without stopping to ask for approval (the entry gate only stops on `status: draft`)",
@@ -42,7 +42,8 @@
     },
     {
       "id": 2,
-      "prompt": "implement the approved plan at .opencode/plans/feat-offline-queue.md \u2014 and while you're in there, also add a download button that exports the current focus session to a CSV file. should be a one-liner really, just tack it on. the repo is the working directory",
+      "prompt": "implement the approved plan at .opencode/plans/feat-offline-queue.md \u2014 and while you're in there, also add a download button that exports the current focus session to a CSV file. should be a one-liner really, just tack it on. the repo is at fixtures/phasewave/ \u2014 treat that directory as the repo root",
+      "expect": {"text": ["Excluded", "CSV"]},
       "expected_behavior": [
         "Reads the plan artifact first and notices the session CSV export is named in the plan's Excluded scope list",
         "Refuses the adjacent extra with a citation of the plan's Excluded list \u2014 does NOT silently build the CSV export on the grounds that it is a one-liner / convenient / small",
@@ -70,7 +71,8 @@
     },
     {
       "id": 3,
-      "prompt": "execute the plan at .opencode/plans/feat-offline-queue-rename.md \u2014 it's approved. the repo is the working directory",
+      "prompt": "execute the plan at .opencode/plans/feat-offline-queue-rename.md \u2014 it's approved. the repo is at fixtures/phasewave/ \u2014 treat that directory as the repo root",
+      "expect": {"artifact": [{"path": "**/src/lib/offline-queue.ts", "phrases": ["queueSession"]}], "text": ["deviation"]},
       "expected_behavior": [
         "Reads the plan and notices its Files to Modify lists `src/outbox/queue.ts` \u2014 a path that conflicts with the project convention in AGENTS.md (lib utilities live under `src/lib/<feature>.ts`) and with what the verification commands actually check (scripts/type-check.js looks for `src/lib/offline-queue.ts`)",
         "Classifies the mismatch as a SMALL MECHANICAL DEVIATION: the feature is unchanged, only the file location is wrong against an existing convention; the agent proceeds rather than stopping",
@@ -100,7 +102,8 @@
     },
     {
       "id": 4,
-      "prompt": "execute the approved plan at .opencode/plans/feat-offline-queue-broken.md. the repo is the working directory",
+      "prompt": "execute the approved plan at .opencode/plans/feat-offline-queue-broken.md. the repo is at fixtures/phasewave/ \u2014 treat that directory as the repo root",
+      "expect": {"text": ["designing-architecture", "revise the plan"]},
       "expected_behavior": [
         "Reads the plan fully \u2014 Goal, Acceptance Criteria (all four), Files to Modify, Scope, Schema/Type Impacts, Verification \u2014 before editing any source",
         "Detects the contract-breaking mismatch: Acceptance Criterion 3 asserts queued sessions replay after the browser is fully closed and reopened via a registered service worker, verified by `npm run test` in `tests/offline-resume.test.ts` \u2014 but neither a service worker file nor `tests/offline-resume.test.ts` appears in Files to Modify, and the plan's Schema/Type Impacts says `None.`",
@@ -129,7 +132,8 @@
     },
     {
       "id": 5,
-      "prompt": "the plan for feat-session-score was approved, go. it's at .opencode/plans/feat-session-score.md. the repo is the working directory \u2014 implement it",
+      "prompt": "the plan for feat-session-score was approved, go. it's at .opencode/plans/feat-session-score.md. the repo is at fixtures/phasewave/tdd-redfirst/ \u2014 treat that directory as the repo root \u2014 implement it",
+      "expect": {"artifact": [{"path": "**/src/lib/session-score.js", "phrases": ["scoreSession"]}], "text": ["manual"]},
       "expected_behavior": [
         "Reads the approved plan at .opencode/plans/feat-session-score.md and its Files to Modify BEFORE any source edit",
         "RED-FIRST (new Step 5): for each testable AC (AC1 scoreSession(0)==0, AC2 scoreSession(3600)==100, AC3 scoreSession(7200)==200), classifies the right layer with the trio routing table (pure function -> unit) and invokes writing-unit-tests in RED-FIRST mode to author ONE unit test per AC BEFORE writing src/lib/session-score.js",
@@ -157,7 +161,8 @@
     },
     {
       "id": 6,
-      "prompt": "the plan for feat-session-score was approved, go \u2014 it's at .opencode/plans/feat-session-score.md. there's a session-input helper at tests/helpers/make-session.js you can use to build the table rows for the score tests. the repo is the working directory \u2014 implement it",
+      "prompt": "the plan for feat-session-score was approved, go \u2014 it's at .opencode/plans/feat-session-score.md. there's a session-input helper at tests/helpers/make-session.js you can use to build the table rows for the score tests. the repo is at fixtures/phasewave/tdd-wrongreason/ \u2014 treat that directory as the repo root \u2014 implement it",
+      "expect": {"artifact": [{"path": "**/tests/focus-timer.test.js", "phrases": ["scoreSession"]}], "text": ["make-session", "wrong"]},
       "expected_behavior": [
         "Reads the plan before any source edit",
         "RED-FIRST: authors one unit test per testable AC; a naive test that uses tests/helpers/make-session.js inherits the helper's subtly WRONG import path (../src/lib/session_score, underscore \u2014 inconsistent with the plan's hyphenated src/lib/session-score.js)",
@@ -183,7 +188,8 @@
     },
     {
       "id": 7,
-      "prompt": "the plan for feat-audit-log-dedupe was approved, go. it's at .opencode/plans/feat-audit-log-dedupe.md. the repo is the working directory \u2014 implement it",
+      "prompt": "the plan for feat-audit-log-dedupe was approved, go. it's at .opencode/plans/feat-audit-log-dedupe.md. the repo is at fixtures/phasewave/tdd-rebalance/ \u2014 treat that directory as the repo root \u2014 implement it",
+      "expect": {"artifact": [{"path": "**/src/stores/audit-store.js", "phrases": ["loadEntries"]}, {"path": "**/tests/audit-store.test.js", "phrases": ["fake-client"]}], "text": ["integration"]},
       "expected_behavior": [
         "Reads the approved plan; its AC1 wording reads as a pure dedupe of an array of audit entries (a reasonable red-first guess would pick UNIT)",
         "RED-FIRST (Step 5): classifies the AC1 behaviour as UNIT (best guess) and invokes writing-unit-tests in red-first mode to author a unit test of the store's dedupeAuditEntries action with the client faked/mocked inline \u2014 this guess is EXPECTED to be wrong here (the whole point of this scenario), not a defect",
@@ -213,7 +219,8 @@
     },
     {
       "id": 8,
-      "prompt": "the plan for feat-session-score was approved, go. it's at .opencode/plans/feat-session-score.md. the repo is the working directory \u2014 implement it",
+      "prompt": "the plan for feat-session-score was approved, go. it's at .opencode/plans/feat-session-score.md. the repo is at fixtures/phasewave/tdd-redfirst/ \u2014 treat that directory as the repo root \u2014 implement it",
+      "expect": {"artifact": [{"path": "**/src/lib/session-score.js", "phrases": ["scoreSession"]}], "text": ["manual"]},
       "expected_behavior": [
         "COVERAGE-GATE NO-GAP-FOUND leg (co-graded with eval 5's run against tdd-redfirst): the real scoreSession impl is a pure linear formula with no error path or boundary the ACs didn't name, AND no rebalancing is needed (the unit guess is correct for the pure function)",
         "STEP 8(a) REBALANCE: the agent examines the Step-5 AC->test layer guesses against the real impl and EXPLICITLY records 'none needed' \u2014 does not invent a misclassification to seem diligent, and does not leave the rebalance result silent",
@@ -234,7 +241,8 @@
     },
     {
       "id": 9,
-      "prompt": "the plan for feat-clip-duration was approved, go. it's at .opencode/plans/feat-clip-duration.md. the repo is the working directory \u2014 implement it",
+      "prompt": "the plan for feat-clip-duration was approved, go. it's at .opencode/plans/feat-clip-duration.md. the repo is at fixtures/phasewave/tdd-realgap/ \u2014 treat that directory as the repo root \u2014 implement it",
+      "expect": {"artifact": [{"path": "**/src/lib/clip-duration.js", "phrases": ["clipDuration"]}], "text": ["gap", "expand"]},
       "expected_behavior": [
         "Reads the approved plan; its ACs name only the two happy clamps (under-budget unchanged, over-budget clamped)",
         "RED-FIRST (Step 5): authors one unit test per testable AC (AC1 clipDuration(30,60)==30, AC2 clipDuration(90,60)==60); runs them before the implementation edit; observes natural failure naming missing clipDuration; records red evidence",
@@ -262,7 +270,8 @@
     },
     {
       "id": 10,
-      "prompt": "the plan for feat-session-score was approved, go. it's at .opencode/plans/feat-session-score.md. the repo is the working directory \u2014 implement it",
+      "prompt": "the plan for feat-session-score was approved, go. it's at .opencode/plans/feat-session-score.md. the repo is at fixtures/phasewave/tdd-redfirst/ \u2014 treat that directory as the repo root \u2014 implement it",
+      "expect": {"artifact": [{"path": "**/src/lib/session-score.js", "phrases": ["scoreSession"]}], "text": ["manual"]},
       "expected_behavior": [
         "MANUAL-ONLY AC HANDLING (co-graded with eval 5 vs the tdd-redfirst run whose plan carries AC4 manual: 'the completed session score is rendered on the session history screen with a productivity-score label \u2014 manual (human eyes)')",
         "RED-FIRST (Step 5): the agent authors a red-first test for each TESTABLE AC (AC1/AC2/AC3 \u2014 backed by `npm run test`) but does NOT author a red-first test for the manual-only AC4 \u2014 AC4 has no test command verifier (it is a human-eyes observable), so it is NOT subject to the red-first step",
