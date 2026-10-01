@@ -945,6 +945,31 @@ def test_legacy_eval_capped_at_one_nudge():
             os.environ["BEVAL_MAX_CONTINUATIONS"] = old
         shutil.rmtree(d)
 
+def test_no_event_stall_stops_after_two_attempts():
+    """RM-021 (2026-09-30): a turn with NO events is a stall; repeated attempts
+    burn minutes for nothing (modeling-threats#1 stalled 4x = 16 min). At most
+    two no-event turns, then bail as an infra error."""
+    e = {"skill": "alpha", "eval_id": 1, "expect": {"text": ["A"]}, "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    calls = {"n": 0}
+
+    STALL = ("eval stall: subprocess timed out after 240s with no completion "
+             "(transient; subprocess group killed)")
+
+    def stall(_e, turn=None):
+        calls["n"] += 1
+        return runner.EvalResult(raw=STALL)  # no events at all
+
+    try:
+        passed, missing, _ = runner.run_eval(e, stall, logs_dir=d, sleep=lambda _s: None)
+        assert not passed
+        assert calls["n"] <= 3, f"stall burned {calls['n']} attempts"
+        rec = _read_logs(d)[-1]
+        assert rec["outcome"] == "error", rec
+    finally:
+        shutil.rmtree(d)
+
+
 
 def main():
     tests = [
@@ -986,6 +1011,7 @@ def main():
         test_has_work_activity_counts_bash_writes,
         test_bash_writes_suppress_the_zero_write_nudge,
         test_legacy_eval_capped_at_one_nudge,
+        test_no_event_stall_stops_after_two_attempts,
     ]
     failed = 0
     for t in tests:

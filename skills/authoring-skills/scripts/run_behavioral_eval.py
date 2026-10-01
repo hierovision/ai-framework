@@ -561,6 +561,10 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
         best_missing = assert_eval(e, ctx)
         missing = best_missing
         turns = [("initial", result)]
+        # A turn with NO events at all is a stall (provider/gateway), not an
+        # agent error: repeated attempts burn ~4 min each for nothing
+        # (2026-09-30: modeling-threats#1 stalled 4x = 16 of a 20-min shard).
+        no_event_turns = 0 if ctx["events"] else 1
         attempts = 0
         # Transient retry applies to NON-STREAM output only (stall strings,
         # legacy raw): a parseable event stream has no transient signature in
@@ -594,6 +598,8 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             ctx = build_context(result)
             missing = assert_eval(e, ctx)
             best_missing = missing if len(missing) < len(best_missing) else best_missing
+            if not ctx["events"]:
+                no_event_turns += 1
             turns.append((f"transient{attempts}", result))
         # Deterministic continuation policy (2026-09-21, the mechanical form
         # of an eval-run orchestrator): a turn that ends with MISSING
@@ -614,7 +620,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
 
         def nudge_session():
             """Same-session nudges for the CURRENT result (per-session budget)."""
-            nonlocal result, ctx, missing, continuations, best_missing
+            nonlocal result, ctx, missing, continuations, best_missing, no_event_turns
             used = 0
             while (best_missing and used < max_continuations
                    and not _dead_session(ctx)
@@ -644,6 +650,8 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
                 ctx = build_context(result)
                 missing = assert_eval(e, ctx)
                 best_missing = missing if len(missing) < len(best_missing) else best_missing
+                if not ctx["events"]:
+                    no_event_turns += 1
                 turns.append((f"continuation{continuations}", result))
 
         nudge_session()
@@ -676,8 +684,12 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             ctx = build_context(result)
             missing = assert_eval(e, ctx)
             best_missing = missing if len(missing) < len(best_missing) else best_missing
+            if not ctx["events"]:
+                no_event_turns += 1
             turns.append((f"fresh{fresh}", result))
             nudge_session()  # a fresh session that stalls gets the same nudge
+            if no_event_turns >= 2:
+                break  # two no-event turns: stop burning the budget on a stall
 
         # Grade the BEST turn, not the last: a productive turn followed by a
         # dead continuation was recorded as an infra failure even though the
