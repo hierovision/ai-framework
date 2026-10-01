@@ -123,3 +123,6 @@ python3 -m yamllint -c .yamllint.yaml .github/workflows/
     the heartbeat automatic is a future skill-level change.
   - Mechanical note: `.scratch/.../watch_agent.py` is superseded by
     `scripts/watch_agent.py`; the scratch copy is left in place (gitignored).
+  - User-requested addendum (2026-10-01): the `reasoning_effort` Go-gateway
+    compat note added to `reference/opencode-integration.md` (same file this
+    plan already edits) instead of a separate upstream issue.
