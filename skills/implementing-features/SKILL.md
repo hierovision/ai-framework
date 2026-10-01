@@ -320,6 +320,10 @@ browser before the coverage gate. Invoke the `validating-ui` skill
    History follow-ups + the handoff), not silently dropped. A change
    with **no visible UI** skips with an explicit "no visible UI" note —
    the explicit negative is the closure signal.
+6. **Long delegated workstreams** follow `reference/subagent-supervision.md`:
+   bound each dispatch to ≤ ~10 min, require a heartbeat file, and run
+   `scripts/watch_agent.py` while it works; long evals are detached with a log
+   and polled, never a blocking black box.
 
 If the environment lacks a dev server / chromium, the run is recorded
 as DEFERRED (not skipped silently) and the pass proceeds — the handoff
