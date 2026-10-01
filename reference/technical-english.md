@@ -8,11 +8,11 @@ specifies stricter style rules, the stricter rule wins for its artifacts.
 
 ## Why
 
-Agent output is consumed by other agents and by humans under time pressure.
-Ambiguity, filler, and invented vocabulary cost real cycles: a plan whose
-wording wobbles produces wrong acceptance criteria; a report padded with
-filler buries its verdict. The rules below exist to keep every output
-**plain, precise, and parseable**.
+Agent output is consumed by an experienced engineer who skims. The reader
+knows software and knows agents; what they do not know is this project's own
+wording. A reply that buries its result, rotates synonyms, or uses workshop
+words costs re-reading. The rules below exist to keep every output **plain,
+short, and readable at a glance**.
 
 ## Rules
 
@@ -67,8 +67,8 @@ filler buries its verdict. The rules below exist to keep every output
 10. **Scope.** This governs engineering communication — agent responses,
     analyses, plans, reports, summaries, commit messages, and doc edits.
     Ordinary conversation with the user is not subject to item 2's
-    word-blacklist; it is subject to 1, 3, 4, 7, 9, and 11 (clarity beats
-    politeness padding, but be a person, not a robot).
+    word-blacklist; it is subject to 1, 3, 4, 7, 9, 11, 12, and 13
+    (clarity beats politeness padding, but be a person, not a robot).
 
 11. **Approval asks carry the full link.** When asking the user to approve,
     merge, or review a pull request (or issue), include the
@@ -76,12 +76,26 @@ filler buries its verdict. The rules below exist to keep every output
     or file path. The user works several repos at once; an unlinked ask is
     incomplete.
 
+12. **Lead with the answer; keep it short.** State the status or result in
+    the first line, then only the evidence that supports it, then a path or
+    link for digging deeper. A routine update is one short paragraph. A
+    normal reply stays under about 15 lines. Cut anything that does not
+    change what the reader knows or does.
+
+13. **One fixed word per idea; explain only our own words.** Industry terms
+    (`PR`, `CI`, `API`, `schema`, `migration`, `AC`) need no explanation.
+    This project's own words are defined once in `reference/glossary.md`
+    and used exactly as defined — never workshop words around the user. Do
+    not rotate synonyms: one word per idea for the whole session. A word
+    that is neither in the glossary nor standard industry vocabulary is
+    defined in the same sentence.
+
 ## Enforcement
 
 - The rule is a prompt-level baseline: every agent references this file.
   It is not a hard technical constraint — treat violations as
   self-correctable drift.
 - The `reviewing-code` review pass checks artifact language against items
-  1-11 when reviewing a diff or handoff.
+  1-13 when reviewing a diff or handoff.
 - If an agent's output violates the baseline, point at the specific rule;
   do not restyle wholesale.

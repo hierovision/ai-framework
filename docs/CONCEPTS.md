@@ -674,6 +674,12 @@ filler; exact numbers over approximations; **uncertainty stated with
 labels** (`unverified`, `vendor-stated`, `assumed`) rather than hedges; and
 a fixed handoff shape — *done → verified → blocked → next*.
 
+The baseline names its reader: an experienced engineer who uses agents daily
+but does not know this project's wording. Industry terms need no explanation;
+our own words are defined once in `reference/glossary.md` and used exactly
+as written (`batch`, `runner`, `passed`/`failed`, `service failure`). Replies
+lead with the answer and stay short, because the reader skims.
+
 **Rationale.** This is the same bet as Choice 1, applied to language: an
 output that is plain, parseable, and labeled is a signal; a vibes-based one
 is an impression. The baseline is deliberately a floor, not a style manual
