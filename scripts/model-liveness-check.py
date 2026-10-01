@@ -12,7 +12,7 @@ routable where it claims to be, using live catalog + docs evidence.
      (routing-table scope only — dated history sections may name retired
      IDs and are intentionally excluded).
   3. Collect documented IDs (`` `opencode/<id>` `` tokens) from
-     `agents/council.md` and `docs/FREE-TIER-COUNCIL.md` and verify each
+     `agents/council.md` and `docs/COUNCIL.md` and verify each
      is bound somewhere (closes the "docs claim, no binding" failure).
 
 Failure classes (exit 1, each printed):
@@ -146,7 +146,7 @@ def main() -> int:
     for _, free, go_cell, zen_cell in routing_table_rows(repo):
         table_ids |= id_tokens(free) | id_tokens(go_cell) | id_tokens(zen_cell)
     bound_unprefixed = {b.split("/", 1)[-1] for b in bound} | table_ids
-    for rel in ("agents/council.md", "docs/FREE-TIER-COUNCIL.md"):
+    for rel in ("agents/council.md", "docs/COUNCIL.md"):
         for token in sorted(doc_tokens(repo, rel)):
             if token not in bound_unprefixed:
                 errors.append(f"{rel}: documents `{token}` which is bound nowhere")

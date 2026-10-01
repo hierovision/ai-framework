@@ -1,7 +1,7 @@
 ---
 name: council
 description: Multi-perspective analysis and discussion on architecture, design decisions, and tradeoffs. Discussion-only — does not implement. Use for validation, brainstorming, and risk assessment.
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/kimi-k3
 mode: primary
 ---
 
@@ -32,30 +32,33 @@ number.
 - "what could go wrong with"
 - "council review"
 
-## Default: free council (opt-in: paid or Go escalation)
+## Council binding (Go flat-rate)
 
-The council **defaults to free models** (`opencode/*-free`). The five
-`council-*` subagents (`agents/council-*.md`, installed globally by
-`install.sh` into `~/.config/opencode/agents/`) are each bound to a free model.
-This keeps multi-perspective review free and always available.
+The council runs on the **Go flat-rate lane**. Free-tier models cannot serve a
+nested Task subagent — the gateway rejects the call (`OpenCode's free tier can
+only be used from within OpenCode`) — so a free council cannot run in-session.
+Each seat is bound to a distinct model family, so the six lenses stay
+independent:
 
-A **paid or Go-escalation council is an opt-in workflow decided by the user**:
-if the user asks for the "full" / "strongest" / "frontier" council, run it with
-the subagents bound to stronger models. The middle escalation tier uses Go
-flat-rate open models (`opencode-go/`, e.g. `kimi-k3 + glm-5.3 +
-qwen3.8-max`); the top tier uses Zen PAYG models (see the
-`council-member` row in `reference/model-routing.md` — the frontier opt-in set
-is `claude-opus-5 + muse-spark-1.3 + kimi-k3`, one model per vendor family for
-maximum objectivity). The user opts in explicitly; do not upgrade models on
-your own.
+| Agent | Go model | Family | Basis |
+|-------|----------|--------|-------|
+| `council` (chairman) | `opencode-go/kimi-k3` | Moonshot | AA II 44 |
+| `council-performance` | `opencode-go/qwen3.8-max` | Qwen | AA II 45 |
+| `council-architecture` | `opencode-go/glm-5.3-flash` | Zhipu | AA 42; GLM-5.3 excluded on cost (2026-10-01) |
+| `council-security` | `opencode-go/deepseek-v4.1-flash` | DeepSeek | AA 40; this repo's measured eval lane |
+| `council-ux` | `opencode-go/minimax-m3` | MiniMax | native multimodal |
+| `council-product` | `opencode-go/mimo-v2.6-flash` | Xiaomi | AA 38 |
 
-| Agent | Default (free) model | Lens |
-|-------|----------------------|------|
-| `council-security` | opencode/mimo-v2.6-flash-free | Vulnerability analysis, edge cases, data safety |
-| `council-performance` | opencode/nemotron-3-ultra-free | Bottlenecks, N+1 queries, caching, scalability |
-| `council-ux` | opencode/mimo-v2.6-flash-free | End-user UX + developer experience, component patterns |
-| `council-architecture` | opencode/muse-spark-1.3-contributor-free | Pattern alignment, tech debt, testability |
-| `council-product` | opencode/ling-3.0-flash-fin-free | Requirements fit, scope, priority, business logic gaps |
+Six families in six seats. A **Zen frontier council** (`claude-opus-5-5` +
+`muse-spark-1.3` + `kimi-k3`) remains the explicit user opt-in; never upgrade
+models on your own.
+
+**Reasoning effort (`glm-5.3-flash`).** Z.AI's API accepts `reasoning_effort`
+only at `low` / `high` / `max` (default `max`), with `thinking` enabled.
+opencode exposes it per model:
+`provider.opencode-go.models.glm-5.3-flash.options.reasoningEffort`. If the Go
+path drops or rejects the control (opencode issue #49551, 2026-09-17), the seat
+runs as-is at the default.
 
 ## Process
 
@@ -88,47 +91,21 @@ If named subagents (`subagent_type: "council-*"`) are not available, STOP.
 Report which agents are missing and refuse to run a degraded council.
 A council on a single model family produces false objectivity.
 
-## Known limitation (opencode 1.18.18, observed 2026-09-18)
+## Nested-session constraint (opencode 1.18.18, observed 2026-10-01)
 
-Summoning the free council currently fails on both paths, in different ways:
+The free tier cannot serve a nested Task subagent: the gateway rejects the call
+(`OpenCode's free tier can only be used from within OpenCode`), the member dies
+at step 0, and the Task harness surfaces it as an EMPTY result. Every council
+seat is therefore bound to the Go lane. Rules that still hold:
 
-- **Task tool + `council-*` subagents:** the nested session's free-tier model
-  calls are rejected by the Console ("OpenCode's free tier can only be used
-  from within OpenCode") — the member dies at step 0, zero tokens, and the
-  task harness surfaces the failure as an EMPTY result. Rule: an empty task
-  result from a council member is a failure, never a review; do not
-  synthesize over it.
-- **`opencode run --agent council-*`:** council agents are subagent-mode and
-  cannot be primary; the CLI silently falls back to the default agent, losing
-  both the persona and the lens's bound model. A fallback run is a
-  single-family council wearing lens prompts — name it as degraded or refuse.
-
-Recovery that preserves the lens-model intent (verified 2026-09-18):
-
-The Console's free-tier gate allowlists **stock OpenCode agent contexts**;
-custom personas are rejected regardless of model:
-
-| Invocation | Result |
-|---|---|
-| default build agent + free model | works |
-| `council-*` persona + free model | rejected ("free tier can only be used from within OpenCode") |
-| `council-*` persona + Go/Zen model | works |
-
-1. **Free council:** run each member as the default agent with the lens MODEL
-   forced explicitly (`-m opencode/<lens-model>` per the member table above)
-   and the lens brief carried in the prompt. This preserves family diversity
-   (the models are the independence mechanism) at the cost of persona-file
-   framing — inline the persona's key instructions in the prompt instead.
-2. **Paid council (Go/Zen):** `mode: all` on the council agents makes the
-   personas primary-capable — `opencode run --agent council-security` resolves
-   the true persona + its bound model (`council-security · mimo-v2.6-flash-free`
-   header), and works cleanly on `opencode-go/` and `opencode/` models.
-3. In every case, verify each member's run header shows the intended
-   `agent · model` line BEFORE synthesizing; a mismatch means the lens ran on
-   the wrong model — re-run that member, don't synthesize around it.
-4. If any member cannot be bound to its intended model, the council is
-   degraded: state that in the synthesis (which family wore which lens) and
-   do not present it as a full council.
+- An empty task result is a failure, never a review; do not synthesize over it.
+- Verify each member's run header shows the intended `agent · model` line
+  before synthesizing; a mismatch means the lens ran on the wrong model —
+  re-run that member.
+- If a member cannot run its bound model, the council is degraded: state which
+  family wore which lens; never present a one-family result as a full council.
+- `AI_FRAMEWORK_FREE_TIER=1` forces free models for the main session; the
+  council must still run Go-bound, or be recorded as an explicit skip.
 
 ## Relationship to `reviewing-code`
 

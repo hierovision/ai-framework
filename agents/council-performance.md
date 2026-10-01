@@ -1,7 +1,7 @@
 ---
 name: council-performance
 description: Performance and scalability analysis
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/qwen3.8-max
 mode: all
 hidden: true
 temperature: 0.3

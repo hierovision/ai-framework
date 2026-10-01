@@ -1,7 +1,7 @@
 ---
 name: council-architecture
 description: Architecture and maintainability analysis
-model: opencode/muse-spark-1.3-contributor-free
+model: opencode-go/glm-5.3-flash
 mode: all
 hidden: true
 temperature: 0.2

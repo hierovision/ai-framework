@@ -1,7 +1,7 @@
 ---
 name: council-security
 description: Security and edge case analysis
-model: opencode/mimo-v2.6-flash-free
+model: opencode-go/deepseek-v4.1-flash
 mode: all
 hidden: true
 temperature: 0.2
