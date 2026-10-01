@@ -28,8 +28,12 @@ Frontier opt-in (user-requested only): `claude-opus-5-5` + `muse-spark-1.3` +
 1. Orchestrator extracts the question; if unclear, one clarifying question.
 2. Spawn the seats in parallel via the Task tool (`subagent_type: "council-*"`),
    passing the question (2–3 sentences).
-3. Collect all results. An **empty result is a failure, never a review** — do
-   not synthesize over it; re-run the seat or mark the council degraded.
+3. Collect all results. Validate each against
+   `reference/delegated-result-contract.md` (`council-lens`): an **empty or
+   malformed** result is a **failed run**, never clean — do not synthesize over
+   it. A **transient** failure is retried; a **deterministic** one is retried
+   once, then the vehicle is switched or the work taken over inline; the
+   outcome is **recorded**.
 4. Verify each member's run header shows the intended `agent · model` line.
 5. Synthesize: Common Ground · Tensions (name the disagreement) · Risk Register
    · Recommendation. Surface disagreements; never average them away.

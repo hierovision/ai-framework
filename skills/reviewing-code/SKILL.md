@@ -31,10 +31,15 @@ auditability breach the implement skill exists to prevent, and the
 review is where it is caught.
 
 Relationship to the council: `agents/council.md` (shipped) runs
-  security/performance/ux/architecture/product lenses, **defaulting to free
-  models with a paid/Go-escalation opt-in**. This skill is the **single-reviewer**
-discipline — one reviewer, one verdict, against a plan. Note the
-relationship; do not absorb the council.
+  security/performance/ux/architecture/product lenses on the **Go lane** (one
+  family per seat; free-tier models cannot serve a nested subagent). This skill
+  is the **single-reviewer** discipline — one reviewer, one verdict, against a
+  plan. Validate any delegated lens result against
+  `reference/delegated-result-contract.md` (`council-lens`): an **empty or
+  malformed** result is a **failed run**, never clean; a **transient** failure
+  is retried, a **deterministic** one is retried once then the vehicle is
+  switched or the work taken over inline; the outcome is **recorded**. Note the
+  relationship; do not absorb the council.
 
 ## The review pass
 

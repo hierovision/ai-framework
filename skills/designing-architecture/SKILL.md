@@ -175,10 +175,13 @@ For a user-facing item, invoke `council-ux` (subagent_type `council-ux`)
   time and council-ux is a text-only model; it judges the planned
   experience from the brief. Output is 3–5 concerns, advisory.
 
-**An empty result is a hard failure, never a silent skip.** The nested
-free-tier consult path can return an empty result with no visible error
-(`agents/council.md` → Known limitation documents the rule and the
-recovery; read it when reachable). Do not read an empty result as "no
+**An empty or malformed result is a failed run, never a silent skip.**
+Validate the consult against `reference/delegated-result-contract.md`
+(`council-lens`): a **transient** failure is retried, a **deterministic** one
+is retried once then the vehicle is switched or the work taken over inline; the
+outcome is **recorded** in the plan History. The nested free-tier consult path
+can return an empty result with no visible error (`agents/council.md` →
+Nested-session constraint documents the recovery; read it when reachable). Do not read an empty result as "no
 concerns". Attempt the fallback **once**, with no external read required:
 run the UX lens as a general subagent with the lens brief inline, and
 record which fallback form ran. If it also returns empty or cannot run,
