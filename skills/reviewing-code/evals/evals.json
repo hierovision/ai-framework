@@ -20,7 +20,12 @@
         "[fix-verified] the grader's spot-check check FAILS a review that ignores the History records (asserts REVIEW.md references at least one spot-check token) \u2014 added after extending scenario-1-clean's plan History + verify-review.js in this pass (TDD-aware implement sequencing)"
       ],
       "expect": {
-        "text": ["Verdict", "approve"]
+        "artifact": [
+          {
+            "path": "**/REVIEW.md",
+            "phrases": ["approve"]
+          }
+        ]
       },
       "files": [
         "fixtures/phasewave/scenario-1-clean/AGENTS.md",
