@@ -24,6 +24,16 @@ line. Everything below was validated **2026-09-06**.
 - There is **no `--skill` flag**. Resolve the skill from the installed layout
   and run from its directory: `opencode run --dir <dir> <prompt>`.
 
+## Session store (read-only)
+
+- `~/.local/share/opencode/opencode.db` is a SQLite DB with `session` and
+  `part` tables. Open it read-only (`file:…?mode=ro`). `part.data` is JSON
+  (`type`, `tool`, `state.input`/`state.status`); `session` carries `title`,
+  `agent`, `cost`, `tokens_input`/`tokens_output`, `time_updated`, `parent_id`,
+  `directory`. Dated 2026-10-01 — volatile, re-verify on touch;
+  `scripts/watch_agent.py` degrades to heartbeat-only when the DB is absent or
+  the schema changes.
+
 ## Pointers
 
 - `skills/observing-runs/SKILL.md`, `references/schema.md` — run logging.
