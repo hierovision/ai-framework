@@ -117,7 +117,11 @@ Brief: review **correctness** (does the flow behave as the ACs say?),
 **accessibility** (roles, names, keyboard/close paths in the a11y
 tree). Return 3–5 findings, each with: what, where, why, suggested
 in-scope fix. Text-only evidence is the contract — council-ux is a
-text-only model; do not ask it to judge screenshots.
+text-only model; do not ask it to judge screenshots. Validate the result
+against `reference/delegated-result-contract.md` (`council-lens`): an **empty
+or malformed** result is a **failed run**, never clean; a **transient** failure
+is retried, a **deterministic** one is retried once then the vehicle is
+switched or the work taken over inline; the outcome is **recorded** in Step 7.
 
 ### Step 6 — Fix findings in scope; bounded loop
 
