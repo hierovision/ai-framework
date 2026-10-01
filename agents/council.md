@@ -67,7 +67,12 @@ runs as-is at the default.
    council member. Use `subagent_type: "council-{name}"` and
    `description: "council: {name}"`. Each prompt is the user's question
    (2-3 sentences). The agent files define each member's role lens and model.
-3. **Collect** — Wait for all 5 to return.
+3. **Collect** — Wait for all 5 to return. Validate each against
+   `reference/delegated-result-contract.md` (`council-lens`): an **empty or
+   malformed** result is a **failed run**, never clean — do not synthesize over
+   it. A **transient** failure is retried; a **deterministic** one is retried
+   once, then the vehicle is switched or the work taken over inline; the
+   outcome is **recorded**.
 4. **Synthesize** as Chairman:
     - **Common Ground** — Where all/some agree
     - **Tensions** — Where perspectives conflict (note model family differences if relevant)

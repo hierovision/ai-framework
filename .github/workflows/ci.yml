@@ -77,6 +77,8 @@ jobs:
           python3 scripts/test_stall_timeout.py
           python3 scripts/test_eval_workflows.py
           python3 scripts/test_watch_agent.py
+          python3 scripts/test_validate_delegated_result.py
+          python3 scripts/test_delegated_result_contract.py
 
       - name: Offline eval verifiers
         run: |

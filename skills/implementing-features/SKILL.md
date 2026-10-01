@@ -309,7 +309,12 @@ browser before the coverage gate. Invoke the `validating-ui` skill
    evidence bundle — console log, pageerrors, ariaSnapshot, journey,
    ACs — for correctness / appropriateness / accessibility findings.
    council-ux is text-only; screenshots are archived for the human
-   handoff (the optional advisory vision pass is default off).
+   handoff (the optional advisory vision pass is default off). Validate the
+   result against `reference/delegated-result-contract.md` (`council-lens`): an
+   **empty or malformed** result is a **failed run**, never clean; a
+   **transient** failure is retried, a **deterministic** one is retried once
+   then the vehicle is switched or the work taken over inline; the outcome is
+   **recorded** in the handoff.
 5. **Bounded fix loop:** findings are fixed in scope, the harness
    re-runs; **max 2 fix cycles**. Residual findings are recorded (plan
    History follow-ups + the handoff), not silently dropped. A change
