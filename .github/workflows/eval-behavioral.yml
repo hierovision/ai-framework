@@ -158,8 +158,15 @@ jobs:
 
       - name: Merge shard logs (run records + quarantine + streams)
         run: |
-          python3 scripts/merge-eval-logs.py --out logs \
-            $(find shards -maxdepth 2 -type d -name logs | tr '\n' ' ')
+          set -euo pipefail
+          # download-artifact strips the uploaded common prefix (`logs/`), so each
+          # artifact lands as shards/<artifact-name>/ containing run-*.jsonl and
+          # eval-streams/ directly — do NOT look for a nested `logs/` dir.
+          SHARD_DIRS=$(find shards -mindepth 1 -maxdepth 1 -type d | tr '\n' ' ')
+          if [ -z "$SHARD_DIRS" ]; then
+            echo "no shard log directories downloaded" >&2; exit 1
+          fi
+          python3 scripts/merge-eval-logs.py --out logs $SHARD_DIRS
 
       - name: Build eval report artifacts
         run: |
