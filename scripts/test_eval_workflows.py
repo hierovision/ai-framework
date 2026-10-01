@@ -123,8 +123,11 @@ def test_lane_and_nested_agent_override():
                           "--model", "opencode-go/deepseek-v4.1-flash"], capture_output=True,
                          text=True, check=True).stdout
     cfg = json.loads(out)
-    assert cfg["agent"]["council-ux"]["model"] == "opencode-go/deepseek-v4.1-flash", cfg
+    # Free-bound agents get the lane model; the council is Go-bound already
+    # (2026-10-01 rebind) and must NOT be overridden.
+    assert cfg["agent"]["implementer"]["model"] == "opencode-go/deepseek-v4.1-flash", cfg
     assert "architect" in cfg["agent"], cfg
+    assert "council-ux" not in cfg["agent"], cfg
     # /tmp allowance (CI ephemeral): agents use /tmp scratch, and those writes
     # were auto-rejected (33 in one run) -> zero-write turns.
     assert cfg["permission"]["external_directory"]["/tmp/**"] == "allow", cfg

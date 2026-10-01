@@ -1,7 +1,7 @@
 ---
 name: council-product
 description: Product and business logic analysis
-model: opencode/ling-3.0-flash-fin-free
+model: opencode-go/mimo-v2.6-flash
 mode: all
 hidden: true
 temperature: 0.4

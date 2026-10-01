@@ -1,5 +1,14 @@
 # Model Routing
 
+**2026-10-01 pass (council → Go; GLM-5.3 / GLM-5.2 excluded on cost):** the
+council role moves off free models to a six-family Go binding — the free tier
+cannot serve a nested Task subagent (see `agents/council.md`). **GLM-5.3 and
+GLM-5.2 are hard exclusions (user directive 2026-10-01): near-identical
+performance to GLM-5.3-Flash at ~9× the cost ($1.40/$4.40 vs $0.15/$0.50 per
+1M).** Every Go row that named glm-5.3/glm-5.2 now binds glm-5.3-flash. User
+upgraded to **Go Plus ($40/mo)** — same models and prices, higher per-model
+allowances. See Provider notes.
+
 Catalogs, docs free list, and liveness probes: retrieved and live-verified
 2026-09-25 (AA v4.3.2 leaderboard + targeted pages fetched same-day,
 independently run; the 2026-09-18 full sweep stands for unchanged rows —
@@ -43,17 +52,17 @@ Update procedure — Free-tier fallback + council
 
 | Role | Free default (`opencode/*-free`) | Escalation — Go flat-rate (`opencode-go/`) | Escalation — Zen PAYG (`opencode/` or `deepseek/` direct key) | Bench basis for escalation |
 |---|---|---|---|---|
-| `planner` | nemotron-3-ultra-free | glm-5.3 (alt kimi-k3) | claude-opus-5-5 (alt gpt-5.6-sol) | AA II v4.3.2 (2026-09-25): opus-5-5 58 (max) — board leader; opus-5 was 51; KingBench 91.25 for glm-5.3 |
+| `planner` | nemotron-3-ultra-free | glm-5.3-flash (alt kimi-k3) | claude-opus-5-5 (alt gpt-5.6-sol) | AA II v4.3.2 (2026-09-25): opus-5-5 58 (max) — board leader; opus-5 was 51; KingBench 91.25 for glm-5.3 |
 | `implementer` | nemotron-3-ultra-free | kimi-k3 (alt kimi-k2.7-code — live on Go, Zen upstream broken) | deepseek/deepseek-flash (alt gpt-5.6-sol, gemini-3.8-flash) | AA 44 (kimi-k3) / 39 (deepseek-flash, spot-check 2026-09-25; was 40 — noise), tool calls + vision live-verified; sol 47 (max) |
-| `triager` | nemotron-3-ultra-free | glm-5.3 (alt kimi-k3) | gpt-5.6-luna (alt glm-5.3-flash) | AA 38 @ $0.20/$1.20 (docs 2026-09-25, down from $0.40/$1.80 ≤272K), 120 t/s |
+| `triager` | nemotron-3-ultra-free | glm-5.3-flash (alt kimi-k3) | gpt-5.6-luna (alt glm-5.3-flash) | AA 38 @ $0.20/$1.20 (docs 2026-09-25, down from $0.40/$1.80 ≤272K), 120 t/s |
 | `test-writer` | nemotron-3-ultra-free | kimi-k3 (alt kimi-k2.7-code) | deepseek/deepseek-flash (alt gpt-5.6-sol) | AA 44 / 39 + tool-use probes |
-| `debugger` | nemotron-3-ultra-free | glm-5.3 (alt glm-5.2) | deepseek/deepseek-flash (alt gpt-5.6-sol) | AA 45, 1M context |
-| `reviewer` | nemotron-3-ultra-free | glm-5.3 (alt glm-5.2) | deepseek/deepseek-flash (alt gpt-5.6-sol) | AA 45 / 39 (defect catch) |
+| `debugger` | nemotron-3-ultra-free | glm-5.3-flash (alt kimi-k3) | deepseek/deepseek-flash (alt gpt-5.6-sol) | AA 45, 1M context |
+| `reviewer` | nemotron-3-ultra-free | glm-5.3-flash (alt kimi-k3) | deepseek/deepseek-flash (alt gpt-5.6-sol) | AA 45 / 39 (defect catch) |
 | `vision-critic-fast` | — (no free multimodal) | minimax-m3 (native multimodal) | gpt-5.4-mini (alt gemini-3.8-flash) | native image-in (hard gate); AA 41 (gemini-3.8-flash); M3 29 (spot-check 2026-09-25) |
 | `vision-critic-final` | — | — | deepseek/deepseek-flash (alt gemini-3.8-flash) | live vision side-by-side 2026-09-18 (parity/better vs sonnet-5 on UI + chart probes); AA 39 (spot-check 2026-09-25); first real-loop validating-ui cycle is the acceptance gate |
-| `council-member` | nemotron-3-ultra-free + mimo-v2.6-flash-free + muse-spark-1.3-contributor-free + ling-3.0-flash-fin-free | kimi-k3 + glm-5.3 + qwen3.8-max | claude-opus-5-5 + muse-spark-1.3 + kimi-k3 | per-lens quality first, family diversity soft goal (AA v4.3.2 2026-09-25: MiMo-V2.6-Pro 46 = top open-weights, GLM-5.3 45, Kimi K3 44; opus-5-5 58); mimo-v2.5-free failed liveness ×3 2026-09-25 (hard gate) → seats moved to v2.6 |
-| `skill-author` | nemotron-3-ultra-free | minimax-m3 (alt glm-5.2, qwen3.7-max) | glm-5.3-flash (alt deepseek/deepseek-flash) | IFBench 82.9 — top eligible (AA-run, 2026-09-13; refresh 404'd 2026-09-25); Zen pick by user cost decision 2026-09-18 (8× cheaper than sol) |
-| `skill-reviewer` | nemotron-3-ultra-free | glm-5.3 (alt glm-5.2) | claude-opus-5-5 | AA II v4.3.2 (2026-09-25): 58 — highest reasoning among bound; $4/$20 (docs 2026-09-25) |
+| `council-member` | — (free cannot serve a nested subagent; see Council) | kimi-k3 + glm-5.3-flash + qwen3.8-max + deepseek-v4.1-flash + minimax-m3 + mimo-v2.6-flash | claude-opus-5-5 + muse-spark-1.3 + kimi-k3 | six families in six seats; AA v4.3.2 2026-09-25: qwen3.8-max 45, kimi-k3 44, glm-5.3-flash 42, deepseek-v4.1-flash 40, mimo-v2.6 38, minimax-m3 30 (native multimodal); user directive 2026-10-01: council runs on Go |
+| `skill-author` | nemotron-3-ultra-free | minimax-m3 (alt qwen3.7-max) | glm-5.3-flash (alt deepseek/deepseek-flash) | IFBench 82.9 — top eligible (AA-run, 2026-09-13; refresh 404'd 2026-09-25); Zen pick by user cost decision 2026-09-18 (8× cheaper than sol) |
+| `skill-reviewer` | nemotron-3-ultra-free | glm-5.3-flash (alt kimi-k3) | claude-opus-5-5 | AA II v4.3.2 (2026-09-25): 58 — highest reasoning among bound; $4/$20 (docs 2026-09-25) |
 
 ## Benchmark evidence principles
 
@@ -82,19 +91,21 @@ Never bind, recommend, or escalate to these models in any tier, for any persona 
 | `claude-fable-5-1` | Zen | same |
 | `gpt-6-astra` | Zen | same |
 | `claude-sonnet-5` (and all sonnet IDs) | Zen | user directive (2026-09-18): eliminated entirely in favor of deepseek/deepseek-flash; not bound in any role or alt list |
+| `glm-5.3` | Go, Zen | user cost directive (2026-10-01): near-identical to GLM-5.3-Flash at ~9× cost ($1.40/$4.40 vs $0.15/$0.50 per 1M); never bound, any tier |
+| `glm-5.2` | Go, Zen | same directive (2026-10-01) — same $1.40/$4.40 class |
 
-The grok exclusion supersedes any earlier mention. When a new grok-* ID appears in a catalog fetch, treat it as excluded automatically. The cost directive covers the whole peak pricing class — treat gpt-5.5 / gpt-5.5-pro (and any new $10/$50-tier ID) identically if ever proposed. These models may be invoked manually by the user for experiments; they must never be bound by any role, agent, or loop in this repo.
+The grok exclusion supersedes any earlier mention. When a new grok-* ID appears in a catalog fetch, treat it as excluded automatically. The cost directive covers the whole peak pricing class — treat gpt-5.5 / gpt-5.5-pro (and any new $10/$50-tier ID) identically if ever proposed, and the 2026-10-01 GLM cost directive covers glm-5.3 / glm-5.2. These models may be invoked manually by the user for experiments; they must never be bound by any role, agent, or loop in this repo.
 
 ## Free-tier caveats (read before relying on free defaults)
 
 The free generalist was validated 2026-07-26 by a clean, no-tool head-to-head eval. Since 2026-08-14 `ling-3.0-flash-free` is gone from the catalog, `nemotron-3-ultra-free` now holds the generalist seats — its streaming caveat is the standing reliability risk. For risk-bearing tasks you may still escalate to Go, Zen, or the direct-key tier. Free by default; escalation is opt-in. All four free-family IDs re-verified live 2026-09-18. `big-pickle` is docs-listed free and routes live (enabled 2026-09-18) but is **unbenched** — free-tier redundancy candidate only, stays unbound until evaluated.
 
-**Council seat policy (user directive, 2026-09-13):** family diversity is a **soft goal** — attempted each pass, but per-model quality outranks diversity for its own sake. Free-family readings on AA II v4.3 (2026-09-13): ling ~25 (partial index), nemotron-3-ultra 23, mimo-v2.5 22 (one-point ties break toward diversity); nemotron-3.5-lightning-free scores 14 — confirmed weak, stays unbound. muse-spark-1.3-contributor-free is not separately benched (same-family flagship muse-spark-1.3 scores 48; the free variant runs contributor terms). Seat validations: architecture seat (muse-spark) passed 2026-09-04; product seat (ling-fin) passed 2026-09-13 (3-prompt checklist + cross-family convergence). Free council seats after the 2026-09-25 rebind: nemotron×2 (chairman, performance), mimo-v2.6-flash-free×2 (security, ux), muse-spark-1.3 (architecture), ling-fin (product) — four families in six seats, largest family share 2/6. **mimo-v2.6-flash-free is unbenched** — the binding leans on the family's independent AA reading (MiMo-V2.6-Pro 46) plus liveness; a 3-prompt seat-validation checklist like the 2026-09-13 product seat is the open resolver.
+**Council seat policy (user directive 2026-10-01):** the council runs on the **Go flat-rate lane**, one family per seat — kimi-k3 (chairman), qwen3.8-max (performance), glm-5.3-flash (architecture), deepseek-v4.1-flash (security), minimax-m3 (ux), mimo-v2.6-flash (product). Reason: the free tier cannot serve a nested Task subagent, so the 2026-09-13 free-council seats are retired. Family diversity is a **soft goal**; per-model quality outranks it. Open resolver: a 3-prompt seat validation for the ux and product seats (their fit rests on family AA + role fit, not a lens-specific bench).
 
 ## Provider notes
 
 - **Free tier** ($0): `opencode/*-free` catalog entries (subset of Zen catalog) **that are docs-listed and live-verified**. Default tier — used for every role where a live free model exists. No financial consequence. Catalog-vs-docs mismatches stand: `deepseek-v4-flash-free` and `muse-spark-1.2-contributor-free` are catalog-listed but NOT docs free-listed — excluded from candidacy (the 2026-09-02 failure pattern).
-- **Go** ($10/mo flat): Open models only. Config prefix `opencode-go/`. Escalation tier — used when the free default is insufficient or unavailable (vision, peak coding). Limits: $12/5hr, $30/wk, $60/mo. `hy3` and `hy3-preview` are Go flat-rate models. `kimi-k2.7-code` confirmed live on Go — **user directive (2026-09-18): Go-only; the broken Zen upstream is no longer probed or tracked** (Go's "Use balance" Zen fallback covers credit exhaustion). New on Go 2026-09-18: `qwen3.8-max` (AA 45, live-probed clean) and `qwen3.8-flash`.
+- **Go / Go Plus** (flat-rate): Open models only. Config prefix `opencode-go/`. Escalation tier — used when the free default is insufficient or unavailable (vision, nested subagents, peak coding). **Go $10/mo; Go Plus $40/mo** (user upgraded 2026-10-01) — same models and token prices, higher per-model usage. Each model has its own monthly dollar cap: 5-hour = 20% of it, weekly = 50%, monthly = 100% (opencode.ai/docs/go, fetched 2026-10-01). Go falls back to Zen balance ("Use balance") after limits. `kimi-k2.7-code` stays Go-only (2026-09-18 directive). Current Go models include glm-5.3-flash, kimi-k3, qwen3.8-max, qwen3.8-flash, deepseek-v4.1-flash, minimax-m3, mimo-v2.6-flash/pro; glm-5.3/glm-5.2 are excluded (2026-10-01).
 - **Zen** (pay-as-you-go): Full catalog including proprietary models. Config prefix `opencode/`. Workspace model-access toggles gate individual models — "Model is disabled" means a workspace toggle, not a gateway death (resolved 2026-09-18 by enabling opus-5, sonnet-5, sol, luna, big-pickle). `qwen3.7-*` is Go-only — bind it as a Go escalation, never as a Zen one. `muse-spark-1.3` (paid flagship, AA 48) routes live with no toggle — distinct from the contributor-free variant and its training-terms caveat.
 - **CI eval lane (user directive 2026-09-29)**: behavioral evals in CI run on
   the **Go flat-rate** lane — **`opencode-go/deepseek-v4.1-flash`**, authenticated
@@ -164,7 +175,7 @@ The UI iteration loop requires a model that can read screenshots. Tiered strateg
 
 - **Toggle:** `AI_FRAMEWORK_FREE_TIER=1` selects free-tier mode. The escalation rows above remain the default-capable path; with the toggle on, every task uses a free model even when Go/Zen keys are present.
 - Skills reference **roles**, never these IDs (library convention). The binding of a role to a free model in free-tier mode happens in the harness/project config, not in skill bodies — this file is the single home of the IDs.
-- **Council** runs on free models for planning & review (per `docs/FREE-TIER-COUNCIL.md`). The 5 council lenses bind to: security=mimo-v2.6-flash-free, performance=nemotron-3-ultra-free, ux=mimo-v2.6-flash-free, architecture=muse-spark-1.3-contributor-free, product=ling-3.0-flash-fin-free. Chairman binds to nemotron-3-ultra-free. Family diversity (soft goal, user directive 2026-09-13): nemotron×2, mimo×2, muse-spark×1, ling×1 — four families in six seats. (2026-09-25 rebind: security/ux moved mimo-v2.5-free → mimo-v2.6-flash-free after the liveness failure.)
+- **Council** runs on the Go lane for planning & review (per `agents/council.md`). The six seats bind one family each: chairman=kimi-k3 (Moonshot), performance=qwen3.8-max (Qwen), architecture=glm-5.3-flash (Zhipu), security=deepseek-v4.1-flash (DeepSeek), ux=minimax-m3 (MiniMax), product=mimo-v2.6-flash (Xiaomi). Reason: the free tier cannot serve a nested Task subagent (user directive 2026-10-01); the 2026-09-13 free-council seats are retired. A Zen frontier council (claude-opus-5-5 + muse-spark-1.3 + kimi-k3) stays the explicit opt-in.
 - Council only for **planning & review** (per above). Raw execution stays single-model to conserve free quota.
 - Always surface disagreements; never let one model silently override another.
 - Free-tier mode coexists with the escalation routing — the toggle selects between them; the escalation rows are not modified by enabling free-tier.
