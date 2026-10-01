@@ -21,7 +21,7 @@
     {
       "id": 2,
       "prompt": "Prove the sync-issues.mjs pure helpers (parseRoadmap, findSourceFiles, findSectionHints, extractChecklist, buildBody, isBacked, priorityForScore, findOpenTableSourcesCol) behave correctly — run the unit suite.",
-      "expect": {"text": ["PASS", "planned creates"]},
+      "expect": {"action": [{"tool": "bash", "args": {"command": "*unit.test.mjs*"}}]},
       "expected_behavior": [
         "node skills/managing-github-issues/evals/fixtures/unit.test.mjs exits 0",
         "parseRoadmap extracts open-table rows with score/status/sourcesRaw",

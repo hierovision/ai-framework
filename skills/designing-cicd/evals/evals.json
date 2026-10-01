@@ -5,7 +5,7 @@
     {
       "id": 1,
       "prompt": "phasewave's CI deploys to prod but migrations run AFTER the deploy (see .github/workflows/ci.yml in the repo root). fix the topology so migrations run before the deploy that serves traffic, add concurrency so only one prod deploy runs at a time (queue it, don't cancel an in-flight one), and gate prod with a protected `production` environment. the repo is at fixtures/phasewave/cicd-migrate/ \u2014 treat that directory as the repo root",
-      "expect": {"artifact": [{"path": "**/.github/workflows/ci.yml", "phrases": ["workflow_dispatch"]}], "text": ["topology"]},
+      "expect": {"artifact": [{"path": "**/.github/workflows/ci.yml", "phrases": ["concurrency", "cancel-in-progress", "environment", "production"]}]},
       "expected_behavior": [
         "Reads the current .github/workflows/ci.yml before changing anything (not from memory)",
         "Recognizes the cardinal defect: `deploy` does not `needs` the `migrate` job (migrate-before-deploy violated) — and fixes the ordering so `deploy` `needs: [migrate]` (or migrate runs before deploy in the DAG)",
@@ -43,7 +43,7 @@
     {
       "id": 3,
       "prompt": "can you add GitHub Actions to run our unit tests on every pull request? just the tests, nothing else",
-      "expect": {"artifact": [{"path": "**/.github/workflows/ci.yml", "phrases": ["actions/checkout"]}], "text": ["topology"]},
+      "expect": {"artifact": [{"path": "**/.github/workflows/ci.yml", "phrases": ["actions/checkout"]}]},
       "expected_behavior": [
         "Recognizes this is the narrow PR-validation slice, NOT a full release pipeline — scopes to a `pull_request`-triggered test (and build) job only",
         "Does NOT invent a prod deploy, environment, or migration job that the user didn't ask for (resists scope creep)",

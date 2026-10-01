@@ -41,7 +41,7 @@
     {
       "id": 2,
       "prompt": "same dashboard page — does it have any actual WCAG violations? report only what's there, don't pad it. I need an honest pass/fail, mobile + desktop, WCAG AA",
-      "expect": {"artifact": [{"path": "**/report.json", "phrases": ["verdict"]}], "action": [{"tool": "bash", "args": {"command": "*audit.mjs*"}}], "text": ["manual"]},
+      "expect": {"artifact": [{"path": "**/report.json", "phrases": ["verdict", "manual"]}], "action": [{"tool": "bash", "args": {"command": "*audit.mjs*"}}]},
       "expected_behavior": [
         "Runs the audit against the genuinely accessible page; the emitted report.json is schema-valid with verdict pass, ZERO violations, ZERO severity in the rollup",
         "FALSE-POSITIVE DISCIPLINE (from reviewing-code): does NOT manufacture a violation, does NOT inflate a nit into a blocker just to seem thorough — a genuinely accessible page gets a clean report",
