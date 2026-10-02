@@ -396,6 +396,10 @@ prior sections, do not clobber the History:
   `implemented` or `done`. If the convention is unknown, leave status
   alone and surface the question in the handoff. Do not pre-flip.
 - Append the revision date to `revised:` (never replace the array).
+- If the plan's slug is a `docs/ROADMAP.md` ID, flip that row to `done` with
+  the date + PR link in the **same** PR (`reference/git-workflow.md` → Roadmap
+  closure). A PR that closes a roadmap item but leaves the row `backlog` is
+  incomplete.
 
 The plan is the audit trail. A future reader must be able to
 reconstruct "what was the plan, what did the implementer actually do,
