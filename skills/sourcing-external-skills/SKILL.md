@@ -172,9 +172,10 @@ resolved against this skill's own directory):
   whose gate inputs are pending (e.g. files not yet provided, scan not
   yet run); it is never a closure claim, and the closure section lists
   open rows with what unblocks each.
-- The register lives where the program plan says (e.g. the plan's
-  `skill-gap-analysis-candidates.md` companion); ad-hoc passes write it
-  beside the gap brief.
+- The register is a working artifact in the plans tier (or beside the gap
+  brief for an ad-hoc pass); once every row is terminal and its ingest
+  decision is recorded, it is deleted — git history is the recovery path
+  (ADR-0008 amendment).
 
 ### Step 7 — Provenance (when anything is adapted or verbatim)
 
