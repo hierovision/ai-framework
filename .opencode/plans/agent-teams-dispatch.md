@@ -304,6 +304,10 @@ list` mode check; one in-session `architect` dispatch; one
   `skills/implementing-features/SKILL.md` Step 8 (RM-022's delivered contract;
   the assertion was not touched). The full Verification list now exits 0;
   commit / push / PR proceed.
+- 2026-10-02 — PR opened:
+  [PR #86](https://github.com/hierovision/ai-framework/pull/86) on branch
+  `feat/agent-teams-dispatch`; RM-032 row carries the link (in-progress,
+  flips to done at merge).
 
 ### Follow-ups
 
