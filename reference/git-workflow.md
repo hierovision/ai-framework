@@ -54,6 +54,15 @@ override the *naming* via their rules file; the *discipline* is fixed.
 - Commit on the branch in logical steps if a pass spans long; the PR
   squash-merge collapses it to one main-history commit.
 
+## Roadmap closure
+
+- A PR that closes (or advances) a `docs/ROADMAP.md` item updates that row in
+  the **same** PR: status → `done` (or `in-progress`), with the close date and
+  the PR link in the row. The row is part of the change, not a follow-up.
+- A merged PR that leaves its roadmap item `backlog` is incomplete: the next
+  triage pass has to reconstruct what shipped. `reviewing-code` checks the row
+  when the plan's slug is a roadmap ID.
+
 ## Push, PR, merge
 
 1. After the green verification (and before/with the handoff), push the
