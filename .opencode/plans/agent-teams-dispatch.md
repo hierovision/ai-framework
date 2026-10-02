@@ -304,6 +304,13 @@ list` mode check; one in-session `architect` dispatch; one
   `skills/implementing-features/SKILL.md` Step 8 (RM-022's delivered contract;
   the assertion was not touched). The full Verification list now exits 0;
   commit / push / PR proceed.
+- 2026-10-02 — same PR #82 trim regression, second occurrence (found by the
+  PR CI run; masked locally because it sits after the watch test that failed
+  first): the trim also dropped the RM-023 recovery sentence from
+  `implementing-features` Step 8 (`transient` / `deterministic` / recorded),
+  which `scripts/test_delegated_result_contract.py` asserts. Restored the
+  dropped contract text; the assertion was not touched. All 25
+  CI-equivalent offline checks now exit 0.
 - 2026-10-02 — PR opened:
   [PR #86](https://github.com/hierovision/ai-framework/pull/86) on branch
   `feat/agent-teams-dispatch`; RM-032 row carries the link (in-progress,

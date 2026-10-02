@@ -159,9 +159,11 @@ dated-allowlisted), journey completeness, the bounded ≤2-cycle fix loop, and
 the `council-ux` text-evidence review — do not restate its process here. A
 delegated `council-ux` result is validated per
 `reference/delegated-result-contract.md` (an **empty or malformed** result is a
-**failed run**, never clean). A change with **no visible UI** skips with an
-explicit note; a missing dev server/chromium is recorded as DEFERRED, and the
-handoff carries the note.
+**failed run**, never clean); a **transient** failure is retried, a
+**deterministic** one is retried once then the vehicle is switched or the work
+taken over inline, and the outcome is **recorded** in the handoff. A change
+with **no visible UI** skips with an explicit note; a missing dev
+server/chromium is recorded as DEFERRED, and the handoff carries the note.
 
 Long delegated workstreams follow `reference/subagent-supervision.md`: bound
 each dispatch to ≤ ~10 min, require a heartbeat file, and run
