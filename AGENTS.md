@@ -18,9 +18,9 @@ state or process detail — propose an ADR instead of adding prose here.
    a consumer project's worktree.
 4. **Plan lifecycle** (ADR-0008): plans and session handoffs are working
    artifacts in `.opencode/plans/` (tracked in this repo); extract their
-   essence into ADRs / ROADMAP / skill bodies before merge, then archive
-   them in `.opencode/plans/archive/` — the archive is an audit trail,
-   not current truth.
+   essence into ADRs / ROADMAP / skill bodies before merge, then delete
+   them — git history is the recovery path, not a checked-in archive
+   (ADR-0008 Amendment, 2026-10-02).
 5. **The cardinal rule** (defined in `skills/debugging-test-failures/
    SKILL.md`, cited everywhere): never green a check by weakening the
    net; an override is honored only with a dated record.
