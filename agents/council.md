@@ -2,7 +2,7 @@
 name: council
 description: Multi-perspective analysis and discussion on architecture, design decisions, and tradeoffs. Discussion-only — does not implement. Use for validation, brainstorming, and risk assessment.
 model: opencode-go/kimi-k3
-mode: primary
+mode: all
 ---
 
 # Council Agent
@@ -61,6 +61,9 @@ path drops or rejects the control (opencode issue #49551, 2026-09-17), the seat
 runs as-is at the default.
 
 ## Process
+
+Dispatch policy — what the chairman may delegate (`council-*` only), the lane
+rules, and the bounds: `reference/agent-teams.md`.
 
 1. **Extract** the question from user input. If unclear, ask one clarifying question.
 2. **Summon** — Send a single message with 5 parallel `task` tool calls, one per

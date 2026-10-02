@@ -83,6 +83,32 @@ def fmt_age(sec):
     return f"{sec/60:.1f}m"
 
 
+def session_model(sess):
+    """Resolve the session row's `model` JSON blob to `<providerID>/<id>`.
+
+    The blob is volatile (probed 2026-10-02:
+    `{"id":"nemotron-3-ultra-free","providerID":"opencode","variant":"default"}`).
+    Every missing/odd shape degrades to None — never a crash
+    (reference/opencode-integration.md).
+    """
+    try:
+        raw = sess["model"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    provider, model_id = data.get("providerID"), data.get("id")
+    if not provider or not model_id:
+        return None
+    return f"{provider}/{model_id}"
+
+
 # --- heartbeat source --------------------------------------------------------
 
 HB_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s+(\S+)\s*(.*)$")
@@ -302,7 +328,8 @@ def _report(a, hb, sess, an, result, why):
         status_line("heartbeat:", "(none)")
     if an:
         title = (sess["title"] or "")[:58]
-        status_line("session:", f"{sess['id']}  {sess['agent']}  \"{title}\"")
+        status_line("session:", f"{sess['id']}  {sess['agent']}  "
+                               f"{session_model(sess) or '-'}  \"{title}\"")
         status_line("", f"last-event {fmt_age(s_age)} ago | parts={an['part_count']} | "
                         f"writes={an['created']} edits={an['edited']} | cost=${sess['cost'] or 0:.3f} "
                         f"| in/out={sess['tokens_input'] or 0}/{sess['tokens_output'] or 0}")
@@ -333,7 +360,8 @@ def _json(hb, sess, an, result, why):
         "session": None if not sess else {"id": sess["id"], "title": sess["title"],
                                           "agent": sess["agent"], "cost": sess["cost"],
                                           "tokens_in": sess["tokens_input"],
-                                          "tokens_out": sess["tokens_output"]},
+                                          "tokens_out": sess["tokens_output"],
+                                          "model": session_model(sess)},
         "session_age_s": s_age, "analysis": None if not an else {
             "tools": an["tools"], "created": an["created"], "edited": an["edited"],
             "blocking_waits": an["blocking_waits"], "running": an["running"],

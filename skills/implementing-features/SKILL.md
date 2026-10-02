@@ -163,6 +163,11 @@ delegated `council-ux` result is validated per
 explicit note; a missing dev server/chromium is recorded as DEFERRED, and the
 handoff carries the note.
 
+Long delegated workstreams follow `reference/subagent-supervision.md`: bound
+each dispatch to ≤ ~10 min, require a heartbeat file, and run
+`scripts/watch_agent.py` while it works; long evals detach with a log and are
+polled, never a blocking black box.
+
 ### Step 9 — Coverage-and-quality gate (rebalance + expand)
 
 With real code in place:
