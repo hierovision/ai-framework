@@ -24,6 +24,7 @@ exists, proceed generically and flag the gap to the user in the handoff.
 - Pinia store + composable patterns
 - E2E selector / condition discipline (no fixed timeouts)
 - TypeScript hygiene
+- Verification flake: lazy-import signature
 - Where this stack trips an implement pass
 
 ## Generated DB types
@@ -142,6 +143,19 @@ fixed timeouts:
   get verification green — a suppressed failure is a deferred contract
   break. If a verifier cannot pass without a suppression, treat it as a
   contract-breaking deviation (Step 4 of the skill).
+
+## Verification flake: lazy-import signature
+
+A verifier that "flakes" only on navigation to one route — a click that never
+lands, a view that never mounts, assertions seeing the wrong page — is usually
+a **compile/runtime error in that route's lazily-imported component**, not
+infra. Before blaming the sandbox (IndexedDB, offline Supabase, headless
+quirks): capture the browser console during the failing step and look for
+`Failed to fetch dynamically imported module` / a 500 on a `*.vue` module. That
+is a real defect in the code just written — fix it, do not work around it.
+Unit suites can stay fully green while an SFC carries a template/script error,
+because nothing imports the component in tests; the e2e layer is where it
+surfaces.
 
 ## Where this stack trips an implement pass
 
