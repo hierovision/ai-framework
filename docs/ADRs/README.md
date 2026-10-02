@@ -38,7 +38,7 @@ The plan-lifecycle rule (ADR-0008) is the routing table:
 |---|---|---|
 | Cross-session imperative | `AGENTS.md` | standing rule adopted |
 | Binding/structure decision | `docs/ADRs/` | decided (this directory) |
-| In-flight plan / session handoff | `.opencode/plans/` | essence extracted → `archive/` |
+| In-flight plan / session handoff | `.opencode/plans/` | essence extracted → deleted (git history) |
 | Improvement candidate / target-repo uplift | `reference/self-improvement.md` governs; captured in the target repo's `.opencode/exercise.md` | promoted at session close (issues / target-repo memory) → archived |
 | Current state + next action | `docs/ROADMAP.md` | every session boundary |
 | Volatile facts (models, pricing) | `reference/*.md` | re-verified every pass |

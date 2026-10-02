@@ -28,8 +28,9 @@ Adopt three memory tiers, and one working-artifact tier:
    is superseded or reversed *in place*, never silently rewritten.
 3. **Plan lifecycle** — plans are working artifacts whose essence is
    extracted into tracked docs (ADRs, ROADMAP, skill bodies) before merge;
-   the files then move to `.opencode/plans/archive/`. There is no
-   archive-as-memory tier — the archive preserves the audit trail, it is
+   the files are then **deleted** (amended 2026-10-02 — see Amendment;
+   originally: move to `.opencode/plans/archive/`). There is no
+   archive-as-memory tier — git history preserves the audit trail, it is
    not read as current truth.
 
 Working-artifact tier: `.opencode/plans/` holds the in-flight plans and
@@ -39,7 +40,7 @@ consumer repos; this is the opt-in the plan-format contract anticipates).
 `docs/handoffs/` is retired; the fixed handoff shape (done → verified →
 blocked → next) remains defined in `docs/CONCEPTS.md` Choice 11, and a
 session handoff lives in `.opencode/plans/` until its essence is extracted,
-then joins the archive.
+then is deleted (amended 2026-10-02).
 
 ## Consequences
 
@@ -60,3 +61,13 @@ then joins the archive.
 - `.opencode/plans/handoff-rm-003-to-rm-004.md` (the retiring artifact)
 - `.gitignore` history: deletion `12c8297` (2026-07-27), revival `fa8af03`
   (2026-09-22), this retirement (2026-09-23)
+
+## Amendment (2026-10-02) — plans are deleted, not archived
+
+User directive 2026-10-02: once a plan's essence is extracted, the plan file
+is **deleted**, not moved to `.opencode/plans/archive/`. The archive tier is
+retired and the existing archive was deleted in the same pass. Recoverability
+is git history, not a checked-in archive: the plans tier stays tracked, so
+every deleted plan remains in the commit history. References to plan paths in
+ADRs and other docs resolve through that history. This amends Decision item 3
+and the session-handoff sentence above; the rest of the decision stands.
