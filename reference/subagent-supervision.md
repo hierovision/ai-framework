@@ -7,6 +7,19 @@ invisible from outside, cancelled by the user who could not tell progress from
 a hang. Promoted from `.scratch/skill-gap-analysis/SUBAGENT-PROTOCOL.md`
 (2026-10-01); the watchdog now lives at `scripts/watch_agent.py`.
 
+## Dispatch vehicles
+
+- **In-session Task**: works when the parent session is on a nested-capable
+  tier (Go / Zen / direct-key); a nested free-bound subagent is
+  environment-dependent (CI rejects it) — see `reference/agent-teams.md`
+  §Lane policy.
+- **Run-vehicle**: `python3 scripts/dispatch_agent.py --agent <name>
+  --prompt-file <file>` runs a top-level `opencode run`, prints the session id
+  (resume with `--session`), validates the captured result against a declared
+  contract, and emits exactly one `kind=agent` run-log record with agent +
+  resolved model. Lane policy, topology bounds, question relay, and the full
+  attribution contract: `reference/agent-teams.md`.
+
 ## 1. Bound the dispatch (the orchestrator's job)
 
 - One Task == one checkpoint of ≤ ~10 minutes of wall clock. Split authoring

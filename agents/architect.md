@@ -2,7 +2,7 @@
 name: architect
 description: Architect multi-file features, plan database changes, produce implementation plans.
 model: opencode/nemotron-3-ultra-free
-mode: primary
+mode: all
 ---
 
 # Design Agent
@@ -27,6 +27,9 @@ number.
 Follow the **`designing-architecture`** skill for the full process (research,
 goal/ACs/boundaries extraction, the plan artifact schema, and the revision
 rules for an existing plan) — do not reimplement that process here.
+
+Dispatch policy — what this agent may delegate, the lane rules, and the
+bounds: `reference/agent-teams.md`.
 
 Project-specific context to bring into that skill's research step:
 

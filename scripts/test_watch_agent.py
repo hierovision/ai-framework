@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import tempfile
+import types
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
@@ -107,6 +108,51 @@ def test_json_output_shape():
     assert rc == 0, rc
     payload = json.loads(buf.getvalue())
     assert payload["verdict"] == "OK" and "why" in payload and "analysis" in payload, payload
+
+
+def _session(model=None):
+    return {"id": "ses_test", "title": "probe", "agent": "architect",
+            "cost": 0.0, "tokens_input": 0, "tokens_output": 0,
+            "model": model if model is not None
+            else '{"id":"nemotron-3-ultra-free","providerID":"opencode",'
+                 '"variant":"default"}'}
+
+
+def test_session_model_parsing_and_degradation():
+    """AC6: the session `model` JSON blob resolves to provider/id, and every
+    missing/odd shape degrades to None instead of raising."""
+    assert watch.session_model(_session()) == "opencode/nemotron-3-ultra-free"
+    for sess in ({}, {"model": None}, {"model": ""}, {"model": "not json"},
+                 {"model": '["x"]'}, {"model": '{"id":"x"}'},
+                 {"model": '{"providerID":"p"}'},
+                 {"model": '{"id":"i","providerID":""}'}):
+        assert watch.session_model(sess) is None, sess
+
+
+def test_json_output_exposes_model():
+    """AC6: `watch_agent.py --json` exposes the session model."""
+    import contextlib
+    import io
+    import json
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        watch._json(None, _session(), None, "OK", [])
+    payload = json.loads(buf.getvalue())
+    assert payload["session"]["model"] == "opencode/nemotron-3-ultra-free", payload
+
+
+def test_status_line_exposes_model():
+    """AC6: the human-readable session line carries the model."""
+    import contextlib
+    import io
+    an = {"part_count": 1, "created": 0, "edited": 0, "tools": {}, "running": [],
+          "blocking_waits": [], "bad": [], "loops": [], "last_ms": None,
+          "timeline": []}
+    a = types.SimpleNamespace(progress=None, tail=3)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        watch._report(a, None, _session(), an, "OK", [])
+    assert "opencode/nemotron-3-ultra-free" in buf.getvalue(), buf.getvalue()
 
 
 def test_protocol_reference_and_citation():

@@ -2,9 +2,12 @@
 name: planner
 description: Analyzes code, drafts approaches, and reviews without making changes. Use for investigation, design exploration, and read-only assessment.
 model: opencode/nemotron-3-ultra-free
-mode: primary
+mode: all
 permission:
   edit: deny
+  # Leaf dispatcher policy: the planner delegates nothing (reference/agent-teams.md).
+  task:
+    "*": "deny"
   # Bash map: opencode evaluates the LAST matching rule, so `*` (ask) comes
   # first and the narrow rules below override it. The allowlist is read-only
   # investigation; anything that writes, installs, deletes, or spends is denied
@@ -143,6 +146,8 @@ number.
 ## Boundaries
 
 - Never edit files; never run mutating commands.
+- Dispatch policy (a leaf — this agent delegates nothing):
+  `reference/agent-teams.md`.
 - When analysis becomes a buildable plan for a multi-file feature, hand off to
   `architect` (the plan artifact belongs in `.opencode/plans/<slug>.md` via the
   `designing-architecture` skill).

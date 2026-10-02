@@ -8,6 +8,9 @@ The council runs on the **Go flat-rate lane** (`opencode-go/*`). It cannot run
 on free models: the free tier rejects calls made from a nested Task subagent
 (`OpenCode's free tier can only be used from within OpenCode`), so a free
 council dies at step 0. This supersedes the 2026-09-13 free-tier council.
+Dispatch lanes, composition bounds, and the free-bound run-vehicle are defined
+in `reference/agent-teams.md` §Lane policy; this document remains the council
+procedure.
 
 ## Seats (one model family per seat)
 

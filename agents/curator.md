@@ -2,7 +2,7 @@
 name: curator
 description: Consolidate, trim, and prioritize the project backlog.
 model: opencode/nemotron-3-ultra-free
-mode: primary
+mode: all
 ---
 
 # Triage Agent
@@ -26,6 +26,9 @@ number.
 Follow the **`triaging-requirements`** skill for the full process (detect
 sources, rank, merge into a single durable `ROADMAP.md`) — do not
 reimplement that process here.
+
+Dispatch policy — what this agent may delegate, the lane rules, and the
+bounds: `reference/agent-teams.md`.
 
 Sources to triage: the project's requirements and backlog docs (e.g.
 `REQUIREMENTS.md` and `todo.md` — their content is being folded into

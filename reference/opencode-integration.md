@@ -33,6 +33,37 @@ line. Validated **2026-09-06**, except where a section carries its own date.
   `directory`. Dated 2026-10-01 — volatile, re-verify on touch;
   `scripts/watch_agent.py` degrades to heartbeat-only when the DB is absent or
   the schema changes.
+- `session.model` is a **JSON blob** —
+  `{"id":"nemotron-3-ultra-free","providerID":"opencode","variant":"default"}`
+  on a probed `architect` run-vehicle session (2026-10-02). Resolve it to a
+  display model as `<providerID>/<id>`; parse defensively (missing/odd blob →
+  unknown, never a crash). `watch_agent.py` exposes it in `--json`.
+
+## Agent dispatch (dated 2026-10-02)
+
+- **`mode` semantics** (<https://opencode.ai/docs/agents/>, fetched
+  2026-10-02): `primary` = selectable as the session agent, not offered to the
+  Task tool; `subagent` = Task-only; `all` = both. opencode's default when
+  `mode` is unspecified is `all`. `opencode agent list` annotates each entry
+  `(primary)` / `(subagent)` / `(all)`; on 1.18.18 the five core personas were
+  `(primary)` before the 2026-10-02 dispatch flip.
+- **`permission.task`** (<https://opencode.ai/docs/permissions/>, fetched
+  2026-10-02): matches the subagent type; object form with glob patterns where
+  the **last matching rule wins**, so a `"*": "deny"` catch-all first plus
+  explicit `"allow"` entries is the allow-list pattern. `deny` also removes
+  the subagent from the Task tool's description.
+- **Named dispatch honors the target's frontmatter `model`** (upstream #35126,
+  fixed 2026-07-09): the target's binding — and its permission wrapper — travel
+  with the agent, so an orchestrator need not restate either.
+- **Free-tier nested calls are environment-dependent**: CI rejects a nested
+  subagent bound to a free model (`OpenCode's free tier can only be used from
+  within OpenCode` — `scripts/ci-lane-overrides.py`), and a free council died
+  nested locally on 2026-10-01 (RM-017); but a Go-bound parent dispatched the
+  free-bound `architect` in-session cleanly on 2026-10-02 (child session row
+  `model={"id":"nemotron-3-ultra-free","providerID":"opencode",...}`). Route
+  free-bound targets through the top-level run-vehicle
+  (`scripts/dispatch_agent.py`) when the orchestrator is free-bound or
+  headless.
 
 ## Model reasoning control (Go)
 
