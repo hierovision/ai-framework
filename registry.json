@@ -292,6 +292,14 @@
       "boundary_ref": "agents/curator.md"
     },
     {
+      "name": "debugger",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L1",
+      "status": "active",
+      "boundary_ref": "agents/debugger.md"
+    },
+    {
       "name": "implementer",
       "type": "persona",
       "owner": "@hierovision",
@@ -306,6 +314,54 @@
       "maturity": "L3",
       "status": "active",
       "boundary_ref": "agents/planner.md"
+    },
+    {
+      "name": "reviewer",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L1",
+      "status": "active",
+      "boundary_ref": "agents/reviewer.md"
+    },
+    {
+      "name": "skill-author",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L1",
+      "status": "active",
+      "boundary_ref": "agents/skill-author.md"
+    },
+    {
+      "name": "skill-reviewer",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L1",
+      "status": "active",
+      "boundary_ref": "agents/skill-reviewer.md"
+    },
+    {
+      "name": "test-writer",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L1",
+      "status": "active",
+      "boundary_ref": "agents/test-writer.md"
+    },
+    {
+      "name": "vision-critic-fast",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L1",
+      "status": "active",
+      "boundary_ref": "agents/vision-critic-fast.md"
+    },
+    {
+      "name": "vision-critic-final",
+      "type": "persona",
+      "owner": "@hierovision",
+      "maturity": "L1",
+      "status": "active",
+      "boundary_ref": "agents/vision-critic-final.md"
     }
   ]
 }

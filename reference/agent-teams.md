@@ -19,9 +19,11 @@ validity in `reference/delegated-result-contract.md`.
   precedent: five lenses + chairman). Split larger sets into waves, and keep
   each Task to one checkpoint of ≤ ~10 minutes per
   `reference/subagent-supervision.md` §1.
-- The only encoded dispatch rule is **leaf hygiene**: the planner and every
-  `council-*` lens deny `task`, so a single-shot agent cannot recurse.
-  Orchestrators carry no `permission.task` allow-list
+- The only encoded dispatch rule is **leaf hygiene**: the planner, every
+  `council-*` lens, and the single-shot roles (`reviewer`, `skill-reviewer`,
+  `vision-critic-fast`, `vision-critic-final`) deny `task`, so a single-shot
+  agent cannot recurse. Orchestrators and the loop workers (`test-writer`,
+  `debugger`, `skill-author`) carry no `permission.task` allow-list
   (`reference/opencode-integration.md`).
 
 ## Composition
@@ -35,9 +37,16 @@ examples, not gates:
 
 - an orchestrator → any worker (the general case);
 - architect → planner or a council lens for design consults;
-- implementer → `council-*` or explore while implementing;
+- implementer → `test-writer` / `debugger` / `council-*` / explore while
+  building;
+- a verifier that resists → `debugger`, then back to `implementer`;
+- UI iteration → `vision-critic-fast` during the fix loop,
+  `vision-critic-final` for sign-off;
+- meta-loop → `skill-author`, then `skill-reviewer` (the author never grades
+  itself);
 - curator → architect / planner / implementer to route an item;
-- planner and `council-*` → nothing (leaves by role).
+- leaves by role: planner, `council-*`, `reviewer`, `skill-reviewer`,
+  `vision-critic-fast`, `vision-critic-final`.
 
 The leaf deny is the one mechanically encoded exception.
 

@@ -179,6 +179,13 @@ improves, one file changes and every project inherits it on `git pull`.
 When a project wants a different model, one `model:` line changes and no
 process knowledge moves.
 
+The persona cast covers each standing loop role: `architect` (design),
+`implementer` (build), `test-writer` (tests), `reviewer` (verdict),
+`debugger` (debug), `vision-critic-fast` / `vision-critic-final` (UI
+iteration and sign-off), `skill-author` / `skill-reviewer` (meta-loop),
+`curator` / `planner` (support), and `council` + lenses (multi-perspective
+review).
+
 ```mermaid
 flowchart LR
     subgraph HARNESS["per project / per harness"]
