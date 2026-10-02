@@ -315,6 +315,10 @@ list` mode check; one in-session `architect` dispatch; one
   [PR #86](https://github.com/hierovision/ai-framework/pull/86) on branch
   `feat/agent-teams-dispatch`; RM-032 row carries the link (in-progress,
   flips to done at merge).
+- 2026-10-02 — AC10 closed: PR CI `quality-gates` green
+  ([run 37063937522](https://github.com/hierovision/ai-framework/actions/runs/37063937522),
+  28s); the full local Verification list and all 25 CI-equivalent offline
+  checks exit 0.
 
 ### Follow-ups
 
