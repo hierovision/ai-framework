@@ -249,6 +249,11 @@ Plus (live, manual line in handoff): `bash scripts/install.sh && opencode agent 
   (the repo's closure convention — flips to `done` at merge), not `done` as
   AC8 worded it.
 
+- 2026-10-02 — PR opened:
+  [PR #88](https://github.com/hierovision/ai-framework/pull/88) on branch
+  `feat/agent-persona-expansion`; RM-033 row carries the link (in-progress;
+  flips to `done` at merge).
+
 ### Follow-ups
 
 - `scripts/test_registry.py`'s PASS line still prints the frozen "10
