@@ -31,6 +31,7 @@ field names elsewhere.
 | `cost` | float \| null | no | null | **measured USD** reported by the provider stream (`opencode` step-finish `cost`); null when unknown, never 0-by-default — the authoritative allowance/spend figure, no price table needed |
 | `outcome` | enum `success`\|`failure`\|`error`\|`stopped` | **yes** | — | quality / regression |
 | `eval_pass` | bool \| null | no | null | eval-kind pass/fail (drift) |
+| `eval` | string \| null | no | null | RM-021 AC3: eval key `<skill>#<id>` on `kind=eval` records; readers tolerate absence |
 | `detail` | string \| null | no | null | **failure-only**, capped 512 chars |
 
 `required` = must be present in the caller's record (no safe default).
@@ -59,8 +60,8 @@ Full I/O is never logged (privacy + noise + cost).
 ## Example lines
 
 ```jsonl
-{"ts":"2026-08-28T06:00:00Z","run_id":"c1f2...","kind":"eval","skill":"writing-unit-tests","agent":null,"model":"go","tokens_in":812,"tokens_out":305,"duration_ms":142000,"outcome":"success","eval_pass":true,"detail":null}
-{"ts":"2026-08-28T06:03:11Z","run_id":"a9b0...","kind":"eval","skill":"writing-unit-tests","agent":null,"model":"go","tokens_in":790,"tokens_out":298,"duration_ms":139000,"outcome":"failure","eval_pass":false,"detail":"expected_behavior[3] missing: agent did not route RLS to integration"}
+{"ts":"2026-08-28T06:00:00Z","run_id":"c1f2...","kind":"eval","skill":"writing-unit-tests","eval":"writing-unit-tests#1","agent":null,"model":"go","tokens_in":812,"tokens_out":305,"duration_ms":142000,"outcome":"success","eval_pass":true,"detail":null}
+{"ts":"2026-08-28T06:03:11Z","run_id":"a9b0...","kind":"eval","skill":"writing-unit-tests","eval":"writing-unit-tests#3","agent":null,"model":"go","tokens_in":790,"tokens_out":298,"duration_ms":139000,"outcome":"failure","eval_pass":false,"detail":"expected_behavior[3] missing: agent did not route RLS to integration"}
 {"ts":"2026-08-28T09:15:02Z","run_id":"d4e5...","kind":"skill","skill":"triaging-requirements","agent":null,"model":"zen","tokens_in":1205,"tokens_out":540,"duration_ms":88000,"outcome":"success","eval_pass":null,"detail":null}
 ```
 

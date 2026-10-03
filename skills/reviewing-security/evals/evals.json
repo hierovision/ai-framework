@@ -109,7 +109,7 @@
           {
             "path": "**/SECURITY-REVIEW.md",
             "phrases": [
-              "ownership",
+              "cross-tenant",
               "tenant",
               "route.ts"
             ]
