@@ -1100,7 +1100,8 @@ def _final_eval_keys(logs_dir):
     counts as a final verdict.
     """
     keys = set()
-    if not logs_dir or not os.path.isdir(logs_dir):
+    logs_dir = logs_dir or log_run.DEFAULT_LOGS_DIR
+    if not os.path.isdir(logs_dir):
         return keys
     for fn in os.listdir(logs_dir):
         if not fn.endswith(".jsonl"):
@@ -1305,7 +1306,11 @@ def main(argv=None):
             return 3
 
     # RM-021 AC2: assert every selected eval has a final content record.
-    missing_keys = _missing_eval_keys(selected, args.logs_dir)
+    # Use the effective logs dir: the per-change lane invokes the runner
+    # without --logs-dir, so args.logs_dir is None there (2026-10-03 fix —
+    # passing None false-failed every selected eval after they had passed).
+    missing_keys = _missing_eval_keys(
+        selected, args.logs_dir or log_run.DEFAULT_LOGS_DIR)
     if missing_keys:
         print(f"\ncompleteness check failed: {len(missing_keys)} selected eval(s) "
               f"have no final record: {', '.join(missing_keys)}", file=sys.stderr)

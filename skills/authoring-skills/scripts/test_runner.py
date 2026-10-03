@@ -282,6 +282,27 @@ def test_cli_pass_branch():
         shutil.rmtree(root); shutil.rmtree(logs)
 
 
+def test_cli_completeness_uses_default_logs_dir():
+    """RM-021 AC2 regression: the per-change lane passes no --logs-dir; the
+    completeness check must resolve the effective default, never treat the
+    None argument as an empty log dir (2026-10-03 per-change false-fail)."""
+    root = _make_skills_root()
+    logs = tempfile.mkdtemp()
+    try:
+        env = _hermetic_env()
+        env["OBSERVE_LOG_DIR"] = logs
+        r = subprocess.run([sys.executable, RUNNER, "--skills-root", root,
+                            "--stub-output", "ALL"],
+                           capture_output=True, text=True, env=env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert "completeness check failed" not in (r.stderr or ""), r.stderr
+        recs = _read_logs(logs)
+        assert recs and all(x["eval_pass"] is True for x in recs), recs
+        print("PASS  no --logs-dir -> completeness resolves the default, exit 0")
+    finally:
+        shutil.rmtree(root); shutil.rmtree(logs)
+
+
 def test_cli_fail_branch():
     root = _make_skills_root()
     logs = tempfile.mkdtemp()

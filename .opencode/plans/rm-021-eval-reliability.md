@@ -293,3 +293,10 @@ command from AC9.
   test_eval_report.py, test_eval_workflows.py, test_quarantine.py,
   check_typed_evals.py, validate_skill.py --all, yamllint). Live rehearsals
   and AC9 scheduled-run qualification pending.
+- 2026-10-03 — post-PR fix slice (AC2). The per-change lane invokes the
+  runner without `--logs-dir`, so the completeness check received `None` and
+  false-failed every selected eval after they had passed (verified:
+  `observing-runs#1` record `eval_pass=true` alongside "no final record").
+  `_final_eval_keys` and the call site now resolve
+  `log_run.DEFAULT_LOGS_DIR`; a regression test runs the CLI without
+  `--logs-dir`. Rehearsals AC6/AC7 and the AC9 watch continue.
