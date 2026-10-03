@@ -149,6 +149,10 @@ jobs:
             done
             SHARD_SKILLS="${FILTERED# }"
           fi
+          if [ -z "$SHARD_SKILLS" ]; then
+            echo "no selected skills in this shard; skipping"
+            exit 0
+          fi
           SKILL_ARGS=""
           for s in $SHARD_SKILLS; do SKILL_ARGS="$SKILL_ARGS --skill $s"; done
           python3 skills/authoring-skills/scripts/run_behavioral_eval.py \
