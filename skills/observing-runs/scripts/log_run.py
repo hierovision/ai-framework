@@ -56,6 +56,9 @@ FIELD_TYPES = {
     "cost": (float, int, type(None)),
     "outcome": str,
     "eval_pass": (bool, type(None)),
+    # RM-021 AC3: optional eval key '<skill>#<id>' on kind=eval records so
+    # per-eval infra/content classification is unambiguous across shards.
+    "eval": (str, type(None)),
     "detail": (str, type(None)),
 }
 

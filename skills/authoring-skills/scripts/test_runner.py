@@ -970,6 +970,143 @@ def test_no_event_stall_stops_after_two_attempts():
         shutil.rmtree(d)
 
 
+def test_fixture_copy_contained_layout():
+    """RM-021 AC1: fixture paths are copied into the workdir at the repo-relative
+    layout; paths that normalize outside the repo are skipped, never crashing."""
+    root = tempfile.mkdtemp(prefix="beval-copy-")
+    try:
+        # Mirror a real repo root so dirname(dirname(skills_root)) == root.
+        repo = os.path.join(root, "repo")
+        skill = "observing-runs"
+        evals = os.path.join(repo, "skills", skill, "evals")
+        os.makedirs(evals)
+        # A normal fixture under evals/
+        with open(os.path.join(evals, "fixture.txt"), "w") as fh:
+            fh.write("fixture")
+        # A file reached via ../ (should land at skills/observing-runs/scripts/)
+        scripts = os.path.join(repo, "skills", skill, "scripts")
+        os.makedirs(scripts)
+        with open(os.path.join(scripts, "log_run.py"), "w") as fh:
+            fh.write("log_run")
+
+        tmp = tempfile.mkdtemp(prefix="beval-tmp-")
+        try:
+            copied = runner._copy_fixture_files(
+                tmp, skill,
+                ["fixture.txt", "../scripts/log_run.py", "/tmp/escaped-eval-file.txt"],
+                skills_root=os.path.join(repo, "skills"))
+            # Repo-relative layout preserved under tmp
+            assert os.path.isfile(os.path.join(tmp, "skills", skill, "evals", "fixture.txt")), \
+                f"fixture.txt not copied: {os.listdir(tmp)}"
+            assert os.path.isfile(os.path.join(tmp, "skills", skill, "scripts", "log_run.py")), \
+                f"log_run.py not copied: {os.listdir(tmp)}"
+            assert not os.path.exists(os.path.join(tmp, "tmp", "escaped-eval-file.txt")), \
+                "path escaping repo was not skipped"
+            assert copied == 2, copied
+        finally:
+            shutil.rmtree(tmp)
+    finally:
+        shutil.rmtree(root)
+
+
+def test_crash_isolation_records_infra_and_continues():
+    """RM-021 AC2: an unexpected exception in one eval is recorded as that eval's
+    infra error and the runner continues; the other eval still runs."""
+    root = tempfile.mkdtemp(prefix="beval-crash-")
+    logs = tempfile.mkdtemp(prefix="beval-crash-logs-")
+    try:
+        d = os.path.join(root, "alpha", "evals")
+        os.makedirs(d)
+        json.dump({"evals": [
+            {"id": 1, "prompt": "p", "expected_behavior": ["A"]},
+        ]}, open(os.path.join(d, "evals.json"), "w"))
+        d2 = os.path.join(root, "beta", "evals")
+        os.makedirs(d2)
+        json.dump({"evals": [
+            {"id": 1, "prompt": "p", "expected_behavior": ["B"]},
+        ]}, open(os.path.join(d2, "evals.json"), "w"))
+
+        calls = {"n": 0}
+
+        def get_output(e, turn=None):
+            calls["n"] += 1
+            if e["skill"] == "alpha":
+                raise RuntimeError("simulated shard crash")
+            return "B"
+
+        # Directly exercise the loop behavior with a raising get_output.
+        selected = runner.load_skill_evals(root)
+        for e in selected:
+            try:
+                runner.run_eval(e, get_output, logs_dir=logs, sleep=lambda _s: None)
+            except Exception as exc:
+                runner._record_infra_error(e, exc, logs_dir=logs)
+
+        recs = _read_logs(logs)
+        alpha_recs = [r for r in recs if r.get("skill") == "alpha"]
+        beta_recs = [r for r in recs if r.get("skill") == "beta"]
+        assert alpha_recs, "alpha crash must produce a record"
+        assert alpha_recs[-1]["outcome"] == "error", alpha_recs[-1]
+        assert beta_recs, "beta must still run after alpha crash"
+        assert beta_recs[-1]["eval_pass"] is True, beta_recs[-1]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+
+
+def test_completeness_assertion_names_missing_eval():
+    """RM-021 AC2: before exit the runner asserts every selected eval has a final
+    record and exits non-zero naming any missing key."""
+    root = tempfile.mkdtemp(prefix="beval-missing-")
+    logs = tempfile.mkdtemp(prefix="beval-missing-logs-")
+    try:
+        d = os.path.join(root, "alpha", "evals")
+        os.makedirs(d)
+        json.dump({"evals": [{"id": 1, "prompt": "p", "expected_behavior": ["A"]}]},
+                  open(os.path.join(d, "evals.json"), "w"))
+        # No records written for alpha#1.
+        selected = runner.load_skill_evals(root)
+        missing = runner._missing_eval_keys(selected, logs)
+        assert missing == ["alpha#1"], missing
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+
+
+def test_eval_record_carries_eval_key():
+    """RM-021 AC3: every final kind=eval record carries `eval: '<skill>#<id>'`."""
+    e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["A"], "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    try:
+        passed, missing, _ = runner.run_eval(e, lambda _e: "A", logs_dir=d)
+        assert passed, missing
+        rec = _read_logs(d)[-1]
+        assert rec.get("eval") == "alpha#1", rec
+    finally:
+        shutil.rmtree(d)
+
+
+def test_stall_stderr_persisted():
+    """RM-021 AC4: a timed-out invocation persists captured server stderr next to
+    the synthetic stall stream."""
+    e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["XYZZY_EXPECTED"], "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    try:
+        def stall_with_stderr(_e, turn=None):
+            return runner.EvalResult(
+                raw="eval stall: subprocess timed out after 1s with no completion",
+                stderr="ERROR provider=xyz timeout")
+        passed, missing, _ = runner.run_eval(e, stall_with_stderr, logs_dir=d, sleep=lambda _s: None)
+        assert not passed
+        sd = os.path.join(d, "eval-streams")
+        assert os.path.isdir(sd), "eval-streams dir missing"
+        stderr_files = [f for f in os.listdir(sd) if f.endswith("-stderr.log")]
+        assert stderr_files, f"no stderr log written: {os.listdir(sd)}"
+        body = open(os.path.join(sd, stderr_files[0]), encoding="utf-8").read()
+        assert "provider=xyz" in body, body
+    finally:
+        shutil.rmtree(d)
+
 
 def main():
     tests = [
@@ -1012,6 +1149,11 @@ def main():
         test_bash_writes_suppress_the_zero_write_nudge,
         test_legacy_eval_capped_at_one_nudge,
         test_no_event_stall_stops_after_two_attempts,
+        test_fixture_copy_contained_layout,
+        test_crash_isolation_records_infra_and_continues,
+        test_completeness_assertion_names_missing_eval,
+        test_eval_record_carries_eval_key,
+        test_stall_stderr_persisted,
     ]
     failed = 0
     for t in tests:

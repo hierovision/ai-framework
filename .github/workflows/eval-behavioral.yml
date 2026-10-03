@@ -12,7 +12,7 @@
 #     light eval (vs 70 s), 168 s on the heavy one (vs 147 s), AA 37 intel at
 #     $0.10/$0.50 per M; mimo measured 2x slower on the same light eval (141 s)
 #     which risks the shard timeout. Alt: mimo-v2.6-flash (cheaper, slower).
-#   - Depth: weekly = default per skill (26 evals); monthly = full suite (111).
+#   - Depth: weekly = default per skill (26 evals); monthly = full suite (110).
 #   - Why shard: a full pass measured 70-300 s per eval (probe 2026-09-29) =
 #     ~4-6 h serial, over the 150-min job timeout and the 120-min green-run
 #     budget. Six measured-weight shards run in parallel, so the RUN wall time
@@ -42,7 +42,7 @@ on:
     # Mondays 10:30 UTC — DEFAULT DEPTH (one default eval per skill, 26 evals,
     # ~10-15 min). Off-peak for the provider lane.
     - cron: '30 10 * * 1'
-    # 1st of the month 10:30 UTC — FULL suite (all 111 included evals), sharded.
+    # 1st of the month 10:30 UTC — FULL suite (all 110 included evals), sharded.
     # Depth policy 2026-09-29 (user directive): weekly is the cheap canary pass;
     # the full sweep runs monthly. Measured: full suite ~$1.8 and 59 min wall.
     - cron: '30 10 1 * *'
@@ -52,6 +52,10 @@ on:
         description: 'Run the full suite instead of one default eval per skill'
         type: boolean
         default: false
+      skills:
+        description: 'Space-separated skill names to run (intersected per shard; empty = all)'
+        type: string
+        default: ''
 
 # Least-privilege: read-only is all the eval runner needs.
 permissions:
@@ -129,8 +133,24 @@ jobs:
           # ("OpenCode's free tier can only be used from within OpenCode") and the
           # eval session dies. CI-only override to the lane model.
           export OPENCODE_CONFIG_CONTENT="$(python3 scripts/ci-lane-overrides.py --model opencode-go/deepseek-v4.1-flash)"
+          # RM-021 AC5: optional targeted dispatch restricts the shard to the
+          # intersection of the matrix skill list and the user-supplied list.
+          USER_SKILLS="${{ inputs.skills }}"
+          SHARD_SKILLS="${{ matrix.shard.skills }}"
+          if [ -n "$USER_SKILLS" ]; then
+            FILTERED=""
+            for s in $SHARD_SKILLS; do
+              for u in $USER_SKILLS; do
+                if [ "$s" = "$u" ]; then
+                  FILTERED="$FILTERED $s"
+                  break
+                fi
+              done
+            done
+            SHARD_SKILLS="${FILTERED# }"
+          fi
           SKILL_ARGS=""
-          for s in ${{ matrix.shard.skills }}; do SKILL_ARGS="$SKILL_ARGS --skill $s"; done
+          for s in $SHARD_SKILLS; do SKILL_ARGS="$SKILL_ARGS --skill $s"; done
           python3 skills/authoring-skills/scripts/run_behavioral_eval.py \
             --model opencode-go/deepseek-v4.1-flash --logs-dir logs $DEFAULT_ARG $SKILL_ARGS
 

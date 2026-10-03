@@ -711,6 +711,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
         rec = {
             "kind": "eval",
             "skill": e["skill"],
+            "eval": eval_key(e),
             "agent": None,
             "model": model or e["model_tier"],
             "outcome": "success" if passed else ("error" if dead else "failure"),
@@ -875,6 +876,34 @@ def preflight_model(model):
                    f"direct-key lane — advisory only)")
 
 
+def _copy_fixture_files(tmp, skill, files, skills_root=None):
+    """Copy eval fixtures into tmp at the repo-relative layout.
+
+    RM-021 AC1: every destination resolves under `tmp`. Paths that escape the
+    repo root are skipped rather than crashing. Returns the number of files
+    copied.
+    """
+    skills_root = skills_root or SKILLS_ROOT
+    repo_root = os.path.dirname(skills_root)
+    norm_repo = os.path.normpath(os.path.abspath(repo_root))
+    copied = 0
+    for rel in files or []:
+        src = os.path.join(skills_root, skill, "evals", rel)
+        norm_src = os.path.normpath(os.path.abspath(src))
+        # An absolute path outside the repo, or enough `..` segments, can
+        # escape. Reject anything not under the repo root.
+        if not (norm_src == norm_repo or norm_src.startswith(norm_repo + os.sep)):
+            continue
+        if not os.path.isfile(norm_src):
+            continue
+        rel_to_repo = os.path.relpath(norm_src, norm_repo)
+        dst = os.path.join(tmp, rel_to_repo)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy(norm_src, dst)
+        copied += 1
+    return copied
+
+
 def invoke_opencode(e, model=None, turn=None):
     """Real fresh-agent invocation (CI only; needs the model credential).
 
@@ -891,12 +920,7 @@ def invoke_opencode(e, model=None, turn=None):
     keep = False
     try:
         if not (turn and turn.get("session_id")):
-            for rel in e["files"]:
-                src = os.path.join(SKILLS_ROOT, e["skill"], "evals", rel)
-                if os.path.exists(src):
-                    dst = os.path.join(tmp, rel)
-                    os.makedirs(os.path.dirname(dst), exist_ok=True)
-                    shutil.copy(src, dst)
+            _copy_fixture_files(tmp, e["skill"], e.get("files"))
         # The model credential must already be in the environment (repo secret);
         # it is consumed here, never echoed.
         # start_new_session=True: a stalled opencode may leak child processes
@@ -926,10 +950,13 @@ def invoke_opencode(e, model=None, turn=None):
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass  # group already gone
-            proc.communicate()  # reap the killed group's pipes
+            # RM-021 AC4: reap the killed group's pipes so the captured server
+            # stderr (where opencode logs the resolving cause) is persisted.
+            _out, _err = proc.communicate()
             return EvalResult(
                 raw=(f"eval stall: subprocess timed out after {stall_timeout}s "
-                     f"with no completion (transient; subprocess group killed)"))
+                     f"with no completion (transient; subprocess group killed)"),
+                stderr=_redact(_err or "")[:4096])
         # Keep the workdir: the artifact class reads files the agent wrote
         # there; run_eval closes (removes) it after matching.
         keep = True
@@ -1044,6 +1071,63 @@ def _last_record(path):
     except OSError:
         return {}
     return last or {}
+
+
+def _record_infra_error(e, exc, logs_dir=None, model=None):
+    """RM-021 AC2: record an unexpected eval-level crash as an infra error.
+
+    Used when the runner's own loop catches an exception from `get_output` or
+    `run_eval` so one crash cannot silently drop the eval.
+    """
+    detail = (f"runner crash: {type(exc).__name__}: {exc}")[:DETAIL_MAX]
+    rec = {
+        "kind": "eval",
+        "skill": e["skill"],
+        "eval": eval_key(e),
+        "agent": None,
+        "model": model or e.get("model_tier"),
+        "outcome": "error",
+        "eval_pass": False,
+        "detail": detail,
+    }
+    return log_run.log_record(rec, logs_dir=logs_dir)
+
+
+def _final_eval_keys(logs_dir):
+    """Return the set of eval keys that have a final content verdict.
+
+    Per-attempt annotation records have `eval_pass=None`; only True/False
+    counts as a final verdict.
+    """
+    keys = set()
+    if not logs_dir or not os.path.isdir(logs_dir):
+        return keys
+    for fn in os.listdir(logs_dir):
+        if not fn.endswith(".jsonl"):
+            continue
+        try:
+            with open(os.path.join(logs_dir, fn), encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        continue
+                    if (rec.get("kind") == "eval"
+                            and rec.get("eval") is not None
+                            and rec.get("eval_pass") is not None):
+                        keys.add(rec["eval"])
+        except OSError:
+            continue
+    return keys
+
+
+def _missing_eval_keys(selected, logs_dir):
+    """RM-021 AC2: list selected eval keys with no final record."""
+    final = _final_eval_keys(logs_dir)
+    return [eval_key(e) for e in selected if eval_key(e) not in final]
 
 
 def main(argv=None):
@@ -1185,10 +1269,16 @@ def main(argv=None):
     failed = 0
     infra_deaths = 0
     for e in selected:
-        passed, missing, path = run_eval(e, get_output, logs_dir=args.logs_dir,
-                                         model=args.model,
-                                         max_retries=args.max_retries,
-                                         quarantine_path=quarantine_path)
+        # RM-021 AC2: isolate per-eval exceptions so one crash cannot drop the
+        # rest of the shard. Record an infra error and continue.
+        try:
+            passed, missing, path = run_eval(e, get_output, logs_dir=args.logs_dir,
+                                             model=args.model,
+                                             max_retries=args.max_retries,
+                                             quarantine_path=quarantine_path)
+        except Exception as exc:
+            path = _record_infra_error(e, exc, logs_dir=args.logs_dir, model=args.model)
+            passed, missing = False, [str(exc)]
         status = "PASS" if passed else "FAIL"
         print(f"{status}  {e['skill']}#{e['eval_id']}  -> {path}")
         if not passed:
@@ -1213,6 +1303,13 @@ def main(argv=None):
             print("aborting: model resolution failed for 3 consecutive evals "
                   "(infra, not a regression)", file=sys.stderr)
             return 3
+
+    # RM-021 AC2: assert every selected eval has a final content record.
+    missing_keys = _missing_eval_keys(selected, args.logs_dir)
+    if missing_keys:
+        print(f"\ncompleteness check failed: {len(missing_keys)} selected eval(s) "
+              f"have no final record: {', '.join(missing_keys)}", file=sys.stderr)
+        return 1
 
     if failed:
         print(f"\n{failed} eval(s) failed regression gate", file=sys.stderr)
