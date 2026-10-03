@@ -293,6 +293,20 @@ command from AC9.
   test_eval_report.py, test_eval_workflows.py, test_quarantine.py,
   check_typed_evals.py, validate_skill.py --all, yamllint). Live rehearsals
   and AC9 scheduled-run qualification pending.
+- 2026-10-03 — rehearsal AC6 run #1 (37137725702) FAILED: `modeling-threats#1`
+  terminal infra (dead session, no work). Captured stderr (AC4) shows the
+  agent leaving the fixture root to probe the CI checkout
+  (`.github/workflows/*`, `*behavioral*`) and being auto-rejected
+  (`external_directory`); all retries ended without artifacts. Per-change run
+  37137720026: 10/11 shards green (the previously red false-positives pass);
+  the sole red `designing-architecture#1` is the same class (denied read of
+  `~/.config/opencode/agents/council-ux.md`; fresh retries died with no
+  events). AC6 remedy + rerun pending. Separately, the report job merged
+  shard artifacts from a flat layout the merge step doesn't expect
+  (`download-artifact` landed files directly under `shards/`, no
+  per-artifact dirs), so `merge-eval-logs.py` output 0 records/0 streams and
+  `failure-taxonomy.json` was vacuously empty — AC9 qualification would be
+  false-green until the merge step locates `run-*.jsonl` in either layout.
 - 2026-10-03 — post-PR fix slice (AC2). The per-change lane invokes the
   runner without `--logs-dir`, so the completeness check received `None` and
   false-failed every selected eval after they had passed (verified:

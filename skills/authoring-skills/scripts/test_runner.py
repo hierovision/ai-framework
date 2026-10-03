@@ -894,9 +894,25 @@ def test_augment_prompt_gives_absolute_root():
     out = runner.augment_prompt("write the tests", "/tmp/beval-abc", files)
     assert "/tmp/beval-abc/fixtures/phasewave/unit-duration" in out, out
     assert "never write outside it" in out, out
+    assert "do not read outside it" in out, out
     out2 = runner.augment_prompt("p", "/w", ["a/b/one.md", "a/c/two.md"])
     assert "/w/a" in out2, out2
     assert runner.augment_prompt("p", "/w", []) == "p"
+
+def test_sandbox_env_scrubs_ci_paths():
+    """RM-021 (2026-10-03): GITHUB_*/RUNNER_* env vars leak host paths the
+    agent probed (external_directory auto-reject -> zero-write turns); the
+    sandbox env must drop them while keeping the lane credentials."""
+    env = {
+        "PATH": "/usr/bin", "HOME": "/home/runner",
+        "OPENCODE_API_KEY": "k", "OPENCODE_CONFIG_CONTENT": "{}",
+        "GITHUB_WORKSPACE": "/home/runner/work/ai-framework/ai-framework",
+        "GITHUB_ACTIONS": "true", "RUNNER_TEMP": "/tmp/x",
+    }
+    out = runner.sandbox_env(env)
+    assert out["OPENCODE_API_KEY"] == "k" and out["PATH"] == "/usr/bin", out
+    assert not any(k.startswith(("GITHUB_", "RUNNER_")) for k in out), out
+
 
 def _tool_stream(tool, **inp):
     return json.dumps({"type": "tool", "sessionID": "ses_test",
@@ -1166,6 +1182,7 @@ def main():
         test_infra_death_does_not_quarantine_but_content_miss_does,
         test_eval_record_carries_measured_tokens_and_duration,
         test_augment_prompt_gives_absolute_root,
+        test_sandbox_env_scrubs_ci_paths,
         test_has_work_activity_counts_bash_writes,
         test_bash_writes_suppress_the_zero_write_nudge,
         test_legacy_eval_capped_at_one_nudge,

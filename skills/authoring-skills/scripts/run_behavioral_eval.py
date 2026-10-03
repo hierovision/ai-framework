@@ -762,8 +762,10 @@ def augment_prompt(prompt, workdir, files):
         return prompt
     abs_root = os.path.join(workdir, root)
     return (f"{prompt}\n\nTarget repo root (absolute): {abs_root}. Treat that "
-            f"directory as the repo root, write every artifact inside it, and "
-            f"never write outside it.")
+            f"directory as the repo root, write every artifact inside it, "
+            f"never write outside it, and do not read outside it — the "
+            f"evaluation harness, CI checkout, and other host paths are not "
+            f"part of the task.")
 
 
 def opencode_run_args(tmp, prompt, model=None):
@@ -904,6 +906,18 @@ def _copy_fixture_files(tmp, skill, files, skills_root=None):
     return copied
 
 
+def sandbox_env(environ):
+    """Child env with CI workspace hints removed (RM-021, 2026-10-03).
+
+    `GITHUB_*`/`RUNNER_*` hand the agent absolute host paths (the checkout)
+    to probe; sessions that followed them were auto-rejected as
+    `external_directory` and ended with 0 writes. Credentials
+    (`OPENCODE_API_KEY`, `OPENCODE_CONFIG_CONTENT`), PATH, and HOME stay.
+    """
+    return {k: v for k, v in environ.items()
+            if not (k.startswith("GITHUB_") or k.startswith("RUNNER_"))}
+
+
 def invoke_opencode(e, model=None, turn=None):
     """Real fresh-agent invocation (CI only; needs the model credential).
 
@@ -938,7 +952,7 @@ def invoke_opencode(e, model=None, turn=None):
             proc = subprocess.Popen(
                 argv,
                 cwd=tmp, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, env=os.environ,
+                text=True, env=sandbox_env(os.environ),
                 start_new_session=True,
             )
         except OSError as exc:

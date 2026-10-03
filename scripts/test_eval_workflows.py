@@ -146,6 +146,22 @@ def test_lane_and_nested_agent_override():
     # /tmp allowance (CI ephemeral): agents use /tmp scratch, and those writes
     # were auto-rejected (33 in one run) -> zero-write turns.
     assert cfg["permission"]["external_directory"]["/tmp/**"] == "allow", cfg
+    # Installed-config reads (2026-10-03): skill references and agent
+    # definitions live there; a denied read ended an eval turn.
+    installed = os.path.expanduser("~/.config/opencode") + "/**"
+    assert cfg["permission"]["external_directory"][installed] == "allow", cfg
+
+
+def test_report_downloads_per_artifact():
+    """RM-021 (2026-10-03): actions/download-artifact v7 flattened
+    pattern-matched artifacts, so same-named shard run logs overwrote and the
+    merged report read 0 records. The report job must download one directory
+    per shard artifact (gh run download -n ... -D shards/<name>)."""
+    text = open(BEHAVIORAL, encoding="utf-8").read()
+    assert "gh run download" in text and '"shards/$name"' in text, text
+    doc = yaml.safe_load(text)
+    assert doc["permissions"].get("actions") == "read", doc["permissions"]
+    print("PASS  report job downloads shard artifacts per-artifact")
 
 
 def main():
@@ -156,6 +172,7 @@ def main():
         test_weekly_timeout_is_150,
         test_skills_dispatch_input_wired,
         test_lane_and_nested_agent_override,
+        test_report_downloads_per_artifact,
     ]
     failed = 0
     for t in tests:

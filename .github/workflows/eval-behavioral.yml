@@ -57,9 +57,11 @@ on:
         type: string
         default: ''
 
-# Least-privilege: read-only is all the eval runner needs.
+# Least-privilege: read-only is all the eval runner needs; `actions: read` is
+# for the report job's per-artifact log download.
 permissions:
   contents: read
+  actions: read
 
 # One weekly run at a time; cancel a stale one if re-dispatched.
 concurrency:
@@ -175,17 +177,33 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
 
       - name: Download all shard logs
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7 (node24)
-        with:
-          pattern: eval-logs-shard-*
-          path: shards
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Per-artifact download: actions/download-artifact v7 flattens
+          # pattern-matched artifacts into `path`, so the same-named
+          # run-<date>.jsonl overwrote across shards (2026-10-03: the merge
+          # read 0 records). `gh run download -n` guarantees one directory
+          # per shard artifact.
+          mkdir -p shards
+          mapfile -t NAMES < <(gh api \
+            "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100" \
+            --paginate --jq '.artifacts[].name' | grep '^eval-logs-shard-' | sort)
+          if [ "${#NAMES[@]}" -eq 0 ]; then
+            echo "no shard log artifacts found" >&2
+            exit 1
+          fi
+          for name in "${NAMES[@]}"; do
+            gh run download "${{ github.run_id }}" -n "$name" -D "shards/$name"
+          done
 
       - name: Merge shard logs (run records + quarantine + streams)
         run: |
           set -euo pipefail
-          # download-artifact strips the uploaded common prefix (`logs/`), so each
-          # artifact lands as shards/<artifact-name>/ containing run-*.jsonl and
-          # eval-streams/ directly — do NOT look for a nested `logs/` dir.
+          # Each artifact was downloaded to shards/<artifact-name>/ and contains
+          # run-*.jsonl and eval-streams/ directly — do NOT look for a nested
+          # `logs/` dir.
           SHARD_DIRS=$(find shards -mindepth 1 -maxdepth 1 -type d | tr '\n' ' ')
           if [ -z "$SHARD_DIRS" ]; then
             echo "no shard log directories downloaded" >&2; exit 1

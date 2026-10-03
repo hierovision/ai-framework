@@ -39,9 +39,15 @@ def overrides(repo, lane_model):
         "agent": agents,
         # CI runners are ephemeral, and agents legitimately use /tmp scratch
         # (`/tmp/audit-report-*`, `/tmp/capture-evidence-*`): 33 auto-rejects in
-        # one full run ended turns with 0 writes. Allow /tmp only; unmatched
+        # one full run ended turns with 0 writes. The installed config tree is
+        # also legitimate read material — skills resolve from there and can
+        # reference agent definitions; a denied read of `agents/council-ux.md`
+        # ended the designing-architecture eval turn (2026-10-03). Unmatched
         # paths keep opencode's default (the CI checkout stays out of reach).
-        "permission": {"external_directory": {"/tmp/**": "allow"}},
+        "permission": {"external_directory": {
+            "/tmp/**": "allow",
+            os.path.expanduser("~/.config/opencode") + "/**": "allow",
+        }},
     }
 
 
