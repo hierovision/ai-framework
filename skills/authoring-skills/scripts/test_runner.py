@@ -1175,6 +1175,7 @@ def main():
         test_completeness_assertion_names_missing_eval,
         test_eval_record_carries_eval_key,
         test_stall_stderr_persisted,
+        test_cli_completeness_uses_default_logs_dir,
     ]
     failed = 0
     for t in tests:
