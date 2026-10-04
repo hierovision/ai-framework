@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Refine GitHub issue #42 in acme/widgets — it was synced from the roadmap and just has a source checklist, I need real acceptance criteria before I assign it.",
+      "prompt": "Refine GitHub issue #42 in acme/widgets — it was synced from the roadmap and just has a source checklist, I need real acceptance criteria before I assign it. Write the refined body to issue-42-refined.md in the working directory so I can review it before anything goes to GitHub.",
       "expect": {"artifact": [{"path": "**/issue-42-refined.md", "phrases": ["Acceptance", "Criteria"]}]},
       "expected_behavior": [
         "Fetches issue #42 and reads its current body (Roadmap ID, Category, Score, source checklist)",

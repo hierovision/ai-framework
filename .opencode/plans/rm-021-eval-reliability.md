@@ -307,6 +307,12 @@ command from AC9.
   per-artifact dirs), so `merge-eval-logs.py` output 0 records/0 streams and
   `failure-taxonomy.json` was vacuously empty — AC9 qualification would be
   false-green until the merge step locates `run-*.jsonl` in either layout.
+- 2026-10-04 — per-change flake exposed `refining-issue-acceptance#1`'s latent
+  false-red: its prompt never named `issue-42-refined.md` (the AC7 gap fixed
+  only for #2/#3), and a stall-fragmented run missed the artifact assertion
+  (two premature stops + two dead fresh retries, then a content miss).
+  Prompt now names the output file, matching #2/#3; re-verified by the
+  per-change lane.
 - 2026-10-03 — AC6 remedy experiment (decision rule: provider hang/timeout →
   per-eval timeout override, dated). Evidence: three 240 s invocations of
   `modeling-threats#1` with zero events/stderr/tokens, while the same CI lane
