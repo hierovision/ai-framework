@@ -885,19 +885,53 @@ def test_eval_record_carries_measured_tokens_and_duration():
         shutil.rmtree(d)
 
 def test_augment_prompt_gives_absolute_root():
-    """RM-021 (2026-09-29): an eval prompt must carry the materialized ABSOLUTE
-    target root plus a write-only-there instruction. Relative paths let agents
-    resolve artifacts against the installed skill checkout (or /tmp), which were
-    auto-rejected as external_directory — 108 zero-write turns in one full run."""
-    files = ["fixtures/phasewave/unit-duration/AGENTS.md",
-             "fixtures/phasewave/unit-duration/tests/x.test.js"]
-    out = runner.augment_prompt("write the tests", "/tmp/beval-abc", files)
-    assert "/tmp/beval-abc/fixtures/phasewave/unit-duration" in out, out
-    assert "never write outside it" in out, out
-    assert "do not read outside it" in out, out
-    out2 = runner.augment_prompt("p", "/w", ["a/b/one.md", "a/c/two.md"])
-    assert "/w/a" in out2, out2
-    assert runner.augment_prompt("p", "/w", []) == "p"
+    """RM-021 (2026-09-29; corrected 2026-10-04): an eval prompt must carry the
+    ABSOLUTE root of the MATERIALIZED repo-layout destinations plus a
+    write-only-there instruction. The raw files[] commonpath named a dir that
+    does not exist (`tmp/fixtures`, not `tmp/skills/<skill>/evals/fixtures`)."""
+    with tempfile.TemporaryDirectory() as root:
+        skills_root = os.path.join(root, "skills")
+        fx = os.path.join(skills_root, "demo", "evals", "fixtures",
+                          "phasewave", "unit-duration")
+        os.makedirs(os.path.join(fx, "tests"))
+        for rel in ("AGENTS.md", "tests/x.test.js"):
+            open(os.path.join(fx, rel), "w", encoding="utf-8").close()
+        files = ["fixtures/phasewave/unit-duration/AGENTS.md",
+                 "fixtures/phasewave/unit-duration/tests/x.test.js"]
+        out = runner.augment_prompt("write the tests", "/tmp/beval-abc", files,
+                                    skill="demo", skills_root=skills_root)
+        assert ("/tmp/beval-abc/skills/demo/evals/fixtures/phasewave/"
+                "unit-duration") in out, out
+        assert "never write outside it" in out, out
+        assert "do not read outside it" in out, out
+        assert runner.augment_prompt("p", "/w", [], skill="demo",
+                                     skills_root=skills_root) == "p"
+        # No materialized file -> no bogus root appended.
+        assert runner.augment_prompt("p", "/w", ["missing.md"], skill="demo",
+                                     skills_root=skills_root) == "p"
+
+
+def test_fixture_repo_rels_matches_materialized_layout():
+    """RM-021 follow-up (2026-10-04): eval #4's suite imports
+    ../../scripts/refine-issue.mjs; the fixture list must materialize the
+    module, and the prompt root must agree with the copy (`..` entries allowed
+    while contained; escapes skipped)."""
+    with tempfile.TemporaryDirectory() as root:
+        skills_root = os.path.join(root, "skills")
+        skill_dir = os.path.join(skills_root, "demo")
+        os.makedirs(os.path.join(skill_dir, "evals", "fixtures"))
+        os.makedirs(os.path.join(skill_dir, "scripts"))
+        open(os.path.join(skill_dir, "evals", "fixtures", "unit.test.mjs"),
+             "w", encoding="utf-8").close()
+        open(os.path.join(skill_dir, "scripts", "refine-issue.mjs"),
+             "w", encoding="utf-8").close()
+        rels = runner._fixture_repo_rels(
+            "demo", ["fixtures/unit.test.mjs", "../scripts/refine-issue.mjs"],
+            skills_root=skills_root)
+        assert rels == ["skills/demo/evals/fixtures/unit.test.mjs",
+                        "skills/demo/scripts/refine-issue.mjs"], rels
+        assert runner._fixture_repo_rels(
+            "demo", ["../../../../etc/passwd"], skills_root=skills_root) == []
 
 def test_sandbox_env_scrubs_ci_paths():
     """RM-021 (2026-10-03): GITHUB_*/RUNNER_* env vars leak host paths the
@@ -1205,6 +1239,7 @@ def main():
         test_infra_death_does_not_quarantine_but_content_miss_does,
         test_eval_record_carries_measured_tokens_and_duration,
         test_augment_prompt_gives_absolute_root,
+        test_fixture_repo_rels_matches_materialized_layout,
         test_sandbox_env_scrubs_ci_paths,
         test_eval_timeout_override_precedence,
         test_load_skill_evals_carries_timeout,

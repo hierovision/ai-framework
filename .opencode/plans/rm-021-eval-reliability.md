@@ -307,6 +307,15 @@ command from AC9.
   per-artifact dirs), so `merge-eval-logs.py` output 0 records/0 streams and
   `failure-taxonomy.json` was vacuously empty — AC9 qualification would be
   false-green until the merge step locates `run-*.jsonl` in either layout.
+- 2026-10-04 — AC7 full run found two real defects behind
+  `refining-issue-acceptance#4` (its action ran, its text proxy missed):
+  (1) the fixture list lacked the module the suite imports
+  (`../scripts/refine-issue.mjs`), so the suite could not test the real
+  artifact; (2) `augment_prompt` computed the target root from raw `files[]`
+  dirs while fixtures materialize at repo layout, so every eval prompt named
+  a nonexistent root (`tmp/fixtures`, not `tmp/skills/<skill>/evals/...`).
+  Fixed both: `_fixture_repo_rels` shared by copy and prompt; #4 files[] adds
+  the module; regression tests added. Targeted full re-run pending.
 - 2026-10-04 — AC6 first targeted PASS (run 37164974025, after the loader fix
   made the 600 s override effective): `modeling-threats#1` final
   `eval_pass: true`, 95,581 in / 21,430 out, **410 s** — the old 240 s timeout

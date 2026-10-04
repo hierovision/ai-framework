@@ -742,7 +742,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             result.close()
 
 
-def augment_prompt(prompt, workdir, files):
+def augment_prompt(prompt, workdir, files, skill=None, skills_root=None):
     """Append the ABSOLUTE target root to an eval prompt.
 
     2026-09-29 (RM-021): the prompt fix that replaced "repo is the working
@@ -753,8 +753,15 @@ def augment_prompt(prompt, workdir, files):
     with 0 writes (premature stop -> dead session -> infra failure). Handing
     the agent the materialized ABSOLUTE path, plus an explicit "write only
     here", removes the ambiguity at its source.
+
+    2026-10-04 correction: the root is the common dir of the MATERIALIZED
+    repo-layout destinations (`_fixture_repo_rels`), not of the raw `files[]`
+    entries — the raw computation named `tmp/fixtures/...` while the files
+    landed under `tmp/skills/<skill>/evals/...`, so every prompt pointed at a
+    nonexistent root (modeling-threats wandered; refining-issue-acceptance#4's
+    suite could not import its module).
     """
-    rels = [os.path.dirname(f) for f in (files or []) if f]
+    rels = _fixture_repo_rels(skill, files, skills_root)
     root = None
     if rels:
         try:
@@ -881,6 +888,37 @@ def preflight_model(model):
                    f"direct-key lane — advisory only)")
 
 
+def _fixture_repo_rels(skill, files, skills_root=None):
+    """Repo-relative destinations of an eval's fixture files.
+
+    Mirrors `_copy_fixture_files`: `files[]` entries resolve against the
+    skill's `evals/` dir, stay contained to the repo root, and land at their
+    repo-relative path under the run workdir. Returns only entries that
+    exist. `skill=None` treats the entries as already repo-relative.
+    """
+    skills_root = skills_root or SKILLS_ROOT
+    repo_root = os.path.dirname(skills_root)
+    norm_repo = os.path.normpath(os.path.abspath(repo_root))
+    rels = []
+    for rel in files or []:
+        if not rel:
+            continue
+        if skill is None:
+            norm_src = os.path.normpath(os.path.abspath(
+                os.path.join(norm_repo, rel)))
+        else:
+            norm_src = os.path.normpath(os.path.abspath(
+                os.path.join(skills_root, skill, "evals", rel)))
+        # An absolute path outside the repo, or enough `..` segments, can
+        # escape. Reject anything not under the repo root.
+        if not (norm_src == norm_repo or norm_src.startswith(norm_repo + os.sep)):
+            continue
+        if not os.path.isfile(norm_src):
+            continue
+        rels.append(os.path.relpath(norm_src, norm_repo).replace(os.sep, "/"))
+    return rels
+
+
 def _copy_fixture_files(tmp, skill, files, skills_root=None):
     """Copy eval fixtures into tmp at the repo-relative layout.
 
@@ -890,21 +928,12 @@ def _copy_fixture_files(tmp, skill, files, skills_root=None):
     """
     skills_root = skills_root or SKILLS_ROOT
     repo_root = os.path.dirname(skills_root)
-    norm_repo = os.path.normpath(os.path.abspath(repo_root))
     copied = 0
-    for rel in files or []:
-        src = os.path.join(skills_root, skill, "evals", rel)
-        norm_src = os.path.normpath(os.path.abspath(src))
-        # An absolute path outside the repo, or enough `..` segments, can
-        # escape. Reject anything not under the repo root.
-        if not (norm_src == norm_repo or norm_src.startswith(norm_repo + os.sep)):
-            continue
-        if not os.path.isfile(norm_src):
-            continue
-        rel_to_repo = os.path.relpath(norm_src, norm_repo)
+    for rel_to_repo in _fixture_repo_rels(skill, files, skills_root):
+        src = os.path.join(repo_root, rel_to_repo)
         dst = os.path.join(tmp, rel_to_repo)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
-        shutil.copy(norm_src, dst)
+        shutil.copy(src, dst)
         copied += 1
     return copied
 
@@ -964,7 +993,8 @@ def invoke_opencode(e, model=None, turn=None):
                 argv += ["--model", model]
         else:
             argv = ["opencode"] + opencode_run_args(
-                    tmp, augment_prompt(e["prompt"], tmp, e.get("files")), model=model)
+                    tmp, augment_prompt(e["prompt"], tmp, e.get("files"),
+                                        skill=e["skill"]), model=model)
         try:
             proc = subprocess.Popen(
                 argv,
