@@ -646,3 +646,5 @@ family diversity per directive 1 above.)
 
   UX consult: no user-facing UI — council-ux consult skipped (unchanged from
   design).
+
+PR: https://github.com/hierovision/ai-framework/pull/96 (user merges; squash-only).
