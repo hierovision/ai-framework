@@ -365,6 +365,14 @@ architect sessions — a brief that reads sibling repos:
 
 ## History
 
+- 2026-10-03 — review + scope widening (user-authorized): `reviewing-code`
+  pass on PR #94 → verdict `approve-with-nits` (no blockers/majors; four
+  `consider` minors: heartbeat terminal-write guard, unparsable-config
+  diagnostic, `--allow-dirs` isdir check, resume block accumulation).
+  Absorbed: `agents/reviewer.md` — its blanket `edit`/`write: deny`
+  contradicted `reviewing-code` Step 7 / `docs/CONCEPTS.md` ("writes only
+  REVIEW.md"); `edit` is now path-scoped (`*` deny, `REVIEW.md` allow),
+  validated live (reviewer wrote REVIEW.md in a smoke dispatch).
 - 2026-10-03 — implemented (branch `feat/run-vehicle-visibility`). Delivered
   AC1–AC13 plus the AC8/AC14 doc updates in `scripts/dispatch_agent.py`,
   `scripts/test_dispatch_agent.py`, `scripts/watch_agent.py`,
