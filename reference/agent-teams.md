@@ -71,7 +71,12 @@ The leaf deny is the one mechanically encoded exception.
   session id, captures the result, and emits the attribution record.
   `--model <id>` overrides the lane for that call; `--contract <name>` fails
   the dispatch non-zero when the result is empty or malformed
-  (`reference/delegated-result-contract.md`).
+  (`reference/delegated-result-contract.md`). Add `--stream-out FILE`,
+  `--stream-err FILE`, and `--heartbeat FILE` for live visibility (mandatory
+  by contract for runs expected to exceed ~10 min) and `--allow-dirs PATH`
+  (repeatable, least privilege) for any brief that reaches outside the
+  working directory — see `reference/subagent-supervision.md`
+  §Dispatch vehicles.
 - While a delegated run is in flight, supervision follows RM-022
   (`scripts/watch_agent.py`): a stalled or blocking run is flagged within one
   poll.
@@ -98,8 +103,14 @@ non-null `agent` and `model` (schema owner:
 `skills/observing-runs/scripts/log_run.py`; RM-001):
 
 - **Run-vehicle (mechanical)**: `scripts/dispatch_agent.py` resolves the
-  model (explicit `--model`, else the target's frontmatter binding), sums
-  tokens/cost from the event stream, and emits the record itself.
+  model from the finished **session row** (`session.model`, read-only through
+  the watcher's reader), falling back to the declared binding when the DB is
+  unavailable (explicit `--model`, else the target's frontmatter). The
+  pre-run line labels the declared value `binding=`; completion prints the
+  session-resolved `model=`, and the record uses the session-resolved value —
+  so a consumer repo's project wrapper is never recorded as the framework's
+  free binding. It sums tokens/cost from the event stream and emits the
+  record itself.
 - **In-session Task (convention)**: the orchestrator emits the record after
   collecting the result — agent = the dispatched subagent type, model = the
   child run's resolved model (the `model` blob on the child session row, or
