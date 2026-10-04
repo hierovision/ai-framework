@@ -130,7 +130,19 @@ if mode == "denied":
 
 if mode == "denied_stderr":
     start("ses_stub_denied_stderr")
-    print("error: external_directory /sibling auto-reject", file=sys.stderr)
+    # non-SGR CSI (erase-line) + OSC title, must be stripped from the detail
+    print("\\x1b[2K\\x1b]0;title\\x07error: external_directory /sibling auto-reject",
+          file=sys.stderr)
+    sys.exit(0)
+
+if mode == "surrogate":
+    # a lone surrogate in the text makes the utf-8 result write raise
+    # UnicodeEncodeError (a non-OSError) before the heartbeat terminal line
+    sid = "ses_stub_surrogate"
+    start(sid)
+    emit({"type": "text", "sessionID": sid,
+          "part": {"type": "text", "sessionID": sid,
+                   "text": "Verification: ok\\nHandoff: \\ud800"}})
     sys.exit(0)
 
 # valid
@@ -405,6 +417,42 @@ def test_heartbeat_terminal_blocked():
         shutil.rmtree(work, ignore_errors=True)
 
 
+def test_heartbeat_terminal_on_unexpected_write_failure():
+    """M1: an unexpected non-OSError result write, and an unexpected
+    non-ValueError run-log record write, must still end in exactly one
+    terminal line with the handle closed and the outcome/exit unmasked."""
+    work = tempfile.mkdtemp(prefix="dispatch-hb-")
+    try:
+        # (a) the result write raises UnicodeEncodeError (not OSError) before
+        # the terminal write: the heartbeat must still terminate, no traceback.
+        hb = os.path.join(work, "surrogate.log")
+        r = _run("surrogate", extra=["--heartbeat", hb,
+                                     "--contract", "implement-handoff"])
+        assert "Traceback" not in r.stderr, r.stderr
+        terminals = [l for l in _lines(r.heartbeat) if " BLOCKED " in l]
+        assert len(terminals) == 1 and "unexpected" in terminals[0].lower(), \
+            r.heartbeat
+        assert r.rc == 3, (r.rc, r.stdout, r.stderr)
+
+        # (b) the run-log record write raises OSError (not ValueError) after
+        # the success outcome: warn, keep the outcome/exit, still terminate.
+        blocker = os.path.join(work, "blocker")
+        with open(blocker, "w", encoding="utf-8") as fh:
+            fh.write("x")
+        hb2 = os.path.join(work, "recordfail.log")
+        r2 = _run("valid", extra=["--heartbeat", hb2,
+                                  "--contract", "implement-handoff",
+                                  "--logs-dir", os.path.join(blocker, "logs")])
+        assert "Traceback" not in r2.stderr, r2.stderr
+        assert r2.rc == 0, (r2.rc, r2.stdout, r2.stderr)
+        t2 = [l for l in _lines(r2.heartbeat) if " DONE " in l]
+        assert len(t2) == 1 and "DONE ok" in t2[0], r2.heartbeat
+        assert "run-log record" in r2.stderr, r2.stderr
+        assert "result=" in r2.stdout, r2.stdout
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def test_heartbeat_prompt_injection():
     """AC5: the prompt carries the canonical block naming the heartbeat
     file and citing the protocol section."""
@@ -422,6 +470,18 @@ def test_heartbeat_prompt_injection():
         assert "§2" in block, block
         for token in ("STEP", "CALL", "POLL", "180"):
             assert token in block, (token, block)
+
+        # M4: a --session resume must NOT re-inject the block (no accumulation)
+        hb2 = os.path.join(work, "resume.log")
+        dump2 = os.path.join(work, "resume.dump")
+        r2 = _run("valid", extra=["--heartbeat", hb2,
+                                  "--session", "ses_stub_valid"],
+                  env_extra={"STUB_DUMP_PROMPT": dump2})
+        assert r2.rc == 0, (r2.rc, r2.stderr)
+        assert "Supervision protocol" not in r2.prompt_dump, r2.prompt_dump
+        assert os.path.abspath(hb2) not in r2.prompt_dump, r2.prompt_dump
+        # the envelope still marks the resume
+        assert any(" START " in l for l in _lines(r2.heartbeat)), r2.heartbeat
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -542,6 +602,37 @@ def test_allow_dir_grants_external_permission():
                                   "--contract", "implement-handoff"])
         assert r3.rc == 2, (r3.rc, r3.stderr)
         assert "session_id=" not in r3.stdout, r3.stdout
+
+        # M3: a regular file is not a directory — exit 2 before launch
+        somefile = os.path.join(work, "somefile.txt")
+        with open(somefile, "w", encoding="utf-8") as fh:
+            fh.write("x")
+        r4 = _run("valid", extra=["--allow-dirs", somefile,
+                                  "--contract", "implement-handoff"])
+        assert r4.rc == 2, (r4.rc, r4.stderr)
+        assert "session_id=" not in r4.stdout, r4.stdout
+        assert "directory" in r4.stderr, r4.stderr
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_permission_config_warns_on_malformed_caller_env():
+    """M2: an unparsable caller OPENCODE_CONFIG_CONTENT warns to stderr and is
+    discarded, but --allow-dirs is still merged and the dispatch proceeds."""
+    work = tempfile.mkdtemp(prefix="dispatch-grant-")
+    try:
+        granted = os.path.join(work, "sibling")
+        os.makedirs(granted)
+        key = os.path.join(os.path.abspath(granted), "**")
+        dump = os.path.join(work, "env.json")
+        r = _run("valid", extra=["--allow-dirs", granted,
+                                 "--contract", "implement-handoff"],
+                 env_extra={"STUB_DUMP_ENV": dump,
+                            "OPENCODE_CONFIG_CONTENT": "{not valid json"})
+        assert r.rc == 0, (r.rc, r.stderr)
+        assert "OPENCODE_CONFIG_CONTENT" in r.stderr, r.stderr
+        cfg = json.loads(json.loads(r.env_dump)["OPENCODE_CONFIG_CONTENT"])
+        assert cfg["permission"]["external_directory"][key] == "allow", cfg
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -561,6 +652,9 @@ def test_permission_denial_classification():
     detail2 = r2.records[0]["detail"] or ""
     assert detail2.startswith("permission denied:"), detail2
     assert "external_directory" in detail2, detail2
+    # N3: non-SGR CSI and OSC escapes are stripped from the record detail
+    assert "\x1b" not in detail2, repr(detail2)
+    assert "[2K" not in detail2, repr(detail2)
 
 
 def test_reference_docs_carry_the_recipe():

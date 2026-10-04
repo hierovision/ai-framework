@@ -23,8 +23,11 @@ a hang. Promoted from `.scratch/skill-gap-analysis/SUBAGENT-PROTOCOL.md`
     expected to exceed ~10 min): `--stream-out FILE` tees the stdout JSON
     event stream, `--stream-err FILE` tees stderr, `--heartbeat FILE` writes
     the dispatcher envelope and injects the §2 protocol block. A fresh
-    dispatch truncates the targets; `--session` resume appends. An
-    unopenable target exits 2 before opencode launches (no session created).
+    dispatch truncates the targets; `--session` resume appends. The block
+    is injected only on a fresh dispatch — a `--session` resume appends to
+    the heartbeat without re-injecting it, so resumes do not accumulate
+    copies. An unopenable target exits 2 before opencode launches (no
+    session created).
   - **External grants**: `--allow-dirs PATH` (repeatable) grants opencode's
     `permission.external_directory` allow-map for one declared path,
     `<abs-path>/**`, least privilege. Without it behavior is unchanged.

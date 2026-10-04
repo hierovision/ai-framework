@@ -88,7 +88,10 @@ DEFAULT_TIMEOUT = 600
 HEARTBEAT_PROTOCOL_REF = "reference/subagent-supervision.md"
 PERMISSION_DENY_RE = re.compile(
     r"external_directory|auto-reject|permission denied", re.IGNORECASE)
-ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+# ANSI escapes kept out of the record detail: CSI (SGR and non-SGR), OSC
+# terminated by BEL or ST, and two-character escapes.
+ANSI_RE = re.compile(
+    r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])")
 
 
 def now_iso():
@@ -252,7 +255,7 @@ def heartbeat_prompt_block(path):
     """
     return (
         "\n---\n"
-        "Supervision protocol (reference/subagent-supervision.md §2): append "
+        f"Supervision protocol ({HEARTBEAT_PROTOCOL_REF} §2): append "
         "one timestamped progress line per event to the absolute path\n"
         f"{os.path.abspath(path)}\n"
         "as you work — `STEP` when a step changes, `CALL begin`/`CALL end` "
@@ -299,6 +302,9 @@ def permission_config(dirs, existing_raw):
     """Merge `<abs-dir>/**` -> allow into OPENCODE_CONFIG_CONTENT.
 
     Caller-supplied settings win on conflict (existing keys are left intact).
+    An unparsable `existing_raw` is discarded with a named stderr warning and
+    the merge proceeds — a recoverable env issue must not hard-fail the
+    dispatch, but the caller-settings loss is never silent.
     """
     config = {}
     if existing_raw:
@@ -306,8 +312,9 @@ def permission_config(dirs, existing_raw):
             parsed = json.loads(existing_raw)
             if isinstance(parsed, dict):
                 config = parsed
-        except ValueError:
-            pass
+        except ValueError as exc:
+            print(f"warning: ignoring unparsable OPENCODE_CONFIG_CONTENT: {exc}",
+                  file=sys.stderr)
     perm = config.get("permission")
     if not isinstance(perm, dict):
         perm = {}
@@ -462,8 +469,9 @@ def main(argv=None):
     # Preflight: validate grants and open every target before opencode runs
     # (AC6) — an unopenable target exits 2 with no session created.
     for d in (a.allow_dirs or []):
-        if not os.path.exists(d):
-            print(f"error: --allow-dirs path does not exist: {d}", file=sys.stderr)
+        if not os.path.isdir(d):
+            print(f"error: --allow-dirs requires an existing directory: {d}",
+                  file=sys.stderr)
             return 2
     tee_out = tee_err = hb = None
     try:
@@ -490,7 +498,10 @@ def main(argv=None):
     if hb is not None:
         heartbeat_begin(hb, f"{a.agent} dispatch", a.prompt_file,
                         fresh=not append)
-        prompt = prompt.rstrip() + "\n" + heartbeat_prompt_block(a.heartbeat)
+        if not append:
+            # only a fresh run injects the supervision block; a `--session`
+            # resume would otherwise accumulate `---` blocks each time (M4)
+            prompt = prompt.rstrip() + "\n" + heartbeat_prompt_block(a.heartbeat)
 
     opencode_argv = ["opencode", "run", "--agent", a.agent, "--format", "json"]
     if a.dir_:
@@ -518,49 +529,57 @@ def main(argv=None):
     model = resolve_session_model(session_id) or binding
     print(f"model={model or '?'}", flush=True)
 
-    if timed_out:
-        outcome, exit_code = "error", 4
-        detail = f"timeout after {a.timeout}s (process group killed)"
-    elif rc_proc != 0:
-        outcome, exit_code = "error", 3
-        tail = " ".join((stderr_text or "").split())[:200]
-        detail = f"opencode exited {rc_proc}" + (f": {tail}" if tail else "")
-    elif session_id is None:
-        outcome, exit_code = "error", 3
-        detail = "no session id in event stream (empty/dead stream)"
-    elif markers is not None and parse_errors:
-        outcome, exit_code = "failure", 1
-        detail = f"malformed event stream: {parse_errors[0]}"
-    elif markers is not None:
-        ok, missing = validate_delegated_result.validate(text, markers)
-        if ok:
+    # Guard the outcome computation and result write so an unexpected
+    # exception still writes exactly one heartbeat terminal line and closes
+    # the handle (M1, "never end silent"), without masking the outcome.
+    outcome, exit_code, detail = "error", 3, "dispatch did not complete"
+    try:
+        if timed_out:
+            outcome, exit_code = "error", 4
+            detail = f"timeout after {a.timeout}s (process group killed)"
+        elif rc_proc != 0:
+            outcome, exit_code = "error", 3
+            tail = " ".join((stderr_text or "").split())[:200]
+            detail = f"opencode exited {rc_proc}" + (f": {tail}" if tail else "")
+        elif session_id is None:
+            outcome, exit_code = "error", 3
+            detail = "no session id in event stream (empty/dead stream)"
+        elif markers is not None and parse_errors:
+            outcome, exit_code = "failure", 1
+            detail = f"malformed event stream: {parse_errors[0]}"
+        elif markers is not None:
+            ok, missing = validate_delegated_result.validate(text, markers)
+            if ok:
+                outcome, exit_code = "success", 0
+                detail = None
+            else:
+                denied = permission_denial(events, stderr_text)
+                outcome, exit_code = "failure", 1
+                if denied:
+                    detail = denied
+                elif missing is None:
+                    detail = "empty result"
+                else:
+                    detail = "missing marker(s): " + ", ".join(missing)
+        else:
             outcome, exit_code = "success", 0
             detail = None
-        else:
-            denied = permission_denial(events, stderr_text)
-            outcome, exit_code = "failure", 1
-            if denied:
-                detail = denied
-            elif missing is None:
-                detail = "empty result"
-            else:
-                detail = "missing marker(s): " + ", ".join(missing)
-    else:
-        outcome, exit_code = "success", 0
-        detail = None
 
-    try:
-        with open(out_path, "w", encoding="utf-8") as fh:
-            fh.write(text + ("\n" if text else ""))
-    except OSError as exc:
-        outcome, exit_code = "error", 2
-        detail = f"cannot write result: {exc}"
-
-    if hb is not None:
         try:
-            heartbeat_terminal(hb, outcome, detail)
-        finally:
-            hb.close()
+            with open(out_path, "w", encoding="utf-8") as fh:
+                fh.write(text + ("\n" if text else ""))
+        except OSError as exc:
+            outcome, exit_code = "error", 2
+            detail = f"cannot write result: {exc}"
+    except Exception as exc:  # noqa: BLE001 - never end silent
+        outcome, exit_code = "error", 3
+        detail = f"unexpected dispatch error: {exc}"
+    finally:
+        if hb is not None:
+            try:
+                heartbeat_terminal(hb, outcome, detail)
+            finally:
+                hb.close()
 
     record = {
         "kind": "agent",
@@ -580,6 +599,8 @@ def main(argv=None):
         print(f"error: run-log record rejected: {exc}", file=sys.stderr)
         if exit_code == 0:
             exit_code = 2
+    except Exception as exc:  # noqa: BLE001 - must not mask the dispatch outcome
+        print(f"error: run-log record failed: {exc}", file=sys.stderr)
 
     print(f"result={out_path}", flush=True)
     if exit_code != 0:

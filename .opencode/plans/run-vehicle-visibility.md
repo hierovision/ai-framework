@@ -3,7 +3,7 @@ slug: run-vehicle-visibility
 title: Run-vehicle live visibility — stream tees, heartbeats, session-resolved attribution, permission grants
 status: approved
 created: 2026-10-03
-revised: [2026-10-03, 2026-10-03]
+revised: [2026-10-03, 2026-10-03, 2026-10-03]
 related: [rm-022, go-first-model-bindings]
 ---
 
@@ -365,6 +365,33 @@ architect sessions — a brief that reads sibling repos:
 
 ## History
 
+- 2026-10-03 — review-fix pass (user-authorized: resolve ALL four minors +
+  three nits from PR #94's `approve-with-nits` on commit `52ff1c4`; on top of
+  `af0174e`). Files: `scripts/dispatch_agent.py`,
+  `scripts/test_dispatch_agent.py`, `reference/subagent-supervision.md`,
+  `reference/opencode-integration.md`, this plan. RED-first per finding
+  (the new assertion failed for the right reason against pre-fix code, then
+  green):
+
+  | Finding | Fix (file:line) | Verification evidence |
+  |---|---|---|
+  | M1 | guard outcome→result write, terminal in `finally` (`scripts/dispatch_agent.py:532–581`); broad `except Exception` around `log_record` (`:602–603`) | `test_heartbeat_terminal_on_unexpected_write_failure`: RED = `UnicodeEncodeError` traceback + no terminal; GREEN = one `BLOCKED unexpected dispatch error` line, rc 3; record-write `OSError` → `run-log record failed` warning, `DONE ok`, rc 0 unchanged |
+  | M2 | warn to stderr on unparsable caller config + docstring note (`scripts/dispatch_agent.py:302–316`) | `test_permission_config_warns_on_malformed_caller_env`: RED = no warning; GREEN = `OPENCODE_CONFIG_CONTENT` warning, grant still merged, rc 0 |
+  | M3 | `os.path.isdir` + named error (`scripts/dispatch_agent.py:472–475`) | `test_allow_dir_grants_external_permission` file case: RED = rc 0; GREEN = rc 2, `directory` named, no session |
+  | M4 | inject block only when not `--session` (`scripts/dispatch_agent.py:501–504`); rule in `reference/subagent-supervision.md:22–31` | `test_heartbeat_prompt_injection` resume case: RED = block re-injected; GREEN = block absent, envelope `START` still written |
+  | N1 | use `HEARTBEAT_PROTOCOL_REF` in `heartbeat_prompt_block` (`scripts/dispatch_agent.py:258`) | inspection; existing block test still green |
+  | N2 | single blank line before `## Permission config` (`reference/opencode-integration.md:51`) | inspection |
+  | N3 | broaden `ANSI_RE` to CSI non-SGR / OSC / two-char (`scripts/dispatch_agent.py:91–95`) | `test_permission_denial_classification`: RED = `\x1b…` in detail; GREEN = stripped |
+
+  - **Verification (hermetic, exit 0 each)** —
+    `python3 scripts/test_dispatch_agent.py` (19 cases; +2),
+    `python3 scripts/test_watch_agent.py` (11 cases),
+    `python3 skills/authoring-skills/scripts/validate_skill.py --all`,
+    `python3 scripts/check_typed_evals.py --base main`.
+  - **Coverage gate** — no mislayered tests and no high-value gap beyond the
+    findings; M3/M4/N3 extend the existing cases, M1/M2 add one each.
+  - **Scope** — `agents/reviewer.md`, workflows, and the uncommitted
+    `.opencode/plans/go-first-model-bindings.md` worktree change untouched.
 - 2026-10-03 — review + scope widening (user-authorized): `reviewing-code`
   pass on PR #94 → verdict `approve-with-nits` (no blockers/majors; four
   `consider` minors: heartbeat terminal-write guard, unparsable-config

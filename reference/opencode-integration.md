@@ -49,7 +49,6 @@ line. Validated **2026-09-06**, except where a section carries its own date.
   unavailable) — it does not replicate opencode's agent-resolution
   precedence.
 
-
 ## Permission config (`external_directory`)
 
 - opencode authorizes reads outside the working directory through
