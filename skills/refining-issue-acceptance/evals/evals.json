@@ -61,7 +61,8 @@
         "analyzeAcs/validateRefined enforce exactly one [unit]/[integration]/[e2e] tag per AC and detect leaks"
       ],
       "files": [
-        "fixtures/unit.test.mjs"
+        "fixtures/unit.test.mjs",
+        "../scripts/refine-issue.mjs"
       ]
     }
   ]
