@@ -42,8 +42,8 @@ independent:
 
 | Agent | Go model | Family | Basis |
 |-------|----------|--------|-------|
-| `council` (chairman) | `opencode-go/qwen3.8-flash` | Qwen | user cost directive 2026-10-03 — max's AA 45 at ~13× the price rejected; 3-prompt seat validation recorded in the plan History |
-| `council-performance` | `opencode-go/gpt-5.6-luna` | OpenAI | AA 38; `/responses` protocol — 3-prompt seat validation through the opencode path recorded in the plan History |
+| `council` (chairman) | `opencode-go/qwen3.8-flash` | Qwen | user cost directive 2026-10-03 — max's AA 45 at ~13× the price rejected; seat validated 2026-10-04 (3/3 prompts via the opencode path) |
+| `council-performance` | `opencode-go/gpt-5.6-luna` | OpenAI | AA 38; `/responses` protocol — seat validated 2026-10-04 (3/3 prompts via the opencode path) |
 | `council-architecture` | `opencode-go/glm-5.3-flash` | Zhipu | AA 42; GLM-5.3 excluded on cost (2026-10-01) |
 | `council-security` | `opencode-go/deepseek-v4.1-flash` | DeepSeek | AA 39; this repo's measured eval lane |
 | `council-ux` | `opencode-go/minimax-m3` | MiniMax | native multimodal |

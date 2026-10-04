@@ -120,9 +120,9 @@ seat — qwen3.8-flash (chairman, Qwen), gpt-5.6-luna (performance, OpenAI),
 glm-5.3-flash (architecture, Zhipu), deepseek-v4.1-flash (security, DeepSeek),
 minimax-m3 (ux, MiniMax), mimo-v2.6-flash (product, Xiaomi). Family diversity
 is the seat-design mechanism; for non-council roles scores outrank diversity
-(2026-10-03 directive). The changed seats (chairman, performance) carry the
-3-prompt seat validation recorded in `.opencode/plans/go-first-model-bindings.md`
-History.
+(2026-10-03 directive). The changed seats (chairman, performance) were
+seat-validated 2026-10-04 — 3/3 prompts each through the opencode path — as
+were the `mimo-v2.6-pro` quality seats (context window 1M confirmed).
 
 ## Provider notes
 

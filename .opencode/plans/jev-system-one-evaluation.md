@@ -3,7 +3,7 @@ slug: jev-system-one-evaluation
 title: Jev (TypeSafe System One) future-fit evaluation — durable record, trigger-gated, no adoption now
 status: approved
 created: 2026-10-03
-revised: [2026-10-03]
+revised: [2026-10-03, 2026-10-04]
 related: [go-first-model-bindings]   # additive only; this plan never modifies its decisions
 ---
 
@@ -57,7 +57,7 @@ For: the framework owner.
   verified facts, the probe log with verbatim responses, an 11-row
   candidate matrix (1 keep, 10 drop, each with the filter reasoning and a
   re-open trigger), and a cold-pickup integration sketch for the survivor.
-  One trigger-gated ROADMAP row (RM-039) watches the triggers. One note in
+  One trigger-gated ROADMAP row (RM-041) watches the triggers. One note in
   `reference/model-routing.md` makes jev-* structurally unbindable as a
   role. Zero spend, zero new dependencies, no code, no CI change.
 - **Value + how they judge it** — judge by reading the reference doc cold:
@@ -115,7 +115,7 @@ implementation of Jev anything.
    each drop row's trigger cell against that rule;
    `grep -c "revisit later" reference/jev-system-one-evaluation.md` = 0.
 6. **Durable residue landed, go-first untouched.** `docs/ROADMAP.md` gains
-   the RM-039 row (trigger-gated per the swamp guards, citing the reference
+   the RM-041 row (trigger-gated per the swamp guards, citing the reference
    doc, noting adoption-requires-ADR); `reference/model-routing.md` gains
    the additive non-chat-models note (never a role-binding candidate).
    Verifier: `grep -n "jev" docs/ROADMAP.md` shows a row containing
@@ -134,12 +134,12 @@ implementation of Jev anything.
 
 8. **Anti-rot lifecycle: the evaluation deletes itself when stale (user
    requirement, 2026-10-03).** The reference doc carries the dated header
-   and a `## Lifecycle` section stating deletion triggers D1–D4; the RM-039
+   and a `## Lifecycle` section stating deletion triggers D1–D4; the RM-041
    row carries the same D1–D4 in its trigger cell (swamp-guard rule: the
    anti-rot mechanic lives in the row); and
    `scripts/model-liveness-check.py` gains the mechanical **D1 alarm** —
    with the doc present, zero live `jev-*` IDs in the Zen catalog fails the
-   canary with the remedy "delete the doc + close RM-039". Verifier: the
+   canary with the remedy "delete the doc + close RM-041". Verifier: the
    canary exits 0 on `main` today (jev-1.13 live); a stub-catalog fixture
    exercises the failure path; the doc and row are grep-checked for D1–D4,
    `evaluated 2026-10-03`, and `review-by 2027-01-31`.
@@ -320,9 +320,9 @@ already settles; no novelty.
    plans are deleted after essence extraction; git history is the recovery
    path — but the essence must live in a durable tier, and a matrix of
    this size overflows a ROADMAP cell).
-2. **`docs/ROADMAP.md` — RM-039 row (draft text):**
+2. **`docs/ROADMAP.md` — RM-041 row (draft text):**
 
-   > | RM-039 | evaluation | Jev (System One) advisory eval content-failure triage — trigger-gated | 5 | 3 | backlog | jev-system-one-evaluation plan 2026-10-03; `reference/jev-system-one-evaluation.md` | Advisory `jev_triage` classification of weekly-run content failures (skill_regression / assertion_wording_drift / prompt_or_fixture_defect / environment / unclear) enriching `eval-report.py failure-taxonomy` via a stdlib `scripts/jev_decide.py` against the Zen `systemone` endpoint; fail-open (unreachable → status field, report still emits), never gates a run, quarantine, or green-run; state = public-repo artifacts only, never secrets/consumer data; adoption requires an ADR (new external API dependency + CI secret) and explicit spend approval. **Trigger** (any one re-opens; each carries its verification mechanic): T1 a `jev-*` ID appears in the Go flat-rate catalog — checked at the next optimizing-model-routing catalog fetch; T2 `jev-1.13-free` still live on re-probe **and** two consecutive post-RM-021 weekly runs each leave ≥10 content failures needing human stream-reading — checked from failure-taxonomy artifacts — **and** the user accepts the free variant's data terms; T3 a dated user directive approving Zen PAYG spend (<$0.01/weekly run, measured) + a Zen CI secret. **Delete** (the reference doc is removed and this row closes when any of): D1 no `jev-*` ID live in the Zen catalog — enforced by the model-liveness alarm; D2 T1–T3 fired and the integration shipped (essence absorbed there); D3 superseded/rejected at triage or the ALM review; D4 review-by 2027-01-31 reached without D1–D3 (re-verify or delete). If a trigger fires and the candidate no longer survives the filter, close with a dated rejection note in the evaluation doc. |
+   > | RM-041 | evaluation | Jev (System One) advisory eval content-failure triage — trigger-gated | 5 | 3 | backlog | jev-system-one-evaluation plan 2026-10-03; `reference/jev-system-one-evaluation.md` | Advisory `jev_triage` classification of weekly-run content failures (skill_regression / assertion_wording_drift / prompt_or_fixture_defect / environment / unclear) enriching `eval-report.py failure-taxonomy` via a stdlib `scripts/jev_decide.py` against the Zen `systemone` endpoint; fail-open (unreachable → status field, report still emits), never gates a run, quarantine, or green-run; state = public-repo artifacts only, never secrets/consumer data; adoption requires an ADR (new external API dependency + CI secret) and explicit spend approval. **Trigger** (any one re-opens; each carries its verification mechanic): T1 a `jev-*` ID appears in the Go flat-rate catalog — checked at the next optimizing-model-routing catalog fetch; T2 `jev-1.13-free` still live on re-probe **and** two consecutive post-RM-021 weekly runs each leave ≥10 content failures needing human stream-reading — checked from failure-taxonomy artifacts — **and** the user accepts the free variant's data terms; T3 a dated user directive approving Zen PAYG spend (<$0.01/weekly run, measured) + a Zen CI secret. **Delete** (the reference doc is removed and this row closes when any of): D1 no `jev-*` ID live in the Zen catalog — enforced by the model-liveness alarm; D2 T1–T3 fired and the integration shipped (essence absorbed there); D3 superseded/rejected at triage or the ALM review; D4 review-by 2027-01-31 reached without D1–D3 (re-verify or delete). If a trigger fires and the candidate no longer survives the filter, close with a dated rejection note in the evaluation doc. |
 
    Landed as a proposed row at priority 5 / backlog; the next
    `triaging-requirements` pass ratifies or re-scores it (ingestion never
@@ -339,7 +339,7 @@ already settles; no novelty.
    >   candidate** — not a chat model; no routing pass may rank or bind it
    >   in any tier. Evaluated for advisory use 2026-10-03:
    >   `reference/jev-system-one-evaluation.md` (trigger-gated; ROADMAP
-   >   RM-039).
+   >   RM-041).
 
    Deliberately **not** a Hard-exclusions row: that table records
    user-directive bans on bindable chat models; Jev is categorically
@@ -349,7 +349,7 @@ already settles; no novelty.
    ROADMAP row + evaluation doc; this repo's ADRs record binding/structure
    decisions, and no structure changes. **Adoption would warrant one**
    (new external API dependency, a CI secret, a privacy posture) — the
-   RM-039 row says so explicitly, so the trigger-fired session cannot skip
+   RM-041 row says so explicitly, so the trigger-fired session cannot skip
    it.
 
 ## Files to Modify
@@ -361,7 +361,7 @@ already settles; no novelty.
   above extracted verbatim-in-substance with a dated header (`evaluated
   2026-10-03; review-by 2027-01-31`) and a `## Lifecycle` section carrying
   deletion triggers D1–D4 (AC-8)
-- `docs/ROADMAP.md` — add the RM-039 row (draft text in Durable home,
+- `docs/ROADMAP.md` — add the RM-041 row (draft text in Durable home,
   including the D1–D4 deletion triggers); no other row touched
 - `scripts/model-liveness-check.py` — add the D1 stale-evaluation alarm
   (doc present + zero live `jev-*` IDs in the Zen catalog → fail with the
@@ -381,7 +381,7 @@ already settles; no novelty.
 - Landing the durable residue: one new reference doc, one ROADMAP row, one
   additive model-routing note
 - The anti-rot lifecycle (user requirement): D1–D4 deletion triggers in the
-  doc + RM-039 row, the model-liveness D1 alarm, and the review-by date
+  doc + RM-041 row, the model-liveness D1 alarm, and the review-by date
 
 **Excluded:**
 
@@ -422,7 +422,7 @@ Docs-only change; the full CONTRIBUTING gate battery must stay green:
   doc present and `jev-1.13` live (the D1 alarm dormant, not red)
 - `git diff --name-only origin/main...HEAD` → exactly the five files in
   Files to Modify (AC7)
-- `grep -n "jev" docs/ROADMAP.md reference/model-routing.md` → RM-039 row
+- `grep -n "jev" docs/ROADMAP.md reference/model-routing.md` → RM-041 row
   + non-chat note present (AC6)
 - `python3 scripts/changed-files-to-skills.py --format object docs/ROADMAP.md reference/model-routing.md reference/jev-system-one-evaluation.md`
   → expected: `reference/model-routing.md` is **evaluable** → the
@@ -437,9 +437,9 @@ Non-blocking; each has a proposed default the approver can swap.
 - **OQ-1 — Durable home shape.** Resolved (user, 2026-10-03): reference doc
   + ROADMAP row, **conditional on an explicit anti-rot lifecycle** — the
   doc must never become a stale file. Deletion triggers D1–D4 live in the
-  doc's `## Lifecycle` section and the RM-039 row; the model-liveness D1
+  doc's `## Lifecycle` section and the RM-041 row; the model-liveness D1
   alarm and the review-by date enforce them; see AC-8.
-- **OQ-2 — RM-039 priority/status.** Resolved (user, 2026-10-03): priority 5,
+- **OQ-2 — RM-041 priority/status.** Resolved (user, 2026-10-03): priority 5,
   `backlog`, marked as proposed-by-this-plan; the next triage pass ratifies
   or re-scores (RM-028: ingestion never bypasses scoring).
 - **OQ-3 — model-routing note placement.** Resolved (user, 2026-10-03): a new
@@ -470,10 +470,10 @@ Non-blocking; each has a proposed default the approver can swap.
 - 2026-10-03 — OQ-3 resolved (user): the Jev note lands as a new "Non-chat
   models (decision endpoints)" subsection in `reference/model-routing.md`.
   Remaining OQs 4–5 under review.
-- 2026-10-03 — OQ-2 resolved (user): RM-039 lands priority 5 / `backlog`,
+- 2026-10-03 — OQ-2 resolved (user): RM-041 lands priority 5 / `backlog`,
   marked proposed-by-this-plan; next triage pass ratifies or re-scores
   (RM-028). Remaining OQs 3–5 under review.
-- 2026-10-03 — user review: OQ-1 resolved as reference doc + RM-039,
+- 2026-10-03 — user review: OQ-1 resolved as reference doc + RM-041,
   conditional on an explicit anti-rot lifecycle (deletion triggers D1–D4 in
   both artifacts, a model-liveness D1 alarm, review-by 2027-01-31); AC-8
   added, AC-7/AC-8 diff lists and Verification updated. Remaining OQs
@@ -488,3 +488,9 @@ Non-blocking; each has a proposed default the approver can swap.
   or printed. Catalogs fetched same day: Zen lists both jev IDs; Go lists
   none. Consult outcome recorded per the design-consult contract
   (`reference/delegated-result-contract.md`): skip, reason above.
+
+- 2026-10-04 — mechanical renumber: the reserved trigger-gated row moves
+  **RM-039 → RM-041** — RM-039 was claimed while this plan was queued and is
+  now the go-first model-policy row (merged #96); RM-040 is the Go Plus
+  review. No scope, acceptance, or decision changed. Implementation is
+  unblocked (the go-first branch merged 2026-10-04, satisfying OQ-5).
