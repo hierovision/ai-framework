@@ -20,7 +20,9 @@ paths, exact ACs, no emoji.
 (`reference/technical-english.md` rule 9) — the single logical next step
 with the actor; never omitted, `None — awaiting <X>` when nothing is
 pending. Approval asks carry the full PR link (rule 11), never a bare
-number.
+number. The user sees only the final message — tool calls and output are
+not reviewable; restate every material fact, including the exact targets
+of any external action (rule 14).
 
 ## Process
 

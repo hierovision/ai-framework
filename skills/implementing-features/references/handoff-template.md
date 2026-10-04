@@ -7,6 +7,9 @@ explicitly, never omitted.
 
 - **What changed** — which files were edited / created, in one line per
   file, referencing the plan's `Files to Modify`.
+- **Material facts inline** — name the exact targets and values of external
+  actions (recipients, records, config values). Never point at tool output
+  or command text; it scrolls away (rule 14).
 - **Acceptance-criteria status** — per criterion, the status as
   evidenced by the verifier that greened. Criteria whose verifier is a
   command that greened: mark them satisfied (with the command). Criteria
