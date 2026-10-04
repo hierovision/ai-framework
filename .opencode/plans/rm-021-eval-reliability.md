@@ -315,7 +315,11 @@ command from AC9.
   dirs while fixtures materialize at repo layout, so every eval prompt named
   a nonexistent root (`tmp/fixtures`, not `tmp/skills/<skill>/evals/...`).
   Fixed both: `_fixture_repo_rels` shared by copy and prompt; #4 files[] adds
-  the module; regression tests added. Targeted full re-run pending.
+  the module; regression tests added. Targeted full re-run after merge. AC7
+  **met**: `refining-issue-acceptance` targeted full run (37167308378, all
+  four evals PASS including #4 with the module fix) and
+  `reviewing-security` targeted dispatch (37167679119, PASS) both succeeded.
+  PR #93 merged (a985eb5).
 - 2026-10-04 — AC6 first targeted PASS (run 37164974025, after the loader fix
   made the 600 s override effective): `modeling-threats#1` final
   `eval_pass: true`, 95,581 in / 21,430 out, **410 s** — the old 240 s timeout
