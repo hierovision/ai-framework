@@ -1,7 +1,7 @@
 ---
 name: test-writer
 description: Author tests for a change — unit, integration, or e2e by layer — under red-first discipline.
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/deepseek-v4.1-flash
 mode: all
 ---
 

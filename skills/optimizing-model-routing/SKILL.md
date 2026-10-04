@@ -1,6 +1,6 @@
 ---
 name: optimizing-model-routing
-description: Re-derive the library's model bindings from objective evidence — gather the live opencode catalogs (or a local snapshot), identify and verify the most objective benchmarks available (independently reproduced first; vendor self-reported numbers are a tier filter and never decide a binding), rank the best free and escalation model per workflow role, and present a table (current vs proposed free/Go/Zen with bench basis) plus a mandatory Questionable/Uncertain section for review — then apply the approved updates to reference/model-routing.md and agents/*.md on a branch + PR. Use when the user says "optimize model routing", "rebind the models", "find the best model for each skill or role", "the bindings are stale", "catalog check", or "right-size the models". Not for one-off model config edits in a consumer project, changing agent prompts, or price-only lookups.
+description: Re-derive the library's model bindings from objective evidence — gather the live opencode catalogs (or a local snapshot), identify and verify the most objective benchmarks available (independently reproduced first; vendor self-reported numbers are a tier filter and never decide a binding),       rank the best default and escalation model per role under the library's recorded policy, and present a table (current vs proposed default/opt-in/escalation) plus a mandatory Questionable/Uncertain section — then apply the approved updates to reference/model-routing.md and agents/*.md on a branch + PR. Use when the user says "optimize model routing", "rebind the models", "find the best model for each skill or role", "the bindings are stale", "catalog check", or "right-size the models". Not for one-off model config edits in a consumer project, changing agent prompts, or price-only lookups.
 ---
 
 # Optimizing Model Routing
@@ -23,7 +23,7 @@ Routing Progress:
 - [ ] 2. Read current state
 - [ ] 3. Gather catalogs + liveness (live fetch; docs + routing probe)
 - [ ] 4. Identify + verify objective benchmarks
-- [ ] 5. Rank candidates per role (free first; Go/Zen escalation — live candidates only)
+- [ ] 5. Rank candidates per role (library default first — Go, with free as the opt-in column; Zen/direct escalation — live candidates only)
 - [ ] 6. Capture the evidence (table + Questionable/Uncertain; write no files)
 - [ ] 7. Present table + evidence + Questionable/Uncertain; STOP for approval
 - [ ] 8. On approval: apply, verify, commit, PR
@@ -94,12 +94,16 @@ Per role in scope, rank **only over live candidates** (Step 3) on the
 role's dominant trait per the reference map, deciding on the most
 objective evidence available and tie-breaking upward in objectivity (an
 independent result beats a cross-checked one beats a vendor claim).
-Free-first: propose a free model wherever a live, docs-listed free model
-qualifies; Go and Zen rows are escalation picks. **Liveness is a hard
+Propose the best live model for the **default** column first, per the
+library's recorded policy (`reference/model-routing.md`: Go default, free
+as an explicit opt-in); a free model is proposed for the opt-in column
+only, and Zen/direct rows are escalation picks. **Liveness is a hard
 gate, like capability** — a non-live ID is not a candidate at any
 benchmark score and never enters ranking. Capability requirements (e.g.
 native image input for vision seats) are hard gates, not scores — a
 text-only model cannot hold a vision seat at any benchmark number.
+**Hard exclusions sit above all scores** — an excluded ID is dropped from
+candidacy regardless of a live probe or a top benchmark result.
 
 ### Step 6 — Capture the evidence
 
@@ -131,12 +135,12 @@ End with the explicit approval question. Make zero changes to
 Apply exactly the approved table — a user modification to the proposal is
 part of the approval, not an argument to relitigate:
 
-1. Update `agents/*.md` `model:` lines (free defaults) and the role rows
-   in `reference/model-routing.md` (escalations). Record the evidence
-   basis and what actually landed (including user modifications) in the
-   commit message and PR description — model-routing.md carries current
-   state only, no in-file changelog. Revise-don't-clobber: never rewrite
-   git history.
+1. Update `agents/*.md` `model:` lines (defaults) and the role rows
+   in `reference/model-routing.md` (default, free opt-in, escalations).
+   Record the evidence basis and what actually landed (including user
+   modifications) in the commit message and PR description —
+   model-routing.md carries current state only, no in-file changelog.
+   Revise-don't-clobber: never rewrite git history.
 2. Generate the expectation JSON from the **approved** table
    (`bindings` + `forbidden` ids: excluded families and removed catalog
    ids) and run, resolved against this skill's own directory — not the

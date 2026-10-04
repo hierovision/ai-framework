@@ -1,7 +1,7 @@
 ---
 name: skill-author
 description: Author and improve agent skills — evals before body, structure and boundary discipline.
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/minimax-m3
 mode: all
 ---
 

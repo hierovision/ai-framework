@@ -138,11 +138,11 @@ def test_lane_and_nested_agent_override():
                           "--model", "opencode-go/deepseek-v4.1-flash"], capture_output=True,
                          text=True, check=True).stdout
     cfg = json.loads(out)
-    # Free-bound agents get the lane model; the council is Go-bound already
-    # (2026-10-01 rebind) and must NOT be overridden.
-    assert cfg["agent"]["implementer"]["model"] == "opencode-go/deepseek-v4.1-flash", cfg
-    assert "architect" in cfg["agent"], cfg
-    assert "council-ux" not in cfg["agent"], cfg
+    # Go-first flip (2026-10-03, plan go-first-model-bindings): every framework
+    # persona is Go-bound, so the nested-agent override map is empty for this
+    # repo. The loop stays as a guard for consumer repos whose wrappers are
+    # still free-bound.
+    assert cfg["agent"] == {}, cfg
     # /tmp allowance (CI ephemeral): agents use /tmp scratch, and those writes
     # were auto-rejected (33 in one run) -> zero-write turns.
     assert cfg["permission"]["external_directory"]["/tmp/**"] == "allow", cfg

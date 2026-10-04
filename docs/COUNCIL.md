@@ -7,24 +7,26 @@ single home of the model IDs; this doc is the **procedure**.
 The council runs on the **Go flat-rate lane** (`opencode-go/*`). It cannot run
 on free models: the free tier rejects calls made from a nested Task subagent
 (`OpenCode's free tier can only be used from within OpenCode`), so a free
-council dies at step 0. This supersedes the 2026-09-13 free-tier council.
-Dispatch lanes, composition bounds, and the free-bound run-vehicle are defined
-in `reference/agent-teams.md` §Lane policy; this document remains the council
-procedure.
+council dies at step 0. This supersedes the 2026-09-13 free-tier council. Every
+framework persona is Go-bound by default (go-first policy, 2026-10-03); the
+council's six-family seat table is that policy's deliberate diversity form.
+Dispatch lanes, composition bounds, and the run-vehicle dispatch path are
+defined in `reference/agent-teams.md` §Lane policy; this document remains the
+council procedure.
 
 ## Seats (one model family per seat)
 
 | Seat | Go model | Family | Lens |
 |---|---|---|---|
-| `council` (chairman) | `opencode-go/kimi-k3` | Moonshot | synthesis |
+| `council` (chairman) | `opencode-go/qwen3.8-flash` | Qwen | synthesis |
 | `council-architecture` | `opencode-go/glm-5.3-flash` | Zhipu | pattern alignment, tech debt, testability |
-| `council-performance` | `opencode-go/qwen3.8-max` | Qwen | bottlenecks, N+1, caching, scaling |
+| `council-performance` | `opencode-go/gpt-5.6-luna` | OpenAI | bottlenecks, N+1, caching, scaling |
 | `council-security` | `opencode-go/deepseek-v4.1-flash` | DeepSeek | vulnerabilities, edge cases, data safety |
 | `council-ux` | `opencode-go/minimax-m3` | MiniMax | end-user + developer experience |
 | `council-product` | `opencode-go/mimo-v2.6-flash` | Xiaomi | requirements fit, scope, priority |
 
 Frontier opt-in (user-requested only): `claude-opus-5-5` + `muse-spark-1.3` +
-`kimi-k3`, one family per seat. Never upgrade models on your own.
+`gpt-5.6-sol`, one family per seat. Never upgrade models on your own.
 
 ## Procedure
 
@@ -46,8 +48,9 @@ Frontier opt-in (user-requested only): `claude-opus-5-5` + `muse-spark-1.3` +
 ## Guardrails
 
 - Council only for planning & review; raw execution stays single-model.
-- `AI_FRAMEWORK_FREE_TIER=1` forces free models for the main session; the
-  council must still run Go-bound, or be recorded as an explicit skip.
+- `AI_FRAMEWORK_FREE_TIER=1` forces free models for the main session (the
+  explicit free opt-in); the council must still run Go-bound, or be recorded
+  as an explicit skip.
 - A council on one model family is not a council — state it as degraded.
 
 ## Reasoning effort (`glm-5.3-flash`)

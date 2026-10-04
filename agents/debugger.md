@@ -1,7 +1,7 @@
 ---
 name: debugger
 description: Diagnose why a failing verification won't converge — reproduce first, fix at root cause, run the full suite.
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/mimo-v2.6-pro
 mode: all
 ---
 

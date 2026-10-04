@@ -1,7 +1,7 @@
 ---
 name: implementer
 description: Execute coding tasks from an approved plan. Build components, run tests, resolve specific todos.
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/deepseek-v4.1-flash
 mode: all
 ---
 

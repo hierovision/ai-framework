@@ -1,12 +1,19 @@
-# Model-liveness drift canary.
+# Model-liveness + Go-first policy canary.
 #
 # Runs `scripts/model-liveness-check.py` ("model doctor"): fetches the live
 # Zen + Go catalogs and the docs free list, and verifies every model ID the
 # repo binds (`agents/*.md`, `reference/model-routing.md`) or documents
-# (`agents/council.md`, `docs/FREE-TIER-COUNCIL.md`) is actually routable
-# where it claims to be. This is the automated form of the check that
-# caught the 2026-09-02 `deepseek-v4-flash-free` failure (catalog-listed
-# but not docs-listed, hence not routable).
+# (`agents/council.md`, `docs/COUNCIL.md`) is actually routable where it
+# claims to be. It also enforces the Go-first policy (2026-10-03, plan
+# go-first-model-bindings): no bound `-free` ID, no bound hard-excluded ID
+# (kimi-k3, glm-5.3/5.2, gpt-6-luna, the grok/sonnet/fable/astra families,
+# the peak $10/$50 class — exclusions sit above all scores), and every
+# routing-table default cell present in the live Go catalog. The live
+# `--probe` mode (manual; needs OPENCODE_API_KEY) uses the 20s trivial-prompt
+# contract — bare catalog IDs, `x-opencode-session`, timeout never extended.
+# This is the automated form of the check that caught the 2026-09-02
+# `deepseek-v4-flash-free` failure (catalog-listed but not docs-listed,
+# hence not routable).
 #
 # Kept separate from CI on purpose: CI is fully offline/hermetic; this job
 # needs network. Scheduled + manual only — never on the merge path, so a

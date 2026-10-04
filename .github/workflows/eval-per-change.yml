@@ -271,9 +271,11 @@ jobs:
           # shakedown data asked for (clamp max 3 in the runner).
           BEVAL_MAX_CONTINUATIONS: "2"
         run: |
-          # Nested subagents (council lenses etc.) are FREE-tier bound; in CI the
-          # free tier rejects calls outside the OpenCode client and the eval
-          # session dies. CI-only override of those agents to the lane model.
+          # Nested-agent override (2026-09-29): a free-bound subagent is
+          # rejected in CI ("OpenCode's free tier can only be used from within
+          # OpenCode") and the eval session dies. Since the Go-first flip
+          # (2026-10-03) every framework persona is Go-bound — this repo's
+          # override map is empty; the guard remains for consumer wrappers.
           export OPENCODE_CONFIG_CONTENT="$(python3 scripts/ci-lane-overrides.py --model opencode-go/deepseek-v4.1-flash)"
           set -euo pipefail
           RUNNER="skills/authoring-skills/scripts/run_behavioral_eval.py"

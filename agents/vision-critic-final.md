@@ -1,7 +1,7 @@
 ---
 name: vision-critic-final
 description: Final visual sign-off on a UI change — independent read of the archived evidence before merge.
-model: deepseek/deepseek-flash
+model: opencode-go/deepseek-v4.1-flash
 mode: all
 permission:
   edit: deny

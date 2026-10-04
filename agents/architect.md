@@ -1,7 +1,7 @@
 ---
 name: architect
 description: Architect multi-file features, plan database changes, produce implementation plans.
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/glm-5.3-flash
 mode: all
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Analyzes code, drafts approaches, and reviews without making changes. Use for investigation, design exploration, and read-only assessment.
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/glm-5.3-flash
 mode: all
 permission:
   edit: deny

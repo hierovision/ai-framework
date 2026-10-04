@@ -1,7 +1,7 @@
 ---
 name: curator
 description: Consolidate, trim, and prioritize the project backlog.
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/glm-5.3-flash
 mode: all
 ---
 

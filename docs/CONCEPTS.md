@@ -477,13 +477,22 @@ Capability facts (native image input for vision seats, catalog membership)
 are **hard gates, not scores**: a text-only model cannot hold a vision seat
 at any number.
 
-### 7c. Free by default; escalation is an explicit opt-in
+### 7c. Go by default; free is the explicit opt-in
 
-The routing table binds every role to a **free model where one exists**,
-with a flat-rate tier and a pay-as-you-go frontier tier as *escalation
-only* — because defaulting to paid models has direct financial
-consequences, and an agent upgrading its own models on its own initiative
-is exactly the kind of silent decision this framework refuses everywhere.
+The routing table binds every role to a **Go flat-rate model by default**;
+free use is an explicit opt-in — the environment toggle
+`AI_FRAMEWORK_FREE_TIER=1` (or the runner's free-tier mode) or a per-session
+model switch — and a last resort, never a default. The flip is a dated user
+decision (2026-10-03, ADR-0013): the free tier was the reliability tax behind
+dead sessions and retried passes while every persona ran on it, so the owner
+funded Go Plus and set defaults to the validated Go model per role.
+Escalation beyond the Go default (the pay-as-you-go tier, the direct-key
+lane, a frontier council) stays an explicit user opt-in — an agent upgrading
+its own models on its own initiative is exactly the kind of silent decision
+this framework refuses everywhere. Hard exclusions (dated cost and
+reliability directives) sit **above all scores**: a live probe or a top
+benchmark result never rehabilitates one.
+
 The pass also ends honestly: a **mandatory Questionable/Uncertain
 section** — vendor-only scores, unbenched newcomers, reliability caveats —
 is never omitted, and every entry names what would resolve it. Uncertainty
@@ -659,9 +668,10 @@ flowchart TB
 ```
 
 Consistent with Choice 2, the council is **discussion-only** — it never
-edits files or writes code. Consistent with Choice 7, it **defaults to
-free models**; a paid council is an explicit user opt-in, never an
-agent-initiated upgrade.
+edits files or writes code. Consistent with Choice 7, it runs on **Go-bound
+seats** — the free tier cannot serve a nested subagent — with one model
+family per seat; upgrading seats beyond the default binding stays an
+explicit user opt-in, never an agent-initiated change.
 
 ---
 

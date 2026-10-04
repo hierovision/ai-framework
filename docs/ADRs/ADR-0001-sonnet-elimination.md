@@ -24,6 +24,10 @@ the first real-loop validating-ui cycle as its acceptance gate.
 
 - Free/cheap tier carries more weight; the free-first policy (ADR-0007
   predecessor) stays intact.
+  - (2026-10-03) Superseded premise: the free-first policy no longer holds —
+  the default is Go-first with free as an explicit opt-in
+  ([ADR-0013](ADR-0013-go-first-model-policy.md)). The rest of this ADR
+  (sonnet eliminated, deepseek vision sign-off basis) stands.
 - The eliminated ID is recorded in the hard-exclusions table
   (`reference/model-routing.md`), not deleted from history.
 

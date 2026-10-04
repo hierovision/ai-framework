@@ -1,7 +1,7 @@
 ---
 name: council
 description: Multi-perspective analysis and discussion on architecture, design decisions, and tradeoffs. Discussion-only — does not implement. Use for validation, brainstorming, and risk assessment.
-model: opencode-go/kimi-k3
+model: opencode-go/qwen3.8-flash
 mode: all
 ---
 
@@ -42,16 +42,16 @@ independent:
 
 | Agent | Go model | Family | Basis |
 |-------|----------|--------|-------|
-| `council` (chairman) | `opencode-go/kimi-k3` | Moonshot | AA II 44 |
-| `council-performance` | `opencode-go/qwen3.8-max` | Qwen | AA II 45 |
+| `council` (chairman) | `opencode-go/qwen3.8-flash` | Qwen | user cost directive 2026-10-03 — max's AA 45 at ~13× the price rejected; 3-prompt seat validation recorded in the plan History |
+| `council-performance` | `opencode-go/gpt-5.6-luna` | OpenAI | AA 38; `/responses` protocol — 3-prompt seat validation through the opencode path recorded in the plan History |
 | `council-architecture` | `opencode-go/glm-5.3-flash` | Zhipu | AA 42; GLM-5.3 excluded on cost (2026-10-01) |
-| `council-security` | `opencode-go/deepseek-v4.1-flash` | DeepSeek | AA 40; this repo's measured eval lane |
+| `council-security` | `opencode-go/deepseek-v4.1-flash` | DeepSeek | AA 39; this repo's measured eval lane |
 | `council-ux` | `opencode-go/minimax-m3` | MiniMax | native multimodal |
 | `council-product` | `opencode-go/mimo-v2.6-flash` | Xiaomi | AA 38 |
 
 Six families in six seats. A **Zen frontier council** (`claude-opus-5-5` +
-`muse-spark-1.3` + `kimi-k3`) remains the explicit user opt-in; never upgrade
-models on your own.
+`muse-spark-1.3` + `gpt-5.6-sol`) remains the explicit user opt-in; never
+upgrade models on your own.
 
 **Reasoning effort (`glm-5.3-flash`).** Z.AI's API accepts `reasoning_effort`
 only at `low` / `high` / `max` (default `max`), with `thinking` enabled.
@@ -104,7 +104,8 @@ A council on a single model family produces false objectivity.
 The free tier cannot serve a nested Task subagent: the gateway rejects the call
 (`OpenCode's free tier can only be used from within OpenCode`), the member dies
 at step 0, and the Task harness surfaces it as an EMPTY result. Every council
-seat is therefore bound to the Go lane. Rules that still hold:
+seat is therefore bound to the Go lane (all framework personas moved to the Go
+default 2026-10-03 — plan go-first-model-bindings). Rules that still hold:
 
 - An empty task result is a failure, never a review; do not synthesize over it.
 - Verify each member's run header shows the intended `agent · model` line
@@ -112,8 +113,9 @@ seat is therefore bound to the Go lane. Rules that still hold:
   re-run that member.
 - If a member cannot run its bound model, the council is degraded: state which
   family wore which lens; never present a one-family result as a full council.
-- `AI_FRAMEWORK_FREE_TIER=1` forces free models for the main session; the
-  council must still run Go-bound, or be recorded as an explicit skip.
+- `AI_FRAMEWORK_FREE_TIER=1` forces free models for the main session (the
+  explicit free opt-in); the council must still run Go-bound, or be recorded
+  as an explicit skip.
 
 ## Relationship to `reviewing-code`
 
