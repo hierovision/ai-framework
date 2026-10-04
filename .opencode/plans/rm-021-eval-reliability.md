@@ -307,6 +307,11 @@ command from AC9.
   per-artifact dirs), so `merge-eval-logs.py` output 0 records/0 streams and
   `failure-taxonomy.json` was vacuously empty — AC9 qualification would be
   false-green until the merge step locates `run-*.jsonl` in either layout.
+- 2026-10-04 — the 600 s timeout did not take effect in run 37164171405:
+  `load_skill_evals` normalizes eval dicts with a fixed field list and dropped
+  `timeout`, so `eval_timeout` fell back to 240 s (the stall record still said
+  240). The loader carries the field now; unit test added; AC6 rerun re-tests
+  the 600 s hypothesis.
 - 2026-10-04 — per-change flake exposed `refining-issue-acceptance#1`'s latent
   false-red: its prompt never named `issue-42-refined.md` (the AC7 gap fixed
   only for #2/#3), and a stall-fragmented run missed the artifact assertion

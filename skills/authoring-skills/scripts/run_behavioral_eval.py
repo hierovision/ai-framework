@@ -109,6 +109,9 @@ def load_skill_evals(skills_root):
                 "deferred": bool(e.get("deferred", False)),
                 "model_tier": e.get("default_model_tier", tier),
                 "files": e.get("files", []),
+                # RM-021 AC6 (2026-10-04): per-eval stall budget; dropping it
+                # here silently fell back to 240 s in the first CI rerun.
+                "timeout": e.get("timeout"),
                 # RM-003 pass 4 two-tier markers (AC12): `default` = the
                 # skill's per-change canary; `core` = a harness-change canary.
                 "default": bool(e.get("default", False)),

@@ -923,6 +923,20 @@ def test_eval_timeout_override_precedence():
     assert runner.eval_timeout(None, {"BEVAL_TIMEOUT_SECONDS": "300"}) == 300
 
 
+def test_load_skill_evals_carries_timeout():
+    """RM-021 (2026-10-04): the normalized eval dict must carry the per-eval
+    `timeout`, or the 600 s remedy silently falls back to 240 (first CI rerun:
+    the stall record still said 240 s)."""
+    with tempfile.TemporaryDirectory() as root:
+        d = os.path.join(root, "demo", "evals")
+        os.makedirs(d)
+        with open(os.path.join(d, "evals.json"), "w", encoding="utf-8") as fh:
+            json.dump({"evals": [{"id": 1, "prompt": "p", "timeout": 600,
+                                  "expected_behavior": ["b"]}]}, fh)
+        evs = runner.load_skill_evals(root)
+        assert evs and evs[0]["timeout"] == 600, evs
+
+
 def _tool_stream(tool, **inp):
     return json.dumps({"type": "tool", "sessionID": "ses_test",
                        "part": {"type": "tool", "tool": tool,
@@ -1193,6 +1207,7 @@ def main():
         test_augment_prompt_gives_absolute_root,
         test_sandbox_env_scrubs_ci_paths,
         test_eval_timeout_override_precedence,
+        test_load_skill_evals_carries_timeout,
         test_has_work_activity_counts_bash_writes,
         test_bash_writes_suppress_the_zero_write_nudge,
         test_legacy_eval_capped_at_one_nudge,
