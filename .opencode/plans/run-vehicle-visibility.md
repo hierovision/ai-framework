@@ -365,6 +365,40 @@ architect sessions — a brief that reads sibling repos:
 
 ## History
 
+- 2026-10-03 — CI-caught reconciliation (user-authorized: unblock PR #94's
+  `quality-gates` run 37173743864 / job 111351924567, which failed on
+  `test_new_leaf_permission_posture` still asserting the pre-reconciliation
+  blanket `edit`/`write: deny` for `reviewer`). The reviewer's path-scoped
+  write surface (`REVIEW.md` only) is the documented contract
+  (`reviewing-code` Step 7; `docs/CONCEPTS.md` "reviewing-code writes only
+  REVIEW.md and never edits source"), authorized in `af0174e`; the test
+  encoded the stale side. Files: `scripts/test_agent_dispatch.py`, this plan.
+  The cardinal rule is honored — the new assertions still reject over-broad
+  maps (proven by mutation below), not a weakened net.
+  - **RED→GREEN** — pre-update `python3 scripts/test_agent_dispatch.py` failed
+    exactly as CI did: `FAIL test_new_leaf_permission_posture: ('reviewer',
+    {'edit': {'*': 'deny', 'REVIEW.md': 'allow'}, ...})`. After the update:
+    all 17 cases PASS.
+  - **Mutation proof (strictness)** — against the updated test:
+    - add `"src/**": allow` to the reviewer `edit` map → `FAIL
+      test_new_leaf_permission_posture: ('reviewer', 'over-broad allow',
+      {... 'src/**': 'allow'})`;
+    - flip catch-all to `"*": allow` → `FAIL ... ('reviewer', {'*': 'allow',
+      ...})`;
+    - restore → `PASS`; `agents/reviewer.md` byte-identical (`git diff
+      --quiet` clean).
+  - **Assertions** — `skill-reviewer` keeps blanket `edit`/`write: deny` +
+    bash map; `reviewer` requires an `edit` dict with `"*": deny`,
+    `"REVIEW.md": allow`, allow-set == `{"REVIEW.md"}`, and `write`
+    absent-or-deny; vision critics unchanged.
+  - **Verification (hermetic, exit 0 each)** — the 16 offline Python suites
+    from `.github/workflows/ci.yml` including `scripts/test_agent_dispatch.py`;
+    the four node plan verifiers (managing-github-issues + refining-issue-
+    acceptance `unit.test.mjs`/`verify.mjs`); `validate_skill.py --all`;
+    `check_typed_evals.py --base main`; `bash -n install.sh`; yamllint.
+  - **Scope** — `agents/reviewer.md`, workflows, and the uncommitted
+    `.opencode/plans/go-first-model-bindings.md` worktree change untouched.
+
 - 2026-10-03 — delta-nit fold (user-authorized: bound the unexpected-exception
   heartbeat detail from the delta verification
   `.scratch/dispatch/review-delta-run-vehicle-visibility.result.md` on
