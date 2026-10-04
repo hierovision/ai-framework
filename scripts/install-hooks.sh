@@ -9,6 +9,10 @@
 #   - yamllint -c .yamllint.yaml .github/workflows/            (workflow YAML —
 #     if yamllint is installed locally; otherwise warns and skips, and CI
 #     quality-gates enforces it regardless)
+#   - scripts/test_agent_dispatch.py                           (agent permission
+#     posture / persona contracts — only when staged files touch agents/,
+#     reference/agent-teams.md, or docs/CONCEPTS.md; CI quality-gates runs the
+#     full offline battery regardless)
 #
 # It is advisory: bypassable with `git commit --no-verify`. It costs zero CI
 # minutes and catches malformed skills/manifests/workflows before a commit
@@ -64,9 +68,19 @@ else
     echo "  -> yamllint skipped (not installed locally — pip install yamllint; CI quality-gates still enforces it)"
 fi
 
+# Agent-posture guard: permission/contract changes under agents/ (or the two
+# files the agent-dispatch tests assert) run the hermetic posture suite — the
+# class PR #94 shipped red to CI (reviewer permission test drift).
+posture_files="$(git diff --cached --name-only | grep -E '^(agents/|reference/agent-teams\.md$|docs/CONCEPTS\.md$)' || true)"
+if [[ -n "${posture_files}" ]]; then
+    echo "  -> test_agent_dispatch.py (agent posture surface changed)"
+    python3 "${REPO_ROOT}/scripts/test_agent_dispatch.py" || fail "test_agent_dispatch.py"
+fi
+
 echo "Layer 1 pre-commit: all validators passed"
 EOF
 
 chmod +x "${HOOK_PATH}"
 echo "Installed pre-commit hook at ${HOOK_PATH}"
-echo "It runs validate_skill.py --all, scripts/verify.mjs, and check_typed_evals.py on every commit."
+echo "It runs validate_skill.py --all, scripts/verify.mjs, and check_typed_evals.py on every commit,"
+echo "plus scripts/test_agent_dispatch.py when agents/, reference/agent-teams.md, or docs/CONCEPTS.md change."
