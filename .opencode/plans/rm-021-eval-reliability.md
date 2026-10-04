@@ -307,6 +307,19 @@ command from AC9.
   per-artifact dirs), so `merge-eval-logs.py` output 0 records/0 streams and
   `failure-taxonomy.json` was vacuously empty — AC9 qualification would be
   false-green until the merge step locates `run-*.jsonl` in either layout.
+- 2026-10-04 — AC6 first targeted PASS (run 37164974025, after the loader fix
+  made the 600 s override effective): `modeling-threats#1` final
+  `eval_pass: true`, 95,581 in / 21,430 out, **410 s** — the old 240 s timeout
+  would have killed it, so the per-eval override is the operative fix.
+  `failure-taxonomy`: records=1, pass=1, `terminal_infra=[]`. Per-change
+  37164976610 on the same head: all shards green including
+  `modeling-threats` and the `refining-issue-acceptance` prompt fix. Second
+  consecutive targeted run 37165645759 passed (2026-10-04 00:45:35Z) —
+  **AC6 met** (two consecutive PASS). PR #91: all 14 checks green, mergeable.
+  Residual-stall context: opencode issue
+  #52513 (per-session retry state; parallel sessions storm a throttled
+  provider) and #52962 (Go pooled account-wide usage) are the community
+  reports to weigh if stalls recur.
 - 2026-10-04 — the 600 s timeout did not take effect in run 37164171405:
   `load_skill_evals` normalizes eval dicts with a fixed field list and dropped
   `timeout`, so `eval_timeout` fell back to 240 s (the stall record still said
