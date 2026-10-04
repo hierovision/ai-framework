@@ -3,7 +3,7 @@ slug: run-vehicle-visibility
 title: Run-vehicle live visibility — stream tees, heartbeats, session-resolved attribution, permission grants
 status: approved
 created: 2026-10-03
-revised: [2026-10-03, 2026-10-03, 2026-10-03]
+revised: [2026-10-03, 2026-10-03, 2026-10-03, 2026-10-03]
 related: [rm-022, go-first-model-bindings]
 ---
 
