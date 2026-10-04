@@ -365,6 +365,25 @@ architect sessions — a brief that reads sibling repos:
 
 ## History
 
+- 2026-10-03 — delta-nit fold (user-authorized: bound the unexpected-exception
+  heartbeat detail from the delta verification
+  `.scratch/dispatch/review-delta-run-vehicle-visibility.result.md` on
+  `097480c`; folded into PR #94). Files: `scripts/dispatch_agent.py`,
+  `scripts/test_dispatch_agent.py`, this plan. RED-first (the new assertion
+  failed for the right reason against pre-fix code, then green):
+
+  | Finding | Fix (file:line) | Verification evidence |
+  |---|---|---|
+  | D-nit | cap the unexpected-error detail at the outcome-branch convention, 200 (`scripts/dispatch_agent.py:575–579`) | `test_heartbeat_terminal_on_unexpected_write_failure` part (c): RED = `AssertionError: 500` (unbounded 500-char detail in the heartbeat); GREEN = detail after `unexpected dispatch error: ` ≤ 200, rc 3 |
+
+  - **Verification (hermetic, exit 0 each)** —
+    `python3 scripts/test_dispatch_agent.py` (19 cases),
+    `python3 scripts/test_watch_agent.py` (11 cases),
+    `python3 skills/authoring-skills/scripts/validate_skill.py --all`,
+    `python3 scripts/check_typed_evals.py --base main`.
+  - **Scope** — `agents/reviewer.md`, workflows, and the uncommitted
+    `.opencode/plans/go-first-model-bindings.md` worktree change untouched.
+
 - 2026-10-03 — review-fix pass (user-authorized: resolve ALL four minors +
   three nits from PR #94's `approve-with-nits` on commit `52ff1c4`; on top of
   `af0174e`). Files: `scripts/dispatch_agent.py`,

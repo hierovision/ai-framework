@@ -12,6 +12,9 @@ model calls, no network.
 
 Run: python3 scripts/test_dispatch_agent.py
 """
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import shutil
@@ -248,6 +251,48 @@ def _spawn(mode, extra=None):
     return td, proc
 
 
+def _run_unexpected_error_in_process(long_message, hb_path):
+    """Exercise the guarded outcome block with a long-message non-OSError.
+
+    A natural result-write fault (UnicodeEncodeError) has a short message, so
+    an over-cap detail cannot be produced through the stub. Load
+    dispatch_agent.py fresh and make the contract validator raise inside the
+    guarded block, then drive main() in-process. Returns the exit code.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "dispatch_agent_inproc", DISPATCH)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    stream = ('{"type": "text", "sessionID": "ses_inproc", '
+              '"part": {"type": "text", "sessionID": "ses_inproc", '
+              '"text": "Verification: ok\\nHandoff: ok"}}\n')
+    mod.run_opencode = lambda *a, **k: (0, stream, "", False)
+    mod.resolve_session_model = lambda sid: None
+
+    class LongError(Exception):
+        pass
+
+    def boom(text, markers):
+        raise LongError(long_message)
+
+    mod.validate_delegated_result.validate = boom
+    work = tempfile.mkdtemp(prefix="dispatch-inproc-")
+    try:
+        prompt = os.path.join(work, "prompt.md")
+        with open(prompt, "w", encoding="utf-8") as fh:
+            fh.write("Do the thing.")
+        argv = ["--agent", "architect", "--prompt-file", prompt,
+                "--out", os.path.join(work, "result.md"),
+                "--logs-dir", os.path.join(work, "logs"),
+                "--heartbeat", hb_path, "--contract", "implement-handoff"]
+        silence = io.StringIO()
+        with contextlib.redirect_stdout(silence), \
+                contextlib.redirect_stderr(silence):
+            return mod.main(argv)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 # --- original dispatch contract (unchanged) ---------------------------------
 
 def test_valid_dispatch_records_attribution():
@@ -420,7 +465,9 @@ def test_heartbeat_terminal_blocked():
 def test_heartbeat_terminal_on_unexpected_write_failure():
     """M1: an unexpected non-OSError result write, and an unexpected
     non-ValueError run-log record write, must still end in exactly one
-    terminal line with the handle closed and the outcome/exit unmasked."""
+    terminal line with the handle closed and the outcome/exit unmasked.
+    The unexpected-error detail must also be bounded (~200) so a
+    pathological exception cannot flood the tail-read heartbeat file."""
     work = tempfile.mkdtemp(prefix="dispatch-hb-")
     try:
         # (a) the result write raises UnicodeEncodeError (not OSError) before
@@ -449,6 +496,18 @@ def test_heartbeat_terminal_on_unexpected_write_failure():
         assert len(t2) == 1 and "DONE ok" in t2[0], r2.heartbeat
         assert "run-log record" in r2.stderr, r2.stderr
         assert "result=" in r2.stdout, r2.stdout
+
+        # (c) a long-message non-OSError raised inside the guarded outcome
+        # block: the heartbeat detail must be bounded at the outcome-branch
+        # convention (~200), not written in full.
+        hb3 = os.path.join(work, "longerr.log")
+        rc3 = _run_unexpected_error_in_process("E" * 500, hb3)
+        assert rc3 == 3, rc3
+        t3 = [l for l in _lines(_read(hb3)) if " BLOCKED " in l]
+        assert len(t3) == 1, t3
+        assert "unexpected dispatch error: " in t3[0], t3
+        after = t3[0].split("unexpected dispatch error: ", 1)[1]
+        assert len(after) <= 200, len(after)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

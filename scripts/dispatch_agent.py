@@ -573,7 +573,9 @@ def main(argv=None):
             detail = f"cannot write result: {exc}"
     except Exception as exc:  # noqa: BLE001 - never end silent
         outcome, exit_code = "error", 3
-        detail = f"unexpected dispatch error: {exc}"
+        # bound the detail at the outcome-branch convention (200) so a
+        # pathological exception message cannot flood the tail-read heartbeat
+        detail = f"unexpected dispatch error: {exc}"[:200]
     finally:
         if hb is not None:
             try:
