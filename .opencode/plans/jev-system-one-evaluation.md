@@ -494,3 +494,43 @@ Non-blocking; each has a proposed default the approver can swap.
   now the go-first model-policy row (merged #96); RM-040 is the Go Plus
   review. No scope, acceptance, or decision changed. Implementation is
   unblocked (the go-first branch merged 2026-10-04, satisfying OQ-5).
+
+- 2026-10-04 — implementation pass (Go-lane session on branch
+  `feat/jev-system-one-evaluation`) landed the durable residue and deleted
+  this plan at close (ADR-0008). Files: new
+  `reference/jev-system-one-evaluation.md` (Facts, Probe log, 11-row
+  matrix, keep-candidate sketch, `## Lifecycle` D1–D4, header `evaluated
+  2026-10-03; review-by 2027-01-31`); RM-041 row in `docs/ROADMAP.md`
+  (priority 5 / backlog, proposed-by-this-plan, D1–D4 in the trigger cell);
+  additive "Non-chat models (decision endpoints)" note in
+  `reference/model-routing.md` (no Core-table, Hard-exclusions, role-row, or
+  `agents/*.md` change); D1 alarm in `scripts/model-liveness-check.py`
+  (`stale_evaluation_errors()`, wired into `main()`).
+
+  **Verification (all exit 0):** `validate_skill.py --all`;
+  `check_typed_evals.py --base main`; the six offline suites +
+  `scripts/test_model_policy.py` (hermetic, still green); both node
+  fixtures; `bash -n install.sh`; yamllint; live
+  `python3 scripts/model-liveness-check.py` (D1 alarm dormant — `jev-1.13`
+  + `jev-1.13-free` live in the Zen catalog); AC1/AC2/AC5 greps (zen-go URL
+  ×1, "revisit later" ×0, no key/Bearer leak);
+  `changed-files-to-skills.py` maps `reference/model-routing.md` →
+  `optimizing-model-routing` (the per-change canary is the expected PR
+  check, not a surprise red).
+
+  **AC8 D1-alarm stub-fixture exercise (scratch, not committed — AC7):**
+  `.scratch/jev-system-one-evaluation/exercise_d1_alarm.py` imports
+  `stale_evaluation_errors()` and feeds stub Zen catalogs — (a) doc present
+  + zero `jev-*` → 1 error containing "delete the doc + close RM-041"
+  (PASS); (b) doc present + `jev-1.13` → `[]` (PASS); (c) doc absent →
+  `[]` (PASS). Evidence log:
+  `.scratch/jev-system-one-evaluation/d1-exercise.log`.
+
+  **Mechanical note (Step 4):** AC3's "every cited file path resolves"
+  applies to the *current-mechanism* citations (all resolve); the
+  keep-candidate's `scripts/jev_decide.py` is the planned build artifact
+  and is marked "planned" in the matrix — non-existent by definition. No
+  contract change.
+
+  **Consult:** none launched — docs-only residue, no design or code
+  judgment needed; the skip is recorded here per the session guidance.

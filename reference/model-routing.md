@@ -134,6 +134,18 @@ were the `mimo-v2.6-pro` quality seats (context window 1M confirmed).
 - **Direct-key lane** (user's own DeepSeek API key, approved 2026-09-18): config prefix `deepseek/`. Billed directly by DeepSeek to the user's own balance — check that balance separately from opencode. `deepseek/deepseek-flash` = V4.1-Flash (live-probed: text, vision, tool calls); `deepseek/deepseek-v4-pro` also routes live (AA 36, no vision). Off-peak half price during 01:00–04:00 and 06:00–10:00 UTC Mon–Fri. This lane is an explicit opt-in escalation only.
 - Go can fall back to Zen balance when limits hit ("Use balance" in the console). `AI_FRAMEWORK_FREE_TIER=1` forces the free tier even when a Go/Zen key is present — the explicit free opt-in.
 
+## Non-chat models (decision endpoints)
+
+- **Jev 1.13** (`jev-1.13`, `jev-1.13-free`) — TypeSafe AI "System One"
+  decision model; Zen-only (absent from the Go catalog, verified
+  2026-10-03). Endpoint `https://opencode.ai/zen/v1/systemone` (typed
+  questions → values + probabilities; no AI SDK package). $0.042/1M
+  input, output free; free variant limited-time. **Never a role-binding
+  candidate** — not a chat model; no routing pass may rank or bind it
+  in any tier. Evaluated for advisory use 2026-10-03:
+  `reference/jev-system-one-evaluation.md` (trigger-gated; ROADMAP
+  RM-041).
+
 ## Vision capability strategy
 
 The UI iteration loop requires a model that can read screenshots. Tiered strategy (updated 2026-10-03):

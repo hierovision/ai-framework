@@ -12,6 +12,10 @@ Two jobs in one canary:
    Hard exclusions section — kimi-k3, glm-5.3, glm-5.2, gpt-6-luna, the
    grok/sonnet/fable/astra families, the peak $10/$50 class), and every
    routing-table Go cell present in the live Go catalog.
+3. Anti-rot (plan jev-system-one-evaluation, AC8): the durable Jev
+   evaluation doc is valid only while Jev is live. With the doc present,
+   zero live `jev-*` IDs in the Zen catalog is stale (D1) — fail with the
+   "delete the doc + close RM-041" remedy.
 
 The liveness probe contract (AC3d, 2026-10-03): `--probe` sends the trivial
 prompt `Reply with exactly: OK` with a **20s cap** against
@@ -30,7 +34,8 @@ Failure classes (exit 1, each printed):
   - a Go default/routing cell missing from the Go catalog;
   - a bound Zen/direct ID missing from its catalog;
   - a free opt-in cell that is not docs-listed / not in the Zen catalog;
-  - a documented ID bound nowhere.
+  - a documented ID bound nowhere;
+  - the Jev evaluation doc present but no live `jev-*` Zen ID (D1).
 
 Usage:
   python3 scripts/model-liveness-check.py [--repo <repo-root>]
@@ -56,6 +61,9 @@ GO_CHAT_ENDPOINT = "https://opencode.ai/zen/go/v1/chat/completions"
 ZEN_CHAT_ENDPOINT = "https://opencode.ai/zen/v1/chat/completions"
 PROBE_TIMEOUT_SECONDS = 20
 PROBE_PROMPT = "Reply with exactly: OK"
+
+# Durable evaluation doc watched by the D1 anti-rot alarm (AC8).
+JEV_EVAL_DOC = os.path.join("reference", "jev-system-one-evaluation.md")
 
 UA = {"User-Agent": "ai-framework-model-liveness-check"}
 
@@ -221,6 +229,25 @@ def check_policy(repo: str, catalogs=None) -> list:
     return errors
 
 
+def stale_evaluation_errors(repo: str, zen_ids) -> list:
+    """D1 anti-rot alarm (plan jev-system-one-evaluation, AC8).
+
+    The durable evaluation doc (`reference/jev-system-one-evaluation.md`)
+    is valid only while Jev is live. With the doc present and zero live
+    `jev-*` IDs in the Zen catalog, the evaluation is stale: fail with the
+    deletion remedy. Absent the doc, the alarm is dormant. `zen_ids` is the
+    live Zen catalog set (or a stub in hermetic exercises).
+    """
+    if not os.path.exists(os.path.join(repo, JEV_EVAL_DOC)):
+        return []
+    if any(model_id.startswith("jev-") for model_id in zen_ids):
+        return []
+    return [
+        f"{JEV_EVAL_DOC} is present but zero live `jev-*` IDs remain in the "
+        f"Zen catalog (D1) — delete the doc + close RM-041"
+    ]
+
+
 def doc_tokens(repo: str, rel: str) -> set:
     with open(os.path.join(repo, rel), encoding="utf-8") as fh:
         return set(re.findall(r"`opencode(?:-go)?/([a-z0-9][a-z0-9.\-]*)`", fh.read()))
@@ -321,6 +348,7 @@ def main() -> int:
         return 1
 
     errors += check_policy(repo, {"go": go, "zen": zen, "docs": docs})
+    errors += stale_evaluation_errors(repo, zen)
 
     # Documented IDs must be bound somewhere (agents or routing table).
     bound = set(agent_bindings(repo).values())
