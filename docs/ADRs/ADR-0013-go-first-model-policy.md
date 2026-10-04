@@ -72,8 +72,8 @@ whether free-lane viability warrants revisiting. Tracked as a roadmap row
 
 - User directives 2026-10-03: Go defaults with free as last resort; Go Plus
   upgrade; kimi-k3 disabled in the console as too expensive.
-- `.opencode/plans/go-first-model-bindings.md` (approved plan; evidence basis
-  and History).
+- plan `go-first-model-bindings` (approved 2026-10-03; merged as PR #96 — git
+  history holds the full plan, evidence basis, and History).
 - `reference/model-routing.md` (bindings, exclusions, probe contract),
   `docs/CONCEPTS.md` Choice 7c.
 - ADR-0002 (superseded), ADR-0007 (superseded).
