@@ -23,15 +23,16 @@ REPO = os.path.dirname(HERE)
 # carry no `permission.task` allow-list.
 ORCHESTRATORS = ("architect", "curator", "implementer", "council")
 # The 7-persona expansion (plan agent-persona-expansion): role → default
-# binding per the role rows in reference/model-routing.md.
+# binding per the role rows in reference/model-routing.md (Go-first policy,
+# 2026-10-03 — plan go-first-model-bindings).
 EXPECTED_PERSONAS = {
-    "reviewer": "opencode/nemotron-3-ultra-free",
-    "test-writer": "opencode/nemotron-3-ultra-free",
-    "debugger": "opencode/nemotron-3-ultra-free",
+    "reviewer": "opencode-go/mimo-v2.6-pro",
+    "test-writer": "opencode-go/deepseek-v4.1-flash",
+    "debugger": "opencode-go/mimo-v2.6-pro",
     "vision-critic-fast": "opencode-go/minimax-m3",
-    "vision-critic-final": "deepseek/deepseek-flash",
-    "skill-author": "opencode/nemotron-3-ultra-free",
-    "skill-reviewer": "opencode/nemotron-3-ultra-free",
+    "vision-critic-final": "opencode-go/deepseek-v4.1-flash",
+    "skill-author": "opencode-go/minimax-m3",
+    "skill-reviewer": "opencode-go/mimo-v2.6-pro",
 }
 # Single-shot roles: no dispatch authority at all (the one encoded rule).
 NEW_LEAVES = ("reviewer", "skill-reviewer",

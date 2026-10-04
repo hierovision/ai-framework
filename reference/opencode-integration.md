@@ -34,8 +34,10 @@ line. Validated **2026-09-06**, except where a section carries its own date.
   `scripts/watch_agent.py` degrades to heartbeat-only when the DB is absent or
   the schema changes.
 - `session.model` is a **JSON blob** —
-  `{"id":"nemotron-3-ultra-free","providerID":"opencode","variant":"default"}`
-  on a probed `architect` run-vehicle session (2026-10-02). Resolve it to a
+  `{"id":"glm-5.3-flash","providerID":"opencode-go","variant":"default"}`
+  is the shape a Go-bound `architect` run-vehicle session emits (the
+  2026-10-02 probe observed the same shape with that day's free binding;
+  the persona moved to the Go lane on 2026-10-03). Resolve it to a
   display model as `<providerID>/<id>`; parse defensively (missing/odd blob →
   unknown, never a crash). `watch_agent.py` exposes it in `--json`.
 - `CLI override for the DB path`: `scripts/watch_agent.py` (and
@@ -81,12 +83,11 @@ line. Validated **2026-09-06**, except where a section carries its own date.
 - **Free-tier nested calls are environment-dependent**: CI rejects a nested
   subagent bound to a free model (`OpenCode's free tier can only be used from
   within OpenCode` — `scripts/ci-lane-overrides.py`), and a free council died
-  nested locally on 2026-10-01 (RM-017); but a Go-bound parent dispatched the
-  free-bound `architect` in-session cleanly on 2026-10-02 (child session row
-  `model={"id":"nemotron-3-ultra-free","providerID":"opencode",...}`). Route
-  free-bound targets through the top-level run-vehicle
-  (`scripts/dispatch_agent.py`) when the orchestrator is free-bound or
-  headless.
+  nested locally on 2026-10-01 (RM-017). Since the Go-first flip (2026-10-03,
+  plan go-first-model-bindings) every framework persona is Go-bound, so this
+  now concerns consumer wrappers only: route a free-bound target through the
+  top-level run-vehicle (`scripts/dispatch_agent.py`) when the orchestrator
+  is headless or the target is free-bound.
 
 ## Model reasoning control (Go)
 

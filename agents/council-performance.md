@@ -1,7 +1,7 @@
 ---
 name: council-performance
 description: Performance and scalability analysis
-model: opencode-go/qwen3.8-max
+model: opencode-go/gpt-5.6-luna
 mode: all
 hidden: true
 temperature: 0.3

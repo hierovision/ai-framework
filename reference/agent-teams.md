@@ -56,27 +56,28 @@ The leaf deny is the one mechanically encoded exception.
   named dispatch honors the target's frontmatter `model`
   (`reference/opencode-integration.md`).
 - **In-session Task works when the parent session is on a nested-capable
-  tier — Go, Zen, or the direct-key lane.** Probed 2026-10-02: a Go-bound
-  parent dispatched the free-bound `architect` in-session cleanly (non-empty
-  result; child session `agent=architect`,
-  `model=opencode/nemotron-3-ultra-free` — the declared binding).
+  tier — Go, Zen, or the direct-key lane.** Every framework persona is
+  Go-bound by default (go-first policy, 2026-10-03 — plan
+  go-first-model-bindings), so in-session dispatch is the normal path.
 - **A nested free-bound subagent is environment-dependent.** CI rejects it
   (`OpenCode's free tier can only be used from within OpenCode` —
-  `scripts/ci-lane-overrides.py`), and the 2026-10-01 free council died nested
-  locally (RM-017 → council bound to Go). When the orchestrator is free-bound
-  or headless, do not rely on in-session free dispatch.
-- **Free-bound targets route through the run-vehicle when in-session is not
-  viable**: `python3 scripts/dispatch_agent.py --agent <name> --prompt-file
-  <file>` runs a top-level `opencode run` session (free allowed), prints the
-  session id, captures the result, and emits the attribution record.
-  `--model <id>` overrides the lane for that call; `--contract <name>` fails
-  the dispatch non-zero when the result is empty or malformed
-  (`reference/delegated-result-contract.md`). Add `--stream-out FILE`,
-  `--stream-err FILE`, and `--heartbeat FILE` for live visibility (mandatory
-  by contract for runs expected to exceed ~10 min) and `--allow-dirs PATH`
-  (repeatable, least privilege) for any brief that reaches outside the
-  working directory — see `reference/subagent-supervision.md`
-  §Dispatch vehicles.
+  `scripts/ci-lane-overrides.py` keeps the guard for free-bound consumer
+  wrappers), and the 2026-10-01 free council died nested locally (RM-017 →
+  council bound to Go). A free-bound target is a consumer-repo binding, not
+  a framework persona: when the orchestrator is headless or the target is
+  free-bound, do not rely on in-session dispatch.
+- **Targets outside the nested-capable tiers route through the run-vehicle
+  when in-session is not viable**: `python3 scripts/dispatch_agent.py
+  --agent <name> --prompt-file <file>` runs a top-level `opencode run`
+  session, prints the session id, captures the result, and emits the
+  attribution record. `--model <id>` overrides the lane for that call;
+  `--contract <name>` fails the dispatch non-zero when the result is empty
+  or malformed (`reference/delegated-result-contract.md`). Add
+  `--stream-out FILE`, `--stream-err FILE`, and `--heartbeat FILE` for live
+  visibility (mandatory by contract for runs expected to exceed ~10 min) and
+  `--allow-dirs PATH` (repeatable, least privilege) for any brief that
+  reaches outside the working directory — see
+  `reference/subagent-supervision.md` §Dispatch vehicles.
 - While a delegated run is in flight, supervision follows RM-022
   (`scripts/watch_agent.py`): a stalled or blocking run is flagged within one
   poll.

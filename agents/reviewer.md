@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Independent verdict on a change against the plan that authorized it. Read-only review discipline.
-model: opencode/nemotron-3-ultra-free
+model: opencode-go/mimo-v2.6-pro
 mode: all
 permission:
   # Read-only on sources; the one documented exception is the review

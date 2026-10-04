@@ -1,6 +1,6 @@
 # ADR-0007: Amend the eval-lane policy — direct-key lane allowed despite the free-first default
 
-## Status: accepted 2026-09-21
+## Status: superseded by [ADR-0013](ADR-0013-go-first-model-policy.md) (2026-10-03) — this amendment existed to reconcile a paid eval lane with a free-first default; that default no longer holds (Go-first policy, 2026-10-03), and the eval lane itself later moved to the Go flat-rate lane (2026-09-29). The history below stands as the audit trail.
 
 ## Context
 

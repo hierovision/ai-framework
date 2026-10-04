@@ -1,6 +1,6 @@
 # ADR-0002: CI behavioral evals run on the direct-key DeepSeek lane
 
-## Status: accepted 2026-09-18
+## Status: superseded by [ADR-0013](ADR-0013-go-first-model-policy.md) (2026-10-03) — the eval lane moved to the Go flat-rate lane on 2026-09-29, and ADR-0013 records the Go-first policy that keeps it there. The history below stands as the audit trail.
 
 ## Context
 
