@@ -8,6 +8,35 @@ status: **not adopted** — one advisory candidate survives the filter
 (matrix row 3), trigger-gated in `docs/ROADMAP.md` RM-041; every other
 decision point drops with a recorded reason.
 
+## In plain terms
+
+**What it is.** Jev is an API that answers typed questions about a block of
+text — yes/no, pick-one, or rate-on-a-scale — returning each answer with a
+probability. It is a classifier/scorer, not a chat model: it cannot write,
+review, or converse; it runs only on the Zen endpoint (`jev-1.13`, plus a
+limited-time free variant); and it can never be an agent `model:` binding.
+Any use in this repo would be a small script calling that API alongside the
+normal chat-model workflow.
+
+**What we found.** Of eleven places a probabilistic judgment could land, ten
+are settled better by deterministic checks (counters, regexes, tables) or
+are human policy calls this repo deliberately keeps with humans. One narrow
+candidate survives: when a weekly eval fails on *content*, a human currently
+reads the failure stream to tell a real skill regression from assertion
+wording drift or a bad prompt/fixture. Jev could append an advisory typed
+guess — `skill_regression` / `assertion_wording_drift` /
+`prompt_or_fixture_defect` / `unclear`, with a confidence — to the failure
+report. Fail-open, never gating anything, well under $0.01 per weekly run.
+**It is not built, and nothing is adopted.**
+
+**What happens now.** Nothing changes. This doc exists so a future session
+neither re-investigates Jev nor mis-binds it as a chat model. A trigger-gated
+ROADMAP row (RM-041) watches for the only events that would re-open it — Jev
+appearing in the Go catalog, two consecutive weekly runs leaving ≥10 content
+failures that need human reading, or an explicit spend approval. If Jev is
+retired from the Zen catalog, or 2027-01-31 passes without those, this doc
+deletes itself (see `## Lifecycle`).
+
 ## Facts (verified 2026-10-03)
 
 - **What it is.** TypeSafe AI "System One" decision model, not a chat
