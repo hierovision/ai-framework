@@ -147,11 +147,19 @@ def read_heartbeat(path):
 
 # --- session event-stream source --------------------------------------------
 
+def db_path():
+    """The session DB path: `OPENCODE_DB_PATH` override (read at call time,
+    so hermetic tests and the dispatcher can share one reader), else the
+    default location."""
+    return os.path.expanduser(os.environ.get("OPENCODE_DB_PATH") or DB)
+
+
 def db():
-    if not os.path.isfile(DB):
+    path = db_path()
+    if not os.path.isfile(path):
         return None
     try:
-        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=5)
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
         con.row_factory = sqlite3.Row
         return con
     except sqlite3.Error:

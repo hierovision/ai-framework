@@ -38,6 +38,29 @@ line. Validated **2026-09-06**, except where a section carries its own date.
   on a probed `architect` run-vehicle session (2026-10-02). Resolve it to a
   display model as `<providerID>/<id>`; parse defensively (missing/odd blob →
   unknown, never a crash). `watch_agent.py` exposes it in `--json`.
+- `CLI override for the DB path`: `scripts/watch_agent.py` (and
+  `dispatch_agent.py` through it) honors `OPENCODE_DB_PATH` at **call time**,
+  defaulting to `~/.local/share/opencode/opencode.db` unchanged. This lets a
+  consumer or a hermetic test point the dispatcher and the watcher at one
+  fixture DB. The access is read-only; no verdict or query changes.
+- `dispatch_agent.py` uses that reader only to resolve the **finished run's
+  attribution model** for the completion line and the `kind=agent` record
+  (falling back to the declared binding when the DB/row/blob is
+  unavailable) — it does not replicate opencode's agent-resolution
+  precedence.
+
+## Permission config (`external_directory`)
+
+- opencode authorizes reads outside the working directory through
+  `permission.external_directory`; non-interactively an ungranted path is
+  **auto-rejected**, the turn terminates, and `opencode run` still exits 0
+  with no final text (the 2026-10-03 two-architect `empty result` incident).
+- `dispatch_agent.py --allow-dirs PATH` (repeatable) grants
+  `<absolute-path>/**` → `allow` by writing merged JSON into the child's
+  `OPENCODE_CONFIG_CONTENT`; caller-supplied settings win on conflict and
+  each path is validated to exist before launch (exit 2 otherwise). A
+  rejection in the captured stream/stderr is classified
+  `permission denied: <tool> <command-or-path>` instead of `empty result`.
 
 ## Agent dispatch (dated 2026-10-02)
 

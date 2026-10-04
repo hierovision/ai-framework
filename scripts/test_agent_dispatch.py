@@ -164,13 +164,22 @@ def test_new_workers_judgment_led():
 
 
 def test_new_leaf_permission_posture():
-    """AC3: vision critics deny edit/write/bash; reviewers deny edit/write
-    and carry a read-only bash map with a catch-all."""
+    """AC3: vision critics deny edit/write/bash; skill-reviewer denies
+    edit/write and carries a read-only bash map with a catch-all.
+
+    The one documented exception is `reviewer`'s path-scoped write surface:
+    `reviewing-code` Step 7 writes REVIEW.md at the repo root and
+    `docs/CONCEPTS.md` states "reviewing-code writes only REVIEW.md and never
+    edits source". The map's catch-all stays deny and REVIEW.md is its ONLY
+    allow entry — any broader allow (another path, or `*`) fails, and `write`
+    must be absent or deny.
+    """
     for name in ("vision-critic-fast", "vision-critic-final"):
         perm = _frontmatter(name).get("permission") or {}
         for key in ("edit", "write", "bash"):
             assert perm.get(key) == "deny", (name, key, perm.get(key))
-    for name in ("reviewer", "skill-reviewer"):
+
+    for name in ("skill-reviewer",):
         perm = _frontmatter(name).get("permission") or {}
         assert perm.get("edit") == "deny", (name, perm)
         assert perm.get("write") == "deny", (name, perm)
@@ -179,6 +188,21 @@ def test_new_leaf_permission_posture():
         assert bash.get("*") == "ask", (name, bash)
         assert bash.get("ls *") == "allow", (name, bash)
         assert bash.get("git commit*") == "deny", (name, bash)
+
+    perm = _frontmatter("reviewer").get("permission") or {}
+    edit = perm.get("edit")
+    assert isinstance(edit, dict), ("reviewer", edit)
+    assert edit.get("*") == "deny", ("reviewer", edit)
+    assert edit.get("REVIEW.md") == "allow", ("reviewer", edit)
+    allowed = {k for k, v in edit.items() if v == "allow"}
+    assert allowed == {"REVIEW.md"}, ("reviewer", "over-broad allow", edit)
+    write = perm.get("write")
+    assert write is None or write == "deny", ("reviewer", write)
+    bash = perm.get("bash")
+    assert isinstance(bash, dict), ("reviewer", bash)
+    assert bash.get("*") == "ask", ("reviewer", bash)
+    assert bash.get("ls *") == "allow", ("reviewer", bash)
+    assert bash.get("git commit*") == "deny", ("reviewer", bash)
 
 
 def test_concepts_role_vocabulary():

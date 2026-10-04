@@ -19,6 +19,18 @@ a hang. Promoted from `.scratch/skill-gap-analysis/SUBAGENT-PROTOCOL.md`
   contract, and emits exactly one `kind=agent` run-log record with agent +
   resolved model. Lane policy, topology bounds, question relay, and the full
   attribution contract: `reference/agent-teams.md`.
+  - **Live visibility flags** (opt-in; mandatory-by-contract on any dispatch
+    expected to exceed ~10 min): `--stream-out FILE` tees the stdout JSON
+    event stream, `--stream-err FILE` tees stderr, `--heartbeat FILE` writes
+    the dispatcher envelope and injects the §2 protocol block. A fresh
+    dispatch truncates the targets; `--session` resume appends. The block
+    is injected only on a fresh dispatch — a `--session` resume appends to
+    the heartbeat without re-injecting it, so resumes do not accumulate
+    copies. An unopenable target exits 2 before opencode launches (no
+    session created).
+  - **External grants**: `--allow-dirs PATH` (repeatable) grants opencode's
+    `permission.external_directory` allow-map for one declared path,
+    `<abs-path>/**`, least privilege. Without it behavior is unchanged.
 
 ## 1. Bound the dispatch (the orchestrator's job)
 
@@ -31,6 +43,14 @@ a hang. Promoted from `.scratch/skill-gap-analysis/SUBAGENT-PROTOCOL.md`
   orchestrator then polls it (bounded `sleep`, tail). A blocking black box is
   forbidden even if the work would succeed.
 - Record the dispatch in the progress log before starting.
+- **Any brief whose work reaches outside the working directory must pass
+  `--allow-dirs`** for each external path (least privilege; one flag per
+  path). opencode's `external_directory` permission auto-rejects
+  non-interactively: the turn terminates and `opencode run` exits 0 with no
+  final text, which surfaces as an uninformative `empty result`. This is the
+  two-architect incident of 2026-10-03 (`ses_efd9815fdffepLG4xeD2n3d6xS`,
+  `ses_efd8a001dffePR1M6prjSgCrcL`). A denial now classifies as
+  `permission denied: <tool> <command-or-path>` rather than `empty result`.
 
 ## 2. Heartbeat file (the subagent's job)
 
@@ -56,6 +76,14 @@ Rules:
 - On finishing or failing, the last line is `DONE …` or `BLOCKED …` — never
   end silent.
 
+**Line ownership (run-vehicle).** The dispatcher owns the envelope — it
+writes the `# progress:` header and `START` before launch and exactly one
+terminal `DONE ok` / `BLOCKED <detail>` line on every outcome branch. The
+subagent owns the body: `STEP` / `CALL begin|end` / `POLL` lines. The
+injected prompt block names the absolute heartbeat path and cites this
+section; the dispatcher never re-defines the protocol. Line format and the
+parser regex live in `scripts/watch_agent.py`.
+
 ## 3. Scope prohibitions (bad behaviors the watchdog flags)
 
 - No `git commit`/`push`/`checkout`/`reset`, no branch or PR operations.
@@ -71,6 +99,22 @@ Rules:
 - Anything uncommitted on the branch only; the orchestrator lands.
 
 ## 4. Watchdog (the orchestrator's job)
+
+With the visibility flags the operator watches plain files live; the
+watchdog remains the cross-check of heartbeat against opencode's own session
+stream.
+
+```
+# launch (fresh truncates; --session resume appends)
+python3 scripts/dispatch_agent.py --agent <name> --prompt-file <file> \
+    --stream-out .scratch/dispatch/run.events.jsonl \
+    --stream-err .scratch/dispatch/run.stderr.log \
+    --heartbeat .scratch/dispatch/run.progress.log \
+    --allow-dirs ../sibling-repo          # only if the brief reaches outside
+# watch while it runs (two independent live channels)
+tail -f .scratch/dispatch/run.events.jsonl
+tail -f .scratch/dispatch/run.progress.log
+```
 
 ```
 python3 scripts/watch_agent.py \

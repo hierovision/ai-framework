@@ -3,7 +3,7 @@ slug: run-vehicle-visibility
 title: Run-vehicle live visibility — stream tees, heartbeats, session-resolved attribution, permission grants
 status: approved
 created: 2026-10-03
-revised: [2026-10-03]
+revised: [2026-10-03, 2026-10-03, 2026-10-03, 2026-10-03]
 related: [rm-022, go-first-model-bindings]
 ---
 
@@ -364,6 +364,148 @@ architect sessions — a brief that reads sibling repos:
    many paths.
 
 ## History
+
+- 2026-10-03 — CI-caught reconciliation (user-authorized: unblock PR #94's
+  `quality-gates` run 37173743864 / job 111351924567, which failed on
+  `test_new_leaf_permission_posture` still asserting the pre-reconciliation
+  blanket `edit`/`write: deny` for `reviewer`). The reviewer's path-scoped
+  write surface (`REVIEW.md` only) is the documented contract
+  (`reviewing-code` Step 7; `docs/CONCEPTS.md` "reviewing-code writes only
+  REVIEW.md and never edits source"), authorized in `af0174e`; the test
+  encoded the stale side. Files: `scripts/test_agent_dispatch.py`, this plan.
+  The cardinal rule is honored — the new assertions still reject over-broad
+  maps (proven by mutation below), not a weakened net.
+  - **RED→GREEN** — pre-update `python3 scripts/test_agent_dispatch.py` failed
+    exactly as CI did: `FAIL test_new_leaf_permission_posture: ('reviewer',
+    {'edit': {'*': 'deny', 'REVIEW.md': 'allow'}, ...})`. After the update:
+    all 17 cases PASS.
+  - **Mutation proof (strictness)** — against the updated test:
+    - add `"src/**": allow` to the reviewer `edit` map → `FAIL
+      test_new_leaf_permission_posture: ('reviewer', 'over-broad allow',
+      {... 'src/**': 'allow'})`;
+    - flip catch-all to `"*": allow` → `FAIL ... ('reviewer', {'*': 'allow',
+      ...})`;
+    - restore → `PASS`; `agents/reviewer.md` byte-identical (`git diff
+      --quiet` clean).
+  - **Assertions** — `skill-reviewer` keeps blanket `edit`/`write: deny` +
+    bash map; `reviewer` requires an `edit` dict with `"*": deny`,
+    `"REVIEW.md": allow`, allow-set == `{"REVIEW.md"}`, and `write`
+    absent-or-deny; vision critics unchanged.
+  - **Verification (hermetic, exit 0 each)** — the 16 offline Python suites
+    from `.github/workflows/ci.yml` including `scripts/test_agent_dispatch.py`;
+    the four node plan verifiers (managing-github-issues + refining-issue-
+    acceptance `unit.test.mjs`/`verify.mjs`); `validate_skill.py --all`;
+    `check_typed_evals.py --base main`; `bash -n install.sh`; yamllint.
+  - **Scope** — `agents/reviewer.md`, workflows, and the uncommitted
+    `.opencode/plans/go-first-model-bindings.md` worktree change untouched.
+
+- 2026-10-03 — delta-nit fold (user-authorized: bound the unexpected-exception
+  heartbeat detail from the delta verification
+  `.scratch/dispatch/review-delta-run-vehicle-visibility.result.md` on
+  `097480c`; folded into PR #94). Files: `scripts/dispatch_agent.py`,
+  `scripts/test_dispatch_agent.py`, this plan. RED-first (the new assertion
+  failed for the right reason against pre-fix code, then green):
+
+  | Finding | Fix (file:line) | Verification evidence |
+  |---|---|---|
+  | D-nit | cap the unexpected-error detail at the outcome-branch convention, 200 (`scripts/dispatch_agent.py:575–579`) | `test_heartbeat_terminal_on_unexpected_write_failure` part (c): RED = `AssertionError: 500` (unbounded 500-char detail in the heartbeat); GREEN = detail after `unexpected dispatch error: ` ≤ 200, rc 3 |
+
+  - **Verification (hermetic, exit 0 each)** —
+    `python3 scripts/test_dispatch_agent.py` (19 cases),
+    `python3 scripts/test_watch_agent.py` (11 cases),
+    `python3 skills/authoring-skills/scripts/validate_skill.py --all`,
+    `python3 scripts/check_typed_evals.py --base main`.
+  - **Scope** — `agents/reviewer.md`, workflows, and the uncommitted
+    `.opencode/plans/go-first-model-bindings.md` worktree change untouched.
+
+- 2026-10-03 — review-fix pass (user-authorized: resolve ALL four minors +
+  three nits from PR #94's `approve-with-nits` on commit `52ff1c4`; on top of
+  `af0174e`). Files: `scripts/dispatch_agent.py`,
+  `scripts/test_dispatch_agent.py`, `reference/subagent-supervision.md`,
+  `reference/opencode-integration.md`, this plan. RED-first per finding
+  (the new assertion failed for the right reason against pre-fix code, then
+  green):
+
+  | Finding | Fix (file:line) | Verification evidence |
+  |---|---|---|
+  | M1 | guard outcome→result write, terminal in `finally` (`scripts/dispatch_agent.py:532–581`); broad `except Exception` around `log_record` (`:602–603`) | `test_heartbeat_terminal_on_unexpected_write_failure`: RED = `UnicodeEncodeError` traceback + no terminal; GREEN = one `BLOCKED unexpected dispatch error` line, rc 3; record-write `OSError` → `run-log record failed` warning, `DONE ok`, rc 0 unchanged |
+  | M2 | warn to stderr on unparsable caller config + docstring note (`scripts/dispatch_agent.py:302–316`) | `test_permission_config_warns_on_malformed_caller_env`: RED = no warning; GREEN = `OPENCODE_CONFIG_CONTENT` warning, grant still merged, rc 0 |
+  | M3 | `os.path.isdir` + named error (`scripts/dispatch_agent.py:472–475`) | `test_allow_dir_grants_external_permission` file case: RED = rc 0; GREEN = rc 2, `directory` named, no session |
+  | M4 | inject block only when not `--session` (`scripts/dispatch_agent.py:501–504`); rule in `reference/subagent-supervision.md:22–31` | `test_heartbeat_prompt_injection` resume case: RED = block re-injected; GREEN = block absent, envelope `START` still written |
+  | N1 | use `HEARTBEAT_PROTOCOL_REF` in `heartbeat_prompt_block` (`scripts/dispatch_agent.py:258`) | inspection; existing block test still green |
+  | N2 | single blank line before `## Permission config` (`reference/opencode-integration.md:51`) | inspection |
+  | N3 | broaden `ANSI_RE` to CSI non-SGR / OSC / two-char (`scripts/dispatch_agent.py:91–95`) | `test_permission_denial_classification`: RED = `\x1b…` in detail; GREEN = stripped |
+
+  - **Verification (hermetic, exit 0 each)** —
+    `python3 scripts/test_dispatch_agent.py` (19 cases; +2),
+    `python3 scripts/test_watch_agent.py` (11 cases),
+    `python3 skills/authoring-skills/scripts/validate_skill.py --all`,
+    `python3 scripts/check_typed_evals.py --base main`.
+  - **Coverage gate** — no mislayered tests and no high-value gap beyond the
+    findings; M3/M4/N3 extend the existing cases, M1/M2 add one each.
+  - **Scope** — `agents/reviewer.md`, workflows, and the uncommitted
+    `.opencode/plans/go-first-model-bindings.md` worktree change untouched.
+- 2026-10-03 — review + scope widening (user-authorized): `reviewing-code`
+  pass on PR #94 → verdict `approve-with-nits` (no blockers/majors; four
+  `consider` minors: heartbeat terminal-write guard, unparsable-config
+  diagnostic, `--allow-dirs` isdir check, resume block accumulation).
+  Absorbed: `agents/reviewer.md` — its blanket `edit`/`write: deny`
+  contradicted `reviewing-code` Step 7 / `docs/CONCEPTS.md` ("writes only
+  REVIEW.md"); `edit` is now path-scoped (`*` deny, `REVIEW.md` allow),
+  validated live (reviewer wrote REVIEW.md in a smoke dispatch).
+- 2026-10-03 — implemented (branch `feat/run-vehicle-visibility`). Delivered
+  AC1–AC13 plus the AC8/AC14 doc updates in `scripts/dispatch_agent.py`,
+  `scripts/test_dispatch_agent.py`, `scripts/watch_agent.py`,
+  `reference/subagent-supervision.md`, `reference/agent-teams.md`, and
+  `reference/opencode-integration.md`; no `agents/*.md` binding, workflow, or
+  other-plan change (the Go-first flip stays queued).
+  - **RED evidence** — new AC tests authored before the implementation was
+    finalized were run against the pre-change `dispatch_agent.py` /
+    `watch_agent.py` (stashed): `test_stream_out_live_and_complete`,
+    `test_stream_err_live_and_complete`, `test_stream_files_fresh_vs_resume`,
+    `test_heartbeat_envelope_success`, `test_heartbeat_terminal_blocked`,
+    `test_heartbeat_prompt_injection`, `test_stream_open_failure_exits_2_before_launch`,
+    `test_record_model_from_session_db`, `test_permission_denial_classification`,
+    and `test_allow_dir_grants_external_permission` all failed for the right
+    reason (unrecognized flags / no live tee / `empty result` / free model);
+    restored, then green.
+  - **Verification (hermetic, exit 0 each)** —
+    `python3 scripts/test_dispatch_agent.py` (17 cases),
+    `python3 scripts/test_watch_agent.py` (11 cases),
+    `python3 skills/authoring-skills/scripts/validate_skill.py --all`,
+    `python3 scripts/check_typed_evals.py --base main`.
+  - **Live smokes** (artifacts under `.scratch/dispatch/`, gitignored):
+    - AC9 framework Go: session `ses_efb45d163ffem7v4j7JDt0bGcT`;
+      `smoke.events.jsonl` (14 lines) + `smoke.progress.log`
+      (header/START + injected STEP/CALL lines + `DONE ok`);
+      `model=opencode-go/glm-5.3-flash`; `run_log=` + result written;
+      `watch_agent.py --session … --json` → verdict `OK`.
+    - AC10 consumer repro (`--dir ../paragon-learning-network`, no `--model`):
+      session `ses_efb451244fferb0VqVjm8cmrPi`; pre-run
+      `binding=opencode/nemotron-3-ultra-free` (honest frontmatter label) but
+      `model=opencode-go/glm-5.3-flash` at completion and in the sole
+      `kind=agent` record — paragon's project-wrapper binding, never the
+      framework free binding.
+    - AC12 grant proof: session `ses_efb43eb5bffeNoAs2vBi6f3uHB` with
+      `--allow-dirs ../paragon-learning-network --allow-dirs ../marvin-slack`
+      completed `Consult outcome: cross-repo-ok`, reading both siblings.
+    - AC13 denial proof: same brief without grants — session
+      `ses_efb4162d0ffeYvCr4HqNeWaILO`, outcome `failure`, detail
+      `permission denied: external_directory /home/hierovision/repos/paragon-learning-network/*`,
+      heartbeat terminal `BLOCKED …` (not `empty result`).
+  - **Red/mismatch notes** — none contract-breaking. One mechanical/quality
+    refinement after the first denial smoke: the captured stderr carried ANSI
+    codes, so `permission_denial` now strips them and extracts the
+    `external_directory (<path>)` name for a clean record detail (re-probed
+    live; AC13 re-verified).
+
+### Follow-ups
+- The injected supervision block asks for "timestamped" lines but does not
+  pin the `Z`/UTC format the watchdog's `HB_RE` matches; the live smoke's
+  subagent lines used a local ISO offset and were parsed as `RAW`. Consider
+  pinning the format in the injected block (candidate self-improvement note).
+- `--print-logs` depth and event-file retention remain Excluded per Open
+  Questions 3–4; revisit only with evidence of insufficient signal.
 
 - 2026-10-03 — revised (approved). Folded the second incident: two architect
   dispatches died `failure: empty result` on `external_directory` permission

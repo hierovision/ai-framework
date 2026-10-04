@@ -4,8 +4,14 @@ description: Independent verdict on a change against the plan that authorized it
 model: opencode/nemotron-3-ultra-free
 mode: all
 permission:
-  edit: deny
-  write: deny
+  # Read-only on sources; the one documented exception is the review
+  # artifact — `reviewing-code` Step 7 writes REVIEW.md at the repo root
+  # (docs/CONCEPTS.md: "reviewing-code writes only REVIEW.md and never edits
+  # source"). `edit` covers edit/write/patch and matches on file path; the
+  # last matching rule wins (opencode permissions docs).
+  edit:
+    "*": deny
+    "REVIEW.md": allow
   # Leaf dispatcher policy: one reviewer, one verdict, no sub-delegation
   # (reference/agent-teams.md).
   task: deny
