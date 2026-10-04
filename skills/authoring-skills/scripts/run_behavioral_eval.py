@@ -918,6 +918,20 @@ def sandbox_env(environ):
             if not (k.startswith("GITHUB_") or k.startswith("RUNNER_"))}
 
 
+def eval_timeout(e, environ):
+    """Stall timeout (seconds) for one eval: manifest override > env > 240.
+
+    RM-021 AC6 decision rule (2026-10-03): `modeling-threats#1` stalled with
+    zero events at the 240 s default while the lane was healthy elsewhere
+    (concurrent designing-architecture pass; local ping). The eval carries a
+    per-eval `timeout`; the decision and evidence are dated in the plan.
+    """
+    t = (e or {}).get("timeout")
+    if t is None:
+        t = environ.get("BEVAL_TIMEOUT_SECONDS", 240)
+    return int(t)
+
+
 def invoke_opencode(e, model=None, turn=None):
     """Real fresh-agent invocation (CI only; needs the model credential).
 
@@ -930,7 +944,7 @@ def invoke_opencode(e, model=None, turn=None):
     not a model, ushers stalled agents forward; every nudge is logged).
     """
     tmp = tempfile.mkdtemp(prefix="beval-")
-    stall_timeout = int(os.environ.get("BEVAL_TIMEOUT_SECONDS", "240"))
+    stall_timeout = eval_timeout(e, os.environ)
     keep = False
     try:
         if not (turn and turn.get("session_id")):

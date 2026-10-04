@@ -914,6 +914,15 @@ def test_sandbox_env_scrubs_ci_paths():
     assert not any(k.startswith(("GITHUB_", "RUNNER_")) for k in out), out
 
 
+def test_eval_timeout_override_precedence():
+    """RM-021 AC6 (2026-10-03): a per-eval `timeout` wins over the env default
+    (the modeling-threats#1 stall remedy); absent both, 240 s stands."""
+    assert runner.eval_timeout({"timeout": 600}, {"BEVAL_TIMEOUT_SECONDS": "300"}) == 600
+    assert runner.eval_timeout({}, {"BEVAL_TIMEOUT_SECONDS": "300"}) == 300
+    assert runner.eval_timeout({}, {}) == 240
+    assert runner.eval_timeout(None, {"BEVAL_TIMEOUT_SECONDS": "300"}) == 300
+
+
 def _tool_stream(tool, **inp):
     return json.dumps({"type": "tool", "sessionID": "ses_test",
                        "part": {"type": "tool", "tool": tool,
@@ -1183,6 +1192,7 @@ def main():
         test_eval_record_carries_measured_tokens_and_duration,
         test_augment_prompt_gives_absolute_root,
         test_sandbox_env_scrubs_ci_paths,
+        test_eval_timeout_override_precedence,
         test_has_work_activity_counts_bash_writes,
         test_bash_writes_suppress_the_zero_write_nudge,
         test_legacy_eval_capped_at_one_nudge,

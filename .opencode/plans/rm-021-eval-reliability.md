@@ -307,6 +307,16 @@ command from AC9.
   per-artifact dirs), so `merge-eval-logs.py` output 0 records/0 streams and
   `failure-taxonomy.json` was vacuously empty — AC9 qualification would be
   false-green until the merge step locates `run-*.jsonl` in either layout.
+- 2026-10-03 — AC6 remedy experiment (decision rule: provider hang/timeout →
+  per-eval timeout override, dated). Evidence: three 240 s invocations of
+  `modeling-threats#1` with zero events/stderr/tokens, while the same CI lane
+  and model passed `designing-architecture` concurrently (37139299698,
+  17:09–17:12) and a local ping answered. Added per-eval `timeout` support
+  (manifest override > `BEVAL_TIMEOUT_SECONDS` > 240) and set
+  `modeling-threats#1` to 600 s; a vehicle switch or eval split is the next
+  branch if it still stalls. Per-change 37139299698 fully green (sandbox
+  config-read fix validated); report-pipeline fix validated (taxonomy shows
+  3 records + `terminal_infra`).
 - 2026-10-03 — post-PR fix slice (AC2). The per-change lane invokes the
   runner without `--logs-dir`, so the completeness check received `None` and
   false-failed every selected eval after they had passed (verified:

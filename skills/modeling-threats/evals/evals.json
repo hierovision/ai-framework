@@ -6,6 +6,7 @@
     {
       "id": 1,
       "default": true,
+      "timeout": 600,
       "prompt": "We just signed a design partner and their security team wants our threat model before they onboard. Our service is in fixtures/ledger-api/ (we ship from commit 4f2a9c1). Write the threat model — all three artifacts — in this session. Keep it readable; their reviewer is busy.",
       "expected_behavior": [
         "Produces threat-model.md, threat-model.yaml, and threat-model.json in the modeled root, with the prose canonical and the machine-readable companions derived from it",
