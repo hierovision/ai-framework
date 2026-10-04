@@ -113,7 +113,8 @@ def coverage_gaps(logs_dir, skills_root=None, registry="auto"):
 
 def green_run_status(achieved=False, run_id=None, date=None, branch=None,
                      duration_min=None, all_pass=None, quarantine_flips=None,
-                     artifact_url=None, reason=None):
+                     artifact_url=None, reason=None, depth=None,
+                     infra_retried=None):
     """AC4: dashboard state for the first steady-state green run."""
     if achieved:
         return {
@@ -124,17 +125,18 @@ def green_run_status(achieved=False, run_id=None, date=None, branch=None,
             "duration_min": duration_min,
             "all_pass": all_pass,
             "quarantine_flips": quarantine_flips,
+            "infra_retried": infra_retried,
+            "depth": depth,
             "artifact_url": artifact_url,
             "definition": "reference/eval-green-run-definition.md",
             "qualified_at": _now_iso(),
         }
     reason = reason or (
-        f"No steady-state green run observed as of {_today()}. Earliest candidate "
-        f"is the weekly eval-behavioral run on {GREEN_RUN_EARLIEST} on main "
-        f"(subsequent candidate: 2026-09-28). RM-002's negative-path canary run "
-        f"{RM002_CANARY_RUN} (2026-09-16) is the red counterpart, not a green run. "
-        "Qualification also requires the full included suite to fit the <=120 min "
-        "weekly budget (see reference/eval-green-run-definition.md)."
+        f"No steady-state green run observed as of {_today()}. A qualifying run "
+        f"must satisfy reference/eval-green-run-definition.md: every included "
+        "eval reaches a final content verdict and all are PASS, zero terminal "
+        "infra failures, zero quarantine flips, within the weekly budget, and "
+        "on main. RM-002's negative-path canary run is the red counterpart."
     )
     return {
         "achieved": False,
@@ -223,6 +225,24 @@ def failure_taxonomy(logs_dir):
     pass_n = sum(1 for r in records if r.get("eval_pass"))
     infra = sum(1 for r in records if r.get("outcome") == "error")
     content = sum(1 for r in records if r.get("outcome") == "failure")
+
+    # RM-021 AC3: per-eval terminal vs recovered infra classification.
+    by_eval = {}
+    for r in records:
+        key = r.get("eval") or (r.get("skill") or "(none)")
+        by_eval.setdefault(key, []).append(r)
+    terminal_infra, recovered_infra = [], []
+    for key, recs in sorted(by_eval.items()):
+        final = [r for r in recs if r.get("eval_pass") is not None]
+        annotations = [r for r in recs
+                       if r.get("eval_pass") is None and r.get("outcome") == "error"]
+        if not final:
+            continue
+        if final[-1].get("outcome") == "error":
+            terminal_infra.append(key)
+        elif annotations:
+            recovered_infra.append(key)
+
     signatures = {}
     refs = {}
     streams = dead = acted = 0
@@ -251,6 +271,8 @@ def failure_taxonomy(logs_dir):
         "pass": pass_n,
         "infra_error": infra,
         "content_failure": content,
+        "terminal_infra": terminal_infra,
+        "recovered_infra": recovered_infra,
         "failure_streams": streams,
         "dead_streams": dead,
         "acted_streams": acted,
@@ -354,6 +376,10 @@ def main(argv=None):
     s.add_argument("--quarantine-flips", type=int, default=0)
     s.add_argument("--artifact-url", default=None)
     s.add_argument("--reason", default=None)
+    s.add_argument("--depth", default=None,
+                   help="Suite depth that qualified (default/full).")
+    s.add_argument("--infra-retried", type=int, default=None,
+                   help="Number of evals that recovered from infra retries.")
 
     q = sub.add_parser("quota-projection", parents=[common],
                        help="Monthly quota projection (AC11).")
@@ -393,7 +419,8 @@ def main(argv=None):
                 achieved=achieved, run_id=args.run_id, date=args.date,
                 branch=args.branch, duration_min=args.duration_min,
                 all_pass=args.all_pass, quarantine_flips=args.quarantine_flips,
-                artifact_url=args.artifact_url, reason=args.reason)
+                artifact_url=args.artifact_url, reason=args.reason,
+                depth=args.depth, infra_retried=args.infra_retried)
         else:
             status = green_run_status(reason=args.reason)
         _emit(status, args.out, args.print)

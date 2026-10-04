@@ -172,6 +172,10 @@ function validateManifest(skill, manifestPath, data, evalsDir) {
     if (e.deferred !== undefined && typeof e.deferred !== "boolean") {
       errors.push(`${where}: 'deferred' must be a boolean`);
     }
+    if (e.timeout !== undefined &&
+        (!Number.isInteger(e.timeout) || e.timeout <= 0)) {
+      errors.push(`${where}: 'timeout' must be a positive integer (seconds)`);
+    }
     if (e.default !== undefined) {
       if (typeof e.default !== "boolean") {
         errors.push(`${where}: 'default' must be a boolean`);

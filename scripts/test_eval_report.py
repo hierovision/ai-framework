@@ -118,15 +118,19 @@ def test_query_runs_coverage_gaps_cli():
 def test_green_run_status_not_achieved_and_recorded():
     not_achieved = report.green_run_status()
     assert not_achieved["achieved"] is False
-    assert "2026-09-21" in not_achieved["reason"]
-    assert "35108912831" in not_achieved["reason"]
+    # RM-021 AC8: the not-achieved text is no longer hardcoded to 2026-09-21/28.
+    assert "reference/eval-green-run-definition.md" in not_achieved["reason"]
+    assert "terminal" in not_achieved["reason"] or "budget" in not_achieved["reason"]
 
     achieved = report.green_run_status(
         achieved=True, run_id="123", date="2026-09-21", branch="main",
         duration_min=18.5, all_pass=True, quarantine_flips=0,
-        artifact_url="https://example/actions/runs/123")
+        artifact_url="https://example/actions/runs/123",
+        depth="default", infra_retried=1)
     assert achieved["achieved"] is True and achieved["run_id"] == "123"
     assert achieved["duration_min"] == 18.5
+    assert achieved["depth"] == "default"
+    assert achieved["infra_retried"] == 1
 
 
 def test_quota_projection_under_guardrail():
@@ -281,6 +285,48 @@ def test_failure_taxonomy_splits_infra_and_content():
         shutil.rmtree(d)
 
 
+def test_failure_taxonomy_terminal_vs_recovered_infra():
+    """RM-021 AC3: terminal infra (no final verdict) is reported separately from
+    recovered infra (retried to a verdict)."""
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, "run-2026-10-03.jsonl"), "w", encoding="utf-8") as fh:
+            # alpha: one transient retry annotation then a final PASS -> recovered.
+            fh.write(json.dumps({"ts": "2026-10-03T06:00:00Z", "run_id": "a1",
+                                 "kind": "eval", "skill": "alpha", "eval": "alpha#1",
+                                 "outcome": "error", "eval_pass": None,
+                                 "detail": "transient attempt 1"}) + "\n")
+            fh.write(json.dumps({"ts": "2026-10-03T06:00:30Z", "run_id": "a2",
+                                 "kind": "eval", "skill": "alpha", "eval": "alpha#1",
+                                 "outcome": "success", "eval_pass": True}) + "\n")
+            # beta: terminal infra (final record is outcome=error).
+            fh.write(json.dumps({"ts": "2026-10-03T06:01:00Z", "run_id": "b1",
+                                 "kind": "eval", "skill": "beta", "eval": "beta#1",
+                                 "outcome": "error", "eval_pass": False,
+                                 "detail": "dead session"}) + "\n")
+        out = report.failure_taxonomy(d)
+        assert out["terminal_infra"] == ["beta#1"], out
+        assert out["recovered_infra"] == ["alpha#1"], out
+    finally:
+        shutil.rmtree(d)
+
+
+def test_green_run_status_records_depth_and_infra_retried():
+    """RM-021 AC8: --record emits depth and infra_retried; the not-achieved text
+    is no longer hardcoded to 2026-09-21/28 candidates."""
+    not_achieved = report.green_run_status()
+    assert not_achieved["achieved"] is False
+    assert "2026-09-21" not in (not_achieved.get("reason") or "")
+    assert "2026-09-28" not in (not_achieved.get("reason") or "")
+
+    achieved = report.green_run_status(
+        achieved=True, run_id="r", date="2026-10-03", branch="main",
+        duration_min=12.0, all_pass=True, quarantine_flips=0,
+        artifact_url="https://example/a", depth="default", infra_retried=1)
+    assert achieved["depth"] == "default", achieved
+    assert achieved["infra_retried"] == 1, achieved
+
+
 def test_suite_projection_from_measured_samples():
     """RM-021 (2026-09-29): project tokens/cost/wall-time from measured
     per-eval records (small probe -> extrapolate), with confidence from n."""
@@ -367,6 +413,8 @@ def main():
         test_coverage_gaps_deferred_status,
         test_coverage_gaps_legacy_assertion_backlog,
         test_failure_taxonomy_splits_infra_and_content,
+        test_failure_taxonomy_terminal_vs_recovered_infra,
+        test_green_run_status_records_depth_and_infra_retried,
         test_suite_projection_from_measured_samples,
         test_merge_eval_logs_concatenates_runs_and_quarantine,
     ]

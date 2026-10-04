@@ -89,6 +89,21 @@ def test_weekly_timeout_is_150():
     print("PASS  weekly eval-behavioral timeout-minutes == 150 (measured budget)")
 
 
+def test_skills_dispatch_input_wired():
+    """RM-021 AC5: eval-behavioral.yml accepts a `skills` dispatch input and wires
+    it to the runner's `--skill` argument, intersected per shard."""
+    doc = yaml.safe_load(open(BEHAVIORAL, encoding="utf-8"))
+    # PyYAML parses the bare `on:` key as boolean True.
+    on_block = doc.get("on") or doc.get(True) or {}
+    inputs = on_block.get("workflow_dispatch", {}).get("inputs", {})
+    assert "skills" in inputs, f"missing skills dispatch input: {inputs.keys()}"
+    assert inputs["skills"]["type"] == "string", inputs["skills"]
+    text = open(BEHAVIORAL, encoding="utf-8").read()
+    assert "inputs.skills" in text, "workflow must reference inputs.skills"
+    assert "--skill" in text, "runner invocation must pass --skill"
+    print("PASS  eval-behavioral.yml has skills dispatch input wired to --skill")
+
+
 def test_lane_and_nested_agent_override():
     """Both eval workflows (2026-09-29): the step that RUNS the runner must also
     export the nested-agent override, name the Go lane model, and not reference
@@ -131,6 +146,22 @@ def test_lane_and_nested_agent_override():
     # /tmp allowance (CI ephemeral): agents use /tmp scratch, and those writes
     # were auto-rejected (33 in one run) -> zero-write turns.
     assert cfg["permission"]["external_directory"]["/tmp/**"] == "allow", cfg
+    # Installed-config reads (2026-10-03): skill references and agent
+    # definitions live there; a denied read ended an eval turn.
+    installed = os.path.expanduser("~/.config/opencode") + "/**"
+    assert cfg["permission"]["external_directory"][installed] == "allow", cfg
+
+
+def test_report_downloads_per_artifact():
+    """RM-021 (2026-10-03): actions/download-artifact v7 flattened
+    pattern-matched artifacts, so same-named shard run logs overwrote and the
+    merged report read 0 records. The report job must download one directory
+    per shard artifact (gh run download -n ... -D shards/<name>)."""
+    text = open(BEHAVIORAL, encoding="utf-8").read()
+    assert "gh run download" in text and '"shards/$name"' in text, text
+    doc = yaml.safe_load(text)
+    assert doc["permissions"].get("actions") == "read", doc["permissions"]
+    print("PASS  report job downloads shard artifacts per-artifact")
 
 
 def main():
@@ -139,7 +170,9 @@ def main():
         test_per_change_selection_flags_and_cache,
         test_artifact_pin_node24_both_workflows,
         test_weekly_timeout_is_150,
+        test_skills_dispatch_input_wired,
         test_lane_and_nested_agent_override,
+        test_report_downloads_per_artifact,
     ]
     failed = 0
     for t in tests:

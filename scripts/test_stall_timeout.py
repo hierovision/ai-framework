@@ -61,3 +61,14 @@ except ProcessLookupError:
 """)], capture_output=True, text=True, timeout=30)
 assert "GROUP_DEAD" in r2.stdout, f"group survived: {r2.stdout!r}"
 print("PASS  process group killed — no zombie children")
+
+# RM-021 AC4: a timed-out invocation must return the captured server stderr so
+# the runner can persist it next to the synthetic stall stream.
+import importlib.util
+RUNNER = os.path.join("skills", "authoring-skills", "scripts", "run_behavioral_eval.py")
+spec = importlib.util.spec_from_file_location("run_behavioral_eval", RUNNER)
+runner_mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runner_mod)
+res = runner_mod.EvalResult(raw="stall", stderr="ERROR provider=xyz timeout")
+assert res.stderr == "ERROR provider=xyz timeout", res.stderr
+print("PASS  EvalResult carries captured stderr for stall diagnosis")

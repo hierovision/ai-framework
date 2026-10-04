@@ -282,6 +282,27 @@ def test_cli_pass_branch():
         shutil.rmtree(root); shutil.rmtree(logs)
 
 
+def test_cli_completeness_uses_default_logs_dir():
+    """RM-021 AC2 regression: the per-change lane passes no --logs-dir; the
+    completeness check must resolve the effective default, never treat the
+    None argument as an empty log dir (2026-10-03 per-change false-fail)."""
+    root = _make_skills_root()
+    logs = tempfile.mkdtemp()
+    try:
+        env = _hermetic_env()
+        env["OBSERVE_LOG_DIR"] = logs
+        r = subprocess.run([sys.executable, RUNNER, "--skills-root", root,
+                            "--stub-output", "ALL"],
+                           capture_output=True, text=True, env=env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert "completeness check failed" not in (r.stderr or ""), r.stderr
+        recs = _read_logs(logs)
+        assert recs and all(x["eval_pass"] is True for x in recs), recs
+        print("PASS  no --logs-dir -> completeness resolves the default, exit 0")
+    finally:
+        shutil.rmtree(root); shutil.rmtree(logs)
+
+
 def test_cli_fail_branch():
     root = _make_skills_root()
     logs = tempfile.mkdtemp()
@@ -873,9 +894,48 @@ def test_augment_prompt_gives_absolute_root():
     out = runner.augment_prompt("write the tests", "/tmp/beval-abc", files)
     assert "/tmp/beval-abc/fixtures/phasewave/unit-duration" in out, out
     assert "never write outside it" in out, out
+    assert "do not read outside it" in out, out
     out2 = runner.augment_prompt("p", "/w", ["a/b/one.md", "a/c/two.md"])
     assert "/w/a" in out2, out2
     assert runner.augment_prompt("p", "/w", []) == "p"
+
+def test_sandbox_env_scrubs_ci_paths():
+    """RM-021 (2026-10-03): GITHUB_*/RUNNER_* env vars leak host paths the
+    agent probed (external_directory auto-reject -> zero-write turns); the
+    sandbox env must drop them while keeping the lane credentials."""
+    env = {
+        "PATH": "/usr/bin", "HOME": "/home/runner",
+        "OPENCODE_API_KEY": "k", "OPENCODE_CONFIG_CONTENT": "{}",
+        "GITHUB_WORKSPACE": "/home/runner/work/ai-framework/ai-framework",
+        "GITHUB_ACTIONS": "true", "RUNNER_TEMP": "/tmp/x",
+    }
+    out = runner.sandbox_env(env)
+    assert out["OPENCODE_API_KEY"] == "k" and out["PATH"] == "/usr/bin", out
+    assert not any(k.startswith(("GITHUB_", "RUNNER_")) for k in out), out
+
+
+def test_eval_timeout_override_precedence():
+    """RM-021 AC6 (2026-10-03): a per-eval `timeout` wins over the env default
+    (the modeling-threats#1 stall remedy); absent both, 240 s stands."""
+    assert runner.eval_timeout({"timeout": 600}, {"BEVAL_TIMEOUT_SECONDS": "300"}) == 600
+    assert runner.eval_timeout({}, {"BEVAL_TIMEOUT_SECONDS": "300"}) == 300
+    assert runner.eval_timeout({}, {}) == 240
+    assert runner.eval_timeout(None, {"BEVAL_TIMEOUT_SECONDS": "300"}) == 300
+
+
+def test_load_skill_evals_carries_timeout():
+    """RM-021 (2026-10-04): the normalized eval dict must carry the per-eval
+    `timeout`, or the 600 s remedy silently falls back to 240 (first CI rerun:
+    the stall record still said 240 s)."""
+    with tempfile.TemporaryDirectory() as root:
+        d = os.path.join(root, "demo", "evals")
+        os.makedirs(d)
+        with open(os.path.join(d, "evals.json"), "w", encoding="utf-8") as fh:
+            json.dump({"evals": [{"id": 1, "prompt": "p", "timeout": 600,
+                                  "expected_behavior": ["b"]}]}, fh)
+        evs = runner.load_skill_evals(root)
+        assert evs and evs[0]["timeout"] == 600, evs
+
 
 def _tool_stream(tool, **inp):
     return json.dumps({"type": "tool", "sessionID": "ses_test",
@@ -970,6 +1030,143 @@ def test_no_event_stall_stops_after_two_attempts():
         shutil.rmtree(d)
 
 
+def test_fixture_copy_contained_layout():
+    """RM-021 AC1: fixture paths are copied into the workdir at the repo-relative
+    layout; paths that normalize outside the repo are skipped, never crashing."""
+    root = tempfile.mkdtemp(prefix="beval-copy-")
+    try:
+        # Mirror a real repo root so dirname(dirname(skills_root)) == root.
+        repo = os.path.join(root, "repo")
+        skill = "observing-runs"
+        evals = os.path.join(repo, "skills", skill, "evals")
+        os.makedirs(evals)
+        # A normal fixture under evals/
+        with open(os.path.join(evals, "fixture.txt"), "w") as fh:
+            fh.write("fixture")
+        # A file reached via ../ (should land at skills/observing-runs/scripts/)
+        scripts = os.path.join(repo, "skills", skill, "scripts")
+        os.makedirs(scripts)
+        with open(os.path.join(scripts, "log_run.py"), "w") as fh:
+            fh.write("log_run")
+
+        tmp = tempfile.mkdtemp(prefix="beval-tmp-")
+        try:
+            copied = runner._copy_fixture_files(
+                tmp, skill,
+                ["fixture.txt", "../scripts/log_run.py", "/tmp/escaped-eval-file.txt"],
+                skills_root=os.path.join(repo, "skills"))
+            # Repo-relative layout preserved under tmp
+            assert os.path.isfile(os.path.join(tmp, "skills", skill, "evals", "fixture.txt")), \
+                f"fixture.txt not copied: {os.listdir(tmp)}"
+            assert os.path.isfile(os.path.join(tmp, "skills", skill, "scripts", "log_run.py")), \
+                f"log_run.py not copied: {os.listdir(tmp)}"
+            assert not os.path.exists(os.path.join(tmp, "tmp", "escaped-eval-file.txt")), \
+                "path escaping repo was not skipped"
+            assert copied == 2, copied
+        finally:
+            shutil.rmtree(tmp)
+    finally:
+        shutil.rmtree(root)
+
+
+def test_crash_isolation_records_infra_and_continues():
+    """RM-021 AC2: an unexpected exception in one eval is recorded as that eval's
+    infra error and the runner continues; the other eval still runs."""
+    root = tempfile.mkdtemp(prefix="beval-crash-")
+    logs = tempfile.mkdtemp(prefix="beval-crash-logs-")
+    try:
+        d = os.path.join(root, "alpha", "evals")
+        os.makedirs(d)
+        json.dump({"evals": [
+            {"id": 1, "prompt": "p", "expected_behavior": ["A"]},
+        ]}, open(os.path.join(d, "evals.json"), "w"))
+        d2 = os.path.join(root, "beta", "evals")
+        os.makedirs(d2)
+        json.dump({"evals": [
+            {"id": 1, "prompt": "p", "expected_behavior": ["B"]},
+        ]}, open(os.path.join(d2, "evals.json"), "w"))
+
+        calls = {"n": 0}
+
+        def get_output(e, turn=None):
+            calls["n"] += 1
+            if e["skill"] == "alpha":
+                raise RuntimeError("simulated shard crash")
+            return "B"
+
+        # Directly exercise the loop behavior with a raising get_output.
+        selected = runner.load_skill_evals(root)
+        for e in selected:
+            try:
+                runner.run_eval(e, get_output, logs_dir=logs, sleep=lambda _s: None)
+            except Exception as exc:
+                runner._record_infra_error(e, exc, logs_dir=logs)
+
+        recs = _read_logs(logs)
+        alpha_recs = [r for r in recs if r.get("skill") == "alpha"]
+        beta_recs = [r for r in recs if r.get("skill") == "beta"]
+        assert alpha_recs, "alpha crash must produce a record"
+        assert alpha_recs[-1]["outcome"] == "error", alpha_recs[-1]
+        assert beta_recs, "beta must still run after alpha crash"
+        assert beta_recs[-1]["eval_pass"] is True, beta_recs[-1]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+
+
+def test_completeness_assertion_names_missing_eval():
+    """RM-021 AC2: before exit the runner asserts every selected eval has a final
+    record and exits non-zero naming any missing key."""
+    root = tempfile.mkdtemp(prefix="beval-missing-")
+    logs = tempfile.mkdtemp(prefix="beval-missing-logs-")
+    try:
+        d = os.path.join(root, "alpha", "evals")
+        os.makedirs(d)
+        json.dump({"evals": [{"id": 1, "prompt": "p", "expected_behavior": ["A"]}]},
+                  open(os.path.join(d, "evals.json"), "w"))
+        # No records written for alpha#1.
+        selected = runner.load_skill_evals(root)
+        missing = runner._missing_eval_keys(selected, logs)
+        assert missing == ["alpha#1"], missing
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+
+
+def test_eval_record_carries_eval_key():
+    """RM-021 AC3: every final kind=eval record carries `eval: '<skill>#<id>'`."""
+    e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["A"], "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    try:
+        passed, missing, _ = runner.run_eval(e, lambda _e: "A", logs_dir=d)
+        assert passed, missing
+        rec = _read_logs(d)[-1]
+        assert rec.get("eval") == "alpha#1", rec
+    finally:
+        shutil.rmtree(d)
+
+
+def test_stall_stderr_persisted():
+    """RM-021 AC4: a timed-out invocation persists captured server stderr next to
+    the synthetic stall stream."""
+    e = {"skill": "alpha", "eval_id": 1, "expected_behavior": ["XYZZY_EXPECTED"], "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    try:
+        def stall_with_stderr(_e, turn=None):
+            return runner.EvalResult(
+                raw="eval stall: subprocess timed out after 1s with no completion",
+                stderr="ERROR provider=xyz timeout")
+        passed, missing, _ = runner.run_eval(e, stall_with_stderr, logs_dir=d, sleep=lambda _s: None)
+        assert not passed
+        sd = os.path.join(d, "eval-streams")
+        assert os.path.isdir(sd), "eval-streams dir missing"
+        stderr_files = [f for f in os.listdir(sd) if f.endswith("-stderr.log")]
+        assert stderr_files, f"no stderr log written: {os.listdir(sd)}"
+        body = open(os.path.join(sd, stderr_files[0]), encoding="utf-8").read()
+        assert "provider=xyz" in body, body
+    finally:
+        shutil.rmtree(d)
+
 
 def main():
     tests = [
@@ -1008,10 +1205,19 @@ def main():
         test_infra_death_does_not_quarantine_but_content_miss_does,
         test_eval_record_carries_measured_tokens_and_duration,
         test_augment_prompt_gives_absolute_root,
+        test_sandbox_env_scrubs_ci_paths,
+        test_eval_timeout_override_precedence,
+        test_load_skill_evals_carries_timeout,
         test_has_work_activity_counts_bash_writes,
         test_bash_writes_suppress_the_zero_write_nudge,
         test_legacy_eval_capped_at_one_nudge,
         test_no_event_stall_stops_after_two_attempts,
+        test_fixture_copy_contained_layout,
+        test_crash_isolation_records_infra_and_continues,
+        test_completeness_assertion_names_missing_eval,
+        test_eval_record_carries_eval_key,
+        test_stall_stderr_persisted,
+        test_cli_completeness_uses_default_logs_dir,
     ]
     failed = 0
     for t in tests:

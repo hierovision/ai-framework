@@ -105,6 +105,20 @@ def test_append_only_no_readback():
     assert '"r"' not in src, "log_run.py must not read the log file back (out-of-context guard)"
 
 
+def test_eval_field_accepted():
+    """RM-021 AC3: kind=eval records may carry an `eval` key '<skill>#<id>'."""
+    d = tempfile.mkdtemp()
+    try:
+        rec = {"kind": "eval", "skill": "x", "outcome": "success",
+               "eval_pass": True, "eval": "x#1"}
+        r = _run(rec, d)
+        assert r.returncode == 0, r.stderr
+        obj = json.loads(open(os.path.join(d, os.listdir(d)[0]), encoding="utf-8").read().splitlines()[0])
+        assert obj.get("eval") == "x#1", obj
+    finally:
+        shutil.rmtree(d)
+
+
 def test_default_logs_dir_when_imported_as_module():
     """RM-002 seam (found by the AC5 live gate, 2026-09-16): the eval runner
     IMPORTS log_run as a module (single source of truth — the runner must not
@@ -155,6 +169,7 @@ def main():
         test_symlink_safe,
         test_default_logs_dir_when_imported_as_module,
         test_append_only_no_readback,
+        test_eval_field_accepted,
     ]
     failed = 0
     for t in tests:

@@ -248,9 +248,12 @@ The full JSON schema and the event-stream envelope live in
 
 #### Additive eval markers (`evals.json`)
 
-Two OPTIONAL markers extend the eval protocol (backward-compatible; files
+Three OPTIONAL markers extend the eval protocol (backward-compatible; files
 without them default to included / Go-tier):
 
+- `timeout: 600` on an eval — per-eval stall budget in seconds (default
+  240, or env `BEVAL_TIMEOUT_SECONDS`). Use it for a known-heavy eval; the
+  runner's fresh-retry budget still bounds the total.
 - `deferred: true` on an eval — excluded from the default run because it
   needs a real browser / harness unavailable in the headless gate (e.g.
   `writing-e2e-tests`). The runner's `--list` omits it; re-run explicitly
