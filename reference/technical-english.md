@@ -67,7 +67,7 @@ short, and readable at a glance**.
 10. **Scope.** This governs engineering communication — agent responses,
     analyses, plans, reports, summaries, commit messages, and doc edits.
     Ordinary conversation with the user is not subject to item 2's
-    word-blacklist; it is subject to 1, 3, 4, 7, 9, 11, 12, and 13
+    word-blacklist; it is subject to 1, 3, 4, 7, 9, 11, 12, 13, and 14
     (clarity beats politeness padding, but be a person, not a robot).
 
 11. **Approval asks carry the full link.** When asking the user to approve,
@@ -90,12 +90,20 @@ short, and readable at a glance**.
     that is neither in the glossary nor standard industry vocabulary is
     defined in the same sentence.
 
+14. **The final message is the only thing the user sees.** Tool calls,
+    command text, and tool output scroll away and are not reviewable. Every
+    material fact must be restated in the final message: what happened, the
+    exact targets of any external action (who was emailed, which
+    record/file/project changed), the outcome, and any value the user must
+    act on. A reader who saw nothing else must be able to act. Brevity comes
+    from cutting filler and process narration — never from omitting facts.
+
 ## Enforcement
 
 - The rule is a prompt-level baseline: every agent references this file.
   It is not a hard technical constraint — treat violations as
   self-correctable drift.
 - The `reviewing-code` review pass checks artifact language against items
-  1-13 when reviewing a diff or handoff.
+  1-14 when reviewing a diff or handoff.
 - If an agent's output violates the baseline, point at the specific rule;
   do not restyle wholesale.

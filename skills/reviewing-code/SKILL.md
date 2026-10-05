@@ -192,6 +192,15 @@ outrank taste — do not lead with nits):
    invisible to type-check and lint, so the review is its prevention
    net; the validating-ui Step-8 console net catches the runtime
    symptom.
+8. **Artifact language — rule 14.** When the pass under review includes a
+   handoff, summary, or PR body, check that it restates material facts:
+   what happened, the exact targets of any external action (recipients,
+   records, config values), the outcome, and any value the user must act
+   on. A handoff that omits an external-action target is a finding — a
+   minor by default (self-correctable drift per
+   `reference/technical-english.md`), a major when the omission hides
+   evidence for an AC. Never accept "see the command above" — tool calls
+   and output are not reviewable.
 
 ### Step 5 — Classify findings by severity (the backbone)
 
