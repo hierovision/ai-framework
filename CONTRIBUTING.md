@@ -37,7 +37,8 @@ python3 skills/authoring-skills/scripts/validate_skill.py --all
 python3 scripts/check_typed_evals.py --base main
 python3 scripts/test_changed_files.py && python3 scripts/test_eval_report.py \
   && python3 scripts/test_eval_workflows.py && python3 scripts/test_quarantine.py \
-  && python3 scripts/test_stall_timeout.py && python3 scripts/test_typed_evals.py
+  && python3 scripts/test_stall_timeout.py && python3 scripts/test_typed_evals.py \
+  && python3 scripts/test_session_guard.py
 node skills/managing-github-issues/evals/fixtures/unit.test.mjs
 node skills/refining-issue-acceptance/evals/fixtures/unit.test.mjs
 bash -n install.sh

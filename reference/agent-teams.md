@@ -80,7 +80,13 @@ The leaf deny is the one mechanically encoded exception.
   `reference/subagent-supervision.md` §Dispatch vehicles.
 - While a delegated run is in flight, supervision follows RM-022
   (`scripts/watch_agent.py`): a stalled or blocking run is flagged within one
-  poll.
+  poll. A dispatch wave runs under the session-tree guard
+  (`scripts/session_guard.py`, `reference/subagent-supervision.md` §5) —
+  mandatory by contract: it observes workers and workers' workers (depth ≤ 2),
+  matches the known failure-pattern registry (empty results, permission
+  auto-rejects, identical-retry loops, wave-majority failures, budget
+  overrun), and holds abort authority — it fails the session fast instead of
+  letting a broken wave burn one.
 
 ## Question relay
 

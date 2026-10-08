@@ -138,3 +138,56 @@ Exit codes: `0` OK/WARN, `2` STALLED or BLOCKING, `3` DEAD, `4` UNKNOWN — the
 orchestrator gates on non-zero. The DB source is best-effort; heartbeat-only
 mode is supported when the DB is absent or its schema changes
 (`reference/opencode-integration.md` documents the read-only access).
+
+## 5. Session-tree guard (pattern registry + abort authority)
+
+The watchdog supervises one dispatched subagent; the **session-tree guard**
+(`scripts/session_guard.py`) supervises the whole tree — the orchestrator's
+workers and their workers (depth ≤ 2, `reference/agent-teams.md`) — and is
+**mandatory by contract for any dispatch wave**, the same way live-visibility
+flags are mandatory for runs expected to exceed ~10 minutes. Where the
+watchdog flags, the guard escalates: flag → kill-child (surfaced) → **abort
+the session**. A known failure pattern costs minutes, not an hour.
+
+Launch forms:
+
+```
+# observe a live tree (read-only; no kill without explicit authority)
+python3 scripts/session_guard.py --root <session-id> --watch 15 --json
+
+# own the root process: abort is mechanical (process-group SIGTERM→SIGKILL)
+python3 scripts/session_guard.py --root <id> --wrap -- opencode run ...
+```
+
+Pattern registry v1 (each detector grounded in an observed incident;
+`--contract` enables RM-023 marker validation):
+
+| Pattern | Signal | Action |
+|---|---|---|
+| `empty-result` | final result empty or missing its declared contract markers (RM-023) | flag |
+| `permission-auto-reject` | `permission requested: external_directory … auto-rejecting` / `permission denied: …` — evidence names the denied path and hints `--allow-dirs` (the 2026-10-03 two-architect class) | flag |
+| `dead-stream` | dispatched child with zero messages and zero parts (RM-026 class) | flag |
+| `blocking-wait` | quiet gap > `--call-seconds` between session events (watchdog analysis) | kill-child |
+| `stalled` | watchdog verdict STALLED/DEAD | kill-child |
+| `identical-retry-loop` | ≥ `--retry-cap` (default 2) identical relaunches of the same agent + prompt digest after failed results within `--retry-window-min` (RM-024's bound, enforced) | **abort** |
+| `wave-failure` | ≥ `--wave-ratio` (default 0.6) of one dispatch wave failing with a shared pattern (the 2026-10-07 reviewer-wave shape: 3 of 5 empty) | **abort** |
+| `budget-exceeded` | tree wall clock > `--budget-minutes` (default 45; 0 disables) | **abort** |
+
+`kill-child` is surfaced, not executed: an in-session Task child lives inside
+the root process and has no separate pid (its kill is the root abort), while a
+run-vehicle child is already bounded by `dispatch_agent.py --timeout`'s
+process-group kill. The guard names the sessions to kill in its output.
+
+**Abort contract.** An abort-class pattern fires → the guard writes exactly
+one `ABORT` sentinel (JSON: `pattern`, `evidence`, `sessions`, `ts` UTC `Z`,
+`root_session_id`; default `.scratch/session-guard/ABORT.<root-id>`) and emits
+exactly one run-log record `kind=agent` / `outcome=stopped` with the pattern
+in `detail`. The root process group dies only under kill authority: `--wrap`
+(the guard owns the root) or `--kill-root --root-pid PID` (explicit, never a
+`pgrep` guess — `opencode session` has no abort subcommand, only
+`list`/`delete`). Exit codes: `0` clean, `2` warned (or abort warranted
+without kill authority), `5` abort performed, `4` unknown.
+
+Liveness is never reimplemented: the guard imports `watch_agent`'s
+`analyze_session`/`verdict`, and its DB access is a `file:…?mode=ro` URI
+(asserted by `scripts/test_session_guard.py`).

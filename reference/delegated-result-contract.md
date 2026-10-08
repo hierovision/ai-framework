@@ -59,3 +59,9 @@ defect this contract prevents.
 `designing-architecture`, `validating-ui`, `reviewing-code`,
 `implementing-features` — cite `reference/delegated-result-contract.md`. Related: RM-017/RM-019 (the empty-result
 guard) and RM-022 (run-time supervision while a delegation is in flight).
+"Never loop on an identical retry" is mechanically enforced by the
+session-tree guard (`scripts/session_guard.py`, `reference/subagent-supervision.md`
+§5): its `identical-retry-loop` pattern aborts the session once the bounded
+retry sequence is exceeded (RM-024's cap), and its `empty-result` pattern
+applies the marker table above via `scripts/validate_delegated_result.py`
+(with `--contract`).

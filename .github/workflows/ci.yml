@@ -81,6 +81,7 @@ jobs:
           python3 scripts/test_dispatch_agent.py
           python3 scripts/test_validate_delegated_result.py
           python3 scripts/test_delegated_result_contract.py
+          python3 scripts/test_session_guard.py
 
       - name: Offline eval verifiers
         run: |
