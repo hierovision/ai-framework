@@ -46,7 +46,8 @@
         "Anti-vision recorded inside Alternatives & Non-goals as a concrete failure mode, not generic aspiration.",
         "Open Questions section lists owner decisions the session is genuinely waiting on; the session does NOT pre-fill a recommended answer.",
         "ROADMAP.md rows (if appended) conform to ../triaging-requirements/references/roadmap-format.md — frontmatter carries `rubric:` and the horizon/capacity land in `Notes`, not new columns.",
-        "The session does NOT rebuild the existing ROADMAP.md from scratch — themes + provisional slices are appended; ranking + durable merge are owned by triaging-requirements."
+        "The session does NOT rebuild the existing ROADMAP.md from scratch — themes + provisional slices are appended; ranking + durable merge are owned by triaging-requirements.",
+        "Section headings use the EXACT Title-Case names from references/artifact-format.md (e.g., `## Vision Statement`, not `## Vision statement`); the Slices table column labels include the literal phrases `Success measure` and `Blocked-by`, and those phrases also appear in the final response text so the typed text-assertion can detect them [fix-verified]"
       ]
     },
     {
@@ -63,7 +64,8 @@
       "expected_behavior": [
         "The session routes to triaging-requirements rather than authoring the vision itself — text assertion pins the sibling skill name.",
         "Boundary reason stated: ranking/prioritization of an existing backlog is owned by triaging-requirements; this skill is for vision/strategy/slice generation, not ranking.",
-        "The session does NOT attempt to write a VISION.md or run the slice-generation flow on a ranking request."
+        "The session does NOT attempt to write a VISION.md or run the slice-generation flow on a ranking request.",
+        "When the request routes to a sibling skill, the final response names the sibling by its exact directory name (e.g., `triaging-requirements`) and states the one-line boundary reason — routes are spoken actions, not silent refusals [fix-verified]"
       ]
     },
     {
@@ -80,7 +82,8 @@
       "expected_behavior": [
         "The session routes to designing-architecture — text assertion pins the sibling skill name.",
         "Boundary reason stated: writing the implementation plan for ONE named item is owned by designing-architecture; this skill emits THEME + SLICE rows, not implementation plans.",
-        "The session does NOT attempt to draft a VISION.md or expand scope to adjacent themes — the request is scoped to one named item."
+        "The session does NOT attempt to draft a VISION.md or expand scope to adjacent themes — the request is scoped to one named item.",
+        "When the request routes to a sibling skill, the final response names the sibling by its exact directory name (e.g., `designing-architecture`) and states the one-line boundary reason — routes are spoken actions, not silent refusals [fix-verified]"
       ]
     },
     {
@@ -107,7 +110,8 @@
         "One-shot pressure declared by the owner — the session produces a PARTIAL artifact (the FIXED SECTIONS that can be filled without owner input) rather than inventing strategy under the named sections (Segments/JTBD, Non-goals, Value model, capacity envelope, Compliance gates).",
         "The artifact's Open Questions section lists every owner decision the session is waiting on, with the specific input needed and the section it will land in once answered.",
         "Final response text asks the owner the questions (uses 'question' + 'owner' phrases — pinned by typed expect.text) rather than presenting a fabricated strategy as decided.",
-        "Hand-review envelope: a reviewer reads the Open Questions section and verifies (a) every asked question is a real owner decision the session could not infer, (b) the artifact does NOT silently recommend an answer in any open-question row."
+        "Hand-review envelope: a reviewer reads the Open Questions section and verifies (a) every asked question is a real owner decision the session could not infer, (b) the artifact does NOT silently recommend an answer in any open-question row.",
+        "In a one-shot session the artifact MUST still be written (no 'I'll write it later' ending), with an `Open Questions` section filled for every owner decision the session cannot infer; the final response addresses the owner and lists the questions using the literal words 'owner' and 'question' so the typed text-assertion can detect the ask [fix-verified]"
       ]
     },
     {
