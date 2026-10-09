@@ -10,9 +10,12 @@ specifies stricter style rules, the stricter rule wins for its artifacts.
 
 Agent output is consumed by an experienced engineer who skims. The reader
 knows software and knows agents; what they do not know is this project's own
-wording. A reply that buries its result, rotates synonyms, or uses workshop
-words costs re-reading. The rules below exist to keep every output **plain,
-short, and readable at a glance**.
+wording. The reader's working model of the work is conceptual — causes,
+consequences, decisions — not mechanics, which are retrieved from artifacts
+on request. A reply that buries its result, rotates synonyms, uses workshop
+words, or leads with mechanics and delays the meaning costs re-reading. The
+rules below exist to keep every output **plain, short, and readable at a
+glance**.
 
 ## Rules
 
@@ -67,7 +70,7 @@ short, and readable at a glance**.
 10. **Scope.** This governs engineering communication — agent responses,
     analyses, plans, reports, summaries, commit messages, and doc edits.
     Ordinary conversation with the user is not subject to item 2's
-    word-blacklist; it is subject to 1, 3, 4, 7, 9, 11, 12, 13, and 14
+    word-blacklist; it is subject to 1, 3, 4, 7, 9, 11, 12, 13, 14, and 15
     (clarity beats politeness padding, but be a person, not a robot).
 
 11. **Approval asks carry the full link.** When asking the user to approve,
@@ -98,12 +101,21 @@ short, and readable at a glance**.
     act on. A reader who saw nothing else must be able to act. Brevity comes
     from cutting filler and process narration — never from omitting facts.
 
+15. **Concept first; detail on request.** State what happened, why, and what
+    it means for the reader — the causal account they act on — before any
+    mechanism. Technical detail (identifiers, flags, paths, line numbers,
+    exact values) is evidence, not message: it lives in the artifacts and
+    surfaces when asked, or when a decision cannot be made without it. This
+    sharpens rules 12 and 14 — the material fact to restate is the meaning
+    and the named target; the reader who stores concepts, not mechanics,
+    must still be able to decide and act.
+
 ## Enforcement
 
 - The rule is a prompt-level baseline: every agent references this file.
   It is not a hard technical constraint — treat violations as
   self-correctable drift.
 - The `reviewing-code` review pass checks artifact language against items
-  1-14 when reviewing a diff or handoff.
+  1-15 when reviewing a diff or handoff.
 - If an agent's output violates the baseline, point at the specific rule;
   do not restyle wholesale.

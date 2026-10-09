@@ -31,6 +31,8 @@ pending. Approval asks carry the full PR link (rule 11), never a bare
 number. The user sees only the final message — tool calls and output are
 not reviewable; restate every material fact, including the exact targets
 of any external action (rule 14).
+Concept first; detail on request (rule 15) — lead with what happened and why;
+keep mechanics in the artifacts and surface them on request.
 
 ## Dispatch policy
 
