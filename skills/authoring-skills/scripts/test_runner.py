@@ -1202,6 +1202,159 @@ def test_stall_stderr_persisted():
         shutil.rmtree(d)
 
 
+# ---------------------------------------------------------------------------
+# D2 (friction-log remediation): AC1 tier-conflict warning, AC3 matcher
+# message split, AC4 zero-selection diagnostics, AC5 flushed status helper.
+# ---------------------------------------------------------------------------
+
+
+def test_tier_conflict_warning_on_model_flag():
+    """AC1/F2 (D2): a manifest `default_model_tier` that disagrees with an
+    explicit `--model` prints one WARNING per SKILL naming both and stating
+    the flag wins; selection proceeds on the flag. Non-CI shape only."""
+    root = tempfile.mkdtemp(prefix="beval-tier-")
+    try:
+        d = os.path.join(root, "fpv", "evals")
+        os.makedirs(d)
+        json.dump({
+            "default_model_tier": "free",
+            "evals": [
+                {"id": 1, "prompt": "p", "expected_behavior": ["a"]},
+                {"id": 2, "prompt": "p", "expected_behavior": ["b"]},
+            ],
+        }, open(os.path.join(d, "evals.json"), "w"))
+        r = subprocess.run(
+            [sys.executable, RUNNER, "--list", "--skills-root", root,
+             "--model", "opencode-go/deepseek-v4.1-flash"],
+            capture_output=True, text=True, env=_hermetic_env())
+        assert r.returncode == 0, r.stdout + r.stderr
+        out = r.stdout
+        assert "warning:" in out, out
+        assert "default_model_tier='free'" in out, out
+        assert "opencode-go/deepseek-v4.1-flash" in out, out
+        assert "--model wins" in out, out
+        # One warning per SKILL, not per eval (two evals share this skill).
+        assert out.count("warning:") == 1, out
+        # Selection proceeds on the flag: the evals are still listed.
+        assert "included evals: 2" in out, out
+
+        # An agreeing lane (both `free`) -> no warning.
+        r2 = subprocess.run(
+            [sys.executable, RUNNER, "--list", "--skills-root", root,
+             "--model", "opencode/nemotron-3-ultra-free"],
+            capture_output=True, text=True, env=_hermetic_env())
+        assert r2.returncode == 0, r2.stdout + r2.stderr
+        assert "warning:" not in r2.stdout, r2.stdout
+
+        # CI mode owns the lane decision (assert_ci_free_model); the conflict
+        # warning is non-CI only.
+        env = {**_hermetic_env(), "AI_FRAMEWORK_FREE_TIER": "1"}
+        r3 = subprocess.run(
+            [sys.executable, RUNNER, "--list", "--skills-root", root,
+             "--model", "opencode-go/deepseek-v4.1-flash"],
+            capture_output=True, text=True, env=env)
+        assert r3.returncode == 0, r3.stdout + r3.stderr
+        assert "warning:" not in r3.stdout, r3.stdout
+        print("PASS  tier conflict: one warning per skill, flag wins, non-CI only")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_artifact_miss_message_split():
+    """AC3/F3e (D2): a glob that matched a file but missed phrases reports
+    `artifact phrases missing: [...] (file matched: <path>)`; a true no-match
+    keeps the legacy `no file matching '<glob>'` text. Both matcher surfaces
+    are covered."""
+    d = tempfile.mkdtemp(prefix="beval-split-")
+    try:
+        os.makedirs(os.path.join(d, "out"))
+        with open(os.path.join(d, "out", "report.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("present phrase only\n")
+        ctx = runner.build_context(runner.EvalResult(raw="", workdir=d))
+        entry = [{"path": "**/report.md",
+                  "phrases": ["present phrase", "absent phrase"]}]
+        # Surface 1: file matched the glob, phrases missed -> split message.
+        miss = runner.assert_artifact(entry, ctx["workdir"])
+        assert miss, miss
+        assert "artifact phrases missing:" in miss[0], miss
+        assert "absent phrase" in miss[0], miss
+        assert "(file matched:" in miss[0], miss
+        assert "no file matching" not in miss[0], miss
+        # True no-match keeps the legacy text.
+        absent = [{"path": "**/nope.md", "phrases": ["x"]}]
+        miss2 = runner.assert_artifact(absent, ctx["workdir"])
+        assert miss2 and "no file matching" in miss2[0], miss2
+        # Surface 2: a write event whose filePath matches but content misses.
+        # Pass no workdir so surface 1 cannot shadow the event channel.
+        stream = _tool_stream("write", filePath="/w/report.md",
+                              content="present phrase only")
+        ctx2 = runner.build_context(runner.EvalResult(raw=stream))
+        miss3 = runner.assert_artifact(entry, None, ctx2["events"])
+        assert miss3 and "artifact phrases missing:" in miss3[0], miss3
+        assert "/w/report.md" in miss3[0], miss3
+        print("PASS  artifact miss split: phrases-missing vs no-file-matching")
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_zero_selection_quarantine_diagnostics():
+    """AC4/F4b (D2): an all-quarantined skill produces a decision-grade
+    diagnostic naming the gate count and the re-include flag, not the bare
+    `no evals selected`."""
+    root = tempfile.mkdtemp(prefix="beval-zero-")
+    logs = tempfile.mkdtemp(prefix="beval-zero-logs-")
+    try:
+        d = os.path.join(root, "facilitating-product-vision", "evals")
+        os.makedirs(d)
+        json.dump({"evals": [
+            {"id": i, "prompt": "p", "expected_behavior": [f"e{i}"]}
+            for i in range(1, 5)
+        ]}, open(os.path.join(d, "evals.json"), "w"))
+        q = {f"facilitating-product-vision#{i}": {
+            "fail_count": 3, "status": "quarantined"} for i in range(1, 5)}
+        with open(os.path.join(logs, "quarantine.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump(q, fh)
+        r = subprocess.run(
+            [sys.executable, RUNNER, "--skills-root", root, "--logs-dir", logs],
+            capture_output=True, text=True, env=_hermetic_env())
+        assert r.returncode == 0, r.stdout + r.stderr
+        combined = (r.stdout or "") + (r.stderr or "")
+        assert "no evals selected for facilitating-product-vision" in combined, \
+            combined
+        assert "4 quarantined" in combined, combined
+        assert "--include-quarantine" in combined, combined
+        print("PASS  zero-selection diagnostic names the quarantine gate + flag")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+
+
+def test_emit_flushes_print():
+    """AC5/F5 (D2): status messaging goes through a helper that flushes
+    stdout, so detached launches emit progress immediately."""
+    import builtins
+    calls = []
+    original = builtins.print
+
+    def spy(*a, **k):
+        calls.append((a, k))
+
+    builtins.print = spy
+    try:
+        runner._emit("hello")
+        runner._emit("to-stderr", file=sys.stderr)
+    finally:
+        builtins.print = original
+    assert calls, "helper must print"
+    assert calls[0][0] == ("hello",), calls[0]
+    assert calls[0][1].get("flush") is True, calls[0]
+    assert calls[1][1].get("flush") is True, calls[1]
+    assert calls[1][1].get("file") is sys.stderr, calls[1]
+    print("PASS  _emit passes flush=True (stdout and explicit stderr)")
+
+
 def main():
     tests = [
         test_assert_behavior,
@@ -1253,6 +1406,10 @@ def main():
         test_eval_record_carries_eval_key,
         test_stall_stderr_persisted,
         test_cli_completeness_uses_default_logs_dir,
+        test_tier_conflict_warning_on_model_flag,
+        test_artifact_miss_message_split,
+        test_zero_selection_quarantine_diagnostics,
+        test_emit_flushes_print,
     ]
     failed = 0
     for t in tests:
