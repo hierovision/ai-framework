@@ -50,11 +50,9 @@ examples, not gates:
 
 The leaf deny is the one mechanically encoded exception.
 
-**Persona fit for the brief.** Bash-restricted personas (read-only
-planners, council lenses) deny multi-arg commands, redirects, and
-heartbeat writes — so external-repo read+draft briefs fail mid-flight;
-check the target's permission map, or route through a judgment-led
-lane, and carry `--contract` on run-vehicle consults (RM-044 item 3).
+**Persona fit for the brief.** Bash-restricted personas deny the multi-arg
+commands and heartbeat writes external-repo read+draft briefs need —
+check the map or a judgment-led lane; consults carry `--contract` (RM-044).
 
 ## Lane policy
 

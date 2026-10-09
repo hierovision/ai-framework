@@ -284,8 +284,9 @@ without them default to included / Go-tier):
   is honest; a silent skip looks like coverage.
 - `default_model_tier` — top-level on `evals.json` (or per-eval override)
   declares the tier the runner pins for a manifest-only local run. The
-  `--model` flag WINS over this marker (loader precedence, runner code
-  line 99 + line 592); under a pinned CI lane the marker is INERT, and
+  `--model` flag WINS over this marker (loader precedence: the runner's
+  tier fallback at `run_behavioral_eval.py:99` and the `model or
+  e["model_tier"]` resolution); under a pinned CI lane the marker is INERT, and
   it only steers an unflagged local invocation. Five sibling manifests
   carry the marker as a tier-intent tag — see
   [references/eval-harness.md](references/eval-harness.md) § Lane &
