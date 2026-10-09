@@ -149,7 +149,10 @@ flags are mandatory for runs expected to exceed ~10 minutes. Where the
 watchdog flags, the guard escalates: flag → kill-child (surfaced) → **abort
 the session**. A known failure pattern costs minutes, not an hour.
 
-Launch forms:
+Launch forms (`scripts/session_guard.py` resolves inside the ai-framework
+repo — the global install links skills/agents/reference only; from a consumer
+worktree invoke it as
+`python3 ~/repos/ai-framework/scripts/session_guard.py …`):
 
 ```
 # observe a live tree (read-only; no kill without explicit authority)
