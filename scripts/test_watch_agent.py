@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import types
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -18,6 +19,9 @@ WATCH = os.path.join(HERE, "watch_agent.py")
 _spec = importlib.util.spec_from_file_location("watch_agent", WATCH)
 watch = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(watch)
+# register under the name session_guard imports, so both surfaces share ONE
+# module object (AC12's "same semantics" is identity-testable)
+sys.modules.setdefault("watch_agent", watch)
 
 
 def _hb_file(seconds_ago, body="START test"):
@@ -86,6 +90,64 @@ def test_loop_and_blocking_detection():
     an = watch.analyze_session(None, parts, call_seconds=1, loop_repeats=3)
     assert any(k == "bash:echo hi" and v >= 3 for k, v in an["loops"]), an["loops"]
     assert an["blocking_waits"], an
+
+
+def test_completed_result_not_stalled():
+    """AC5: an analysis reporting a completed result (non-empty final text
+    followed by the terminal `step-finish` marker, no in-flight call) yields
+    verdict OK — not STALLED/DEAD — regardless of quiet age. Post-completion
+    silence is not a stall."""
+    parts = [(1_000, {"type": "text", "text": "final answer"}),
+             (1_050, {"type": "step-finish"})]
+    an = watch.analyze_session(None, parts, call_seconds=30, loop_repeats=3)
+    assert an.get("has_result") is True, an
+    result, why = watch.verdict(None, an, stall_seconds=60, call_seconds=30)
+    assert result == "OK", (result, why)
+
+
+def test_two_surfaces_agree_on_completion():
+    """AC12: `watch_agent.analyze_session`'s `has_result` and the guard's done
+    predicate are the SAME semantics. On three shapes the analysis field, the
+    shared predicate, and the watch verdict all agree, and the guard reuses
+    that one predicate:
+      (a) streaming text-only (no step-finish, recent)  -> not done, OK;
+      (b) hung interim text   (no step-finish, quiet)    -> not done, STALLED;
+      (c) completed turn      (text then step-finish)    -> done, OK.
+    """
+    streaming = [(1_000, {"type": "text", "text": "partial"})]
+    hung = [(1_000, {"type": "text", "text": "still working"}),
+            (2_000, {"type": "tool", "tool": "bash",
+                     "state": {"status": "completed",
+                               "input": {"command": "pytest -q"}}})]
+    completed = [(1_000, {"type": "text", "text": "final answer"}),
+                 (1_050, {"type": "step-finish"})]
+    real = time.time
+    cases = (
+        # parts,    now (s),            want_done, want_verdict
+        (streaming, 1_000 / 1000 + 5, False, "OK"),
+        (hung, 2_000 / 1000 + 300, False, "STALLED"),
+        (completed, 1_050 / 1000 + 300, True, "OK"),
+    )
+    try:
+        for parts, now, want_done, want_verdict in cases:
+            an = watch.analyze_session(None, parts, call_seconds=300,
+                                       loop_repeats=3)
+            assert an["has_result"] is want_done, (parts, an)
+            assert watch.has_terminal_result(parts, an["running"]) is want_done, \
+                parts
+            time.time = lambda now=now: now
+            result, why = watch.verdict(None, an, stall_seconds=240,
+                                        call_seconds=300)
+            assert result == want_verdict, (parts, result, why)
+    finally:
+        time.time = real
+    # the guard reuses exactly this predicate — one semantics across surfaces
+    spec = importlib.util.spec_from_file_location(
+        "session_guard", os.path.join(HERE, "session_guard.py"))
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    assert guard.watch.has_terminal_result is watch.has_terminal_result, \
+        "guard and watch must share one completion predicate"
 
 
 def test_main_exit_codes_offline():

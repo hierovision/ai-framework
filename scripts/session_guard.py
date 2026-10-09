@@ -194,19 +194,35 @@ def result_text(con, session_id):
     return "\n".join(texts)
 
 
-def _part_blob(con, session_id):
-    """Concatenated text-ish content of every part in a session (tool
-    outputs included) — the scan surface for permission denials."""
-    cur = con.cursor()
-    cur.execute("SELECT data FROM part WHERE session_id=?", (session_id,))
-    chunks = []
-    for r in cur.fetchall():
-        try:
-            d = json.loads(r["data"])
-        except (TypeError, ValueError):
+def _permission_denial(parts):
+    """The latest denial CARRIER among a session's parts, or None (AC9).
+
+    A denial carrier is an ERROR-state tool part whose output matches
+    PERMISSION_RE — the shape the AC3 fixture models. Successful/completed
+    tool output is never scanned: a child that merely quotes denial-shaped
+    text (e.g. reads the guard's own source or the supervision reference)
+    must not false-trigger. Returns {"path", "ms"} or None; `ms` is the
+    carrier's time_created so the caller can test recency on the event clock
+    (AC12), never the part index.
+    """
+    latest = None
+    for ms, d in parts:
+        if d.get("type") != "tool":
             continue
-        chunks.append(json.dumps(d, ensure_ascii=False))
-    return "\n".join(chunks)
+        st = d.get("state") or {}
+        if st.get("status") != "error":
+            continue
+        m = None
+        for field in ("output", "error"):
+            out = st.get(field)
+            if isinstance(out, str):
+                m = PERMISSION_RE.search(out)
+                if m:
+                    break
+        if not m:
+            continue
+        latest = {"path": m.group(1) or m.group(2) or "?", "ms": ms}
+    return latest
 
 
 def _count_rows(con, table, session_id):
@@ -236,6 +252,14 @@ def _verdict_at(an, stall_seconds, call_seconds, now):
         time.time = real
 
 
+def _recent_event(an, now, stall_seconds):
+    """True when the session's last event is within the stall window (the
+    child is still streaming). No parts -> no recency signal."""
+    if an["last_ms"] is None:
+        return False
+    return (now - an["last_ms"] / 1000.0) <= stall_seconds
+
+
 # --- pattern detection -------------------------------------------------------
 
 def _hit(pattern, sessions, evidence):
@@ -254,21 +278,18 @@ def detect_patterns(con, nodes, *, contract=None, wave_ratio=0.6,
     root = nodes[0]
     children = [n for n in nodes if n["depth"] >= 1]
 
-    # -- per-node result classification ------------------------------------
+    # -- per-node result classification (lifecycle-aware) ------------------
+    # opencode.db records no completion column, so completion is inferred:
+    # a non-empty result text with no in-flight tool call is a done child.
+    # Order: permission-auto-reject -> dead-stream -> has_result ->
+    # in-flight -> empty-result (RM-023's real shape, detected only once the
+    # child is genuinely quiet with no result).
     failed = {}      # sid -> failing pattern (result-level failures)
     denied = {}      # sid -> denied path
+    analyses = {}    # sid -> watch_agent analysis (computed once)
+    done = {}        # sid -> True for a completed (has-result) child
     for n in children:
         sid = n["id"]
-        blob = _part_blob(con, sid)
-        m = PERMISSION_RE.search(blob)
-        if m:
-            path = m.group(1) or m.group(2) or "?"
-            denied[sid] = path
-            failed[sid] = "permission-auto-reject"
-            hits.append(_hit("permission-auto-reject", [sid],
-                             f"{sid}: permission denied on {path} "
-                             f"(hint: grant with --allow-dirs {path})"))
-            continue  # the denial explains the death; no shadowing generic hit
         n_msg, n_part = (_count_rows(con, "message", sid),
                          _count_rows(con, "part", sid))
         if n_msg == 0 and n_part == 0:
@@ -276,32 +297,74 @@ def detect_patterns(con, nodes, *, contract=None, wave_ratio=0.6,
             hits.append(_hit("dead-stream", [sid],
                              f"{sid}: zero messages and zero parts"))
             continue
+        parts = _load_parts(con, sid)
+        an = watch.analyze_session(n, parts, call_seconds, loop_repeats)
+        analyses[sid] = an
         text = result_text(con, sid)
-        if contract:
-            val = _validator()
-            markers = val.CONTRACTS.get(contract)
-            ok, missing = val.validate(text, markers or [])
-            if not ok:
-                if missing is None:
-                    ev = f"{sid}: empty result (contract {contract})"
-                else:
-                    ev = (f"{sid}: malformed result (contract {contract}, "
-                          f"missing {missing})")
-                failed[sid] = "empty-result"
-                hits.append(_hit("empty-result", [sid], ev))
-        elif not text.strip():
-            failed[sid] = "empty-result"
-            hits.append(_hit("empty-result", [sid], f"{sid}: empty result"))
+        # The done predicate is the ONE shared with watch_agent (AC11/AC12):
+        # a non-empty last text followed by a terminal step-finish, no tool in
+        # flight. A message without step-finish is an unfinished turn — its
+        # text does NOT make the child done.
+        has_result = watch.has_terminal_result(parts, an["running"])
+        # The permission scan reads ONLY denial carriers (error-state tool
+        # parts) and a denial explains the death only when it is the child's
+        # LATEST event (max time_created, AC12 — never the part index, so a
+        # timestamp tie cannot downgrade a denial-death to empty-result) AND
+        # the child is not done. A child that was denied, recovered, and kept
+        # working is not a denial-death; a child whose SUCCESSFUL tool output
+        # merely quotes denial-shaped text is not a denial at all (AC9).
+        denial = _permission_denial(parts)
+        latest_ms = max((ms for ms, _ in parts if ms is not None), default=None)
+        if denial and denial["ms"] == latest_ms and not has_result:
+            path = denial["path"]
+            denied[sid] = path
+            failed[sid] = "permission-auto-reject"
+            hits.append(_hit("permission-auto-reject", [sid],
+                             f"{sid}: permission denied on {path} "
+                             f"(hint: grant with --allow-dirs {path})"))
+            continue  # the denial explains the death; no shadowing generic hit
+        if has_result:
+            done[sid] = True  # completed: no liveness hit, contract still checked
+            if contract:
+                val = _validator()
+                markers = val.CONTRACTS.get(contract)
+                ok, missing = val.validate(text, markers or [])
+                if not ok:
+                    if missing is None:
+                        ev = f"{sid}: empty result (contract {contract})"
+                    else:
+                        ev = (f"{sid}: malformed result (contract {contract}, "
+                              f"missing {missing})")
+                    failed[sid] = "empty-result"
+                    hits.append(_hit("empty-result", [sid], ev))
+            continue
+        if an["running"] or _recent_event(an, now, stall_seconds):
+            continue  # still streaming: no result-level classification yet
+        # quiet past the stall window, no in-flight call, no terminal marker
+        if text.strip():
+            # an unfinished turn that already emitted interim text is a hung
+            # child, not an empty result: leave it to the liveness rules below
+            # (STALLED/DEAD), never a false empty-result.
+            continue
+        # quiet, no in-flight call, and genuinely no result text
+        failed[sid] = "empty-result"
+        ev = (f"{sid}: empty result (contract {contract})" if contract
+              else f"{sid}: empty result")
+        hits.append(_hit("empty-result", [sid], ev))
 
     # -- liveness (watch_agent analysis; AC5) -------------------------------
     for n in children:
         sid = n["id"]
-        parts = _load_parts(con, sid)
-        an = watch.analyze_session(n, parts, call_seconds, loop_repeats)
+        an = analyses.get(sid)
+        if an is None:
+            parts = _load_parts(con, sid)
+            an = watch.analyze_session(n, parts, call_seconds, loop_repeats)
         if an["blocking_waits"]:
             gaps = ", ".join(f"{g[1]:.0f}s/{g[0]}" for g in an["blocking_waits"][:3])
             hits.append(_hit("blocking-wait", [sid],
                              f"{sid}: quiet gap(s) > {call_seconds}s ({gaps})"))
+        if done.get(sid):
+            continue  # a completed child is done, not stalled
         verdict, why = _verdict_at(an, stall_seconds, call_seconds, now)
         if verdict in ("STALLED", "DEAD"):
             hits.append(_hit("stalled", [sid],
