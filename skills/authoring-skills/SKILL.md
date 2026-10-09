@@ -94,6 +94,18 @@ or wrong, and exit 0 when it is done correctly (small script stubs that
 assert on the produced files are fine). An eval whose verification
 cannot fail proves nothing about the skill's feedback loop.
 
+**Batch the first commit to a green validator.** During a new skill's
+development, the pre-commit hook assumes complete state — `evals/`
+exists, `SKILL.md` exists, the skill dir is registered. Commit the
+skill dir only when `python3 skills/authoring-skills/scripts/
+validate_skill.py --all` is green. A mid-development commit that lands
+earlier (e.g. evals present but the body unregistered) requires
+`--no-verify`; that bypass is honest only with a dated record in the
+scratch log (the cardinal rule applies — never green a check by
+weakening the net). The `facilitating-product-vision` D1/D2 sequence
+(2026-10-09, `.scratch/fpv-impl/progress/d1-evals.log`) is the worked
+example of the bypass-with-record path.
+
 ### Step 4: Draft the skill
 
 Create `skills/<name>/SKILL.md` plus bundled resources as needed. Follow the
@@ -169,8 +181,13 @@ expects the answers recorded in the output artifact. Grade both turns.
 
 The fresh-agent assertions above are executed automatically by
 `skills/authoring-skills/scripts/run_behavioral_eval.py`, gated in the
-scheduled CI workflow `.github/workflows/eval-behavioral.yml` (weekly on
-GitHub Free, plus `workflow_dispatch`). The runner:
+two CI workflows `.github/workflows/eval-behavioral.yml` (scheduled)
+and `.github/workflows/eval-per-change.yml` (per-change matrix). Both
+pin the runner to a specific model via `--model` — the actual lane
+IDs and dates live in
+[references/eval-harness.md](references/eval-harness.md) § Lane & tier
+precedence, not here (repo structure is cited; volatile facts are
+not). The runner:
 
 - loads every skill's `evals/evals.json`, launches a fresh agent per eval
   with `opencode run --format json`, and fails the build when the eval's
@@ -180,9 +197,15 @@ GitHub Free, plus `workflow_dispatch`). The runner:
 - writes one `kind=eval` run-log record per eval via RM-001's
   `log_run.py` (single source of truth — it does **not** redefine the
   schema), so `eval_pass=false` is observable out-of-band;
-- supports `--limit` / `--skill` subset sharding to stay within GitHub
-  Free's 2,000 min/month, and `--event-fixture <path>` to replay a
-  committed event stream through the matcher with no model and no network.
+- supports `--limit` / `--skill` subset sharding, and `--event-fixture
+  <path>` to replay a committed event stream through the matcher with
+  no model and no network.
+- honors a precedence: an explicit `--model` on the runner WINS over a
+  manifest's `default_model_tier`. Under a pinned CI lane, the marker is
+  INERT — it only steers a manifest-only local run (no `--model` flag).
+  Five sibling manifests carry the marker as a tier-intent tag (not a
+  steering claim); see `references/eval-harness.md` § Lane & tier
+  precedence for the full truth and the sibling audit.
 
 The hermetic per-PR gate (`ci.yml`) runs the structural validators
 (`validate_skill.py` + `verify.mjs`) plus the typed-eval gate
@@ -260,9 +283,13 @@ without them default to included / Go-tier):
   with `--include-deferred` when the harness allows. A documented deferral
   is honest; a silent skip looks like coverage.
 - `default_model_tier` — top-level on `evals.json` (or per-eval override)
-  selects the tier the runner pins. CI defaults to the free (`*-free`) tier
-  only; Go and Zen PAYG tiers are excluded from scheduled CI and must be
-  marked `deferred` for developer-local paid runs.
+  declares the tier the runner pins for a manifest-only local run. The
+  `--model` flag WINS over this marker (loader precedence, runner code
+  line 99 + line 592); under a pinned CI lane the marker is INERT, and
+  it only steers an unflagged local invocation. Five sibling manifests
+  carry the marker as a tier-intent tag — see
+  [references/eval-harness.md](references/eval-harness.md) § Lane &
+  tier precedence for the full truth and the sibling audit.
 
 ### Step 7: Iterate on observed behavior
 
@@ -273,6 +300,16 @@ down unproductive paths; make prominent what it missed. Explain *why* things
 matter instead of stacking ALL-CAPS MUSTs — all-caps is a yellow flag that
 reasoning is missing. Repeat Steps 6–7 until evals pass and the user is
 satisfied.
+
+**Iterate-round quarantine line.** Each new launch in the iterate loop
+runs against evals that may already be in `quarantine.json` after three
+consecutive failures across prior rounds — and a launch with zero
+selected evals is a silent no-op (exit 0, stdout `no evals selected`).
+Re-include deliberately re-tested evals with `--include-quarantine`
+(the sanctioned authoring-loop path; honest results still recorded).
+See [references/eval-harness.md](references/eval-harness.md) §
+Quarantine & selection diagnostics for the mid-iteration hazard and
+the per-skill manual-reset path.
 
 **Propagate fixes to sibling skills.** When a test round exposes a
 defect in wording or structure this library uses in more than one skill

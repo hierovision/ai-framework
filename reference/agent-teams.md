@@ -50,6 +50,12 @@ examples, not gates:
 
 The leaf deny is the one mechanically encoded exception.
 
+**Persona fit for the brief.** Bash-restricted personas (read-only
+planners, council lenses) deny multi-arg commands, redirects, and
+heartbeat writes — so external-repo read+draft briefs fail mid-flight;
+check the target's permission map, or route through a judgment-led
+lane, and carry `--contract` on run-vehicle consults (RM-044 item 3).
+
 ## Lane policy
 
 - A delegation runs on the lane the target's declared `model` resolves to;
