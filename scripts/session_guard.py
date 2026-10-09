@@ -236,6 +236,14 @@ def _verdict_at(an, stall_seconds, call_seconds, now):
         time.time = real
 
 
+def _recent_event(an, now, stall_seconds):
+    """True when the session's last event is within the stall window (the
+    child is still streaming). No parts -> no recency signal."""
+    if an["last_ms"] is None:
+        return False
+    return (now - an["last_ms"] / 1000.0) <= stall_seconds
+
+
 # --- pattern detection -------------------------------------------------------
 
 def _hit(pattern, sessions, evidence):
@@ -254,9 +262,16 @@ def detect_patterns(con, nodes, *, contract=None, wave_ratio=0.6,
     root = nodes[0]
     children = [n for n in nodes if n["depth"] >= 1]
 
-    # -- per-node result classification ------------------------------------
+    # -- per-node result classification (lifecycle-aware) ------------------
+    # opencode.db records no completion column, so completion is inferred:
+    # a non-empty result text with no in-flight tool call is a done child.
+    # Order: permission-auto-reject -> dead-stream -> has_result ->
+    # in-flight -> empty-result (RM-023's real shape, detected only once the
+    # child is genuinely quiet with no result).
     failed = {}      # sid -> failing pattern (result-level failures)
     denied = {}      # sid -> denied path
+    analyses = {}    # sid -> watch_agent analysis (computed once)
+    done = {}        # sid -> True for a completed (has-result) child
     for n in children:
         sid = n["id"]
         blob = _part_blob(con, sid)
@@ -276,32 +291,47 @@ def detect_patterns(con, nodes, *, contract=None, wave_ratio=0.6,
             hits.append(_hit("dead-stream", [sid],
                              f"{sid}: zero messages and zero parts"))
             continue
+        parts = _load_parts(con, sid)
+        an = watch.analyze_session(n, parts, call_seconds, loop_repeats)
+        analyses[sid] = an
         text = result_text(con, sid)
-        if contract:
-            val = _validator()
-            markers = val.CONTRACTS.get(contract)
-            ok, missing = val.validate(text, markers or [])
-            if not ok:
-                if missing is None:
-                    ev = f"{sid}: empty result (contract {contract})"
-                else:
-                    ev = (f"{sid}: malformed result (contract {contract}, "
-                          f"missing {missing})")
-                failed[sid] = "empty-result"
-                hits.append(_hit("empty-result", [sid], ev))
-        elif not text.strip():
-            failed[sid] = "empty-result"
-            hits.append(_hit("empty-result", [sid], f"{sid}: empty result"))
+        has_result = bool(text.strip()) and not an["running"]
+        if has_result:
+            done[sid] = True  # completed: no liveness hit, contract still checked
+            if contract:
+                val = _validator()
+                markers = val.CONTRACTS.get(contract)
+                ok, missing = val.validate(text, markers or [])
+                if not ok:
+                    if missing is None:
+                        ev = f"{sid}: empty result (contract {contract})"
+                    else:
+                        ev = (f"{sid}: malformed result (contract {contract}, "
+                              f"missing {missing})")
+                    failed[sid] = "empty-result"
+                    hits.append(_hit("empty-result", [sid], ev))
+            continue
+        if an["running"] or _recent_event(an, now, stall_seconds):
+            continue  # still streaming: no result-level classification yet
+        # quiet past the stall window, no in-flight call, empty result
+        failed[sid] = "empty-result"
+        ev = (f"{sid}: empty result (contract {contract})" if contract
+              else f"{sid}: empty result")
+        hits.append(_hit("empty-result", [sid], ev))
 
     # -- liveness (watch_agent analysis; AC5) -------------------------------
     for n in children:
         sid = n["id"]
-        parts = _load_parts(con, sid)
-        an = watch.analyze_session(n, parts, call_seconds, loop_repeats)
+        an = analyses.get(sid)
+        if an is None:
+            parts = _load_parts(con, sid)
+            an = watch.analyze_session(n, parts, call_seconds, loop_repeats)
         if an["blocking_waits"]:
             gaps = ", ".join(f"{g[1]:.0f}s/{g[0]}" for g in an["blocking_waits"][:3])
             hits.append(_hit("blocking-wait", [sid],
                              f"{sid}: quiet gap(s) > {call_seconds}s ({gaps})"))
+        if done.get(sid):
+            continue  # a completed child is done, not stalled
         verdict, why = _verdict_at(an, stall_seconds, call_seconds, now)
         if verdict in ("STALLED", "DEAD"):
             hits.append(_hit("stalled", [sid],

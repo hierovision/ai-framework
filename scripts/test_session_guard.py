@@ -276,8 +276,10 @@ def test_liveness_reuse():
     try:
         dbp = os.path.join(work, "opencode.db")
         root = {"id": "root", "parent_id": None, "title": "orchestrator"}
-        s1, m1, p1 = _result_session("stuck1", "root", text="## Findings\nok\n"
-                                     "## Recommendation\nmerge", created=T0)
+        # no result text: a genuinely hung child. A child WITH a completed
+        # result is `done` under the lifecycle fix (AC2/AC5), not stalled, so
+        # it can no longer exercise the stalled path here.
+        s1, m1, p1 = _result_session("stuck1", "root", text=None, created=T0)
         # two tool calls 400s apart -> invisible blocking black box
         p1.append({"id": "stuck1-p2", "message_id": "stuck1-m1",
                    "session_id": "stuck1", "time_created": T0 + 2000,
@@ -683,6 +685,125 @@ def test_observe_watch_rescans():
     finally:
         if proc is not None and proc.poll() is None:
             proc.kill()
+        shutil.rmtree(work, ignore_errors=True)
+
+
+# --- child lifecycle (plan session-guard-task-child-lifecycle) ---------------
+
+def _reasoning(sid, ms):
+    """A reasoning part (no text, no tool) on the child's single assistant
+    message — the still-streaming shape observed 2026-10-09."""
+    return {"id": f"{sid}-r", "message_id": f"{sid}-m1", "session_id": sid,
+            "time_created": ms, "time_updated": ms,
+            "data": {"type": "reasoning", "text": "thinking about the task"}}
+
+
+def test_in_flight_child_not_empty_result():
+    """AC1: a still-streaming child (no text part yet, last event within the
+    stall window, no in-flight tool) produces NO empty-result hit."""
+    g = _load_guard()
+    work = tempfile.mkdtemp(prefix="guard-inflight-")
+    try:
+        dbp = os.path.join(work, "opencode.db")
+        root = {"id": "root", "parent_id": None, "title": "orchestrator"}
+        s, m, p = _result_session("stream1", "root", text=None)
+        p.append(_reasoning("stream1", T0 + 600))
+        _make_db(dbp, [root] + s, m, p)
+        now = (T0 + 600) / 1000 + 10  # 10s after the last event: recent
+        hits = _scan(g, dbp, "root", stall_seconds=240, call_seconds=300,
+                     now=now)
+        assert not _hits(hits, "empty-result"), _patterns(hits)
+        assert not _hits(hits, "stalled"), _patterns(hits)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_completed_child_not_stalled_or_empty():
+    """AC2: a completed child (non-empty result text, no in-flight tool)
+    quiet past the stall window produces NO stalled and NO empty-result hit."""
+    g = _load_guard()
+    work = tempfile.mkdtemp(prefix="guard-done-")
+    try:
+        dbp = os.path.join(work, "opencode.db")
+        root = {"id": "root", "parent_id": None, "title": "orchestrator"}
+        s, m, p = _result_session("done1", "root", text="final answer")
+        _make_db(dbp, [root] + s, m, p)
+        now = (T0 + 600) / 1000 + 600  # 600s quiet > stall window (240)
+        hits = _scan(g, dbp, "root", stall_seconds=240, now=now)
+        assert not _hits(hits, "stalled"), _patterns(hits)
+        assert not _hits(hits, "empty-result"), _patterns(hits)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_dead_empty_child_still_empty_result():
+    """AC3 (regression guard): an empty result, no in-flight call, quiet past
+    the stall window still produces the empty-result hit (RM-023's shape)."""
+    g = _load_guard()
+    work = tempfile.mkdtemp(prefix="guard-deadempty-")
+    try:
+        dbp = os.path.join(work, "opencode.db")
+        root = {"id": "root", "parent_id": None, "title": "orchestrator"}
+        s, m, p = _result_session("emptyq", "root", text=None)
+        _make_db(dbp, [root] + s, m, p)
+        now = (T0 + 600) / 1000 + 600
+        hits = _scan(g, dbp, "root", stall_seconds=240, now=now)
+        empty = _hits(hits, "empty-result")
+        assert empty and "emptyq" in empty[0]["sessions"], _patterns(hits)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_wave_failure_counts_only_real_failures():
+    """AC4: a wave of 1 genuinely failed + 2 in-flight children produces NO
+    wave-failure hit (1/3 < 0.6); in-flight children are not failures."""
+    g = _load_guard()
+    work = tempfile.mkdtemp(prefix="guard-wave2-")
+    try:
+        dbp = os.path.join(work, "opencode.db")
+        root = {"id": "root", "parent_id": None, "title": "orchestrator"}
+        s1, m1, p1 = _result_session("fail0", "root", text=None, created=T0,
+                                     title="Review A", agent="reviewer")
+        s2, m2, p2 = _result_session("live1", "root", text=None,
+                                     created=T0 + 1000, title="Review B",
+                                     agent="reviewer")
+        p2.append(_reasoning("live1", T0 + 1600))
+        s3, m3, p3 = _result_session("live2", "root", text=None,
+                                     created=T0 + 2000, title="Review C",
+                                     agent="reviewer")
+        p3.append(_reasoning("live2", T0 + 2600))
+        _make_db(dbp, [root] + s1 + s2 + s3, m1 + m2 + m3, p1 + p2 + p3)
+        now = (T0 + 2600) / 1000 + 10  # in-flight children are recent
+        hits = _scan(g, dbp, "root", wave_ratio=0.6, stall_seconds=240,
+                     now=now)
+        assert not _hits(hits, "wave-failure"), _patterns(hits)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_contract_mode_completed_and_in_flight():
+    """AC6: with --contract, a completed child missing markers still fails
+    validation (empty-result naming the missing markers); an in-flight child
+    is skipped, never marked."""
+    g = _load_guard()
+    work = tempfile.mkdtemp(prefix="guard-contract-")
+    try:
+        dbp = os.path.join(work, "opencode.db")
+        root = {"id": "root", "parent_id": None, "title": "orchestrator"}
+        s1, m1, p1 = _result_session("malformed1", "root", text="LGTM, all good.")
+        s2, m2, p2 = _result_session("stream1", "root", text=None)
+        p2.append(_reasoning("stream1", T0 + 600))
+        _make_db(dbp, [root] + s1 + s2, m1 + m2, p1 + p2)
+        now = (T0 + 600) / 1000 + 10
+        hits = _scan(g, dbp, "root", contract="council-lens",
+                     stall_seconds=240, now=now)
+        empty = _hits(hits, "empty-result")
+        named = {sid for h in empty for sid in h["sessions"]}
+        assert named == {"malformed1"}, (named, _patterns(hits))
+        ev = " ".join(str(h.get("evidence", "")) for h in empty)
+        assert "Findings" in ev and "Recommendation" in ev, ev
+        assert not _hits(hits, "stalled"), _patterns(hits)
+    finally:
         shutil.rmtree(work, ignore_errors=True)
 
 

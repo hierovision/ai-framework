@@ -194,3 +194,16 @@ without kill authority), `5` abort performed, `4` unknown.
 Liveness is never reimplemented: the guard imports `watch_agent`'s
 `analyze_session`/`verdict`, and its DB access is a `file:…?mode=ro` URI
 (asserted by `scripts/test_session_guard.py`).
+
+**Child lifecycle (in-session-Task).** In-session-Task children follow the
+same lifecycle rules as run-vehicle children. opencode.db records no
+completion column, so completion is inferred from two signals the guard
+already reads: a non-empty final result text and no tool call in flight.
+Consequences: a mid-run scan of a still-streaming child never yields
+`empty-result` (it is in-flight), and a child that has produced its result is
+`done` — never STALLED/DEAD on post-completion quiet. `empty-result`
+(RM-023) fires only for a genuinely quiet child with no result. Observed
+failure shape (2026-10-09): a healthy 3-lane Research wave was classified
+`empty-result` ×3 mid-run → false `wave-failure` abort, then `stalled`/`DEAD`
+×2 on a post-completion re-scan, while all three result texts were present
+in `opencode.db`.

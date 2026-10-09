@@ -88,6 +88,17 @@ def test_loop_and_blocking_detection():
     assert an["blocking_waits"], an
 
 
+def test_completed_result_not_stalled():
+    """AC5: an analysis reporting a completed result (non-empty final text,
+    no in-flight call) yields verdict OK — not STALLED/DEAD — regardless of
+    quiet age. Post-completion silence is not a stall."""
+    parts = [(1_000, {"type": "text", "text": "final answer"})]
+    an = watch.analyze_session(None, parts, call_seconds=30, loop_repeats=3)
+    assert an.get("has_result") is True, an
+    result, why = watch.verdict(None, an, stall_seconds=60, call_seconds=30)
+    assert result == "OK", (result, why)
+
+
 def test_main_exit_codes_offline():
     import contextlib
     import io

@@ -212,9 +212,12 @@ def analyze_session(sess, parts, call_seconds, loop_repeats):
     created, edited, running = 0, 0, []
     blocking_waits, bad = [], []
     last_ms, writes_last, last_tool = None, None, None
+    last_text = None
     timeline = []
     for i, (ms, d) in enumerate(parts):
         last_ms = ms or last_ms
+        if d.get("type") == "text" and (d.get("text") or "").strip():
+            last_text = d["text"]
         nxt = parts[i + 1][0] if i + 1 < len(parts) else None
         if d.get("type") != "tool":
             continue
@@ -260,6 +263,10 @@ def analyze_session(sess, parts, call_seconds, loop_repeats):
         for k, v in targets.items()
         if v >= (8 if k.startswith(("write:", "edit:")) else loop_repeats)
     ]
+    # Completion is inferred honestly: opencode.db has no completion column.
+    # A non-empty final text part with no tool call in flight is a done child;
+    # post-completion silence must not read as a stall.
+    has_result = bool(last_text) and not running
     return dict(
         tools=tools,
         targets=targets,
@@ -273,6 +280,7 @@ def analyze_session(sess, parts, call_seconds, loop_repeats):
         writes_last=writes_last,
         timeline=timeline,
         part_count=len(parts),
+        has_result=has_result,
     )
 
 
@@ -292,7 +300,14 @@ def verdict(hb, an, stall_seconds=DEFAULT_STALL_SECONDS,
         why.append(f"{len(an['running'])} call(s) in flight > {call_seconds}s")
     live_age = min([x for x in (hb_age, s_age) if x is not None], default=None)
     if live_age is not None:
-        if live_age > 2 * stall_seconds:
+        # A completed session (non-empty result, no in-flight tool) is done:
+        # post-completion quiet is not a stall. Defensive: an in-flight call
+        # still wins (BLOCKING), so only skip when nothing is running.
+        completed = bool(an and an.get("has_result") and not an["running"])
+        if completed:
+            if result == "UNKNOWN":
+                result = "OK"
+        elif live_age > 2 * stall_seconds:
             result = "DEAD"
             why.append(f"no heartbeat and no event for {fmt_age(live_age)}")
         elif live_age > stall_seconds:
