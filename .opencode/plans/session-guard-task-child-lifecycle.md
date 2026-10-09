@@ -134,6 +134,39 @@ fix, already written).
     scripts/session_guard.py --root ses_edec99dc1ffeIrvrBMcc4ZTvq5 --once
     --json --budget-minutes 0` — no hits for any child session.
 
+### Revised 2026-10-09 (2) — review verdict request-changes: OQ1 resolved, done predicate tightened
+
+Independent review of PR #105 (reviewer dispatch, 2026-10-09) returned
+**request-changes** with one major: the `done` predicate
+(`has_result = non-empty text + no in-flight tool`) over-approximates
+completion — a still-streaming text-only child, a hung child carrying
+interim text plus trailing completed tool parts (the pre-fix `stuck1`
+shape, a TRUE positive the fix traded away), and a denial preceded by
+interim text each go permanently silent. OQ1 is resolved by the terminal
+marker instead of a loosened gate — verified against the live DB (the
+2026-10-09 incident children's last assistant messages end
+`step-start → reasoning → text → step-finish`):
+
+11. **Conservative `done` predicate (terminal marker).** A child is done
+    only when its LAST assistant message carries BOTH a non-empty text
+    part AND a terminal `step-finish` part, AND no tool call is in flight.
+    A message without `step-finish` is an unfinished turn regardless of
+    the text it already emitted. The three silent shapes above are each
+    NOT done and surface under the normal rules (streaming → no hits;
+    quiet + unfinished turn → STALLED via liveness; denial-as-latest-event
+    → `permission-auto-reject`). — Verifier: three red-first hermetic
+    cases pinning those shapes, red → green; the AC2/AC3/AC5 cases stay
+    green (a real completed turn still classifies done).
+12. **One completion predicate across both surfaces.**
+    `watch_agent.analyze_session`'s `has_result` and the guard's done
+    predicate are the SAME semantics (parts-view derivation of the
+    terminal-marker rule), so the two supervision surfaces cannot disagree
+    on a session's state. — Verifier: a hermetic case asserting the two
+    surfaces agree on the three shapes and on a real completed turn; plus
+    the denial-latest-event comparison keyed on max `time_created` (not
+    part index), so a timestamp tie cannot downgrade a denial-death to
+    `empty-result` — hermetic case red → green.
+
 ## Files to Modify
 
 - `scripts/session_guard.py` — add `has_result` computation; re-order the
@@ -195,18 +228,26 @@ None.
 
 ## Open Questions
 
-- **OQ1 — `has_result` strictness for text-only interim turns.** The
-  parts-only view cannot distinguish "final assistant message" from "an
-  interim turn's text part" without a message-role join.
-  *Proposed default:* `analyze_session` treats the session's LAST text part
-  as the result tail (matching `result_text`'s last-assistant-message
-  behavior closely enough because a newer turn inserts newer parts), and the
-  no-in-flight-tool gate handles the streaming case. If the implementer's
-  red test shows a real false-done case, prefer the message-role join over
-  loosening the gate.
+- **OQ1 — RESOLVED (revision 2).** The completion predicate is the terminal
+  marker (`step-finish` after a non-empty text part in the last assistant
+  message + no in-flight tool), not a loosened gate; the interim-text
+  shapes surface under the normal stalled/permission rules (ACs 11–12).
 
 ## History
 
+- 2026-10-09 — **Revision 2 (review-driven).** Independent review of
+  PR #105: **request-changes**, one major — the `done` predicate
+  over-approximates completion (three silent true-positive shapes; the
+  pre-fix `stuck1` stall shape traded away). OQ1 resolved by terminal
+  marker (`step-finish` after the non-empty text part in the last
+  assistant message — verified in the live DB), not by loosening the gate;
+  ACs 11–12 added (conservative predicate; one shared predicate across
+  both surfaces + timestamp-keyed denial recency). D4 executes on the same
+  branch/PR. Minors folded: divergent `has_result` definitions (watch vs
+  guard) unified; denial latest-event keyed on max `time_created`. Plan
+  retirement note (AGENTS.md rule 4 / #102 convention): this plan is
+  deleted at merge time — its essence lives in RM-047/RM-048 +
+  `reference/subagent-supervision.md` §5.
 - 2026-10-09 — **Revision: second detector gap folded (AC9/AC10, RM-048).**
   D2's live re-scan surfaced the `_part_blob` scan-surface false positive
   (a child reading the guard's own source / the supervision doc's quoted
@@ -283,3 +324,31 @@ None.
   `ses_ede7b68b6ffe…`, all quoting the guard's own source from completed
   tool output) are gone. RM-048 lands in `docs/ROADMAP.md`; PR #105 body
   updated.
+- 2026-10-09 — **D4 complete (revision 2 scope only: AC11/AC12; review
+  request-changes major closed).** The done predicate is now the terminal
+  `step-finish` marker — a non-empty last text part immediately followed by
+  `step-finish` with no tool in flight — implemented once as
+  `watch_agent.has_terminal_result(parts, running)` and called by both
+  surfaces (`analyze_session`'s `has_result`; `session_guard`'s per-child
+  `done`), so the two supervision surfaces share one predicate. The
+  permission scan's recency test is now `denial["ms"] == max(time_created)`
+  instead of part index (AC12 tie fix). Red-first: 23/26 guard pre-fix —
+  `test_hung_interim_text_restored_stalled` (`[]`; the interim-text hung
+  child was marked done and went silent), `test_denial_preceded_by_text_restored`
+  (`[]`; the text made the child done and suppressed the denial),
+  `test_denial_latest_event_keyed_on_timestamp_not_index`
+  (`['empty-result','stalled']`; the index-keyed check downgraded the denial
+  to empty-result) — → 26/26 post-fix; `test_streaming_text_only_child_not_done`
+  is green both ways (regression guard on the streaming shape). Watch 13/13
+  (the AC5 completed fixture now models the real `text → step-finish` turn;
+  new `test_two_surfaces_agree_on_completion` pins the three shapes and the
+  shared-predicate identity). Full CONTRIBUTING.md offline gate exits 0.
+  AC10 re-scan (live opencode.db, `--budget-minutes 0`): all six incident
+  children classify `done` (no `empty-result`/`wave-failure`/`stalled`/
+  `permission-auto-reject` hit); the only hit is a pre-existing
+  `blocking-wait` on the newer reviewer session `ses_ede753cdbffe…` (a
+  genuine 545s quiet gap), identical under the D3 commit `f229583` on the
+  same live DB — the tree grew from six to eight children after D3 (the
+  PR-#105 review dispatch), independent of this predicate change; recorded,
+  not narrowed. RM-047 row updated with the dated tightening sentence; PR
+  #105 body carries the revision section.

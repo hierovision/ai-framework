@@ -204,6 +204,29 @@ def load_parts(con, sid):
     return out
 
 
+def has_terminal_result(parts, running):
+    """The ONE completion predicate shared by both supervision surfaces
+    (AC11/AC12). `parts` is the flat [(time_created_ms, data), ...] view; it
+    carries no message roles, so completion is derived from the terminal
+    marker: a non-empty text part immediately followed by a `step-finish`
+    part, with no tool part between them, and no tool call in flight.
+    opencode.db records no completion column — a turn without `step-finish`
+    is unfinished regardless of the text it already emitted, so a
+    still-streaming text-only child and a hung child carrying interim text
+    are both NOT done."""
+    last_text = None
+    for i, (_ms, d) in enumerate(parts):
+        if d.get("type") == "text" and (d.get("text") or "").strip():
+            last_text = i
+    if last_text is None:
+        return False
+    if last_text + 1 >= len(parts):
+        return False
+    if (parts[last_text + 1][1].get("type") or "") != "step-finish":
+        return False
+    return not running
+
+
 def analyze_session(sess, parts, call_seconds, loop_repeats):
     """opencode does not record real tool durations (start~=end), so the
     honest signal for a blocking black box is the QUIET GAP between two
@@ -212,12 +235,9 @@ def analyze_session(sess, parts, call_seconds, loop_repeats):
     created, edited, running = 0, 0, []
     blocking_waits, bad = [], []
     last_ms, writes_last, last_tool = None, None, None
-    last_text = None
     timeline = []
     for i, (ms, d) in enumerate(parts):
         last_ms = ms or last_ms
-        if d.get("type") == "text" and (d.get("text") or "").strip():
-            last_text = d["text"]
         nxt = parts[i + 1][0] if i + 1 < len(parts) else None
         if d.get("type") != "tool":
             continue
@@ -263,10 +283,12 @@ def analyze_session(sess, parts, call_seconds, loop_repeats):
         for k, v in targets.items()
         if v >= (8 if k.startswith(("write:", "edit:")) else loop_repeats)
     ]
-    # Completion is inferred honestly: opencode.db has no completion column.
-    # A non-empty final text part with no tool call in flight is a done child;
-    # post-completion silence must not read as a stall.
-    has_result = bool(last_text) and not running
+    # Completion is inferred honestly (AC11/AC12): the terminal step-finish
+    # marker after the final non-empty text, with no tool in flight. The
+    # plain "non-empty text" reading over-approximated done — post-completion
+    # silence must not read as a stall, but an unfinished turn must not read
+    # as completed either.
+    has_result = has_terminal_result(parts, running)
     return dict(
         tools=tools,
         targets=targets,

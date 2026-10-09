@@ -201,10 +201,12 @@ def _permission_denial(parts):
     PERMISSION_RE — the shape the AC3 fixture models. Successful/completed
     tool output is never scanned: a child that merely quotes denial-shaped
     text (e.g. reads the guard's own source or the supervision reference)
-    must not false-trigger. Returns {"path", "index"} or None.
+    must not false-trigger. Returns {"path", "ms"} or None; `ms` is the
+    carrier's time_created so the caller can test recency on the event clock
+    (AC12), never the part index.
     """
     latest = None
-    for i, (_ms, d) in enumerate(parts):
+    for ms, d in parts:
         if d.get("type") != "tool":
             continue
         st = d.get("state") or {}
@@ -219,7 +221,7 @@ def _permission_denial(parts):
                     break
         if not m:
             continue
-        latest = {"path": m.group(1) or m.group(2) or "?", "index": i}
+        latest = {"path": m.group(1) or m.group(2) or "?", "ms": ms}
     return latest
 
 
@@ -299,15 +301,21 @@ def detect_patterns(con, nodes, *, contract=None, wave_ratio=0.6,
         an = watch.analyze_session(n, parts, call_seconds, loop_repeats)
         analyses[sid] = an
         text = result_text(con, sid)
-        has_result = bool(text.strip()) and not an["running"]
+        # The done predicate is the ONE shared with watch_agent (AC11/AC12):
+        # a non-empty last text followed by a terminal step-finish, no tool in
+        # flight. A message without step-finish is an unfinished turn — its
+        # text does NOT make the child done.
+        has_result = watch.has_terminal_result(parts, an["running"])
         # The permission scan reads ONLY denial carriers (error-state tool
         # parts) and a denial explains the death only when it is the child's
-        # LATEST event AND the child is not done. A child that was denied,
-        # recovered, and kept working is not a denial-death; a child whose
-        # SUCCESSFUL tool output merely quotes denial-shaped text is not a
-        # denial at all (AC9).
+        # LATEST event (max time_created, AC12 — never the part index, so a
+        # timestamp tie cannot downgrade a denial-death to empty-result) AND
+        # the child is not done. A child that was denied, recovered, and kept
+        # working is not a denial-death; a child whose SUCCESSFUL tool output
+        # merely quotes denial-shaped text is not a denial at all (AC9).
         denial = _permission_denial(parts)
-        if denial and denial["index"] == len(parts) - 1 and not has_result:
+        latest_ms = max((ms for ms, _ in parts if ms is not None), default=None)
+        if denial and denial["ms"] == latest_ms and not has_result:
             path = denial["path"]
             denied[sid] = path
             failed[sid] = "permission-auto-reject"
@@ -332,7 +340,13 @@ def detect_patterns(con, nodes, *, contract=None, wave_ratio=0.6,
             continue
         if an["running"] or _recent_event(an, now, stall_seconds):
             continue  # still streaming: no result-level classification yet
-        # quiet past the stall window, no in-flight call, empty result
+        # quiet past the stall window, no in-flight call, no terminal marker
+        if text.strip():
+            # an unfinished turn that already emitted interim text is a hung
+            # child, not an empty result: leave it to the liveness rules below
+            # (STALLED/DEAD), never a false empty-result.
+            continue
+        # quiet, no in-flight call, and genuinely no result text
         failed[sid] = "empty-result"
         ev = (f"{sid}: empty result (contract {contract})" if contract
               else f"{sid}: empty result")

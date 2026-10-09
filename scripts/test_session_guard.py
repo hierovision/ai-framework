@@ -85,9 +85,14 @@ def _make_db(path, sessions, messages=(), parts=()):
 
 
 def _result_session(sid, parent_id, text, created=T0, title="Review PR 9",
-                   agent="reviewer", make_result=True):
+                   agent="reviewer", make_result=True, terminal=True):
     """A child session with one assistant message + its result text part.
-    `text=None` -> empty result (no text part)."""
+
+    `text=None` -> empty result (no text part). `terminal=True` (default)
+    appends the `step-finish` part a COMPLETED assistant turn carries after
+    its final text (`step-start -> reasoning -> text -> step-finish`); a
+    text part WITHOUT `step-finish` models an unfinished turn (streaming or
+    hung), so pass `terminal=False` for those shapes (AC11)."""
     sessions = [{"id": sid, "parent_id": parent_id, "title": title,
                  "agent": agent, "time_created": created,
                  "time_updated": created + 1000}]
@@ -99,6 +104,11 @@ def _result_session(sid, parent_id, text, created=T0, title="Review PR 9",
                       "session_id": sid, "time_created": created + 600,
                       "time_updated": created + 600,
                       "data": {"type": "text", "text": text}})
+        if terminal:
+            parts.append({"id": sid + "-pf", "message_id": sid + "-m1",
+                          "session_id": sid, "time_created": created + 650,
+                          "time_updated": created + 650,
+                          "data": {"type": "step-finish"}})
     return sessions, messages, parts
 
 
@@ -880,6 +890,130 @@ def test_permission_scan_ignores_recovered_child():
         assert not _hits(hits, "permission-auto-reject"), _patterns(hits)
         assert not _hits(hits, "empty-result"), _patterns(hits)
         assert not _hits(hits, "stalled"), _patterns(hits)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+# --- done predicate revision 2 (plan revised 2026-10-09 (2); AC11/AC12) ------
+
+def test_streaming_text_only_child_not_done():
+    """AC11(a): a still-streaming child whose last assistant message carries a
+    non-empty text part but NO `step-finish` is NOT done. With recent events it
+    is streaming: no result-level hit and no liveness hit. (The text alone is
+    not a completed turn.)"""
+    g = _load_guard()
+    work = tempfile.mkdtemp(prefix="guard-streamtext-")
+    try:
+        dbp = os.path.join(work, "opencode.db")
+        root = {"id": "root", "parent_id": None, "title": "orchestrator"}
+        s, m, p = _result_session("streamtext1", "root",
+                                  text="partial answer so far", terminal=False)
+        _make_db(dbp, [root] + s, m, p)
+        now = (T0 + 600) / 1000 + 10  # 10s after the last event: recent
+        hits = _scan(g, dbp, "root", stall_seconds=240, call_seconds=300,
+                     now=now)
+        assert not _hits(hits, "empty-result"), _patterns(hits)
+        assert not _hits(hits, "stalled"), _patterns(hits)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_hung_interim_text_restored_stalled():
+    """AC11(b), the restored true positive: a child with interim text, then
+    trailing COMPLETED tool parts, NO `step-finish`, quiet past the stall
+    window is NOT done and surfaces as `stalled` (the pre-fix `stuck1` shape:
+    before the terminal-marker predicate it was marked done and went silent).
+    Non-empty interim text is not an `empty-result` either."""
+    g = _load_guard()
+    work = tempfile.mkdtemp(prefix="guard-hungtext-")
+    try:
+        dbp = os.path.join(work, "opencode.db")
+        root = {"id": "root", "parent_id": None, "title": "orchestrator"}
+        s, m, p = _result_session("hungtext1", "root",
+                                  text="interim findings, still working",
+                                  terminal=False)
+        for off, cmd in ((2000, "pytest -q"), (3000, "pytest -q")):
+            p.append({"id": f"hungtext1-t{off}", "message_id": "hungtext1-m1",
+                      "session_id": "hungtext1", "time_created": T0 + off,
+                      "time_updated": T0 + off,
+                      "data": {"type": "tool", "tool": "bash",
+                               "state": {"status": "completed",
+                                         "input": {"command": cmd}}}})
+        _make_db(dbp, [root] + s, m, p)
+        now = (T0 + 3000) / 1000 + 300  # quiet > stall window (240)
+        hits = _scan(g, dbp, "root", stall_seconds=240, call_seconds=300,
+                     now=now)
+        patterns = _patterns(hits)
+        assert "stalled" in patterns, patterns
+        assert not _hits(hits, "empty-result"), patterns
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_denial_preceded_by_text_restored():
+    """AC11(c), the restored true positive: a denial preceded by interim text
+    in the same unfinished message (no `step-finish`) is NOT done, so the
+    denial — the child's LATEST event — surfaces as `permission-auto-reject`.
+    Before the terminal-marker predicate the text made the child `done` and
+    the denial was suppressed."""
+    g = _load_guard()
+    work = tempfile.mkdtemp(prefix="guard-denialtext-")
+    try:
+        dbp = os.path.join(work, "opencode.db")
+        root = {"id": "root", "parent_id": None, "title": "orchestrator"}
+        s, m, p = _result_session("denialtext1", "root",
+                                  text="about to read the file", terminal=False)
+        p.append({
+            "id": "denialtext1-t", "message_id": "denialtext1-m1",
+            "session_id": "denialtext1", "time_created": T0 + 700,
+            "time_updated": T0 + 700,
+            "data": {"type": "tool", "tool": "bash",
+                     "state": {"status": "error",
+                               "output": "permission requested: external_directory"
+                                         " (/tmp/audit-*); auto-rejecting"}}})
+        _make_db(dbp, [root] + s, m, p)
+        now = (T0 + 700) / 1000 + 600  # quiet past the stall window
+        hits = _scan(g, dbp, "root", stall_seconds=240, now=now)
+        patterns = _patterns(hits)
+        assert "permission-auto-reject" in patterns, patterns
+        assert not _hits(hits, "empty-result"), patterns
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_denial_latest_event_keyed_on_timestamp_not_index():
+    """AC12 (denial recency): a denial carrier at the child's MAX time_created
+    but NOT at the last part index (a timestamp tie with a later-sorting
+    part) still fires `permission-auto-reject` — the recency check is on the
+    event clock, not the part index. An index-keyed check downgrades this
+    denial-death to `empty-result`."""
+    g = _load_guard()
+    work = tempfile.mkdtemp(prefix="guard-denialtie-")
+    try:
+        dbp = os.path.join(work, "opencode.db")
+        root = {"id": "root", "parent_id": None, "title": "orchestrator"}
+        s, m, p = _result_session("denialtie1", "root", text=None)
+        # denial inserted first, a non-denial part at the SAME ms after it:
+        # by index the denial is not last; by max(time_created) it is the
+        # latest event (a tie must not downgrade it).
+        p.append({
+            "id": "denialtie1-t", "message_id": "denialtie1-m1",
+            "session_id": "denialtie1", "time_created": T0 + 700,
+            "time_updated": T0 + 700,
+            "data": {"type": "tool", "tool": "bash",
+                     "state": {"status": "error",
+                               "output": "permission denied: external_directory"
+                                         " /tmp/audit-report-*.txt"}}})
+        p.append({"id": "denialtie1-s", "message_id": "denialtie1-m1",
+                  "session_id": "denialtie1", "time_created": T0 + 700,
+                  "time_updated": T0 + 700,
+                  "data": {"type": "step-start"}})
+        _make_db(dbp, [root] + s, m, p)
+        now = (T0 + 700) / 1000 + 600  # quiet past the stall window
+        hits = _scan(g, dbp, "root", stall_seconds=240, now=now)
+        patterns = _patterns(hits)
+        assert "permission-auto-reject" in patterns, patterns
+        assert not _hits(hits, "empty-result"), patterns
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
