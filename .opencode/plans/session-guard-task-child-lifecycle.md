@@ -352,3 +352,18 @@ None.
   PR-#105 review dispatch), independent of this predicate change; recorded,
   not narrowed. RM-047 row updated with the dated tightening sentence; PR
   #105 body carries the revision section.
+- 2026-10-09 — **D5 complete (docs-only, review loop closed).** Round-2
+  independent review returned **approve-with-minors**; the single
+  merge-blocking item was the RM-049 durable record. RM-049 row landed in
+  `docs/ROADMAP.md` (blocking-wait-on-done disposition = roadmap row, not
+  fix-now: low severity, warn-only in `--once` observe mode, no false
+  failed-classification) and this dated acceptance line recorded. The
+  flat-parts-view residual of `has_terminal_result` — a completed
+  `text → step-finish` pair mid-list followed by later step-start/tool
+  activity of a next turn reads done; narrow to multi-turn resumed children
+  only, and the resume path's supervision relies on heartbeat + run-vehicle
+  visibility — is **accepted as-is, dated 2026-10-09**; the cheap future
+  hardening (require the pair to terminate the flat view + one
+  trailing-`step-start` fixture) is noted for if a real false-done case ever
+  appears. No source-code or behavior change; PR #105 body carries the D5
+  entry; merge remains user-gated.
