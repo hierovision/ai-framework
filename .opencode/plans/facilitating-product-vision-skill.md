@@ -261,3 +261,23 @@ None.
   3 × `kind=agent` records emitted (explore, general → glm-5.3-flash;
   council-product → mimo-v2.6-flash), guard abort record emitted
   mechanically (`agent=session-guard, outcome=stopped`).
+- 2026-10-09 — **AC5 lane correction (D6, skill-author; mechanical
+  plan-vs-reality adjustment per implementing-features Step 10).** The
+  plan's "free tier (CI default)" premise came from stale marker-doc prose
+  in `skills/authoring-skills/SKILL.md`; verified both CI workflows pin
+  `--model opencode-go/deepseek-v4.1-flash` (`.github/workflows/eval-behavioral.yml`
+  line ~163; `.github/workflows/eval-per-change.yml` line ~283) and the
+  runner honors the flag over the manifest — `run_behavioral_eval.py`
+  resolves `model or e["model_tier"]` at lines 592/644/678/719/1149, so the
+  manifest's `default_model_tier: "free"` marker is CI-INERT. The two
+  free-lane rounds (D3 manifest-only 0/4, D5 post-D4-fixes 0/4 with
+  identical signatures; free-tier records in `logs/run-2026-10-09.jsonl`,
+  full per-eval streams under `logs/eval-streams/`) are recorded in the
+  `evals.json` notes as the honest tier-gap finding (free agents did not
+  complete the artifact/route behaviors reliably) — never greened, never
+  deleted. The re-run (D6) uses the CI lane with
+  `--model opencode-go/deepseek-v4.1-flash`, ids 1–4 only (deferred id 5
+  stays excluded per `filter_evals`); `default_model_tier: "free"` is
+  retained (five sibling skills carry it; it is a tier-intent tag, not a
+  CI override) and the dated `evals.json` notes block documents exactly
+  what the marker does and does not steer.

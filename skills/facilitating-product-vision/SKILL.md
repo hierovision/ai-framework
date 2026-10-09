@@ -197,13 +197,24 @@ owner. This is the last decision point before artifact writing.
 
 Three artifacts, one session:
 
-1. **Vision document** at the owner-confirmed home (Step 1). Follow
-   the fixed section order in
-   [references/artifact-format.md](references/artifact-format.md) —
-   the contract a cold reviewer can defend. If a section has no
-   content for this item, write `None.` rather than omitting it; an
-   empty section is a signal, not a deletion. Now/Next/Later band
-   headers appear under the *Outcome Themes* section.
+1. **Vision document** at the owner-confirmed home (Step 1).
+
+   **Read [references/artifact-format.md](references/artifact-format.md)
+   BEFORE writing the artifact. Load the fixed section order, the
+   section schemas, and the Slices-table column labels from that
+   file — do NOT write the artifact from memory.** Progressive
+   disclosure fails silently on mid-tier models: the section
+   vocabulary, the per-section schemas, and the column labels all
+   come from the reference file and a paraphrased draft loses the
+   contract before a typed assertion or a cold reviewer can detect
+   it. The block of heading and column-label literals below is a
+   navigation aid, not a substitute for the load.
+
+   Follow the fixed section order — the contract a cold reviewer
+   can defend. If a section has no content for this item, write
+   `None.` rather than omitting it; an empty section is a signal,
+   not a deletion. Now/Next/Later band headers appear under the
+   *Outcome Themes* section.
 
    The top-level section headings are EXACT and Title-Cased; do
    NOT paraphrase or lowercase them — a typed assertion (and a cold
