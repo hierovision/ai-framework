@@ -101,7 +101,7 @@ is required to say. Pick one and stay in it for the whole session:
   present an invented strategy as decided.
 - **Decisions pre-supplied inline.** The owner has already supplied
   every (or most) owner decisions for THIS run in this turn's
-  prompt, or in an owner-notes file the session has read. Each
+  prompt, or in the owner's own notes file the session has read. Each
   pre-supplied decision is recorded as a decision with its source
   cited. Anything the owner has NOT pre-supplied is surfaced as an
   Open Question. The session does not invent the missing inputs.

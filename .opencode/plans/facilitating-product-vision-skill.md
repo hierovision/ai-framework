@@ -333,3 +333,12 @@ None.
   the agent emitted per the skill's return convention). The manual pass is
   the AC5 deferred variant the plan acknowledges; the four non-deferred
   evals (1–4) carried their 4/4 green on the CI lane (D10).
+- 2026-10-09 — **AC8 verifier-scope deviation (D12, review round 1).** The
+  plan's grep (whole skill dir) hits 6 lines — all dated lane-provenance
+  strings inside `evals.json`'s notes blocks (the AC5 honesty record). Real
+  scope: INSTRUCTIONS (`SKILL.md` + `references/`) — those grep clean
+  (verified). The notes' literal IDs are dated provenance required by the
+  AC5 honesty rule; the alternative (role-name scrub) was considered and
+  rejected: a scrubbed record loses the re-verification anchor the notes
+  exist to keep. Future plans: state the verifier's directory scope
+  explicitly.
