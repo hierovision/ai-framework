@@ -82,6 +82,14 @@
       "boundary_ref": "skills/designing-cicd/SKILL.md"
     },
     {
+      "name": "facilitating-product-vision",
+      "type": "skill",
+      "owner": "@hierovision",
+      "maturity": "L1",
+      "status": "active",
+      "boundary_ref": "skills/facilitating-product-vision/SKILL.md"
+    },
+    {
       "name": "handling-security-incidents",
       "type": "skill",
       "owner": "@hierovision",
