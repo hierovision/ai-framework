@@ -3,6 +3,7 @@ slug: session-guard-task-child-lifecycle
 title: Fix session_guard false empty-result/wave-failure/stalled verdicts on in-session-Task children
 status: approved
 created: 2026-10-09
+revised: [2026-10-09]
 related: [facilitating-product-vision-skill]
 ---
 
@@ -96,11 +97,50 @@ be weakened or skipped (cardinal rule).
    `quality-gates` list pass. — Verifier: the CONTRIBUTING.md offline-gate
    command block exits 0 on the branch.
 
+### Revised 2026-10-09 — second detector gap folded (permission-scan precision)
+
+Discovered during D2's live re-scan (reported by the implementer, verified
+against the code): `_part_blob` concatenates ALL parts — tool outputs
+included — so a child that merely READS a file containing denial-shaped
+literals (the guard's own source lines 80–82, or
+`reference/subagent-supervision.md` §1, which quotes the denial format)
+false-triggers `permission-auto-reject`. Observed on D1's implementer
+session (`ses_ede888d72ffe…`) during the AC7 re-scan. Same trust-erosion
+class, same file, and a live interference vector for the
+`facilitating-product-vision-skill` implement pass (its subagents read the
+supervision reference by citation) — folded into this plan and PR rather
+than spawned separately, per the same severity/interference test the user
+set. Durable record: row **RM-048** (pre-assigned; RM-047 = the lifecycle
+fix, already written).
+
+9. **Denials are read from denial carriers, not arbitrary tool output.**
+   The permission scan reads only tool parts whose `state.status` is
+   `"error"` (the denial carrier — the existing AC3 fixture shows that
+   shape), applies `PERMISSION_RE` to that error output, and fires only
+   when the denial part is the child's LATEST event and the child is not
+   done (a child that got denied, recovered, and completed is not a
+   denial-death). A child whose SUCCESSFUL tool output merely contains
+   denial-shaped text produces no `permission-auto-reject` hit, no failed
+   classification, and no `wave-failure` inflation. — Verifier: two new
+   hermetic cases in `scripts/test_session_guard.py` — (i) successful-output
+   false-positive case (line-numbered guard-source text in a completed
+   tool's output → no hit), red → green; (ii) recovered-child case (denial
+   part followed by later events, no hit) — plus the existing AC3 case
+   stays green (regression guard).
+10. **Live re-scan fully clean.** The AC7 re-scan of the incident tree —
+    now including D1's implementer session (`ses_ede888d72ffe…`) — shows
+    no `empty-result`, no `wave-failure`, no `stalled`, and no
+    `permission-auto-reject` hit on any child. — Verifier: `python3
+    scripts/session_guard.py --root ses_edec99dc1ffeIrvrBMcc4ZTvq5 --once
+    --json --budget-minutes 0` — no hits for any child session.
+
 ## Files to Modify
 
 - `scripts/session_guard.py` — add `has_result` computation; re-order the
   per-child result/liveness classification per the approach; `wave-failure`
-  counts only actually-failed children
+  counts only actually-failed children. Revised 2026-10-09: the permission
+  scan narrows to error-state tool parts (denial carriers), gated on the
+  denial being the latest event and the child not done (AC9)
 - `scripts/watch_agent.py` — `analyze_session` reports `has_result` (final
   text part non-empty + no in-flight tool); `verdict()` skips the
   STALLED/DEAD quiet classification for a completed session
@@ -112,7 +152,8 @@ be weakened or skipped (cardinal rule).
   follow the same lifecycle rules; a mid-run scan never yields
   `empty-result`; a completed child is `done`, not stalled
 - `docs/ROADMAP.md` — delivery row **RM-047** (pre-assigned; the skill plan
-  holds RM-046 — do not renumber)
+  holds RM-046 — do not renumber). Revised 2026-10-09: RM-048 row added for
+  the permission-scan precision fix (same PR, separate durable record)
 
 ## Scope
 
@@ -166,6 +207,14 @@ None.
 
 ## History
 
+- 2026-10-09 — **Revision: second detector gap folded (AC9/AC10, RM-048).**
+  D2's live re-scan surfaced the `_part_blob` scan-surface false positive
+  (a child reading the guard's own source / the supervision doc's quoted
+  denial format false-triggers `permission-auto-reject`; observed on D1's
+  session `ses_ede888d72ffe…`). Verified against `PERMISSION_RE` (line 80)
+  and the AC3 fixture's denial carrier (error-state tool part). Folded into
+  this plan + PR per the user's severity/interference test; D3 executes it
+  on the same branch.
 - 2026-10-09 — **Approved** by the user's directive ("fix it now depending
   on severity and whether it will interfere"); severity/interference verdict
   recorded in Goal/Approach. Execution split: D1 (code + red-first tests +
@@ -212,3 +261,25 @@ None.
   (`agent=session-guard, outcome=stopped`) — kept as the incident evidence;
   no separate GitHub issue is opened because the fix lands in this pass and
   RM-047 is the durable record.
+- 2026-10-09 — **D3 complete (revised scope: AC9/AC10, RM-048).** The
+  permission scan no longer reads `_part_blob`'s all-parts concatenation
+  (tool output included); it reads ONLY denial carriers — tool parts whose
+  `state.status == "error"` — applies `PERMISSION_RE` to that error output
+  (`state.output`, the AC3 fixture shape, and `state.error`, the field real
+  opencode error parts carry), and fires only when the denial part is the
+  child's LATEST event and the child is not done. A recovered child (denial
+  followed by later events) and a child whose SUCCESSFUL tool output merely
+  quotes denial-shaped text (reading `session_guard.py`'s own `PERMISSION_RE`
+  literals or `reference/subagent-supervision.md`'s quoted format) no longer
+  false-trigger. Red-first: 20/22 guard pre-fix — both new cases
+  (`test_permission_scan_ignores_successful_tool_output`,
+  `test_permission_scan_ignores_recovered_child`) failing on
+  `permission-auto-reject` — → 22/22 post-fix; AC3's denial-carrier case
+  stays green; watch 12/12 unchanged; the full CONTRIBUTING.md offline gate
+  exits 0. AC10 live re-scan of the incident tree
+  (`python3 scripts/session_guard.py --root ses_edec99dc1ffeIrvrBMcc4ZTvq5
+  --once --json --budget-minutes 0`) is `clean` with zero hits — the three
+  pre-fix false positives (`ses_ede888d72ffe…` + `ses_ede812608ffe…` +
+  `ses_ede7b68b6ffe…`, all quoting the guard's own source from completed
+  tool output) are gone. RM-048 lands in `docs/ROADMAP.md`; PR #105 body
+  updated.

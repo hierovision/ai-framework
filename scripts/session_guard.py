@@ -194,19 +194,33 @@ def result_text(con, session_id):
     return "\n".join(texts)
 
 
-def _part_blob(con, session_id):
-    """Concatenated text-ish content of every part in a session (tool
-    outputs included) — the scan surface for permission denials."""
-    cur = con.cursor()
-    cur.execute("SELECT data FROM part WHERE session_id=?", (session_id,))
-    chunks = []
-    for r in cur.fetchall():
-        try:
-            d = json.loads(r["data"])
-        except (TypeError, ValueError):
+def _permission_denial(parts):
+    """The latest denial CARRIER among a session's parts, or None (AC9).
+
+    A denial carrier is an ERROR-state tool part whose output matches
+    PERMISSION_RE — the shape the AC3 fixture models. Successful/completed
+    tool output is never scanned: a child that merely quotes denial-shaped
+    text (e.g. reads the guard's own source or the supervision reference)
+    must not false-trigger. Returns {"path", "index"} or None.
+    """
+    latest = None
+    for i, (_ms, d) in enumerate(parts):
+        if d.get("type") != "tool":
             continue
-        chunks.append(json.dumps(d, ensure_ascii=False))
-    return "\n".join(chunks)
+        st = d.get("state") or {}
+        if st.get("status") != "error":
+            continue
+        m = None
+        for field in ("output", "error"):
+            out = st.get(field)
+            if isinstance(out, str):
+                m = PERMISSION_RE.search(out)
+                if m:
+                    break
+        if not m:
+            continue
+        latest = {"path": m.group(1) or m.group(2) or "?", "index": i}
+    return latest
 
 
 def _count_rows(con, table, session_id):
@@ -274,16 +288,6 @@ def detect_patterns(con, nodes, *, contract=None, wave_ratio=0.6,
     done = {}        # sid -> True for a completed (has-result) child
     for n in children:
         sid = n["id"]
-        blob = _part_blob(con, sid)
-        m = PERMISSION_RE.search(blob)
-        if m:
-            path = m.group(1) or m.group(2) or "?"
-            denied[sid] = path
-            failed[sid] = "permission-auto-reject"
-            hits.append(_hit("permission-auto-reject", [sid],
-                             f"{sid}: permission denied on {path} "
-                             f"(hint: grant with --allow-dirs {path})"))
-            continue  # the denial explains the death; no shadowing generic hit
         n_msg, n_part = (_count_rows(con, "message", sid),
                          _count_rows(con, "part", sid))
         if n_msg == 0 and n_part == 0:
@@ -296,6 +300,21 @@ def detect_patterns(con, nodes, *, contract=None, wave_ratio=0.6,
         analyses[sid] = an
         text = result_text(con, sid)
         has_result = bool(text.strip()) and not an["running"]
+        # The permission scan reads ONLY denial carriers (error-state tool
+        # parts) and a denial explains the death only when it is the child's
+        # LATEST event AND the child is not done. A child that was denied,
+        # recovered, and kept working is not a denial-death; a child whose
+        # SUCCESSFUL tool output merely quotes denial-shaped text is not a
+        # denial at all (AC9).
+        denial = _permission_denial(parts)
+        if denial and denial["index"] == len(parts) - 1 and not has_result:
+            path = denial["path"]
+            denied[sid] = path
+            failed[sid] = "permission-auto-reject"
+            hits.append(_hit("permission-auto-reject", [sid],
+                             f"{sid}: permission denied on {path} "
+                             f"(hint: grant with --allow-dirs {path})"))
+            continue  # the denial explains the death; no shadowing generic hit
         if has_result:
             done[sid] = True  # completed: no liveness hit, contract still checked
             if contract:

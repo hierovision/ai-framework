@@ -807,6 +807,83 @@ def test_contract_mode_completed_and_in_flight():
         shutil.rmtree(work, ignore_errors=True)
 
 
+# --- permission-scan precision (plan revised 2026-10-09; AC9) ----------------
+
+def test_permission_scan_ignores_successful_tool_output():
+    """AC9(i): a child whose SUCCESSFUL (completed) tool output merely QUOTES
+    denial-shaped text — reading the guard's own source / the supervision doc,
+    the observed false positive on D1's session `ses_ede888d72ffe…` — produces
+    NO permission-auto-reject hit, NO empty-result, and NO wave-failure. The
+    scan reads denial carriers (error-state tool parts), not arbitrary output."""
+    g = _load_guard()
+    work = tempfile.mkdtemp(prefix="guard-perm-fp-")
+    try:
+        dbp = os.path.join(work, "opencode.db")
+        root = {"id": "root", "parent_id": None, "title": "orchestrator"}
+        s, m, p = _result_session(
+            "reader1", "root",
+            text="## Findings\nread the guard source\n## Recommendation\nmerge")
+        # line-numbered source (a completed read's output) quoting the guard's
+        # own PERMISSION_RE literals and the --allow-dirs hint
+        p.append({
+            "id": "reader1-p2", "message_id": "reader1-m1",
+            "session_id": "reader1", "time_created": T0 + 700,
+            "time_updated": T0 + 700,
+            "data": {"type": "tool", "tool": "read",
+                     "state": {"status": "completed", "output":
+                               "80: PERMISSION_RE = re.compile(\n"
+                               "81:     r\"permission requested: external_directory "
+                               "\\(([^)]*)\\)[^.\\n]*auto-rejecting\"\n"
+                               "82:     r\"|permission denied: \\S+ (\\S+)\")\n"
+                               "285: f\"(hint: grant with --allow-dirs {path})\")"}}})
+        _make_db(dbp, [root] + s, m, p)
+        now = (T0 + 700) / 1000 + 600
+        hits = _scan(g, dbp, "root", stall_seconds=240, now=now)
+        assert not _hits(hits, "permission-auto-reject"), _patterns(hits)
+        assert not _hits(hits, "empty-result"), _patterns(hits)
+        assert not _hits(hits, "wave-failure"), _patterns(hits)
+        assert not _hits(hits, "stalled"), _patterns(hits)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_permission_scan_ignores_recovered_child():
+    """AC9(ii): a REAL denial carrier (error-state tool part) followed by LATER
+    events (the child survived and kept working to a result) produces NO
+    permission hit; the child is judged by the normal streaming/done rules
+    (here: done, not dead)."""
+    g = _load_guard()
+    work = tempfile.mkdtemp(prefix="guard-perm-rec-")
+    try:
+        dbp = os.path.join(work, "opencode.db")
+        root = {"id": "root", "parent_id": None, "title": "orchestrator"}
+        s, m, p = _result_session("rec1", "root", text="recovered and finished")
+        # the denial carrier: the exact AC3 shape (error-state tool part)
+        p.append({
+            "id": "rec1-p2", "message_id": "rec1-m1",
+            "session_id": "rec1", "time_created": T0 + 700,
+            "time_updated": T0 + 700,
+            "data": {"type": "tool", "tool": "bash",
+                     "state": {"status": "error",
+                               "output": "permission requested: external_directory"
+                                         " (/tmp/audit-*); auto-rejecting"}}})
+        # LATER event: the child kept working and completed
+        p.append({
+            "id": "rec1-p3", "message_id": "rec1-m1",
+            "session_id": "rec1", "time_created": T0 + 800,
+            "time_updated": T0 + 800,
+            "data": {"type": "tool", "tool": "bash",
+                     "state": {"status": "completed", "output": "ok"}}})
+        _make_db(dbp, [root] + s, m, p)
+        now = (T0 + 800) / 1000 + 600
+        hits = _scan(g, dbp, "root", stall_seconds=240, now=now)
+        assert not _hits(hits, "permission-auto-reject"), _patterns(hits)
+        assert not _hits(hits, "empty-result"), _patterns(hits)
+        assert not _hits(hits, "stalled"), _patterns(hits)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
