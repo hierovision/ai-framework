@@ -231,6 +231,11 @@ names that source, not a permanent open issue.
 - Grooming a single issue's description → edit that issue.
 - Pure backlog export with no ranking intent → user wants a list, not a
   roadmap pass.
+- Creating the vision artifact or outcome themes from scratch →
+  `facilitating-product-vision` (this skill ranks and merges them afterward;
+  the trigger phrase "build/update our roadmap" overlaps with that skill's
+  "turn the vision into slices" use-when — vision + slice generation is the
+  upstream skill, this skill owns ranking + durable merge only).
 
 ## References
 
