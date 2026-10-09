@@ -108,6 +108,12 @@ def load_skill_evals(skills_root):
                 "expect": e.get("expect"),
                 "deferred": bool(e.get("deferred", False)),
                 "model_tier": e.get("default_model_tier", tier),
+                # AC1 (D2): whether a marker was actually DECLARED (per-eval or
+                # top-level). The loader's "free" fallback above is not a
+                # declaration, so the tier-conflict warning only fires for a
+                # real manifest intent.
+                "tier_declared": ("default_model_tier" in e
+                                  or "default_model_tier" in data),
                 "files": e.get("files", []),
                 # RM-021 AC6 (2026-10-04): per-eval stall budget; dropping it
                 # here silently fell back to 240 s in the first CI rerun.
@@ -426,14 +432,28 @@ def assert_artifact(entries, workdir, events=None):
         phrases = entry.get("phrases") or []
         norms = [_norm_ws(p).lower() for p in phrases]
         found = False
+        # Best partial candidate for a decision-grade miss message (AC3, D2):
+        # (missing phrases, matched path) with the fewest missing phrases.
+        candidate = None
+
+        def _consider(fp, content):
+            nonlocal candidate, found
+            content = _norm_ws(content).lower()
+            if all(p in content for p in norms):
+                found = True
+                return
+            gap = [p for p, n in zip(phrases, norms) if n not in content]
+            if candidate is None or len(gap) < len(candidate[0]):
+                candidate = (gap, fp)
+
         # Surface 1: workdir filesystem.
         for fp in _artifact_files(workdir, path):
             try:
-                content = _norm_ws(open(fp, encoding="utf-8", errors="replace").read()).lower()
+                content = open(fp, encoding="utf-8", errors="replace").read()
             except OSError:
                 continue
-            if all(p in content for p in norms):
-                found = True
+            _consider(fp, content)
+            if found:
                 break
         # Surface 2: write events (path glob + event content).
         if not found and events:
@@ -442,13 +462,23 @@ def assert_artifact(entries, workdir, events=None):
                     continue
                 if not _glob_match(call["args"].get("filePath"), path):
                     continue
-                content = _norm_ws(str(call["args"].get("content") or "")).lower()
-                if all(p in content for p in norms):
-                    found = True
+                _consider(call["args"].get("filePath"),
+                          str(call["args"].get("content") or ""))
+                if found:
                     break
         if not found:
-            missing.append(
-                f"artifact: no file matching {path!r} containing all phrases {phrases}")
+            if candidate:
+                # AC3 (D2): the path matched at least one file (surface 1 or
+                # surface 2's filePath fnmatch) but the phrases missed —
+                # artifact found, content missed vocabulary. Report which
+                # phrases and which file, not the mis-diagnosing legacy lump.
+                gap, fp = candidate
+                missing.append(
+                    f"artifact phrases missing: {gap} (file matched: {fp})")
+            else:
+                missing.append(
+                    f"artifact: no file matching {path!r} containing all "
+                    f"phrases {phrases}")
     return missing
 
 
@@ -1192,6 +1222,106 @@ def _missing_eval_keys(selected, logs_dir):
     return [eval_key(e) for e in selected if eval_key(e) not in final]
 
 
+def _emit(message, file=None):
+    """Print a runner status line and flush it immediately (AC5 / F5, D2).
+
+    Detached launches block-buffer stdout, so per-eval progress, warnings,
+    the zero-selection diagnostics, and the final summary must flush or they
+    surface only at process exit (friction-log item 5, 2026-10-09).
+    """
+    print(message, file=file, flush=True)
+
+
+def model_lane(model):
+    """Plain lane label for a concrete `--model` id (AC1 conflict reporting).
+
+    Maps the flag to the manifest `default_model_tier` vocabulary
+    (`free` / `go` / `zen`) plus the legacy direct-key lane (`deepseek`).
+    Unknown ids map to `unknown`, so they always disagree with a declared
+    tier and are surfaced rather than silently accepted.
+    """
+    m = model or ""
+    if m.endswith("-free"):
+        return "free"
+    if m.startswith(GO_LANE_PREFIX):
+        return "go"
+    if m.startswith(DIRECT_LANE_PREFIX):
+        return "deepseek"
+    if m.startswith("opencode/"):
+        return "zen"
+    return "unknown"
+
+
+def tier_conflict_warnings(evals, model, ci_mode=False):
+    """One WARNING per skill whose declared manifest tier disagrees with
+    the explicit `--model` lane (AC1 / F2, D2).
+
+    Precedence: `--model` WINS; the warning names both and says so. Only a
+    skill that actually declared a `default_model_tier` (per-eval or
+    top-level) is considered — the loader's `free` fallback is not a
+    declaration. Non-CI only: under `--ci` the `assert_ci_free_model` gate
+    owns the lane decision, so this never fires there. Bounded to one line
+    per skill.
+    """
+    if ci_mode or not model:
+        return []
+    lane = model_lane(model)
+    out, seen = [], set()
+    for e in evals:
+        if not e.get("tier_declared") or e["skill"] in seen:
+            continue
+        if e["model_tier"] != lane:
+            seen.add(e["skill"])
+            out.append(
+                f"warning: {e['skill']} manifest default_model_tier="
+                f"{e['model_tier']!r} disagrees with --model lane {lane!r} "
+                f"({model!r}); --model wins")
+    return out
+
+
+def selection_diagnostics(evals, include_deferred=False, ci_mode=False,
+                          quarantined=None, include_quarantine=False,
+                          skill=None):
+    """Decision-grade lines explaining an empty selection (AC4 / F4b, D2).
+
+    Per skill, counts the evals excluded by each gate (quarantined /
+    deferred / tier) and names the flag that re-includes them. Returns [] when
+    no gate accounts for the exclusions (a `--skill` typo, `--limit 0`, or an
+    empty marker selection), so the caller falls back to the bare message.
+    """
+    if isinstance(skill, str):
+        skill = [skill]
+    quarantined = quarantined or set()
+    by_skill = {}
+    for e in evals:
+        if skill and e["skill"] not in skill:
+            continue
+        c = by_skill.setdefault(
+            e["skill"], {"deferred": 0, "tier": 0, "quarantined": 0})
+        if e["deferred"]:
+            if not include_deferred:
+                c["deferred"] += 1
+        elif ci_mode and e["model_tier"] in ("go", "zen"):
+            c["tier"] += 1
+        if quarantined and not include_quarantine and eval_key(e) in quarantined:
+            c["quarantined"] += 1
+    lines = []
+    for name in sorted(by_skill):
+        c = by_skill[name]
+        parts = []
+        if c["quarantined"]:
+            parts.append(f"{c['quarantined']} quarantined "
+                         f"(re-include with --include-quarantine)")
+        if c["deferred"]:
+            parts.append(f"{c['deferred']} deferred "
+                         f"(re-include with --include-deferred)")
+        if c["tier"]:
+            parts.append(f"{c['tier']} tier-excluded (CI free-only mode)")
+        if parts:
+            lines.append(f"no evals selected for {name}: " + ", ".join(parts))
+    return lines
+
+
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
     p = argparse.ArgumentParser(description="Run behavioral eval suite.")
@@ -1258,9 +1388,15 @@ def main(argv=None):
             print(f"error: {e}", file=sys.stderr)
             return 2
     if ci_mode and not args.model:
-        print("warning: --model not set in CI mode; opencode will use its "
+        _emit("warning: --model not set in CI mode; opencode will use its "
               "environment default, which is NOT guaranteed to be a live free "
               "model (RM-002 AC5)", file=sys.stderr)
+
+    # AC1 (D2): a declared manifest tier that disagrees with an explicit
+    # --model is surfaced once per skill; the flag wins (non-CI only).
+    for warning in tier_conflict_warnings(all_evals, args.model,
+                                          ci_mode=ci_mode):
+        _emit(warning)
 
     # Quarantine is CI-owned: enabled by default (the CI jobs rely on it) but
     # Layer 2 advisory local runs MUST opt out with --no-quarantine.
@@ -1278,34 +1414,44 @@ def main(argv=None):
                             core_only=args.core_only)
 
     if args.list:
-        print(f"included evals: {len(selected)}")
+        _emit(f"included evals: {len(selected)}")
         deferred_excluded = (
             0 if args.include_deferred
             else sum(1 for e in all_evals if e["deferred"])
         )
         if deferred_excluded:
-            print(f"deferred: {deferred_excluded} excluded by default "
+            _emit(f"deferred: {deferred_excluded} excluded by default "
                   f"(pass --include-deferred to include)")
         paid_excluded = sum(
             1 for e in all_evals
             if ci_mode and not e["deferred"] and e["model_tier"] in ("go", "zen")
         )
         if paid_excluded:
-            print(f"paid-tier: {paid_excluded} excluded by CI mode "
+            _emit(f"paid-tier: {paid_excluded} excluded by CI mode "
                   f"(free-only; see reference/model-routing.md)")
         if quarantined and not args.include_quarantine:
             excluded = sum(1 for e in all_evals
                            if not e["deferred"] and eval_key(e) in quarantined)
             if excluded:
-                print(f"quarantined: {excluded} excluded by quarantine "
+                _emit(f"quarantined: {excluded} excluded by quarantine "
                       f"(pass --include-quarantine to include)")
         for e in selected:
             tag = "deferred" if e["deferred"] else "eval"
-            print(f"  [{tag}] {e['skill']}#{e['eval_id']} (tier={e['model_tier']})")
+            _emit(f"  [{tag}] {e['skill']}#{e['eval_id']} (tier={e['model_tier']})")
         return 0
 
     if not selected:
-        print("no evals selected", file=sys.stderr)
+        # AC4 (D2): name the gate(s) that excluded the evals and the flag that
+        # re-includes them, per skill — never a silent bare no-op.
+        diag = selection_diagnostics(
+            all_evals, include_deferred=args.include_deferred, ci_mode=ci_mode,
+            quarantined=quarantined,
+            include_quarantine=args.include_quarantine, skill=args.skill)
+        if diag:
+            for line in diag:
+                _emit(line, file=sys.stderr)
+        else:
+            _emit("no evals selected", file=sys.stderr)
         return 0
 
     _stub_calls = {}
@@ -1326,7 +1472,7 @@ def main(argv=None):
             and not args.no_preflight):
         ok, why = preflight_model(args.model)
         if ok is not True:
-            print(f"warning: preflight: {why}", file=sys.stderr)
+            _emit(f"warning: preflight: {why}", file=sys.stderr)
 
     failed = 0
     infra_deaths = 0
@@ -1342,7 +1488,7 @@ def main(argv=None):
             path = _record_infra_error(e, exc, logs_dir=args.logs_dir, model=args.model)
             passed, missing = False, [str(exc)]
         status = "PASS" if passed else "FAIL"
-        print(f"{status}  {e['skill']}#{e['eval_id']}  -> {path}")
+        _emit(f"{status}  {e['skill']}#{e['eval_id']}  -> {path}")
         if not passed:
             failed += 1
             rec = _last_record(path)
@@ -1350,19 +1496,19 @@ def main(argv=None):
                 # Infra death, not a content miss: printing "missing: ..." here
                 # made a model/provider failure look like a failed assertion in
                 # CI logs (RM-021, 2026-09-28).
-                print(f"      infra error: {rec.get('detail') or 'dead session'}")
+                _emit(f"      infra error: {rec.get('detail') or 'dead session'}")
                 infra_deaths = (infra_deaths + 1
                                 if is_model_resolution_error(rec.get("detail")) else 0)
             else:
                 infra_deaths = 0
                 for m in missing:
-                    print(f"      missing: {m[:120]}")
+                    _emit(f"      missing: {m[:120]}")
         else:
             infra_deaths = 0
         if infra_deaths >= 3:
             # Every eval dies the same infra way in ~2s: stop instead of burning
             # the suite and turning one broken catalog into hundreds of reds.
-            print("aborting: model resolution failed for 3 consecutive evals "
+            _emit("aborting: model resolution failed for 3 consecutive evals "
                   "(infra, not a regression)", file=sys.stderr)
             return 3
 
@@ -1373,14 +1519,15 @@ def main(argv=None):
     missing_keys = _missing_eval_keys(
         selected, args.logs_dir or log_run.DEFAULT_LOGS_DIR)
     if missing_keys:
-        print(f"\ncompleteness check failed: {len(missing_keys)} selected eval(s) "
-              f"have no final record: {', '.join(missing_keys)}", file=sys.stderr)
+        _emit(f"\ncompleteness check failed: {len(missing_keys)} selected eval(s) "
+              f"have no final record: {', '.join(missing_keys)}",
+              file=sys.stderr)
         return 1
 
     if failed:
-        print(f"\n{failed} eval(s) failed regression gate", file=sys.stderr)
+        _emit(f"\n{failed} eval(s) failed regression gate", file=sys.stderr)
         return 1
-    print("\nall included evals passed")
+    _emit("\nall included evals passed")
     return 0
 
 
