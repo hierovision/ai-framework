@@ -281,3 +281,55 @@ None.
   retained (five sibling skills carry it; it is a tier-intent tag, not a
   CI override) and the dated `evals.json` notes block documents exactly
   what the marker does and does not steer.
+- 2026-10-09 — **D11 AC5 manual two-turn (skill-author; honest single attempt).**
+  Id 5's deferred two-turn harness is unrunnable in the default CI gate
+  (`filter_evals` excludes `deferred: true`); the runner's multi-turn
+  machinery at `run_behavioral_eval.py:967` (`invoke_opencode`, `turn`
+  dict with `session_id` + `nudge`) is a stall-nudge in the same session,
+  not an owner-answers resume — so a manual protocol is the honest path:
+  materialize the fixture at the prompt-referenced source-layout path under
+  `T=$(mktemp -d /tmp/fpv-turn2-XXXX)`, split the prompt at the literal
+  marker `[turn 2 resumes with:`, run each turn detached on the Go lane
+  (`opencode-go/deepseek-v4.1-flash`) with bounded polling, and grade each
+  turn against the typed assertions + the hand-review envelope.
+  **Turn 1 verdict — PASS** (session `ses_eddedacb2ffeT5XR3t4xH0ds5Z`,
+  jsonl `/tmp/fpv-turn2-0ded/turn1.jsonl` 20 lines): the agent invoked the
+  vision skill via the `skill` tool, loaded `references/artifact-format.md`
+  + the consumer fixture, presented a Checkpoint 1 draft with five
+  question-with-proposal rows for the strategy batch, and stopped — no
+  artifact write (no `docs/vision/PLNA-vision.md` present at end of turn),
+  no themes/slices produced. Final text contains `checkpoint` and
+  `strategy batch` (typed `expect.text`); does NOT contain the literal
+  owner-answer phrases `high-school teachers` / `district seat license` /
+  `FERPA` (those are owner-decision content the session defers to turn 2;
+  `differentiated practice` does appear because the agent echoed the
+  owner-notes JTBD verbatim in its draft questions).
+  **Turn 2 verdict — PASS** (same session, resumed via `-s`, jsonl
+  `/tmp/fpv-turn2-0ded/turn2.jsonl` 22 lines): the agent applied the
+  pre-supplied owner decisions exactly as given and wrote the artifact to
+  `/tmp/fpv-turn2-0ded/docs/vision/PLNA-vision.md` (115 lines / 9003 bytes).
+  Artifact content check (case-insensitive): contains all four literal
+  owner-answer phrases — `high-school teachers` (vision statement +
+  segments table), `differentiated practice` (vision statement + JTBD),
+  `district seat license` (value & business model), `FERPA` (compliance
+  table + open questions). Capacity envelope honored: Now = 2×S, Next =
+  1×M, Later = 1×L (the artifact self-attests the check). Each slice
+  carries AC + Success measure + Blocked-by + Sizing in the typed Slices
+  table. Open Questions section is clean: the five checkpoint-1 strategy
+  decisions (primary segment, non-goals, value model, capacity envelope,
+  FERPA gate) are NOT carried forward as if unanswered; the remaining 11
+  open questions are the legitimately undecided items (vision-statement
+  wording confirmation, segment-set breadth, alternatives considered,
+  non-goal rationale, anti-vision, North Star metric, guardrail
+  thresholds, success-measure target ratification, lead reference
+  district, extra phase gates, published `ROADMAP.md` home).
+  Both verdicts are recorded as a dated `evals.json` notes block on the
+  same date (cardinal rule: an honest failing run is recorded, never
+  greened; the `deferred: true` marker stays — it gates CI, not local
+  runs, and the manual protocol is the only honest option without a real
+  owner in the loop). Evidence preserved under `/tmp/fpv-turn2-0ded/`
+  (turn1.jsonl, turn2.jsonl, PLNA-vision.md, plus the auxiliary
+  `ROADMAP.md` append and `.opencode/plans/2026-10-09-plna-vision-session.md`
+  the agent emitted per the skill's return convention). The manual pass is
+  the AC5 deferred variant the plan acknowledges; the four non-deferred
+  evals (1–4) carried their 4/4 green on the CI lane (D10).
