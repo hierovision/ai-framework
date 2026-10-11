@@ -382,20 +382,40 @@ Gate-pass commands (the project's real commands — from
 
 ## Open Questions
 
-- (non-blocking, with provable defaults) If the Go lane behavioral
-  eval run for either skill cannot complete in the implement window
-  (infra deaths like RM-021's model-resolution class), the deferral
-  is recorded in the plan's History with the failure signature and
-  the done-gate moves to the next green-run record — never a silent
-  green. Default = record honestly and stop.
-- (non-blocking, with default) If the 13-column table overflows
-  readability in ROADMAP.md core views, the fallback is NOT dropping
-  columns (the schema is first-class per the contract); the fallback
-  is one Notes-cell sizing statement per horizon header and a dated
-  readability note. Default = keep the full column contract.
+Both open questions RESOLVED by owner directives, 2026-10-11
+(rm-052-053 design review). Recorded here as user-frozen policy
+(RM-034); each decision carries its own roadmap row.
+
+- **Eval-lane fallback (replaces the "record honestly and stop"
+  default):** if an eval cannot complete because of the model or the
+  opencode service — degradation PROVEN from logs (RM-021-diagnosed
+  classes: model-resolution deaths, dead streams, provider errors) —
+  the run falls back to the **deepseek-v4.1-flash direct API lane**
+  rather than stopping. The binding/routing policy itself stays
+  RM-039/ADR-0013's domain (a per-run lane switch, never a silent
+  re-bind; the eval report marks the fallback lane so pass rates stay
+  comparable). Tracked as roadmap row **RM-056** (own design+build;
+  this plan's runner-edit exclusion stands — during THIS plan's
+  implement window the failure disposition remains the recorded-
+  honestly default until RM-056 delivers).
+- **Roadmap presentation (replaces the overflow textbox default):**
+  the owner rules the overflow issue is solved by a real UI design
+  pass for the **objectively best presentation** — reading to be
+  enjoyed AND structure understood clearly. Tracked as roadmap row
+  **RM-057** (waiting on this plan's deliverable). The schema stays
+  first-class (no column dropping); the migration pass does not
+  hard-code presentation choices beyond the 13-column contract.
 
 ## History
 
+- 2026-10-11 (revision, owner directives) — Open
+  Questions resolved and closed: (1) eval-lane fallback to the
+  deepseek-v4.1-flash direct API on log-proven model/opencode
+  degradation → RM-056 (row added, fired; this plan's implement
+  window disposition unchanged); (2) roadmap presentation is a
+  real design pass — overflow solved by design, never
+  truncation → RM-057 (row added, waits on this plan). No
+  AC/commit changes; both rows carry the pointers.
 - 2026-10-11 — drafted by the designing-architecture pass (RM-052 +
   RM-053, one plan, two gate-pass commit units). Sources: paragon
   handoff 2026-10-09 §A/§B (read at
