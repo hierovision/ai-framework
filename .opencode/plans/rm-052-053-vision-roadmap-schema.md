@@ -476,4 +476,23 @@ Both open questions RESOLVED by owner directives, 2026-10-11
   ROADMAP.md + write-event content were updated to the 13-column shape
   (the new expected output) and folded into commit unit (2); assertion
   strength unchanged, no runner edit.
+- 2026-10-11 (implement pass — behavioral evals, AC13) — Ran on the
+  pinned lane `opencode-go/deepseek-v4.1-flash`; all results recorded
+  honestly (logs + run-jsonl under
+  `.scratch/rm-052-053-design/beval/`, `run-2026-10-11.jsonl`). Results:
+  triaging-requirements 1/2/3 PASS; facilitating-product-vision 1/2/3/4
+  PASS and the deferred id 5 PASS under `--include-deferred` — 8/8 PASS;
+  ~$0.11 latest-per-eval, $0.22 across all records (incl. one partial
+  run killed by a shell-tool timeout and the deferred re-run of ids 1–4).
+  Mechanical plan-vs-reality deviation (recorded): the plan's literal
+  verification commands omit `--no-quarantine`, which the runner's own
+  contract REQUIRES for local advisory runs ("quarantine is CI-owned").
+  Without it, the four non-deferred vision evals resolve to 0 included
+  (they sit on `logs/quarantine.json` from the 2026-10-09 rounds). Runs
+  used `--no-quarantine` + a scratch `--logs-dir`; `logs/quarantine.json`
+  was neither read nor written (unchanged, mtime 2026-10-09). The
+  automated id-5 run passed but is the single-session stall-nudge
+  harness, not a real owner-answers two-turn resume — the D11 manual
+  two-turn PASS (2026-10-09, manifest notes) remains the authoritative
+  two-turn evidence.
 
