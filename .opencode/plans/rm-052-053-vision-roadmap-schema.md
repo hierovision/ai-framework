@@ -456,3 +456,24 @@ Both open questions RESOLVED by owner directives, 2026-10-11
   committed on `docs/rm-052-053-plan` (only this file — not
   docs/ROADMAP.md which has live uncommitted triage working-tree
   changes).
+- 2026-10-11 (implement pass) — Four gate-pass commits on
+  `feat/rm-052-053-schema` (branched from `docs/rm-052-053-plan` @
+  7a97b92): (1) RM-053 contract, (2) RM-053 evals + the triaging canary
+  fixture, (3) RM-052 contract + consumer guidance, (4) RM-052 evals +
+  this History entry. Offline gates green at each: validate_skill.py
+  --all, verify.mjs, check_typed_evals.py --base main|HEAD,
+  test_typed_evals.py, test_runner.py. Plan-vs-reality mismatch
+  (mechanical, recorded per the deviation rule): AC10's eval-1 phrase
+  extension (add `Horizon` + `Success measure`) broke the hermetic
+  canary-replay gate
+  `test_runner.py::test_seven_canaries_replay_fixtures` — the recorded
+  synthetic fixture
+  `skills/authoring-skills/evals/fixtures/event-streams/triaging-requirements__1/`
+  still carried the pre-schema 7-column ROADMAP shape, so the replayed
+  output no longer satisfied the new typed expect. The plan's Files to
+  Modify omitted this fixture (it lives under authoring-skills, not the
+  changed skill). Mechanical, not contract-breaking: the fixture
+  ROADMAP.md + write-event content were updated to the 13-column shape
+  (the new expected output) and folded into commit unit (2); assertion
+  strength unchanged, no runner edit.
+
