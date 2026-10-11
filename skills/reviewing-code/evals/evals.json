@@ -5,7 +5,7 @@
     {
       "id": 1,
       "core": true,
-      "prompt": "review this branch for me \u2014 the diff is in change.diff, plan's at .opencode/plans/feat-session-sort.md and it's approved. repo is the working directory. is this ready to merge?",
+      "prompt": "review this branch for me \u2014 the diff is in change.diff, plan's at .opencode/plans/feat-session-sort.md and it's approved. the repo is at fixtures/phasewave/scenario-1-clean/ — treat that directory as the repo root. is this ready to merge?",
       "expected_behavior": [
         "Reads the plan at .opencode/plans/feat-session-sort.md FIRST (frontmatter status: approved) and reads change.diff \u2014 does not review from the prompt alone",
         "Maps every diff hunk to the plan's Files to Modify (src/lib/session-list.js, src/lib/session-display.js) and confirms the changes match Included scope (descending sort; display renders order unchanged) \u2014 both files are in scope, so no scope-breach finding",
