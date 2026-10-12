@@ -83,10 +83,10 @@ become history, kept in the roadmap as Done so the record stays complete.
 
 - **No `ROADMAP.md` at repo root** → initialize. See
   [references/roadmap-format.md](references/roadmap-format.md) for the
-  section structure and frontmatter.
+  section structure, the thirteen-column item-row schema, and frontmatter.
 - **Existing `ROADMAP.md`** → read it. This is a *merge* pass, not a
   rebuild. Keep prior categories, priorities, and history for still-open
-  items unless the item's status moved (now closed, now blocked, now
+  items unless the item's status moved (now closed, now waiting, now
   unblocked). A new priority label or signal from a source (e.g. a Jira
   `High` priority where there was none) is recorded in Notes but does not
   trigger a re-score — status moves are the only re-score trigger, so
@@ -103,6 +103,16 @@ Fixed set — every item gets exactly one:
 | `bug` | Incorrect behavior against existing intent |
 | `debt` | Internal cleanup that improves future velocity (refactors, schema consistency, dead code) |
 | `chore` | Non-feature maintenance (CI thresholds, icon assets, version bumps, manifest dedup) |
+
+Alongside `Category`, every row carries `Outcome` (the vision-document theme
+name it advances, or `—`), `Horizon` (`Now` / `Next` / `Later`), a one-line
+`Success measure`, and a first-class `Blocked-by`. A roadmap item carries
+**no acceptance criteria** — the detailed evidence bar lives in the item's
+plan artifact, authored at plan time by `designing-architecture`; only the
+one-line `Success measure` (the outcome lock) is a row field. See
+[references/roadmap-format.md](references/roadmap-format.md) for the full
+schema and the confidence-gated-detail rule that scales detail across the
+`Horizon` column.
 
 If an item genuinely doesn't fit (an "Intentionally Excluded" note, a
 research spike with no committed outcome, a scaffolded-but-unwired field
@@ -122,6 +132,10 @@ ranking, not just a flat priority.
 - **Impact** — how many users / how much it hurts not to have it.
 - **Urgency** — time-sensitivity now vs later (a broken core flow this week
   is urgent; a nice-to-have for Q4 is not).
+
+`Horizon` groups the rows (`Now` / `Next` / `Later`); within a horizon the
+derived `Score` orders them, then `ID` ascending. `Outcome` links a row to
+the vision-document theme it advances (or `—` when none).
 
 The user may supply a different rubric (e.g. RICE: reach × confidence /
 effort, MoSCoW buckets, or their own scoring). When they do, switch
@@ -166,11 +180,20 @@ far less than a roadmap built on the wrong formula. Two situations:
 Merge rules — see [references/roadmap-format.md](references/roadmap-format.md)
 for the full format and the field-by-field merge table. Essentials:
 
-- New items append as `proposed`.
+- New items append as `proposed`, with a `Horizon` derived from the item's
+  trigger state.
+- Every row uses the thirteen-column schema
+  (`ID | Title | Outcome | Horizon | Category | Impact | Urgency | Score |
+  Status | Success measure | Blocked-by | Sources | Notes`). An item carries
+  no acceptance criteria or requirement prose — that lives in its plan
+  artifact (`designing-architecture`); the row keeps only the one-line
+  `Success measure`.
 - Items the user's rubric cut sit in a `## Proposed (cut)` section, not the
   main list, until confirmed.
 - Done items (shipped/closed since last pass) move to `Done`; keep them, do
-  not delete. Maintaining done history is the point of a durable roadmap.
+  not delete. Maintaining done history is the point of a durable roadmap. A
+  Done row keeps its historical acceptance prose **verbatim** in `Success
+  measure` (acceptance-as-history) — that cell is a record, not an error.
 - Don't re-score already-ranked open items unless their status moved — or
   unless the rubric changed this pass (see Step 6: re-score all, preserve
   prior score in Notes).
@@ -234,14 +257,15 @@ names that source, not a permanent open issue.
 - Creating the vision artifact or outcome themes from scratch →
   `facilitating-product-vision` (this skill ranks and merges them afterward;
   the trigger phrase "build/update our roadmap" overlaps with that skill's
-  "turn the vision into slices" use-when — vision + slice generation is the
-  upstream skill, this skill owns ranking + durable merge only).
+  vision-session use-when — vision + roadmap-item generation is the upstream
+  skill, this skill owns ranking + durable merge only).
 
 ## References
 
 - [references/roadmap-format.md](references/roadmap-format.md) — ROADMAP.md
-  schema, section order, and the merge table. Read when initializing or
-  before any merge that isn't a trivial append.
+  schema (the thirteen-column item row), section order, the no-AC +
+  confidence-gated-detail rules, and the merge table. Read when initializing
+  or before any merge that isn't a trivial append.
 - [references/stacks/jira.md](references/stacks/jira.md) — fetching Jira
   issues by project key. Read only when a live Jira fetch is required.
 - [references/stacks/github.md](references/stacks/github.md) — fetching

@@ -15,12 +15,15 @@
         "Marks already-done items ([x] / ✅) as done in the roadmap instead of re-listing them as pending work",
         "[fix-verified] Records undated done markers as 'pre <triage-date>' rather than inventing a close date",
         "Scores pending items on impact and urgency, ranks by the combined axis, and shows both axes (not just a flat priority)",
+        "Writes the 13-column item-row schema the contract requires, including the Horizon (Now/Next/Later) and Success measure columns",
+        "A roadmap item carries NO acceptance criteria, detailed requirements, or idea/bug dumps — the detailed evidence bar lives in the item's plan artifact; the row keeps only the one-line Success measure",
+        "Detail scales with confidence across the Horizon columns — Now = specific solutions in flight, Next = opportunities under validation, Later = outcomes only",
         "Writes ROADMAP.md with the all-inclusive categorized list and points the user to the top-priority items",
         "Does not fabricate Jira data it couldn't fetch — states what was read and what wasn't"
       ],
       "expect": {
         "artifact": [
-          {"path": "**/ROADMAP.md", "phrases": ["Impact", "Urgency"]}
+          {"path": "**/ROADMAP.md", "phrases": ["Impact", "Urgency", "Horizon", "Success measure"]}
         ]
       },
       "files": []

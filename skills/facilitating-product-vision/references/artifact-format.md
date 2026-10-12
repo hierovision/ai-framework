@@ -4,7 +4,7 @@ Read this when drafting the vision document (the session's primary
 artifact) and before any revision of one. The artifact is the **contract
 with the owner**: a separate review pass reads it cold, without the
 facilitation conversation, and must be able to defend the strategy and
-slice plan. If a section has no content for this item, write `None.`
+roadmap-item set. If a section has no content for this item, write `None.`
 rather than omitting it — an empty section is a signal.
 
 The skill's body cites this file rather than duplicating its contents —
@@ -26,19 +26,19 @@ The session emits two artifacts that are governed by sibling formats:
 
 1. **Vision document** (default name `VISION.md`, path resolved with the
    owner — see *Path* below). The fixed section list in this file
-   defines its content contract.
-2. **Outcome themes + provisional slices, appended to the project's
-   `ROADMAP.md`**. Rows conform to the item-row schema and frontmatter
-   of the sibling format
+   defines its content contract. It carries **strategy only** — no
+   operational slice tables and no per-item work breakdown.
+2. **Outcome themes + roadmap items, appended to the project's
+   `ROADMAP.md`**. Themes are strategy and live in the vision document;
+   the *items* the session emits are roadmap rows that conform to the
+   item-row schema and frontmatter of the sibling format
    [`../../triaging-requirements/references/roadmap-format.md`](../../triaging-requirements/references/roadmap-format.md)
    (relative path is intentional — the skill installs as a sibling set,
    so the path resolves in both the repo and the symlinked global
-   layout). Now/Next/Later semantics are recorded via the roadmap's
-   `rubric:` frontmatter + `Notes` cell (no private table format is
-   introduced); slices carry a one-line `success measure` + a
-   `blocked-by` mapping recorded in `Notes`.
+   layout). `Outcome`, `Horizon`, and the other item fields are defined
+   in that schema; the session does not introduce a private table format.
 
-The skill emits themes + provisional slices only; **`triaging-requirements`
+The skill emits themes + roadmap items only; **`triaging-requirements`
 owns scoring, ranking, and the durable merge** (the established-once
 rule). The session never rebuilds an existing `ROADMAP.md` from scratch —
 that violates the durable-merger contract.
@@ -52,8 +52,8 @@ that violates the durable-merger contract.
 - **Tone.** Decision-guiding, not marketing. The owner will defend the
   strategy on these pages; vague aspirational language reads as
   unprepared in that conversation.
-- **Tables over prose.** Slice tables, segment tables, theme tables —
-  the body keeps the artifact scannable.
+- **Tables over prose.** Theme tables, segment tables, and the other
+  structured blocks keep the artifact scannable.
 - **Recorded rationale.** Every owner decision carries a one-line
   rationale in or beside the table; "decided because" without the
   *because* is not a record.
@@ -103,8 +103,7 @@ reorder.
 ## Alternatives & Non-goals     (incl. anti-vision)
 ## Value & Business Model
 ## North Star + Guardrails
-## Outcome Themes               (Now / Next / Later; capacity-envelope applied)
-## Slices                       (per slice: AC + success measure + blocked-by + sizing)
+## Outcome Themes               (Now / Next / Later; strategy-only)
 ## Compliance & Phase Gates
 ## Open Questions               (owner decisions, not invented strategy)
 ```
@@ -176,55 +175,30 @@ verify the math without a calculator.
 
 ### Outcome Themes (Now / Next / Later)
 
-A table of outcome themes — what the product is *trying to make
-true for users* over each horizon — placed under three horizon
-labels: **Now** (this quarter), **Next** (this half), **Later**
-(this year, may slip). The capacity envelope (throughput ceiling
-per horizon) is applied *here*, not at the slice level — themes
-are sized to fit the team's reach. Themes without slices in the
-*Slices* section are not themes; cut or rewrite. Columns:
+The product strategy's themes — what the product is *trying to make true
+for users* — grouped under three horizon subheads: **Now** (this
+quarter), **Next** (this half), **Later** (this year, may slip). This
+section is **strategy-only**: a theme name and a one-line observable
+outcome. Columns:
 
-| Theme | Outcome (observable) | Horizon | Capacity band |
+| Theme | Outcome (observable, one line) |
 
-"Capacity band" is a one-word tag (`S` / `M` / `L`) reflecting the
-team's pre-agreed capacity envelope — themes sized `L` do not land
-in `Now`. The envelope is owned by the owner (a team cannot
-redefine its own reach); the session records the band the owner
-gave.
-
-### Slices
-
-One short table per outcome theme (or one combined table for small
-artifacts). Each row is a slice — the smallest unit of work that
-ships user-visible value and is independently testable. Columns:
-
-| Slice | Outcome theme | AC (observable) | Success measure | Blocked-by | Sizing |
-
-- **AC (observable)** — the user-observable behavior the slice
-  delivers; "a teacher can publish a worksheet and a student can
-  complete it" beats "implement the worksheet feature".
-- **Success measure** — the *metric* that proves the slice
-  delivered value, not just the build AC. Slices that lack a
-  success measure are not slices; they are features. "Adoption: ≥30%
-  of teachers publish a worksheet in the first month" is a success
-  measure; "ships" is not.
-- **Blocked-by** — the slice(s) or external dependency this slice
-  cannot start without; `[]` if none. A roadmap of mutually independent
-  slices is suspicious; the blocked-by column surfaces the dependency
-  graph that lets the owner sequence the work.
-- **Sizing** — rough (S/M/L or person-weeks), the owner's call. Do
-  not invent hours from nothing; the owner sizes or the section is
-  incomplete.
-
-Slices inherit the horizon + capacity band of their outcome theme;
-a slice in `Now` whose theme is `L` is a mis-fit the table exposes.
+The three subheads (`### Now`, `### Next`, `### Later`) order the theme
+list by horizon — the strategy question "what does the strategy pursue
+now vs next vs later" is answered by the grouping, not by a per-theme
+field. There is no Horizon column, no capacity band, and no slice list in
+this section: those are roadmap-item fields (see *Roadmap row contract*
+below). The capacity envelope (the throughput ceiling the owner gives) is
+a captured *Input / Constraint* — record it in this section's prose at
+theme level, never as a table column. A theme with no one-line observable
+outcome is not a theme; cut or rewrite it.
 
 ### Compliance & Phase Gates
 
 Any regulatory, security, or phase-gate constraint the strategy
 must satisfy to ship (e.g., "FERPA review before any student-data
-slice ships"; "SOC 2 Type II before the Next horizon opens").
-Each gate names the slice(s) it gates and the entity that owns
+item ships"; "SOC 2 Type II before the Next horizon opens").
+Each gate names the roadmap item(s) it gates and the entity that owns
 the gate (security review, legal, the owner). A strategy that
 ships without naming its gates is a strategy the team will
 discover its gates inside an incident.
@@ -252,8 +226,7 @@ conversation without re-deriving it. Tests:
 | Alternatives & Non-goals | The owner can defend each non-goal; the anti-vision names a concrete failure mode. |
 | Value & Business Model | An owner can defend "we make money because X" in a board meeting. |
 | North Star + Guardrails | The North Star captures value capture (not vanity); guardrails are concrete regressions the strategy will refuse. |
-| Outcome Themes | Capacity envelope applied; every theme has ≥1 slice; no `Now` theme sized `L`. |
-| Slices | Every slice carries an observable AC + a success measure + a blocked-by + a sizing; no slice ships in a vacuum. |
+| Outcome Themes | Each theme is one line and observable, grouped under Now/Next/Later; strategy-only — no Horizon column, no capacity band, no slice list. |
 | Compliance & Phase Gates | Every regulatory/security gate is named with its owner; no implicit gate. |
 | Open Questions | Every open question is a real owner decision; nothing silently invented. |
 
@@ -264,29 +237,9 @@ ready.
 
 ## Roadmap row contract (sibling)
 
-When the session emits theme/slice rows to the project's
-`ROADMAP.md`, the rows conform to the sibling format
+When the session emits outcome-theme / roadmap-item rows to the
+project's `ROADMAP.md`, the rows conform to the item-row schema at
 [`../../triaging-requirements/references/roadmap-format.md`](../../triaging-requirements/references/roadmap-format.md)
-— specifically:
-
-- The frontmatter is the roadmap's (not the vision document's):
-  `rubric:` + `threshold:` are recorded so a future triage pass
-  can tell what was in effect.
-- Each theme row uses the standard `feature` category with the
-  outcome theme name as the title; the horizon (`Now` / `Next` /
-  `Later`) and capacity band are recorded in `Notes` (e.g.
-  `horizon: Now; capacity: M`), not as new columns — the existing
-  schema is the contract, and a fresh column is a separate ADR.
-- Each slice row uses `feature` category with the slice title;
-  the slice's `success measure` and `blocked-by` map are recorded
-  in `Notes` (e.g. `success: ≥30% teacher adoption in 30 days;
-  blocked-by: feat-auth-flow`), not as new columns.
-- The session APPENDS rows; it never edits existing open rows
-  unless the owner directs a re-scoring under a rubric change.
-  Ranking, scoring, and the durable merge are owned by
-  `triaging-requirements` and happen on the next triage pass.
-
-The roadmap's existing schema is the single source of truth for
-row shape. Any extension (first-class Now/Next/Later columns, a
-success-measure column, etc.) is an ADR-gated change and is
-explicitly excluded from this skill's v1 — see the plan's OQ2.
+— read that file and conform to the item-row schema there; this file does
+not restate it. The session APPENDS rows; ranking, scoring, and the durable
+merge are owned by `triaging-requirements` on the next pass.

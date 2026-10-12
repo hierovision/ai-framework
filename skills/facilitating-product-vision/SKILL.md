@@ -1,12 +1,12 @@
 ---
 name: facilitating-product-vision
-description: "Facilitates an owner-led product vision session and produces a vision artifact plus an outcome-based slice roadmap (Now/Next/Later themes sliced into testable units with success measure + blocked-by). Use when the user says 'define/refresh the product vision', 'our roadmap is too lean', 'turn the vision into slices', 'run a vision/strategy session', or 'help me shape the product direction'. Not for: ranking an existing backlog (triaging-requirements), planning one named item (designing-architecture), persisting a roadmap as issues (managing-github-issues), refining a single issue's ACs (refining-issue-acceptance), or read-only product analysis of a draft (council-product). The phrase 'product vision' is the trigger — this skill is about product/strategy, not visual UI critique; UI/screenshot 'vision' reviews belong to council-ux/validating-ui."
+description: "Facilitates an owner-led product vision session and produces two artifacts: a strategy-only vision document plus roadmap items (outcome themes under Now/Next/Later, emitted as ROADMAP.md rows per the sibling item-row schema). Use when the user says 'define/refresh the product vision', 'our roadmap is too lean', 'turn the vision into slices', 'run a vision/strategy session', or 'help me shape the product direction'. Not for: ranking an existing backlog (triaging-requirements), planning one named item (designing-architecture), persisting a roadmap as issues (managing-github-issues), refining a single issue's ACs (refining-issue-acceptance), or read-only product analysis of a draft (council-product). The phrase 'product vision' is the trigger — this skill is about product/strategy, not visual UI critique; UI/screenshot 'vision' reviews belong to council-ux/validating-ui."
 ---
 
 # Facilitating Product Vision
 
 Run a structured, owner-led session that turns product ambition into a
-vision artifact and an outcome-based slice roadmap. The output is two
+strategy-only vision artifact plus roadmap items. The output is two
 artifacts (vision document + provisional `ROADMAP.md` rows) plus a
 working session record — never a rebuild of an existing roadmap and
 never a strategy invented under the owner's name.
@@ -14,7 +14,7 @@ never a strategy invented under the owner's name.
 The session is owner-driven. Every judgment call is owner-owned and
 recorded with a one-line rationale; the facilitator does not invent
 strategy. The artifact is the contract: a separate reviewer reads it
-cold and must be able to defend the strategy and slice plan.
+cold and must be able to defend the strategy and roadmap-item set.
 
 ## Contents
 
@@ -41,12 +41,12 @@ Vision Session Progress:
 - [ ] 1a. Decide mode (interactive multi-turn | declared one-shot | decisions pre-supplied inline) — the mode determines what fills Open Questions and what the final response must say
 - [ ] 2. Strategy batch draft (vision, segments+JTBD, alternatives+non-goals+anti-vision, value model, north star + guardrails)
 - [ ] 2a. CHECKPOINT 1 — strategy batch: present draft as questions-with-proposals; owner decides, every call recorded (skipped only when decisions are pre-supplied — recorded instead)
-- [ ] 3. Roadmap batch draft (3–6 outcome themes banded Now/Next/Later under the capacity envelope; each theme sliced into testable units: AC + success measure + blocked-by + sizing; risk-first ordering)
+- [ ] 3. Roadmap batch draft (3–6 outcome themes banded Now/Next/Later under the capacity envelope; each theme's work emitted as roadmap items in the sibling item-row schema — ACs NOT emitted, they are plan-time artifacts; risk-first ordering)
 - [ ] 3a. CHECKPOINT 2 — roadmap batch: same Q-with-proposal cadence (skipped only when decisions are pre-supplied — recorded instead)
 - [ ] 4. Compliance & phase gates draft (consent/privacy/regulatory milestones, phase gates that unlock later segments)
 - [ ] 4a. CHECKPOINT 3 — compliance + gates: confirm gates and owners (skipped only when decisions are pre-supplied — recorded instead)
-- [ ] 5. Write artifacts (vision doc at the owner-confirmed home using EXACT Title-Case headings and Slices column labels; append theme + slice rows to ROADMAP.md per the sibling format; record the session as a working artifact)
-- [ ] 6. Optional council consults + handoffs (triaging-requirements ranks, designing-architecture plans the top slice)
+- [ ] 5. Write artifacts (vision doc at the owner-confirmed home using EXACT Title-Case headings; append outcome-theme + roadmap-item rows to ROADMAP.md per the sibling item-row schema; record the session as a working artifact)
+- [ ] 6. Optional council consults + handoffs (triaging-requirements ranks, designing-architecture plans the top roadmap item)
 ```
 
 ## Step 1 — Inputs & constraints
@@ -141,7 +141,7 @@ section schemas — the body cites it, never duplicates it. Cover:
 **Checkpoint 1 (strategy batch).** Stop. Present the draft as
 questions-with-proposals, not as a fait accompli. Every judgment call
 is owner-owned and recorded with a one-line rationale. Do not proceed
-to themes or slices until the strategy batch is decided.
+to themes or roadmap items until the strategy batch is decided.
 
 ## Step 3 — Roadmap batch + Checkpoint 2
 
@@ -150,40 +150,39 @@ Draft the roadmap batch.
 1. **3–6 outcome themes** — what the product is *trying to make true
    for users* over each horizon. Themes are banded under three
    horizons: **Now** (this quarter), **Next** (this half),
-   **Later** (this year, may slip). Apply the **capacity envelope**
-   (a throughput ceiling the owner gives) at the *theme* level — a
-   `Later`-banded theme sized `L` is a mis-fit the table exposes.
-   Themes without slices in the next step are not themes; cut or
-   rewrite.
-2. **Slices per theme** — the smallest unit of work that ships
-   user-visible value and is independently testable. Every slice
-   carries: an observable AC; a success measure (the *metric* that
-   proves the slice delivered value, not just the build AC); a
-   blocked-by mapping (the slice(s) or external dependency this
-   slice cannot start without; `[]` if none); and a sizing (S/M/L
-   or person-weeks, the owner's call — do not invent hours from
-   nothing). A slice without all four is a feature, not a slice.
-3. **Risk-first ordering** — the slice that proves the scariest
-   assumption lands first. A roadmap of mutually independent slices
-   is suspicious; the blocked-by column surfaces the dependency
-   graph the owner uses to sequence work.
+   **Later** (this year, may slip). The **capacity envelope** (a
+   throughput ceiling the owner gives) is a captured *Input /
+   Constraint*, applied at the *theme* level. A theme with no
+   one-line observable outcome is not a theme; cut or rewrite.
+2. **Roadmap items per theme** — the work a theme implies, emitted
+   **only** as roadmap rows conforming to the sibling item-row schema
+   ([`../triaging-requirements/references/roadmap-format.md`](../triaging-requirements/references/roadmap-format.md)).
+   `Outcome`, `Horizon`, and `Blocked-by` are roadmap-item fields, and
+   sizing lives in a row's `Notes` — not in the vision document.
+   **Acceptance criteria are NOT emitted** by this skill; they are
+   authored at plan time by `designing-architecture`. The vision
+   document carries no per-item breakdown.
+3. **Risk-first ordering** — the item that proves the scariest
+   assumption lands first. A roadmap of mutually independent items is
+   suspicious; the roadmap item's `Blocked-by` field surfaces the
+   dependency graph the owner uses to sequence work.
 
 **Checkpoint 2 (roadmap batch).** Same Q-with-proposal cadence. The
 owner confirms the themes, the horizon banding, the capacity
-envelope, and the slice plan; the facilitator records every call.
+envelope, and the roadmap items; the facilitator records every call.
 
 ## Step 4 — Compliance & phase gates + Checkpoint 3
 
 Weave in the compliance and phase-gate milestones the strategy must
-satisfy to ship. Each gate names the slice(s) it gates and the entity
-that owns the gate (security review, legal, the owner). A strategy
-that ships without naming its gates is a strategy the team will
-discover its gates inside an incident.
+satisfy to ship. Each gate names the roadmap item(s) it gates and the
+entity that owns the gate (security review, legal, the owner). A
+strategy that ships without naming its gates is a strategy the team
+will discover its gates inside an incident.
 
 Examples of gates to ask about (the list is owner-supplied, not
 assumed):
 
-- **Consent / privacy** — student-data slices, PII, regional
+- **Consent / privacy** — student-data items, PII, regional
   residency.
 - **Regulatory** — FERPA, HIPAA, GDPR, SOC 2, district contracts.
 - **Phase gates that unlock later segments** — a private beta that
@@ -201,7 +200,7 @@ Three artifacts, one session:
 
    **Read [references/artifact-format.md](references/artifact-format.md)
    BEFORE writing the artifact. Load the fixed section order, the
-   section schemas, and the Slices-table column labels from that
+   section schemas, and the Outcome Themes column labels from that
    file — do NOT write the artifact from memory.** Progressive
    disclosure fails silently on mid-tier models: the section
    vocabulary, the per-section schemas, and the column labels all
@@ -214,7 +213,8 @@ Three artifacts, one session:
    can defend. If a section has no content for this item, write
    `None.` rather than omitting it; an empty section is a signal,
    not a deletion. Now/Next/Later band headers appear under the
-   *Outcome Themes* section.
+   *Outcome Themes* section. The vision document carries **strategy
+   only** — no operational slice table, no per-item work breakdown.
 
    The top-level section headings are EXACT and Title-Cased; do
    NOT paraphrase or lowercase them — a typed assertion (and a cold
@@ -227,43 +227,45 @@ Three artifacts, one session:
    ## Alternatives & Non-goals     (incl. anti-vision)
    ## Value & Business Model
    ## North Star + Guardrails
-   ## Outcome Themes               (Now / Next / Later; capacity-envelope applied)
-   ## Slices                       (per slice: AC + success measure + blocked-by + sizing)
+   ## Outcome Themes               (Now / Next / Later; strategy-only)
    ## Compliance & Phase Gates
    ## Open Questions               (owner decisions, not invented strategy)
    ```
 
-   The Slices table uses these EXACT column labels (do NOT rename
-   them — "outcome metric" / "dependency" / "dependencies" lose
-   the contract):
+   The Outcome Themes section is grouped by three horizon subheads
+   and uses these EXACT column labels (do NOT rename them):
 
    ```markdown
-   | Slice | Outcome theme | AC (observable) | Success measure | Blocked-by | Sizing |
+   ### Now
+   ### Next
+   ### Later
+
+   | Theme | Outcome (observable, one line) |
    ```
 
-   The literal phrases `success measure` and `blocked-by` appear
-   as column labels AND in the final response text when the
-   session describes the slice plan, so a typed text-assertion can
-   detect them. The capacity envelope is applied at the *theme*
-   level (a `Now`-banded theme sized `L` is a mis-fit the table
-   exposes).
-2. **ROADMAP.md rows** (theme + slice). Conform to the item-row
-   schema and frontmatter of the sibling format
+   The capacity envelope is a captured *Input / Constraint*, applied
+   at the *theme* level; `Horizon` and sizing are roadmap-item fields
+   (sizing in the row's `Notes`), not vision-document columns.
+2. **ROADMAP.md rows** (outcome theme + roadmap items). The theme is
+   strategy and lives in the vision document; the *items* are emitted
+   **only** as roadmap rows that conform to the item-row schema and
+   frontmatter of the sibling format
    [`../triaging-requirements/references/roadmap-format.md`](../triaging-requirements/references/roadmap-format.md)
    (exact sibling-relative path; the path resolves in both the repo
-   and the symlinked global install). Outcome/Now-Next-Later
-   semantics are recorded via the roadmap's `rubric:` frontmatter +
-   the `Notes` cell (e.g. `horizon: Now; capacity: M`), not as new
-   columns. A first-class Now/Next/Later column or success-measure
-   column is an ADR-gated schema extension and is excluded from v1.
+   and the symlinked global install). `Outcome`, `Horizon`,
+   `Blocked-by`, and the rest of the fields are defined there — the
+   session does not invent columns. **Acceptance criteria are NOT
+   emitted** by this skill: they are authored at plan time by
+   `designing-architecture` (see *Boundary routing*). The vision
+   document carries no per-item breakdown.
 3. **Session record** as a working artifact under the consumer's
    plan convention (the same path `designing-architecture` uses for
    plans — usually `.opencode/plans/`). The record is a working
    artifact: the dated transcript of decisions and rationale, not
    part of the published docs.
 
-**Established-once rule.** The session emits **themes + provisional
-slices** and appends them to the existing `ROADMAP.md`. It never
+**Established-once rule.** The session emits **themes + roadmap
+items** and appends them to the existing `ROADMAP.md`. It never
 rebuilds an established `ROADMAP.md` from scratch — that violates the
 durable-merger contract. **`triaging-requirements` owns scoring,
 ranking, and the durable merge**; the next triage pass scores the
@@ -296,7 +298,7 @@ soft preference:
 
 **Optional council consults.** At each checkpoint, the owner may
 invoke the council for one review round (e.g. `council-product` on the
-strategy batch, `council-ux` if a Now-horizon slice changes visible
+strategy batch, `council-ux` if a Now-horizon item changes visible
 behavior). The consult is **advisory** and uses the
 `agents/council.md` delegated-result contract (cite it at the call
 site); an empty or malformed result is a failed run, never a silent
@@ -308,25 +310,26 @@ fallback / explicit skip). One round per batch — no fix loop.
 
 - `triaging-requirements` — scores and ranks the provisional rows
   and folds them into the published `ROADMAP.md` order.
-- `designing-architecture` — plans the top-ranked slice into a
+- `designing-architecture` — plans the top-ranked roadmap item into a
   verifiable plan artifact, then stops at user approval.
 
-This skill duplicates neither. It produces themes, slices, and the
-vision document; the next two skills take it from there.
+This skill duplicates neither. It produces outcome themes, roadmap
+items, and the vision document; the next two skills take it from there.
 
 ## Boundary routing
 
 | Request | Route |
 |---|---|
-| Run a vision / strategy session, define or refresh the product vision, turn a wishlist into outcome themes + slices | this skill |
+| Run a vision / strategy session, define or refresh the product vision, turn a wishlist into outcome themes + roadmap items | this skill |
 | Scattered ideas wanting structure, "shape the product direction", "what should we be working on" (ambiguous) | this skill (asks the owner which mode) |
 | Rank / score an existing backlog; update an established `ROADMAP.md` | `triaging-requirements` (not this skill) |
 | Plan ONE named item from the roadmap into an implementation plan | `designing-architecture` (not this skill) |
+| Write an item's acceptance criteria / detailed evidence bar | `designing-architecture` (plan-time artifact; this skill does NOT emit ACs) |
 | Persist an established `ROADMAP.md` as GitHub issues | `managing-github-issues` (not this skill) |
 | Refine a single issue's acceptance criteria | `refining-issue-acceptance` (not this skill) |
 | Read-only product analysis of an existing draft / strategy doc | `council-product` lens (not this skill) |
 | UI / screenshot "vision" review (perceptual, visual) | `council-ux` / `validating-ui` — "vision" there is perceptual, not product/strategy (collision guard) |
-| Author a slice's unit / integration / e2e tests | the test trio (`writing-unit-tests`, `writing-integration-tests`, `writing-e2e-tests`) |
+| Author a roadmap item's unit / integration / e2e tests | the test trio (`writing-unit-tests`, `writing-integration-tests`, `writing-e2e-tests`) |
 | Run the session in a consumer project — what comes back, where the artifacts live | see [references/consumer-session.md](references/consumer-session.md) (this skill) |
 
 The five siblings named in the description — `triaging-requirements`,
@@ -334,7 +337,7 @@ The five siblings named in the description — `triaging-requirements`,
 `refining-issue-acceptance`, `council-product` — own the rows this
 skill does not own: ranking, plan-writing, issue persistence,
 AC-refinement, and read-only product lens work. This skill produces
-strategy + slice plan; it does not score, plan, or persist.
+strategy + roadmap items; it does not score, plan, or persist.
 
 **A route is a spoken action, not a silent refusal.** When the
 session identifies that the request is outside this skill's domain
