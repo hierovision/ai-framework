@@ -4,7 +4,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "the .info-card looks cramped — its content clips. captured evidence is in evidence/baseline-evidence.json (matched-styles map + computed CSS for .info-card and .info-card-aside). fix it. stack's vue-supabase, repo's the working dir. the captured padding is the $spacing-sm scale and the design wants the md scale.",
+      "prompt": "the .info-card looks cramped — its content clips. captured evidence is in evidence/baseline-evidence.json (matched-styles map + computed CSS for .info-card and .info-card-aside). fix it. stack's vue-supabase, the repo is at fixtures/correct/measurable-padding/ — treat that directory as the repo root. the captured padding is the $spacing-sm scale and the design wants the md scale.",
       "expect": {"artifact": [{"path": "**/styles.scss", "phrases": ["$spacing-md"]}]},
       "expected_behavior": [
         "Reads AGENTS.md — detects stack vue-supabase and loads the matching CSS-system reference (references/systems/vuetify-scss.md) before editing",
