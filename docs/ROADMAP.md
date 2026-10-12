@@ -52,10 +52,53 @@ scoring uses the Rex Black rubric.
 - "plan" = `docs/maturity-plan.md`; issue refs = `hierovision/ai-framework#NN`.
 
 ## Priority order (1–35)
+One list per horizon, rank order. Every line: `[ID](detail) (score) —
+title`. IDs link to that row's full record in `docs/roadmap-detail/`.
+Score = Impact × Urgency. `— in progress` marks the row under work.
 
-- **Now (18):** RM-021 (in-progress) · RM-056 · RM-016 · RM-018 · RM-019 · RM-027 · RM-028 · RM-042 · RM-034 · RM-036 · RM-037 · RM-038 · RM-043 · RM-044 · RM-051 · RM-054 · RM-057 · RM-035
-- **Next (6):** RM-011 · RM-040 · RM-017 · RM-020 · RM-030 · RM-049
-- **Later (11):** RM-008 · RM-055 · RM-006 · RM-007 · RM-009 · RM-010 · RM-012 · RM-013 · RM-015 · RM-029 · RM-041
+### Now (18)
+
+- [RM-021](docs/roadmap-detail/RM-021.md) (9) — Eval reliability: prompt hygiene + typed migration sweep (runner resilience lands first) — in progress
+- [RM-056](docs/roadmap-detail/RM-056.md) (9) — Eval-lane fallback — direct deepseek-v4.1-flash API on log-proven model/opencode service degradation
+- [RM-016](docs/roadmap-detail/RM-016.md) (6) — Eval-harness independence — sanitized skill staging
+- [RM-018](docs/roadmap-detail/RM-018.md) (6) — Next.js + Supabase stack reference for `designing-architecture`
+- [RM-019](docs/roadmap-detail/RM-019.md) (6) — Empty-result guard for the runtime-validation `council-ux` consult path
+- [RM-027](docs/roadmap-detail/RM-027.md) (6) — Session convention: capture framework defects mid-session, log them at close
+- [RM-028](docs/roadmap-detail/RM-028.md) (6) — Plan-close follow-up ingestion into `ROADMAP.md`
+- [RM-042](docs/roadmap-detail/RM-042.md) (6) — Model-policy checker CI hardening — offline suite + consumer-checker tests
+- [RM-034](docs/roadmap-detail/RM-034.md) (4) — Plan body carries in-scope policy decisions (cold-executable plan-format)
+- [RM-036](docs/roadmap-detail/RM-036.md) (4) — Align implementing-features Step 11 with the git-workflow push/PR contract
+- [RM-037](docs/roadmap-detail/RM-037.md) (4) — Scoped-slice plan maintenance: History + plan-staging ownership
+- [RM-038](docs/roadmap-detail/RM-038.md) (4) — Run-log emission for skill sessions — mandate or narrow the RM-001 contract
+- [RM-043](docs/roadmap-detail/RM-043.md) (4) — Re-align `optimizing-model-routing` deferred evals with the Go-first policy
+- [RM-044](docs/roadmap-detail/RM-044.md) (4) — Run-vehicle/supervision hardening from the go-first + run-vehicle sessions
+- [RM-051](docs/roadmap-detail/RM-051.md) (4) — UX-consult trigger calibration for conversational surfaces (designing-architecture Step 5b)
+- [RM-054](docs/roadmap-detail/RM-054.md) (4) — Session-guard multi-wave scope, long-lived budget default, watch exit + kill-authority notes
+- [RM-057](docs/roadmap-detail/RM-057.md) (4) — Roadmap presentation design pass — overflow resolved by design, structure enjoyed and understood
+- [RM-035](docs/roadmap-detail/RM-035.md) (2) — Cite exact ADR filenames in plans and dispatch prompts
+
+### Next (6)
+
+- [RM-011](docs/roadmap-detail/RM-011.md) (6, dated 2026-11-01) — Drift detection + quarterly ALM reviews
+- [RM-040](docs/roadmap-detail/RM-040.md) (4, dated 2026-11-01) — Go Plus sustainability review (2026-11-01)
+- [RM-017](docs/roadmap-detail/RM-017.md) (2) — Council consult empty-result fallback (`designing-architecture` Step 5b)
+- [RM-020](docs/roadmap-detail/RM-020.md) (2) — Next.js + Supabase guidance for the sibling stack consumers
+- [RM-030](docs/roadmap-detail/RM-030.md) (2) — Per-skill use-case inventories (23 skills)
+- [RM-049](docs/roadmap-detail/RM-049.md) (2) — Session-guard blocking-wait on completed children — gate the append on not-done
+
+### Later (11)
+
+- [RM-008](docs/roadmap-detail/RM-008.md) (3) — Encoded boundary manifest per agent
+- [RM-055](docs/roadmap-detail/RM-055.md) (3) — Executive operating system — chief-of-staff persona + operating-cadence/health/signals skills
+- [RM-006](docs/roadmap-detail/RM-006.md) (2) — Adoptable CI/CD templates
+- [RM-007](docs/roadmap-detail/RM-007.md) (2) — PR annotations from eval + run logs
+- [RM-009](docs/roadmap-detail/RM-009.md) (2) — Cost/ROI tracker (4 numbers)
+- [RM-010](docs/roadmap-detail/RM-010.md) (2) — Standardized escalation/override artifact
+- [RM-012](docs/roadmap-detail/RM-012.md) (2) — Consumer-repo pilot — full loop in one real project
+- [RM-013](docs/roadmap-detail/RM-013.md) (2) — Skill retirement flow (registry deprecated → removed)
+- [RM-015](docs/roadmap-detail/RM-015.md) (2) — First-class consumer override mechanism
+- [RM-029](docs/roadmap-detail/RM-029.md) (2) — Remaining skill-gap candidate-search briefs (2–13)
+- [RM-041](docs/roadmap-detail/RM-041.md) (1) — Jev (System One) advisory eval content-failure triage — trigger-gated
 
 ## Now (fired — solutions in flight)
 
