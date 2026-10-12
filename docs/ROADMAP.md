@@ -51,12 +51,12 @@ scoring uses the Rex Black rubric.
 - Detail files: per-ID provenance at docs/roadmap-detail/<ID>.md (relocated byte-exact 2026-10-11; owner ruling: no massive detail in the roadmap). Referenced from each row's Notes; consumed at design passes; pruned by the quarterly ALM review.
 - "plan" = `docs/maturity-plan.md`; issue refs = `hierovision/ai-framework#NN`.
 
-## Priority order (1–35)
+## Priority order (1–34)
 One list per horizon, rank order. Every line: `[ID](detail) (score) —
 title`. IDs link to that row's full record in `docs/roadmap-detail/`.
 Score = Impact × Urgency. `— in progress` marks the row under work.
 
-### Now (18)
+### Now (17)
 
 - [RM-021](docs/roadmap-detail/RM-021.md) (9) — Eval reliability: prompt hygiene + typed migration sweep (runner resilience lands first) — in progress
 - [RM-056](docs/roadmap-detail/RM-056.md) (9) — Eval-lane fallback — direct deepseek-v4.1-flash API on log-proven model/opencode service degradation
@@ -74,17 +74,18 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 - [RM-044](docs/roadmap-detail/RM-044.md) (4) — Run-vehicle/supervision hardening from the go-first + run-vehicle sessions
 - [RM-051](docs/roadmap-detail/RM-051.md) (4) — UX-consult trigger calibration for conversational surfaces (designing-architecture Step 5b)
 - [RM-054](docs/roadmap-detail/RM-054.md) (4) — Session-guard multi-wave scope, long-lived budget default, watch exit + kill-authority notes
-- [RM-057](docs/roadmap-detail/RM-057.md) (4) — Roadmap presentation design pass — overflow resolved by design, structure enjoyed and understood
 - [RM-035](docs/roadmap-detail/RM-035.md) (2) — Cite exact ADR filenames in plans and dispatch prompts
+
 
 ### Next (6)
 
-- [RM-011](docs/roadmap-detail/RM-011.md) (6, dated 2026-11-01) — Drift detection + quarterly ALM reviews
-- [RM-040](docs/roadmap-detail/RM-040.md) (4, dated 2026-11-01) — Go Plus sustainability review (2026-11-01)
+- [RM-011](docs/roadmap-detail/RM-011.md) (6) — Drift detection + quarterly ALM reviews
+- [RM-040](docs/roadmap-detail/RM-040.md) (4) — Go Plus sustainability review (2026-11-01)
 - [RM-017](docs/roadmap-detail/RM-017.md) (2) — Council consult empty-result fallback (`designing-architecture` Step 5b)
 - [RM-020](docs/roadmap-detail/RM-020.md) (2) — Next.js + Supabase guidance for the sibling stack consumers
 - [RM-030](docs/roadmap-detail/RM-030.md) (2) — Per-skill use-case inventories (23 skills)
 - [RM-049](docs/roadmap-detail/RM-049.md) (2) — Session-guard blocking-wait on completed children — gate the append on not-done
+
 
 ### Later (11)
 
@@ -99,6 +100,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 - [RM-015](docs/roadmap-detail/RM-015.md) (2) — First-class consumer override mechanism
 - [RM-029](docs/roadmap-detail/RM-029.md) (2) — Remaining skill-gap candidate-search briefs (2–13)
 - [RM-041](docs/roadmap-detail/RM-041.md) (1) — Jev (System One) advisory eval content-failure triage — trigger-gated
+
 
 ## Now (fired — solutions in flight)
 
@@ -120,7 +122,6 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 | RM-044 | Run-vehicle/supervision hardening from the go-first + run-vehicle sessions | — | Now | self-improvement | 2 | 2 | 4 | open | Each supervision mechanic (heartbeat Z-format, conditional injection, empty-result classification) carries a hermetic test or recorded live proof. | — | plan follow-ups `run-vehicle-visibility` (#94) + `go-first-model-bindings` (#96) | fired 2026-10-04 (seat-validation dispatches + smoke logs). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-044.md. |
 | RM-051 | UX-consult trigger calibration for conversational surfaces (designing-architecture Step 5b) | — | Now | self-improvement | 2 | 2 | 4 | open | Step 5b consults only on interaction-semantics changes; copy-only changes record an explicit skip; the conversational brief covers message structure, labels, and truncation honesty. | — | hierovision/ai-framework#92; marvin-slack consults 2026-10-03 (user agreement recorded in the issue) | proposed (entered 2026-10-09, merged contracts keep it); fired 2026-10-03. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-051.md. |
 | RM-054 | Session-guard multi-wave scope, long-lived budget default, watch exit + kill-authority notes | — | Now | self-improvement | 2 | 2 | 4 | open | A new wave is supervised cleanly after a historical failure in the same tree; long-lived sessions are not aborted by the budget; --watch exits; kill authority documented or accepted. | — | paragon handoff 2026-10-09 appendix (§C); session `ses_ef8102f5dffevLUPFG0feyKAX8`; family of RM-045/RM-047/048 | fired 2026-10-09/10 (paragon guard appendix); (1)–(2) hermetic red-first tests, (3)–(4) documented contracts. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-054.md. |
-| RM-057 | Roadmap presentation design pass — overflow resolved by design, structure enjoyed and understood | — | Now | debt | 2 | 2 | 4 | open | A dated presentation record delivers the objectively-best roadmap reading — overflow solved by design, structure enjoyed and understood, no truncation. | — | user directive 2026-10-11 (open question, RM-052/053 design review) | owner directive 2026-10-11 (design review); the design pass consumes the migrated 13-column file; detail re-homed by design. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-057.md. |
 | RM-035 | Cite exact ADR filenames in plans and dispatch prompts | — | Now | self-improvement | 1 | 2 | 2 | open | Plans and dispatch prompts cite exact ADR filenames — zero glob-recovery on first read. | — | RM-031 candidate `adr-reference-by-number-not-path` (`.scratch/skill-gap-analysis/subagent-issues.md`, 2026-09-27) | fired 2026-09-27. prev: 4 (priority-1-5-composite); detail: docs/roadmap-detail/RM-035.md. |
 
 ## Next (dated/near — opportunities in validation)
@@ -159,10 +160,11 @@ None.
 None (threshold: null).
 
 ## Done
-Newest first; 22 closed of 57. The table carries the one-line
+Newest first; 23 closed of 57. The table carries the one-line
 
 | ID | Title | Outcome | Horizon | Category | Impact | Urgency | Score | Status | Success measure | Blocked-by | Sources | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| RM-057 | Roadmap presentation design pass — overflow resolved by design, structure enjoyed and understood | — | — | debt | — | — | — | done | The clean 13-column roadmap + glance strips + per-ID detail files deliver the owner's ruling — reading is enjoyable and structure is clear (owner verdict 2026-10-11: "looks good", "I now enjoy the structure"). | — | user directive 2026-10-11 (RM-052/053 design review, option increments) | delivered 2026-10-11 by an interactive increment pass with the owner (tables + delimiter fix + one-line discipline + Done ledger/extract + glance strips; commits 732f9e1, e2d6651, 4d0d035); render tier + CI wiring (plan D6/D7) REJECTED by owner (option C, 2026-10-11) — no HTML artifact; the plan on branch docs/rm-057-plan retired per the ADR-0008 lifecycle. detail: docs/roadmap-detail/RM-057.md. |
 | RM-053 | Roadmap ranking system: Now/Next/Later horizons + confidence-gated detail (triage-schema upgrade) | — | — | self-improvement | — | — | — | done | Roadmap tables carry the 13-column schema with confidence horizons and one-line success measures — no detailed requirements. | — | paragon handoff 2026-10-09 (§B, researched schema); user ask 2026-10-09; sources verified against live docs at implementation | delivered 2026-10-11; prev: 2 (priority-1-5-composite). detail: docs/roadmap-detail/RM-053.md |
 | RM-052 | Vision artifact = strategy only — facilitating-product-vision contract split (consumer-ruled) | — | — | self-improvement | — | — | — | done | Vision artifacts stay strategy-only; roadmap items emit the operational content. | — | paragon handoff 2026-10-09 (§A, AC1–3); consumer ADR-0007 is the counterpart | delivered 2026-10-11; prev: 2 (priority-1-5-composite). detail: docs/roadmap-detail/RM-052.md |
 | RM-047 | Session-guard child lifecycle — no false empty-result/wave-failure/stalled on in-session-Task children | — | — | self-improvement | — | — | — | done | No false empty-result / wave-failure / stalled classification fires on completed in-session-Task children. | — | plan `session-guard-task-child-lifecycle` (deleted at merge 2026-10-09 — git history); RM-027 capture 2026-10-09; [PR #105](https://github.com/hierovision/ai-framework/pull/105) | delivered 2026-10-09; prev: 2 (priority-1-5-composite). detail: docs/roadmap-detail/RM-047.md |
@@ -219,6 +221,11 @@ Resolved 2026-10-09 — Decision 5 (user call): **RM-011 — first review dated.
 - 2026-10-10/11 (RM-052/053 design review, owner directives): two open questions resolved. RM-056 added (fired): eval-lane fallback to the deepseek-v4.1-flash direct API on log-proven model/opencode service degradation — per-run switch, marked in the eval report, never a silent re-bind (routing policy stays RM-039/ADR-0013). RM-057 added (waiting): roadmap presentation design pass — overflow solved by design (objectively best presentation; detail re-homed, never truncated), gated on RM-053's contracts. Plan artifact updated with the dated rulings (commit 7a97b92 on docs/rm-052-053-plan). Rows 35 → 37 total.
 - 2026-10-11 (dispatch record — RM-052/053 implementation): approved plan executed in 4 clean gate-pass commits + plan-History commit (747b7d2 RM-053 contract; 500a08a RM-053 evals + the previously-omitted authoring-skills triage fixture; 0414b86 RM-052 contract + consumer guidance; c3512a7 RM-052 evals; 6690a66 History) — full gate set green at each commit; stale-language sweeps zero; no runner edits (the canary-replay fixture catch was a plan Files-to-Modify gap, fixed inside commit 2 with the History note); behavioral evals 8/8 PASS on the pinned lane (~$0.11; deferred id-5 automated-run pass, manual two-turn from 2026-10-09 stays authoritative); --no-quarantine deviation recorded (runner-local contract; logs/quarantine.json untouched). [PR #111](https://github.com/hierovision/ai-framework/pull/111) open vs main, stacked on PR #110 (merge order: #110 first). Contract record: final message missed the Handoff marker; repaired in-session — outcome success. docs/ROADMAP.md never staged. Rows RM-052/RM-053 close at merge + the owner's manual-validation renders.
 - 2026-10-11 (late-minute cleanup, owner ruling): roadmap detail moved out of the file — 57 per-ID records at docs/roadmap-detail/<ID>.md (35 open pre-migration details + 22 done verbatim histories), byte-exact; §Detail archive and §Done ledger removed; contract amended in skills/triaging-requirements/references/roadmap-format.md (Done-history location + a new Item-detail-files section; cell-length is advisory — the checker warns, never hard-fails length). Rows now carry one-line cells everywhere.
+- 2026-10-11 (gate verdict, owner call): RM-057 delivered + closed via the approved
+increment series; render tier + CI wiring rejected (option C) — no HTML
+artifact; the rm-057 plan branch retired per the ADR-0008 plan lifecycle
+(essence lives in the file + contract). RM-056's design pass dispatched
+next (dispatch record follows).
 - 2026-10-11 (deployment record): main pushed (732f9e1) with the migrated
 roadmap + contract amendment + roadmap-detail/ + roadmap checker. The
 four consumers are updated and VERIFIED: framework content ships via
