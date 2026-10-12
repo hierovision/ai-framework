@@ -148,6 +148,26 @@ An item whose detail exceeds its horizon's confidence is over-planned:
 move the solution detail to the plan artifact and leave the outcome in the
 row.
 
+## Item detail files
+
+Roadmap detail that does not fit one row cell lives in
+`docs/roadmap-detail/<ID>.md` — one file per ID, created by migration or
+merge passes by **byte-exact relocation** (never reworded, never truncated):
+
+- open rows: the trigger evidence and pre-migration acceptance drafts;
+- done rows: the acceptance-as-delivered history (audit record).
+
+The roadmap's `Notes` cell references it (`detail: docs/roadmap-detail/<ID>.md`).
+Lifecycle: a detail file is *consumed* when the item reaches a design pass
+(the plan artifact becomes the detail's home) and pruned by the quarterly
+ALM review — never silently; provenance rows keep a dated note.
+
+Cell-length discipline is **guidance, best effort** — the automated check
+(`scripts/check_roadmap_verbatim.py`) prints length as a WARNING and exits
+0; the agent surfaces the option to shorten to the owner. Hard contract
+failures (parse errors, delimiter/table mismatches, roadmap-ID ↔ detail-file
+bijection breaks, missing sections) still exit 1.
+
 ## Merge table
 
 Applies when `ROADMAP.md` already exists. "Incoming" = a freshly gathered
@@ -183,15 +203,15 @@ before the first pass that saw it" without fabricating precision the
 source doesn't have. If a later pass learns the real date from a tracker,
 update the cell.
 
-**Done rows are acceptance-as-history.** A Done row adopts the new
-thirteen-column set, but its historical acceptance prose moves **verbatim**
-into the `Success measure` cell and its old trigger/extra state content
-moves verbatim into `Notes`. That cell is the record of what shipped and is
-never reworded, truncated, or back-summarized. The no-AC rule above governs
-**new / open rows only**; a long `Success measure` cell on a Done row is
-correct, not an error. Where a historical annotation was appended to a
-moved cell (e.g. a `(YYYY-MM-DD triage: …)` suffix), preserve it verbatim
-so the annotation and the original text stay separable.
+**Done rows are acceptance-as-history.** A Done row adopts the
+thirteen-column set; its `Success measure` cell carries the one-line
+delivered outcome. The historical acceptance prose moves **verbatim** to
+the item's detail file (`docs/roadmap-detail/<ID>.md`, see *Item detail
+files*) — byte-exact, never reworded or truncated; this is an amendment of
+2026-10-11 (owner ruling: massive detail never lives inside the roadmap
+file). Where a historical annotation was appended to a moved cell (e.g. a
+`(YYYY-MM-DD triage: …)` suffix), preserve it verbatim so the annotation
+and the original text stay separable.
 
 ## Sizing
 
