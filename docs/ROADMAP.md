@@ -51,15 +51,16 @@ scoring uses the Rex Black rubric.
 - Detail files: per-ID provenance at docs/roadmap-detail/<ID>.md (relocated byte-exact 2026-10-11; owner ruling: no massive detail in the roadmap). Referenced from each row's Notes; consumed at design passes; pruned by the quarterly ALM review.
 - "plan" = `docs/maturity-plan.md`; issue refs = `hierovision/ai-framework#NN`.
 
-## Priority order (1–34)
+## Priority order (1–35)
 One list per horizon, rank order. Every line: `[ID](detail) (score) —
 title`. IDs link to that row's full record in `docs/roadmap-detail/`.
 Score = Impact × Urgency. `— in progress` marks the row under work.
 
-### Now (17)
+### Now (18)
 
 - [RM-021](docs/roadmap-detail/RM-021.md) (9) — Eval reliability: prompt hygiene + typed migration sweep (runner resilience lands first) — in progress
 - [RM-056](docs/roadmap-detail/RM-056.md) (9) — Eval-lane fallback — direct deepseek-v4.1-flash API on log-proven model/opencode service degradation
+- [RM-058](docs/roadmap-detail/RM-058.md) (9) — Orchestrator wake-on-completion
 - [RM-016](docs/roadmap-detail/RM-016.md) (6) — Eval-harness independence — sanitized skill staging
 - [RM-018](docs/roadmap-detail/RM-018.md) (6) — Next.js + Supabase stack reference for `designing-architecture`
 - [RM-019](docs/roadmap-detail/RM-019.md) (6) — Empty-result guard for the runtime-validation `council-ux` consult path
@@ -108,6 +109,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | RM-021 | Eval reliability: prompt hygiene + typed migration sweep (runner resilience lands first) | — | Now | evaluation | 3 | 3 | 9 | in-progress | The next weekly run qualifies fully green and is recorded via green-run-status; no silent drops. | — | 2026-09-28 session (weekly run 36410692855: 4/47 pass, 16 dead-session deaths; authoring canary 3/3 dead-session failures) | in-progress; runner resilience + prompt batches landed (#42–#44); residue pass corrected the 3 live canaries (PR #110, merged); the sweep CLOSES at the recorded green run. prev: 2 (priority-1-5-composite); detail: docs/roadmap-detail/RM-021.md. |
 | RM-056 | Eval-lane fallback — direct deepseek-v4.1-flash API on log-proven model/opencode service degradation | — | Now | evaluation | 3 | 3 | 9 | open | A log-proven model/opencode service degradation switches the eval lane to the deepseek-v4.1-flash direct API, marked in the eval report — never silent. | — | user directive 2026-10-11 (open question, RM-052/053 design review); RM-021-diagnosed degradation classes | owner directive 2026-10-11 (design review); per-run lane switch, routing policy stays RM-039/ADR-0013; persistent degradation escalates to a routing review. prev: 2 (priority-1-5-composite); detail: docs/roadmap-detail/RM-056.md. |
+| RM-058 | Orchestrator wake-on-completion — concurrent subagent interaction + owner-free notifications | — | Now | self-improvement | 3 | 3 | 9 | open | A hermetic contract test proves a terminal-state subagent outcome reaches the orchestrator conversation within 5 minutes, owner-ping-free | — (complements RM-022/RM-045) | user directive 2026-10-12; stack RM-022/RM-045/RM-032; AGENTS.md rule 1 boundary | Concurrent interaction while a subagent runs is the working model today; requirement 2 (owner-ping-free wake) is the infra target, standard for this repo and every consumer (uniform via live symlinks). detail: docs/roadmap-detail/RM-058.md |
 | RM-016 | Eval-harness independence — sanitized skill staging | — | Now | evaluation | 3 | 2 | 6 | open | A re-run sourcing-external-skills suite shows zero answer-key reads with unchanged pass/fail — no weakened assertions. | — | 2026-09-28 triage (session) | fired 2026-09-28 (all 7 fresh-agent runs read the answer key); fix belongs in the behavioral runner. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-016.md. |
 | RM-018 | Next.js + Supabase stack reference for `designing-architecture` | — | Now | self-improvement | 2 | 3 | 6 | open | A Next.js + Supabase design pass selects the dedicated stack reference — no Vue-reference hand-translation. | — | hierovision/ai-framework#29; PLN design pass 2026-09-27 | fired 2026-09-27; re-anchored to paragon-learning-network (Decision 1, 2026-10-09). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-018.md. |
 | RM-019 | Empty-result guard for the runtime-validation `council-ux` consult path | — | Now | self-improvement | 2 | 3 | 6 | open | A runtime-validation pass records its consult outcome (clean / fallback / skip) — no silent lens loss. | — | RM-017 review 2026-09-28 | fired 2026-09-28 (RM-017 review); apply the RM-017 rule to the council-ux runtime path. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-019.md. |
@@ -160,7 +162,7 @@ None.
 None (threshold: null).
 
 ## Done
-Newest first; 23 closed of 57. The table carries the one-line
+Newest first; 23 closed of 58. The table carries the one-line
 
 | ID | Title | Outcome | Horizon | Category | Impact | Urgency | Score | Status | Success measure | Blocked-by | Sources | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -239,3 +241,4 @@ update; paragon's own ROADMAP restructure stays gated on its queued
 vision-session work (its ADR-0007).
 - 2026-10-11 (migration pass): docs/ROADMAP.md moved onto the merged 13-column contract (PR #111, RM-052/RM-053 closed at merge, delivered 2026-10-11). Rubric switched priority-1-5-composite → impact-urgency: all 35 open rows re-scored (prior Priority preserved per row); horizons derived per plan D4; open-row acceptance + trigger text re-homed verbatim to the §Detail archive; Done rows keep acceptance-as-history verbatim in Success measure. Documented deviation: the repo keeps its lifecycle category set (Legend), deferred to RM-057 + the ALM review. Rows: 22 done / 35 open (18 Now / 6 Next / 11 Later).
 - 2026-10-02 (prior pass, verbatim header note): (GitHub issues: #83 → RM-028; #53 closed via RM-022; #30 closed — cause removed, RM-017 acceptance carried; #52 kept open for RM-024). Plans-tier cleanup 2026-10-02: briefs 2–13 → RM-029, use-case inventories → RM-030, six subagent-run candidates → RM-031; old plans deleted (ADR-0008 amendment). RM-031 resolved 2026-10-02 → RM-034…RM-038 (5 accepted), 1 rejected (resolved by RM-032/033).
+
