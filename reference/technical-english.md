@@ -119,3 +119,15 @@ glance**.
   1-15 when reviewing a diff or handoff.
 - If an agent's output violates the baseline, point at the specific rule;
   do not restyle wholesale.
+## Clarity (added 2026-10-12, owner directive)
+
+16. **No compression inversions.** The sentence's subject is the system
+    or actor doing the action — never an exit code, a result, or a
+    process state. ("What exits 4 loses is the remainder" is the banned
+    shape.) Spell the cause → consequence in normal subject–verb–object
+    order, even when the result is longer.
+17. **One consequence per sentence** in status answers, so the reader
+    can restate each sentence without re-parsing its grammar.
+18. **Density is the artifact's job, not the status line's.** Keep chat
+    status and handoff summaries in plain sentences; put compact
+    tables/lists in artifacts, not in the chat prose the owner reads.
