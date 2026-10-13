@@ -1,9 +1,9 @@
 ---
 slug: rm-056-eval-lane-fallback
 title: Log-proven per-run eval fallback to the deepseek-v4.1-flash direct API lane, marked in the report — never silent, never a re-bind
-status: draft
+status: approved
 created: 2026-10-12
-revised: []
+revised: [2026-10-13]
 related: [rm-052-053-vision-roadmap-schema, rm-021-eval-reliability]
 ---
 
@@ -596,3 +596,43 @@ Non-blocking; each with a proposed default; none block the draft:
   would re-litigate frozen rulings, not resolve ambiguity.
   Consult outcome: skipped (policy frozen by owner directive,
   no feature-identity ambiguity).
+- 2026-10-13 — implementation pass (branch `feat/rm-056-eval-fallback`,
+  cut from the design tip `91a8684`). Owner approval 2026-10-12 per the
+  implement dispatch; frontmatter `status` flipped `draft` → `approved`
+  (RM-021 convention) and `revised` appended. Four gated commits, each
+  green on its unit verifiers + the Layer-1 hermetic validators:
+  1. runner fallback + hermetic drills — `run_behavioral_eval.py`,
+     `test_runner.py` (AC 1-5, 9, 11);
+  2. report surfaces + green-run clause — `scripts/eval-report.py`,
+     `scripts/test_eval_report.py`,
+     `reference/eval-green-run-definition.md` (AC 6-8);
+  3. CI wiring — both eval workflows + `scripts/test_eval_workflows.py`
+     (AC 10);
+  4. harness-reference cite — `skills/authoring-skills/references/eval-harness.md`.
+  AC 12 verified by the full offline suite green; AC 5's diff assertion
+  verified in-pass (the change set is exactly Files to Modify; both
+  workflows keep the same `opencode-go/deepseek-v4.1-flash` run-block
+  pin). Rehearsal drills (hermetic, logs under `.scratch/rm-056-impl/`):
+  `:FALLBACK-DRILL:` replays RM-021's model-resolution death class
+  (3 terminal provider-classed records → one `lane-degradation-evidence:`
+  → one `lane-switch:` → fallback verdicts carry
+  `deepseek/deepseek-flash`; exit 0); `:EXTERNAL-REJECT:` replays the
+  external-directory auto-reject class (zero lane records; exit 1);
+  ceiling forced to `0.01` exits 4 with a `lane-fallback-ceiling:`
+  record naming the deferred remainder.
+  Deviation note (mechanical, proceeded with History): the owner-added
+  clarification — "on a ceiling hit the run still emits its report and
+  names the deferred remainder" — is NOT literal in the pre-approval
+  plan body on the design branch. Implemented to intent: the ceiling
+  record is written, the runner emits its report summary, and the record
+  names the deferred remainder; AC 9 is unchanged.
+
+### Follow-ups
+- Live smoke 1 (primary-healthy `workflow_dispatch`, `Lane: primary`)
+  and optional live smoke 2 (real-switch replay) are owner-run; not
+  executed here per the dispatch's behavioral-evals budget constraint.
+- AC 5's git-diff review assertion is verified in-pass (see History);
+  a future reader can re-run `git diff <design-tip>...HEAD --name-only`.
+- The routing-review escalation this feature emits lands in RM-040's
+  monthly slot (2026-11-01) per D4; no ROADMAP.md edit is made by this
+  pass (ROADMAP is the migration pass's working product — plan Excluded).

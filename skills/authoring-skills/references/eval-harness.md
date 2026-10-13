@@ -64,6 +64,16 @@ three prefixes: `*-free` (the $0 opencode tier), `opencode-go/*` (the Go
 flat-rate tier), and `deepseek/*` (the legacy direct-key lane). Zen
 pay-as-you-go (`opencode/*`, non-free) is never allowed in CI.
 
+**RM-056 lane fallback (2026-10-12).** The CI lane may switch — for that run
+only, never a re-bind — to the `deepseek/deepseek-flash` direct-key lane when
+the run's own log proves a MODEL/opencode-service degradation: provider-classed
+deaths (the model-resolution class or the dead-session `UnknownError` wrapper,
+never the external-directory auto-reject class). The switch is recorded
+(`lane-degradation-evidence:` then `lane-switch:` records) and marked in the
+eval report (`lane` / `fallback_carried`), so a fallback-carried green run
+records it honestly. The `-free`/zen selection semantics and the `--model`-wins
+precedence above are unchanged; routing policy stays RM-039 / ADR-0013's domain.
+
 **Five-sibling manifest audit** (marker = tier-intent tag, not steering;
 no manifest edits per plan scope). All five carry `default_model_tier:
 "free"` at evals.json line 3: `auditing-supply-chain`, `modeling-threats`,
