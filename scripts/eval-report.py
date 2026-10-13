@@ -27,13 +27,14 @@ CLI:
   eval-report.py coverage-gaps   --logs-dir logs/ [--out PATH] [--print]
   eval-report.py green-run-status [--out PATH] [--print] [--record ...]
   eval-report.py quota-projection [--logs-dir logs/] [--out PATH] [--print]
+  eval-report.py lane-status     --logs-dir logs/ [--out PATH] [--print]
   eval-report.py all             --logs-dir logs/ [--out-dir DIR]
 """
 import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -46,6 +47,14 @@ import query_runs  # run-log schema owner / aggregator (single source of truth)
 GREEN_RUN_EARLIEST = "2026-09-21"
 # RM-002's negative-path canary (red counterpart) for reference.
 RM002_CANARY_RUN = "35108912831"
+
+# RM-056 lane-fallback marks: reserved `detail` prefixes written by the runner
+# (run_behavioral_eval.py). The schema's outcome enum has no "not-a-verdict"
+# value, so these ride `detail` + `model`; query_runs skips eval_pass=None
+# before counting, so they never affect a pass rate.
+FALLBACK_EVIDENCE_PREFIX = "lane-degradation-evidence: "
+FALLBACK_SWITCH_PREFIX = "lane-switch: "
+FALLBACK_CEILING_PREFIX = "lane-fallback-ceiling: "
 
 # AC11 quota model (pass 4; documented in reference/per-change-eval-sla.md).
 # Measured ~100s per fresh-agent eval (PR #23, run 35392700424) supersedes
@@ -114,8 +123,15 @@ def coverage_gaps(logs_dir, skills_root=None, registry="auto"):
 def green_run_status(achieved=False, run_id=None, date=None, branch=None,
                      duration_min=None, all_pass=None, quarantine_flips=None,
                      artifact_url=None, reason=None, depth=None,
-                     infra_retried=None):
-    """AC4: dashboard state for the first steady-state green run."""
+                     infra_retried=None, lane="primary"):
+    """AC4: dashboard state for the first steady-state green run.
+
+    RM-056 D3: a run on the fallback lane still qualifies (fallback-carried),
+    but the lane mark is recorded so pass rates stay comparable. `lane` is
+    `primary` or `fallback`; `fallback_carried` is true only for `fallback`.
+    """
+    lane = lane or "primary"
+    fallback_carried = (lane == "fallback")
     if achieved:
         return {
             "achieved": True,
@@ -128,6 +144,8 @@ def green_run_status(achieved=False, run_id=None, date=None, branch=None,
             "infra_retried": infra_retried,
             "depth": depth,
             "artifact_url": artifact_url,
+            "lane": lane,
+            "fallback_carried": fallback_carried,
             "definition": "reference/eval-green-run-definition.md",
             "qualified_at": _now_iso(),
         }
@@ -142,6 +160,8 @@ def green_run_status(achieved=False, run_id=None, date=None, branch=None,
         "achieved": False,
         "reason": reason,
         "candidate_runs": [],
+        "lane": lane,
+        "fallback_carried": fallback_carried,
         "definition": "reference/eval-green-run-definition.md",
         "checked_at": _now_iso(),
     }
@@ -226,6 +246,17 @@ def failure_taxonomy(logs_dir):
     infra = sum(1 for r in records if r.get("outcome") == "error")
     content = sum(1 for r in records if r.get("outcome") == "failure")
 
+    # RM-056 D3: surface lane degradation / switches from the records' own
+    # `detail` prefixes (no stream re-reads), so a degraded run is visible in
+    # the merged report. Per-verdict lane attribution stays in per_skill.
+    def _lane_rows(prefix):
+        return [{"ts": r.get("ts"), "model": r.get("model"),
+                 "detail": r.get("detail")}
+                for r in records if (r.get("detail") or "").startswith(prefix)]
+
+    lane_evidence = _lane_rows(FALLBACK_EVIDENCE_PREFIX)
+    lane_switches = _lane_rows(FALLBACK_SWITCH_PREFIX)
+
     # RM-021 AC3: per-eval terminal vs recovered infra classification.
     by_eval = {}
     for r in records:
@@ -281,6 +312,96 @@ def failure_taxonomy(logs_dir):
         # sampled refs let an operator pull the matching opencode server log.
         "error_ref_samples": {k: v[:5] for k, v in refs.items()},
         "error_ref_count": {k: len(v) for k, v in refs.items()},
+        # RM-056: lane degradation evidence + switch records (marked runs).
+        "lane_evidence": lane_evidence,
+        "lane_switches": lane_switches,
+    }
+
+
+def _evidence_keys_from_detail(detail):
+    """Parse the `<...>; evidence: k1, k2` tail of a lane-switch record."""
+    text = detail or ""
+    marker = "; evidence: "
+    idx = text.find(marker)
+    if idx < 0:
+        return []
+    tail = text[idx + len(marker):].strip()
+    return [k.strip() for k in tail.split(",") if k.strip()]
+
+
+def lane_status(logs_dir, window_days=30, review_after=2, review_cover=50,
+                now=None):
+    """RM-056 D4: the escalation signal that routes a routing review.
+
+    Scans `kind=eval` lane-switch records across `run-<date>.jsonl` within the
+    window. Events = distinct UTC dates with a switch record (deduped; one
+    degraded weekly run is one event). `needed` when events >= `review_after`
+    within the window OR any single event carried >= `review_cover` percent of
+    that run's included evals. Read-only; no schema change.
+    """
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=window_days)
+    events = {}
+    if os.path.isdir(logs_dir):
+        for name in sorted(os.listdir(logs_dir)):
+            m = query_runs.RUN_FILE_RE.match(name)
+            if not m:
+                continue
+            try:
+                day = datetime.strptime(m.group(1), "%Y-%m-%d").replace(
+                    tzinfo=timezone.utc)
+            except ValueError:
+                continue
+            if day < cutoff:
+                continue
+            recs = []
+            try:
+                with open(os.path.join(logs_dir, name), encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            recs.append(json.loads(line))
+                        except ValueError:
+                            continue
+            except OSError:
+                continue
+            switches = [r for r in recs
+                        if (r.get("detail") or "").startswith(FALLBACK_SWITCH_PREFIX)]
+            if not switches:
+                continue
+            final_keys = {r.get("eval") for r in recs
+                          if r.get("kind") == "eval" and r.get("eval")
+                          and r.get("eval_pass") is not None}
+            evidence_keys = set()
+            for r in switches:
+                evidence_keys.update(_evidence_keys_from_detail(r.get("detail")))
+            cover = (len(evidence_keys) / len(final_keys) * 100.0
+                     if final_keys else 0.0)
+            events[m.group(1)] = {
+                "date": m.group(1),
+                "switches": len(switches),
+                "cover_pct": round(cover, 1),
+            }
+    event_dates = sorted(events)
+    max_cover = max((e["cover_pct"] for e in events.values()), default=0.0)
+    needed = (len(event_dates) >= review_after) or (max_cover >= review_cover)
+    basis_parts = []
+    if event_dates:
+        basis_parts.append(
+            f"{len(event_dates)} fallback event(s) in {window_days}d: "
+            + ", ".join(event_dates))
+    if max_cover >= review_cover:
+        basis_parts.append(f"max run cover {max_cover}% >= {review_cover}%")
+    basis = "; ".join(basis_parts) if basis_parts else "no fallback events in window"
+    return {
+        "generated_at": _now_iso(),
+        "window_days": window_days,
+        "fallback_events": len(event_dates),
+        "event_dates": event_dates,
+        "max_run_cover_pct": max_cover,
+        "routing_review": {"needed": needed, "basis": basis},
     }
 
 
@@ -380,6 +501,9 @@ def main(argv=None):
                    help="Suite depth that qualified (default/full).")
     s.add_argument("--infra-retried", type=int, default=None,
                    help="Number of evals that recovered from infra retries.")
+    s.add_argument("--lane", default="primary", choices=("primary", "fallback"),
+                   help="Lane the run was carried on (RM-056); recorded so pass "
+                        "rates stay comparable.")
 
     q = sub.add_parser("quota-projection", parents=[common],
                        help="Monthly quota projection (AC11).")
@@ -390,6 +514,13 @@ def main(argv=None):
                         help="Infra-vs-content failure split + error signatures (RM-021).")
     ft.add_argument("--out", default=None)
     ft.add_argument("--print", action="store_true")
+
+    ls = sub.add_parser("lane-status", parents=[common],
+                        help="RM-056 escalation signal from per-run lane switches.")
+    ls.add_argument("--out", default=None)
+    ls.add_argument("--print", action="store_true")
+    ls.add_argument("--window-days", type=int, default=30,
+                    help="Look-back window in days (default 30, matches retention).")
 
     sp = sub.add_parser("suite-projection", parents=[common],
                         help="Project suite tokens/cost/wall-time from measured probes (RM-021).")
@@ -420,10 +551,14 @@ def main(argv=None):
                 branch=args.branch, duration_min=args.duration_min,
                 all_pass=args.all_pass, quarantine_flips=args.quarantine_flips,
                 artifact_url=args.artifact_url, reason=args.reason,
-                depth=args.depth, infra_retried=args.infra_retried)
+                depth=args.depth, infra_retried=args.infra_retried,
+                lane=args.lane)
         else:
-            status = green_run_status(reason=args.reason)
+            status = green_run_status(reason=args.reason, lane=args.lane)
         _emit(status, args.out, args.print)
+    elif args.cmd == "lane-status":
+        _emit(lane_status(logs_dir, window_days=args.window_days),
+              args.out, args.print)
     elif args.cmd == "quota-projection":
         _emit(quota_projection(skills_root), args.out, args.print)
     elif args.cmd == "failure-taxonomy":

@@ -1355,6 +1355,255 @@ def test_emit_flushes_print():
     print("PASS  _emit passes flush=True (stdout and explicit stderr)")
 
 
+# ---------------------------------------------------------------------------
+# RM-056: log-proven per-run eval lane fallback (drills)
+#
+# Hermetic rehearsal of RM-021's recorded incident classes via two new stub
+# modes (`:FALLBACK-DRILL:`, `:EXTERNAL-REJECT:`). No model, no network.
+# ---------------------------------------------------------------------------
+
+FALLBACK_DRILL_MODEL = "deepseek/deepseek-flash"
+DRILL_PRIMARY_MODEL = "opencode-go/deepseek-v4.1-flash"
+# The recorded dead-stream shape whose signature resolves to the
+# ProviderModelNotFoundError class (matches run 36455843309).
+PROVIDER_CAUSE_STDERR = (
+    'ts level=ERROR message=failed ref=err_1 '
+    'error="ProviderModelNotFoundError: Model not found: '
+    'opencode-go/deepseek-v4.1-flash"'
+)
+# RM-021's second root (2026-09-28): the external-directory auto-reject class.
+EXTERNAL_REJECT_STDERR = (
+    "\x1b[93m\x1b[1m! \x1b[0mpermission requested: "
+    "external_directory (/tmp/audit-report-iL08P/*); auto-rejecting"
+)
+
+
+def _fallback_env(**extra):
+    env = _hermetic_env()
+    env.pop("DEEPSEEK_API_KEY", None)
+    env.pop("BEVAL_FALLBACK_ENABLED", None)
+    env.update(extra)
+    return env
+
+
+def _make_drill_root(n_evals=3, skill="drillskill"):
+    root = tempfile.mkdtemp(prefix="beval-drill-")
+    d = os.path.join(root, skill, "evals")
+    os.makedirs(d)
+    json.dump({"evals": [
+        {"id": i, "prompt": "p", "expect": {"text": ["drill ok"]}}
+        for i in range(1, n_evals + 1)
+    ]}, open(os.path.join(d, "evals.json"), "w"))
+    return root
+
+
+def _lane_records(logs):
+    """Return (evidence, switches, ceilings) lane records from a logs dir."""
+    recs = _read_logs(logs)
+    ev = [r for r in recs
+          if (r.get("detail") or "").startswith("lane-degradation-evidence: ")]
+    sw = [r for r in recs
+          if (r.get("detail") or "").startswith("lane-switch: ")]
+    ceil = [r for r in recs
+            if (r.get("detail") or "").startswith("lane-fallback-ceiling: ")]
+    return ev, sw, ceil
+
+
+def _run_drill(root, logs, mode, env):
+    return subprocess.run(
+        [sys.executable, RUNNER, "--model", DRILL_PRIMARY_MODEL,
+         "--skills-root", root, "--logs-dir", logs,
+         "--stub-output", mode, "--no-quarantine"],
+        capture_output=True, text=True, env=env)
+
+
+def test_fallback_is_provider_classed_error():
+    """RM-056 D1: provider-classed = model-resolution OR the dead-session
+    UnknownError wrapper; the external-directory class is explicitly NOT."""
+    assert runner.is_provider_classed_error(
+        "dead session: UnknownError ref=err_1 "
+        "(ProviderModelNotFoundError: Model not found: x)")
+    assert runner.is_provider_classed_error(
+        "dead session: UnknownError ref=err_1 — no work produced")
+    assert not runner.is_provider_classed_error(
+        "dead session: UnknownError ref=err_1 "
+        "(external_directory auto-reject (/tmp/audit-report-iL08P/*))")
+    assert not runner.is_provider_classed_error(
+        "missing: text: phrase not found: 'Verdict'")
+    print("PASS  is_provider_classed_error separates provider vs env classes")
+
+
+def test_fallback_drill_switch_and_marking():
+    """RM-056 AC1/AC2: >=3 terminal provider deaths -> ONE evidence record then
+    ONE switch record (in order, kind=eval/eval_pass=None); every post-switch
+    verdict is lane-attributed to the fallback model; one switch maximum."""
+    root = _make_drill_root(3)
+    logs = tempfile.mkdtemp(prefix="beval-drill-logs-")
+    env = _fallback_env(BEVAL_FALLBACK_ENABLED="1",
+                        DEEPSEEK_API_KEY="sk-test")
+    try:
+        r = _run_drill(root, logs, ":FALLBACK-DRILL:", env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        recs = _read_logs(logs)
+        ev, sw, ceil = _lane_records(logs)
+        assert len(ev) == 1 and len(sw) == 1, (ev, sw)
+        assert not ceil, ceil
+        idx_ev = recs.index(ev[0])
+        idx_sw = recs.index(sw[0])
+        assert idx_ev < idx_sw, "evidence must precede the switch"
+        # >=3 terminal provider-classed error records BEFORE the switch.
+        before = [rec for rec in recs[:idx_sw]
+                  if rec.get("eval_pass") is False and rec.get("outcome") == "error"
+                  and runner.is_model_resolution_error(rec.get("detail"))]
+        assert len(before) >= 3, before
+        for rec in (ev[0], sw[0]):
+            assert rec["kind"] == "eval" and rec["eval_pass"] is None, rec
+        assert ev[0]["model"] == DRILL_PRIMARY_MODEL, ev[0]
+        assert sw[0]["model"] == FALLBACK_DRILL_MODEL, sw[0]
+        # Every post-switch final verdict is attributed to the fallback lane.
+        post = [rec for rec in recs[idx_sw + 1:] if rec.get("eval_pass") is not None]
+        assert post, "fallback re-attempts must produce final verdicts"
+        assert all(rec["model"] == FALLBACK_DRILL_MODEL for rec in post), post
+        assert all(rec.get("eval_pass") is True for rec in post), post
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+
+
+def test_fallback_disabled_exits_three():
+    """RM-056 AC3a: without the opt-in flag, a drill records zero switch records
+    and stops at 3 consecutive deaths with exit 3 (today's behavior + evidence)."""
+    root = _make_drill_root(3)
+    logs = tempfile.mkdtemp(prefix="beval-drill-off-logs-")
+    env = _fallback_env()
+    try:
+        r = _run_drill(root, logs, ":FALLBACK-DRILL:", env)
+        assert r.returncode == 3, (r.returncode, r.stdout, r.stderr)
+        ev, sw, ceil = _lane_records(logs)
+        assert not sw and not ceil, (sw, ceil)
+        assert len(ev) == 1, ev  # degradation is still proven in the log
+        assert not any(rec.get("model") == FALLBACK_DRILL_MODEL
+                       for rec in _read_logs(logs)), "no fallback verdicts when disabled"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+
+
+def test_fallback_enabled_no_key_unavailable():
+    """RM-056 AC3b: flag set but no DEEPSEEK_API_KEY -> the runner says so on
+    stderr, still records evidence, exits 3, runs no fallback eval."""
+    root = _make_drill_root(3)
+    logs = tempfile.mkdtemp(prefix="beval-drill-nokey-logs-")
+    env = _fallback_env(BEVAL_FALLBACK_ENABLED="1")
+    try:
+        r = _run_drill(root, logs, ":FALLBACK-DRILL:", env)
+        assert r.returncode == 3, (r.returncode, r.stdout, r.stderr)
+        assert ("lane-fallback-unavailable: DEEPSEEK_API_KEY not set"
+                in (r.stderr or "")), r.stderr
+        ev, sw, ceil = _lane_records(logs)
+        assert len(ev) == 1 and not sw and not ceil, (ev, sw, ceil)
+        assert not any(rec.get("model") == FALLBACK_DRILL_MODEL
+                       for rec in _read_logs(logs))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+
+
+def test_external_reject_never_switches():
+    """RM-056 AC4: the external-directory auto-reject class never triggers —
+    zero lane records; the run terminates red as today."""
+    root = _make_drill_root(3)
+    logs = tempfile.mkdtemp(prefix="beval-reject-logs-")
+    env = _fallback_env(BEVAL_FALLBACK_ENABLED="1",
+                        DEEPSEEK_API_KEY="sk-test")
+    try:
+        r = _run_drill(root, logs, ":EXTERNAL-REJECT:", env)
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        ev, sw, ceil = _lane_records(logs)
+        assert not ev and not sw and not ceil, (ev, sw, ceil)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+
+
+def test_fallback_primary_healthy_records_no_lane():
+    """RM-056 AC11 + AC5: an enabled run with NO degradation stays on the
+    primary lane (zero lane records, no fallback model) — including a second
+    fresh process (per-run scope, never a re-bind)."""
+    root = _make_drill_root(3)
+    logs = tempfile.mkdtemp(prefix="beval-healthy-logs-")
+    env = _fallback_env(BEVAL_FALLBACK_ENABLED="1",
+                        DEEPSEEK_API_KEY="sk-test")
+    try:
+        r = _run_drill(root, logs, "ALL", env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        ev, sw, ceil = _lane_records(logs)
+        assert not ev and not sw and not ceil, (ev, sw, ceil)
+        recs = _read_logs(logs)
+        assert recs and all(rec.get("model") != FALLBACK_DRILL_MODEL
+                            for rec in recs), recs
+        # Second process on a fresh logs dir still starts on the primary lane.
+        logs2 = tempfile.mkdtemp(prefix="beval-healthy-logs2-")
+        try:
+            r2 = _run_drill(root, logs2, "ALL", env)
+            assert r2.returncode == 0, (r2.returncode, r2.stdout, r2.stderr)
+            ev2, sw2, _ = _lane_records(logs2)
+            assert not ev2 and not sw2, (ev2, sw2)
+            assert all(rec.get("model") != FALLBACK_DRILL_MODEL
+                       for rec in _read_logs(logs2))
+        finally:
+            shutil.rmtree(logs2, ignore_errors=True)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+
+
+def test_fallback_ceiling_stops_with_exit_four():
+    """RM-056 AC9: crossing BEVAL_FALLBACK_RUN_CEILING_USD writes a
+    lane-fallback-ceiling record naming the deferred remainder and exits 4,
+    with no further fallback re-attempts started."""
+    root = _make_drill_root(3)
+    logs = tempfile.mkdtemp(prefix="beval-ceiling-logs-")
+    env = _fallback_env(BEVAL_FALLBACK_ENABLED="1",
+                        DEEPSEEK_API_KEY="sk-test",
+                        BEVAL_FALLBACK_RUN_CEILING_USD="0.01")
+    try:
+        r = _run_drill(root, logs, ":FALLBACK-DRILL:", env)
+        assert r.returncode == 4, (r.returncode, r.stdout, r.stderr)
+        ev, sw, ceil = _lane_records(logs)
+        assert len(sw) == 1 and len(ceil) == 1, (sw, ceil)
+        assert "deferred remainder" in (ceil[0].get("detail") or ""), ceil[0]
+        fallback_verdicts = [rec for rec in _read_logs(logs)
+                             if rec.get("model") == FALLBACK_DRILL_MODEL
+                             and rec.get("eval_pass") is not None]
+        assert len(fallback_verdicts) == 1, fallback_verdicts
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+
+
+def test_fallback_per_eval_single_canary():
+    """RM-056 D1 per-eval path: a single-canary run whose only eval dies with
+    >=3 provider-classed dead turns switches and re-attempts on the fallback
+    lane."""
+    root = _make_drill_root(1)
+    logs = tempfile.mkdtemp(prefix="beval-single-logs-")
+    env = _fallback_env(BEVAL_FALLBACK_ENABLED="1",
+                        DEEPSEEK_API_KEY="sk-test")
+    try:
+        r = _run_drill(root, logs, ":FALLBACK-DRILL:", env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        ev, sw, ceil = _lane_records(logs)
+        assert len(ev) == 1 and len(sw) == 1, (ev, sw)
+        verdicts = [rec for rec in _read_logs(logs)
+                    if rec.get("eval_pass") is True]
+        assert verdicts, "the single canary must pass on the fallback lane"
+        assert all(rec.get("model") == FALLBACK_DRILL_MODEL for rec in verdicts)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+
+
 def main():
     tests = [
         test_assert_behavior,
@@ -1410,6 +1659,14 @@ def main():
         test_artifact_miss_message_split,
         test_zero_selection_quarantine_diagnostics,
         test_emit_flushes_print,
+        test_fallback_is_provider_classed_error,
+        test_fallback_drill_switch_and_marking,
+        test_fallback_disabled_exits_three,
+        test_fallback_enabled_no_key_unavailable,
+        test_external_reject_never_switches,
+        test_fallback_primary_healthy_records_no_lane,
+        test_fallback_ceiling_stops_with_exit_four,
+        test_fallback_per_eval_single_canary,
     ]
     failed = 0
     for t in tests:

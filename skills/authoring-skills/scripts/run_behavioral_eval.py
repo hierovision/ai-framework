@@ -82,6 +82,45 @@ TRANSIENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# RM-056: log-proven per-run eval lane fallback. On a MODEL/opencode-service
+# degradation (proven from the run's own log records first), a run switches —
+# for that run only, never a re-bind — to the deepseek-v4.1-flash direct API
+# lane. Every switch is recorded and marked in the eval report so pass rates
+# stay comparable. See .opencode/plans/rm-056-eval-lane-fallback.md.
+FALLBACK_DEFAULT_MODEL = "deepseek/deepseek-flash"
+FALLBACK_EVIDENCE_PREFIX = "lane-degradation-evidence: "
+FALLBACK_SWITCH_PREFIX = "lane-switch: "
+FALLBACK_CEILING_PREFIX = "lane-fallback-ceiling: "
+
+
+def fallback_config(environ):
+    """RM-056 D1 constants (env-overridable so workflows need no runner edits)."""
+    def _int(name, default):
+        try:
+            return int(environ.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    def _float(name, default):
+        try:
+            return float(environ.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        "enabled": bool(environ.get("BEVAL_FALLBACK_ENABLED")),
+        "model": environ.get("BEVAL_FALLBACK_MODEL", FALLBACK_DEFAULT_MODEL),
+        "deaths": _int("BEVAL_FALLBACK_DEATHS", 3),
+        "infra_share": _float("BEVAL_FALLBACK_INFRA_SHARE", 50),
+        "min_attempted": _int("BEVAL_FALLBACK_MIN_ATTEMPTED", 6),
+        "eval_deaths": _int("BEVAL_FALLBACK_EVAL_DEATHS", 3),
+        "max_reruns": _int("BEVAL_FALLBACK_MAX_RERUNS", 1),
+        "ceiling_usd": _float("BEVAL_FALLBACK_RUN_CEILING_USD", 3.00),
+        "review_after": _int("BEVAL_FALLBACK_REVIEW_AFTER", 2),
+        "review_window_days": _int("BEVAL_FALLBACK_REVIEW_WINDOW_DAYS", 30),
+        "review_cover": _float("BEVAL_FALLBACK_REVIEW_COVER", 50),
+    }
+
 
 def load_skill_evals(skills_root):
     """Yield normalized eval entries from every skill's evals/evals.json."""
@@ -568,7 +607,7 @@ def _has_work_activity(ctx):
 
 
 def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
-             sleep=time.sleep, quarantine_path=None):
+             sleep=time.sleep, quarantine_path=None, lane_state=None):
     """Run one eval via `get_output(e)`, assert, and write a run-log record.
 
     Returns (passed, missing, record_path). `model` (concrete ID, e.g.
@@ -723,6 +762,12 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             nudge_session()  # a fresh session that stalls gets the same nudge
             if no_event_turns >= 2:
                 break  # two no-event turns: stop burning the budget on a stall
+
+        # RM-056 D1 per-eval trigger: report (via the shared lane state) whether
+        # this eval's dead turns were all provider-classed, so main can switch
+        # the lane for the single-canary case. Never fires after a switch.
+        if lane_state is not None:
+            lane_state["eval_trigger"] = _per_eval_provider_trigger(turns, lane_state)
 
         # Grade the BEST turn, not the last: a productive turn followed by a
         # dead continuation was recorded as an infra failure even though the
@@ -887,6 +932,46 @@ def _resolved_cause(stderr):
 def is_model_resolution_error(text):
     """True when `text` names the model-resolution failure class."""
     return bool(MODEL_RESOLUTION_RE.search(text or ""))
+
+
+_DEAD_SESSION_WRAPPER_RE = re.compile(r"UnknownError", re.IGNORECASE)
+
+
+def is_provider_classed_error(detail):
+    """RM-056 D1: True when a dead-session `detail` is provider/service-classed.
+
+    Provider-classed = the model-resolution class
+    (`ProviderModelNotFoundError`) OR the dead-session `UnknownError` wrapper
+    class. The external-directory auto-reject class (RM-021's second root,
+    2026-09-28) is explicitly NOT a trigger — it is an env permission failure,
+    not a lane/service degradation. A content miss (`missing: ...`) is not one.
+    """
+    text = detail or ""
+    if "external_directory auto-reject" in text:
+        return False
+    if is_model_resolution_error(text):
+        return True
+    return bool(_DEAD_SESSION_WRAPPER_RE.search(text))
+
+
+def _per_eval_provider_trigger(turns, lane_state):
+    """RM-056 D1 per-eval trigger: an eval whose dead turns are ALL
+    provider-classed, with >= `eval_deaths` dead turns, is a per-eval
+    degradation (covers the per-change single-canary case). Never fires once
+    the run's lane has already switched.
+    """
+    if lane_state.get("active"):
+        return False
+    threshold = lane_state.get("eval_deaths", 3)
+    dead = 0
+    for _label, res in turns:
+        ctx = build_context(res)
+        if not _dead_session(ctx):
+            continue
+        dead += 1
+        if not is_provider_classed_error(_error_signature(ctx)):
+            return False
+    return dead >= threshold
 
 
 def model_listed(output, model):
@@ -1132,8 +1217,54 @@ def _stub_typed_result(e):
     return EvalResult(raw=raw, workdir=workdir, cleanup=True)
 
 
+# RM-056 D6 rehearsal stub shapes (hermetic; no opencode, no network). The
+# `:FALLBACK-DRILL:` candidate replays RM-021's model-resolution death class
+# (run 36455843309) for the first BEVAL_FALLBACK_EVAL_DEATHS turns, then the
+# healthy direct-key lane; `:EXTERNAL-REJECT:` replays the second root
+# (external-directory auto-reject, 2026-09-28) as the named NEGATIVE candidate.
+_FALLBACK_DRILL_DEATHS = 3
+_DRILL_DEAD_STREAM = (
+    '{"type":"error","timestamp":1,"sessionID":"ses_drill",'
+    '"error":{"name":"UnknownError","data":{"message":"boom","ref":"err_drill"}}}\n'
+)
+_DRILL_DEAD_STDERR = (
+    'ts level=ERROR message=failed ref=err_drill '
+    'error="ProviderModelNotFoundError: Model not found: '
+    'opencode-go/deepseek-v4.1-flash"'
+)
+_DRILL_EXTERNAL_STDERR = (
+    "permission requested: external_directory "
+    "(/tmp/audit-report-iL08P/*); auto-rejecting"
+)
+_DRILL_FALLBACK_COST = 0.02
+
+
+def _drill_fallback_pass(e):
+    """Passing typed synthesis for the healthy direct-key lane, with a measured
+    cost so the spend ceiling can be exercised (RM-056 D5)."""
+    res = _stub_typed_result(e)
+    finish = json.dumps({"type": "step_finish", "part": {
+        "type": "step-finish", "tokens": {"input": 100, "output": 50},
+        "cost": _DRILL_FALLBACK_COST}})
+    res.raw = finish + "\n" + (res.raw or "")
+    return res
+
+
 def stub_result(e, mode, calls):
-    """Hermetic test output for one eval (ALL / :MISS: / :FLAKY:)."""
+    """Hermetic test output for one eval (ALL / :MISS: / :FLAKY:).
+
+    Plus the RM-056 rehearsal modes: `:FALLBACK-DRILL:` (provider-classed
+    dead streams that resolve to a passing fallback lane) and
+    `:EXTERNAL-REJECT:` (the env class that must never switch)."""
+    if mode.startswith(":FALLBACK-DRILL:"):
+        key = eval_key(e)
+        n = calls.get(key, 0)
+        calls[key] = n + 1
+        if n < _FALLBACK_DRILL_DEATHS:
+            return EvalResult(raw=_DRILL_DEAD_STREAM, stderr=_DRILL_DEAD_STDERR)
+        return _drill_fallback_pass(e)
+    if mode.startswith(":EXTERNAL-REJECT:"):
+        return EvalResult(raw=_DRILL_DEAD_STREAM, stderr=_DRILL_EXTERNAL_STDERR)
     if mode.startswith(":MISS:"):
         if e.get("expected_behavior"):
             return EvalResult(raw="\n".join(e["expected_behavior"][1:]))
@@ -1220,6 +1351,53 @@ def _missing_eval_keys(selected, logs_dir):
     """RM-021 AC2: list selected eval keys with no final record."""
     final = _final_eval_keys(logs_dir)
     return [eval_key(e) for e in selected if eval_key(e) not in final]
+
+
+def _dead_provider_keys(latest):
+    """RM-056: eval keys whose latest final record is a provider-classed error."""
+    return [k for k, rec in latest.items()
+            if rec.get("outcome") == "error"
+            and is_provider_classed_error(rec.get("detail"))]
+
+
+# ---------------------------------------------------------------------------
+# RM-056 D3: lane marks ride `detail` prefixes + `model` (log_run.build_record
+# drops unknown keys, so novel per-record fields would be silently lost).
+# Both annotation records carry kind=eval, eval_pass=None so they never count
+# toward a pass rate (query_runs skips eval_pass=None before counting).
+# ---------------------------------------------------------------------------
+
+def _write_evidence_record(primary, keys, logs_dir=None):
+    detail = (FALLBACK_EVIDENCE_PREFIX
+              + f"{len(keys)} provider-classed infra death(s); evals: "
+              + ", ".join(keys))[:DETAIL_MAX]
+    return log_run.log_record({
+        "kind": "eval", "skill": None, "agent": None,
+        "model": primary, "outcome": "error",
+        "eval_pass": None, "detail": detail,
+    }, logs_dir=logs_dir)
+
+
+def _write_switch_record(primary_label, fallback, keys, logs_dir=None):
+    detail = (FALLBACK_SWITCH_PREFIX
+              + f"{primary_label} -> {fallback}; per-run; evidence: "
+              + ", ".join(keys))[:DETAIL_MAX]
+    return log_run.log_record({
+        "kind": "eval", "skill": None, "agent": None,
+        "model": fallback, "outcome": "error",
+        "eval_pass": None, "detail": detail,
+    }, logs_dir=logs_dir)
+
+
+def _write_ceiling_record(fallback, spend, ceiling, remainder, logs_dir=None):
+    detail = (FALLBACK_CEILING_PREFIX
+              + f"fallback spend ${spend:.4f} > ceiling ${ceiling:.2f}; "
+              + "deferred remainder: " + (", ".join(remainder) or "(none)"))[:DETAIL_MAX]
+    return log_run.log_record({
+        "kind": "eval", "skill": None, "agent": None,
+        "model": fallback, "outcome": "error",
+        "eval_pass": None, "detail": detail,
+    }, logs_dir=logs_dir)
 
 
 def _emit(message, file=None):
@@ -1369,8 +1547,11 @@ def main(argv=None):
                         "instead of invoking opencode. 'ALL' passes every eval; "
                         "':MISS:' forces a permanent (non-transient) failure; "
                         "':FLAKY:' emits a transient error first, then passes "
-                        "(exercises the retry path). Typed evals are synthesized "
-                        "to match their expect block.")
+                        "(exercises the retry path). RM-056 rehearsal modes: "
+                        "':FALLBACK-DRILL:' replays the provider-classed death "
+                        "class then a healthy fallback lane; ':EXTERNAL-REJECT:' "
+                        "replays the env class that must never switch. Typed "
+                        "evals are synthesized to match their expect block.")
     p.add_argument("--event-fixture", default=None,
                    help="Hermetic replay (RM-003 pass 5): path to a recorded "
                         "event-stream file (events.jsonl) or its directory; "
@@ -1474,24 +1655,67 @@ def main(argv=None):
         if ok is not True:
             _emit(f"warning: preflight: {why}", file=sys.stderr)
 
-    failed = 0
+    # RM-056: log-proven per-run lane fallback. The primary lane is the
+    # `--model` flag (unchanged); on a proven MODEL/service degradation the run
+    # switches — for that run only, never a re-bind — to the direct-key
+    # `deepseek/deepseek-flash` lane and marks it in the run log.
+    cfg = fallback_config(os.environ)
+    primary_label = args.model or "environment default"
+    state = {
+        "enabled": cfg["enabled"],
+        "fallback_model": cfg["model"],
+        "has_key": bool(os.environ.get("DEEPSEEK_API_KEY")),
+        "active": False,
+        "switched": False,
+        "evidence_written": False,
+        "spend": 0.0,
+        "ceiling": cfg["ceiling_usd"],
+        "eval_deaths": cfg["eval_deaths"],
+        "max_reruns": cfg["max_reruns"],
+        "eval_trigger": False,
+    }
+    # The per-eval trigger covers the per-change single-canary job; on a
+    # multi-eval run the run-level T1/T2 counter owns the switch so the log
+    # shows the aggregate degradation first (RM-056 D1 / AC1).
+    per_eval_allowed = (len(selected) == 1)
     infra_deaths = 0
-    for e in selected:
+    provider_dead = 0
+    attempted = 0
+    latest = {}
+    reruns = {}
+
+    def _ceiling_stop(remainder):
+        """Write the ceiling record (naming the deferred remainder), emit the
+        run report summary, and return the distinct exit 4 (RM-056 D5 / AC9)."""
+        _write_ceiling_record(state["fallback_model"], state["spend"],
+                              state["ceiling"], remainder, logs_dir=args.logs_dir)
+        _emit(f"fallback ceiling reached: ${state['spend']:.4f} > "
+              f"${state['ceiling']:.2f}; stopping. deferred remainder: "
+              f"{', '.join(remainder) or '(none)'}", file=sys.stderr)
+        _emit("run report emitted (run log + ceiling record); "
+              "exit 4 (fallback-ceiling stop)", file=sys.stderr)
+        return 4
+
+    for i, e in enumerate(selected):
+        model_now = state["fallback_model"] if state["active"] else args.model
         # RM-021 AC2: isolate per-eval exceptions so one crash cannot drop the
         # rest of the shard. Record an infra error and continue.
         try:
             passed, missing, path = run_eval(e, get_output, logs_dir=args.logs_dir,
-                                             model=args.model,
+                                             model=model_now,
                                              max_retries=args.max_retries,
-                                             quarantine_path=quarantine_path)
+                                             quarantine_path=quarantine_path,
+                                             lane_state=state)
         except Exception as exc:
-            path = _record_infra_error(e, exc, logs_dir=args.logs_dir, model=args.model)
+            path = _record_infra_error(e, exc, logs_dir=args.logs_dir,
+                                       model=model_now)
             passed, missing = False, [str(exc)]
+        attempted += 1
+        latest[eval_key(e)] = _last_record(path)
+        rec = latest[eval_key(e)]
         status = "PASS" if passed else "FAIL"
         _emit(f"{status}  {e['skill']}#{e['eval_id']}  -> {path}")
         if not passed:
-            failed += 1
-            rec = _last_record(path)
             if rec.get("outcome") == "error":
                 # Infra death, not a content miss: printing "missing: ..." here
                 # made a model/provider failure look like a failed assertion in
@@ -1499,18 +1723,85 @@ def main(argv=None):
                 _emit(f"      infra error: {rec.get('detail') or 'dead session'}")
                 infra_deaths = (infra_deaths + 1
                                 if is_model_resolution_error(rec.get("detail")) else 0)
+                if is_provider_classed_error(rec.get("detail")):
+                    provider_dead += 1
             else:
                 infra_deaths = 0
                 for m in missing:
                     _emit(f"      missing: {m[:120]}")
         else:
             infra_deaths = 0
-        if infra_deaths >= 3:
-            # Every eval dies the same infra way in ~2s: stop instead of burning
-            # the suite and turning one broken catalog into hundreds of reds.
-            _emit("aborting: model resolution failed for 3 consecutive evals "
-                  "(infra, not a regression)", file=sys.stderr)
-            return 3
+
+        # Spend guardrail (RM-056 D5): only fallback-attributed runs accrue.
+        if state["active"]:
+            state["spend"] += float(rec.get("cost") or 0.0)
+            if state["spend"] > state["ceiling"]:
+                return _ceiling_stop([eval_key(x) for x in selected[i + 1:]])
+
+        # Trigger evaluation (RM-056 D1). T1 = consecutive model-resolution
+        # deaths (the early-abort counter); T2 = provider-classed share of the
+        # run; T-eval = the per-eval single-canary path.
+        if not state["active"]:
+            t1 = infra_deaths >= cfg["deaths"]
+            t2 = (attempted >= cfg["min_attempted"]
+                  and (provider_dead / attempted * 100.0) >= cfg["infra_share"])
+            t_eval = bool(per_eval_allowed and state.get("eval_trigger"))
+            state["eval_trigger"] = False
+            if t1 or t2 or t_eval:
+                keys = _dead_provider_keys(latest) or [eval_key(e)]
+                _write_evidence_record(primary_label, keys, logs_dir=args.logs_dir)
+                state["evidence_written"] = True
+                if state["enabled"] and state["has_key"]:
+                    _write_switch_record(primary_label, cfg["model"], keys,
+                                         logs_dir=args.logs_dir)
+                    state["switched"] = True
+                    state["active"] = True
+                    _emit(f"lane switched for this run: {primary_label} -> "
+                          f"{cfg['model']} (evidence recorded)", file=sys.stderr)
+                elif state["enabled"] and not state["has_key"]:
+                    _emit("lane-fallback-unavailable: DEEPSEEK_API_KEY not set",
+                          file=sys.stderr)
+                    return 3
+                elif t1:
+                    # Degradation proven but the fallback is not opted in:
+                    # today's early abort, now with the evidence record.
+                    _emit("aborting: model resolution failed for 3 consecutive "
+                          "evals (infra, not a regression)", file=sys.stderr)
+                    return 3
+                # A t2/t_eval trigger without the opt-in leaves behavior as
+                # today (no abort) — only the evidence is now in the log.
+
+    # RM-056 D2: re-attempt provider-classed verdict-less failures on the
+    # fallback lane (bounded per eval), honoring the spend ceiling.
+    if state["active"]:
+        for i, e in enumerate(selected):
+            key = eval_key(e)
+            rec = latest.get(key) or {}
+            if not (rec.get("outcome") == "error"
+                    and is_provider_classed_error(rec.get("detail"))):
+                continue
+            if reruns.get(key, 0) >= int(state["max_reruns"]):
+                continue
+            reruns[key] = reruns.get(key, 0) + 1
+            try:
+                passed, missing, path = run_eval(
+                    e, get_output, logs_dir=args.logs_dir,
+                    model=state["fallback_model"],
+                    max_retries=args.max_retries,
+                    quarantine_path=quarantine_path, lane_state=state)
+            except Exception as exc:
+                path = _record_infra_error(e, exc, logs_dir=args.logs_dir,
+                                           model=state["fallback_model"])
+                passed, missing = False, [str(exc)]
+            latest[key] = _last_record(path)
+            state["spend"] += float(latest[key].get("cost") or 0.0)
+            _emit(f"{'PASS' if passed else 'FAIL'}  {e['skill']}#{e['eval_id']}"
+                  f"  -> {path} (fallback re-attempt)")
+            if state["spend"] > state["ceiling"]:
+                return _ceiling_stop([eval_key(x) for x in selected[i + 1:]])
+
+    failed = sum(1 for e in selected
+                 if not (latest.get(eval_key(e)) or {}).get("eval_pass"))
 
     # RM-021 AC2: assert every selected eval has a final content record.
     # Use the effective logs dir: the per-change lane invokes the runner

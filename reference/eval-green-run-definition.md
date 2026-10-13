@@ -41,6 +41,18 @@ A **steady-state green run** is a weekly `eval-behavioral` workflow run on
 
 A run that fails any condition is a candidate, not a green run.
 
+### Lane marking (RM-056 amendment, 2026-10-12)
+
+A qualifying run records which lane carried it: `green-run-status.json` gains
+`"lane": <"primary"|"fallback">` and `"fallback_carried": <bool>`. A run
+carried on the fallback lane **still qualifies** — it is recorded as
+**"fallback-carried (lane: fallback)"** — but the lane mark is the
+comparability control: both lanes serve the same model family
+(DeepSeek-V4.1-Flash), so pass rates stay comparable and are only comparable
+across lanes when the lane mark is visible. The four conditions above are
+unchanged; the lane mark is additive. (The per-run fallback itself is RM-056;
+routing policy remains RM-039 / ADR-0013.)
+
 ## First qualifying run
 
 - Earliest candidate: the scheduled weekly run on **2026-09-21**.
@@ -69,7 +81,9 @@ Not-yet-achieved shape:
 ```
 
 Achieved shape adds `run_id`, `date`, `branch`, `duration_min`, `all_pass`,
-`quarantine_flips`, `infra_retried`, `depth`, `artifact_url`, and `qualified_at`.
+`quarantine_flips`, `infra_retried`, `depth`, `artifact_url`, `lane`,
+`fallback_carried`, and `qualified_at`. Both shapes carry `lane` /
+`fallback_carried` (RM-056, 2026-10-12).
 
 ## Relationship to RM-002's canary
 

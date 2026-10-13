@@ -104,22 +104,51 @@ def test_skills_dispatch_input_wired():
     print("PASS  eval-behavioral.yml has skills dispatch input wired to --skill")
 
 
+def _collect_env(doc):
+    """Every (key, value) pair in job/step `env:` mappings (values stringified)."""
+    out = []
+    for job in doc["jobs"].values():
+        for k, v in (job.get("env") or {}).items():
+            out.append((k, str(v)))
+        for step in job.get("steps", []):
+            for k, v in (step.get("env") or {}).items():
+                out.append((k, str(v)))
+    return out
+
+
 def test_lane_and_nested_agent_override():
-    """Both eval workflows (2026-09-29): the step that RUNS the runner must also
-    export the nested-agent override, name the Go lane model, and not reference
-    DEEPSEEK_API_KEY.
+    """Both eval workflows (2026-09-29; RM-056 amended 2026-10-12): the step
+    that RUNS the runner must also export the nested-agent override, name the
+    Go lane model, and carry the RM-056 fallback opt-in.
 
     Caught a real bug: the export was first injected into an unrelated
     `set -euo pipefail` step (the changed-files step), so CI still ran the
     free-bound council consult and died with "…free tier can only be used from
     within OpenCode". Structural check: same step, same `run` block.
+
+    RM-056 scoped-intent amendment: the direct-key secret may appear ONLY as
+    `${{ secrets.DEEPSEEK_API_KEY }}` inside an `env:` mapping — never inside a
+    `run:` script, never echoed. Replaces the prior blunt "no DEEPSEEK_API_KEY
+    anywhere" assertion while keeping every pin/lane assertion unchanged.
     """
     import subprocess
     found = 0
     for path in (PER_CHANGE, BEHAVIORAL):
         doc = yaml.safe_load(open(path, encoding="utf-8"))
-        text = open(path, encoding="utf-8").read()
-        assert "DEEPSEEK_API_KEY" not in text, f"{path}: direct-key secret referenced"
+        # The secret must never appear in a `run:` script.
+        for job in doc["jobs"].values():
+            for step in job.get("steps", []):
+                run = step.get("run") or ""
+                assert "DEEPSEEK_API_KEY" not in run, \
+                    f"{path}/{step.get('name')}: secret referenced in a run script"
+        # ...only as a secrets.* expression in an env mapping.
+        env_values = _collect_env(doc)
+        secret_env = [v for k, v in env_values if k == "DEEPSEEK_API_KEY"]
+        assert secret_env, f"{path}: DEEPSEEK_API_KEY not wired into any env"
+        assert all(v == "${{ secrets.DEEPSEEK_API_KEY }}" for v in secret_env), secret_env
+        # The fallback opt-in is present.
+        assert any(k == "BEVAL_FALLBACK_ENABLED" and v == "1"
+                   for k, v in env_values), f"{path}: fallback opt-in missing"
         for job in doc["jobs"].values():
             for step in job.get("steps", []):
                 run = step.get("run") or ""
@@ -133,6 +162,11 @@ def test_lane_and_nested_agent_override():
                     f"{path}/{step.get('name')}: runner step lacks the nested-agent override"
                 assert "opencode-go/deepseek-v4.1-flash" in run, \
                     f"{path}/{step.get('name')}: lane model missing in the runner step"
+                env = step.get("env") or {}
+                assert env.get("DEEPSEEK_API_KEY") == "${{ secrets.DEEPSEEK_API_KEY }}", \
+                    f"{path}/{step.get('name')}: runner step lacks the direct-key secret env"
+                assert env.get("BEVAL_FALLBACK_ENABLED") == "1", \
+                    f"{path}/{step.get('name')}: runner step lacks the fallback opt-in"
     assert found >= 2, f"expected a runner step in both workflows, found {found}"
     out = subprocess.run([sys.executable, os.path.join(HERE, "ci-lane-overrides.py"),
                           "--model", "opencode-go/deepseek-v4.1-flash"], capture_output=True,
@@ -164,6 +198,17 @@ def test_report_downloads_per_artifact():
     print("PASS  report job downloads shard artifacts per-artifact")
 
 
+def test_behavioral_report_emits_lane_escalation():
+    """RM-056 D4/AC10: the weekly report job computes lane-status, uploads it,
+    and prints the RM-040 escalation line to the step summary."""
+    text = open(BEHAVIORAL, encoding="utf-8").read()
+    assert "eval-report.py lane-status" in text, "report job must compute lane-status"
+    assert "lane-status.json" in text, "lane-status artifact must be uploaded"
+    assert "RM-040" in text and "Routing review needed" in text, \
+        "report job must print the RM-040 escalation summary line"
+    print("PASS  weekly report job emits the RM-056 lane escalation signal")
+
+
 def main():
     tests = [
         test_per_change_matrix_and_aggregation,
@@ -173,6 +218,7 @@ def main():
         test_skills_dispatch_input_wired,
         test_lane_and_nested_agent_override,
         test_report_downloads_per_artifact,
+        test_behavioral_report_emits_lane_escalation,
     ]
     failed = 0
     for t in tests:
