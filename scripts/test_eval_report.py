@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -402,6 +403,149 @@ def test_merge_eval_logs_concatenates_runs_and_quarantine():
         shutil.rmtree(d)
 
 
+def test_green_run_status_lane_marking():
+    """RM-056 AC6: `--lane fallback` marks a run fallback-carried; the default
+    (and missing) value is primary/false, additively on both shapes."""
+    fallback = report.green_run_status(
+        achieved=True, run_id="r", date="2026-10-12", branch="main",
+        duration_min=15, all_pass=True, lane="fallback")
+    assert fallback["lane"] == "fallback", fallback
+    assert fallback["fallback_carried"] is True, fallback
+    primary = report.green_run_status(
+        achieved=True, run_id="r", date="2026-10-12", branch="main",
+        duration_min=15, all_pass=True)
+    assert primary["lane"] == "primary" and primary["fallback_carried"] is False
+    not_achieved = report.green_run_status()
+    assert not_achieved["lane"] == "primary"
+    assert not_achieved["fallback_carried"] is False
+
+
+def test_failure_taxonomy_surfaces_lane_lists():
+    """RM-056 AC6: failure-taxonomy surfaces lane_evidence / lane_switches from
+    the records' own `detail` prefixes (and keeps per-skill lane attribution)."""
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, "run-2026-10-12.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"ts": "2026-10-12T06:00:00Z", "kind": "eval",
+                                 "skill": "alpha", "eval": "alpha#1",
+                                 "model": "opencode-go/deepseek-v4.1-flash",
+                                 "outcome": "error", "eval_pass": False,
+                                 "detail": "dead session: UnknownError"}) + "\n")
+            fh.write(json.dumps({"ts": "2026-10-12T06:01:00Z", "kind": "eval",
+                                 "skill": None, "model": "opencode-go/deepseek-v4.1-flash",
+                                 "outcome": "error", "eval_pass": None,
+                                 "detail": "lane-degradation-evidence: 1 provider-classed "
+                                           "infra death(s); evals: alpha#1"}) + "\n")
+            fh.write(json.dumps({"ts": "2026-10-12T06:02:00Z", "kind": "eval",
+                                 "skill": None, "model": "deepseek/deepseek-flash",
+                                 "outcome": "error", "eval_pass": None,
+                                 "detail": "lane-switch: opencode-go/deepseek-v4.1-flash "
+                                           "-> deepseek/deepseek-flash; per-run; "
+                                           "evidence: alpha#1"}) + "\n")
+        out = report.failure_taxonomy(d)
+        assert len(out["lane_evidence"]) == 1, out["lane_evidence"]
+        assert len(out["lane_switches"]) == 1, out["lane_switches"]
+        assert out["lane_switches"][0]["model"] == "deepseek/deepseek-flash"
+        # per-skill rows keep the per-record model (cross-lane comparison).
+        agg = report.aggregate_report(d)
+        assert agg["per_skill"]["alpha"][0]["model"] == "opencode-go/deepseek-v4.1-flash"
+    finally:
+        shutil.rmtree(d)
+
+
+def _seed_lane_day(d, date, n_evals, n_evidence):
+    with open(os.path.join(d, f"run-{date}.jsonl"), "a", encoding="utf-8") as fh:
+        for i in range(1, n_evals + 1):
+            fh.write(json.dumps({
+                "ts": f"{date}T06:0{i}:00Z", "kind": "eval", "skill": "s",
+                "eval": f"s#{i}", "model": "m", "outcome": "success",
+                "eval_pass": True}) + "\n")
+        keys = ", ".join(f"s#{i}" for i in range(1, n_evidence + 1))
+        fh.write(json.dumps({
+            "ts": f"{date}T06:30:00Z", "kind": "eval", "skill": None,
+            "model": "deepseek/deepseek-flash", "outcome": "error",
+            "eval_pass": None,
+            "detail": ("lane-switch: m -> deepseek/deepseek-flash; per-run; "
+                       f"evidence: {keys}")}) + "\n")
+
+
+def test_lane_status_escalation():
+    """RM-056 AC8: two distinct-date switch events -> routing_review needed;
+    one event -> not needed; one event covering >=50% of its run -> needed."""
+    now = datetime(2026, 10, 12, tzinfo=timezone.utc)
+    d = tempfile.mkdtemp()
+    try:
+        # one event, 1 of 4 included evals -> 25% cover -> not needed.
+        _seed_lane_day(d, "2026-10-09", n_evals=4, n_evidence=1)
+        one = report.lane_status(d, now=now)
+        assert one["fallback_events"] == 1, one
+        assert one["event_dates"] == ["2026-10-09"], one
+        assert one["routing_review"]["needed"] is False, one
+        # a second distinct date -> needed.
+        _seed_lane_day(d, "2026-10-11", n_evals=4, n_evidence=1)
+        two = report.lane_status(d, now=now)
+        assert two["fallback_events"] == 2, two
+        assert two["routing_review"]["needed"] is True, two
+        assert "2026-10-11" in two["routing_review"]["basis"], two
+        # a single event covering >=50% of its run -> needed (fresh dir).
+        d2 = tempfile.mkdtemp()
+        try:
+            _seed_lane_day(d2, "2026-10-10", n_evals=5, n_evidence=3)
+            cover = report.lane_status(d2, now=now)
+            assert cover["fallback_events"] == 1, cover
+            assert cover["max_run_cover_pct"] == 60.0, cover
+            assert cover["routing_review"]["needed"] is True, cover
+        finally:
+            shutil.rmtree(d2)
+        # window: a switch older than the window is ignored.
+        d3 = tempfile.mkdtemp()
+        try:
+            _seed_lane_day(d3, "2026-08-01", n_evals=4, n_evidence=4)
+            old = report.lane_status(d3, now=now)
+            assert old["fallback_events"] == 0, old
+        finally:
+            shutil.rmtree(d3)
+        # CLI round-trip.
+        r = subprocess.run([sys.executable, os.path.join(HERE, "eval-report.py"),
+                            "lane-status", "--logs-dir", d, "--print"],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        payload = json.loads(r.stdout)
+        assert payload["routing_review"]["needed"] is True, payload
+    finally:
+        shutil.rmtree(d)
+
+
+def test_green_run_status_cli_lane_roundtrip():
+    """RM-056 AC6 CLI: green-run-status --record --lane fallback emits the
+    fallback lane mark."""
+    d = tempfile.mkdtemp()
+    try:
+        out_path = os.path.join(d, "green-run-status.json")
+        r = subprocess.run([sys.executable, os.path.join(HERE, "eval-report.py"),
+                            "green-run-status", "--record", "--run-id", "r",
+                            "--date", "2026-10-12", "--duration-min", "15",
+                            "--all-pass", "--lane", "fallback",
+                            "--out", out_path],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        out = json.load(open(out_path, encoding="utf-8"))
+        assert out["lane"] == "fallback" and out["fallback_carried"] is True, out
+    finally:
+        shutil.rmtree(d)
+
+
+def test_green_run_definition_documents_lane():
+    """RM-056 AC7: the green-run definition documents the lane field + the
+    fallback-carried qualifying semantics + the comparability note."""
+    path = os.path.join(REPO_ROOT, "reference", "eval-green-run-definition.md")
+    text = open(path, encoding="utf-8").read()
+    assert "fallback-carried" in text, "missing fallback-carried clause"
+    assert "fallback_carried" in text, "missing fallback_carried field"
+    assert "lane" in text, "missing lane field"
+    assert "comparab" in text.lower(), "missing comparability note"
+
+
 def main():
     tests = [
         test_aggregate_report_per_run_scores,
@@ -417,6 +561,11 @@ def main():
         test_green_run_status_records_depth_and_infra_retried,
         test_suite_projection_from_measured_samples,
         test_merge_eval_logs_concatenates_runs_and_quarantine,
+        test_green_run_status_lane_marking,
+        test_failure_taxonomy_surfaces_lane_lists,
+        test_lane_status_escalation,
+        test_green_run_status_cli_lane_roundtrip,
+        test_green_run_definition_documents_lane,
     ]
     failed = 0
     for t in tests:
