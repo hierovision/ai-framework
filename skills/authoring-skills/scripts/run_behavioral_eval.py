@@ -1446,6 +1446,19 @@ def _emit(message, file=None):
     print(message, file=file, flush=True)
 
 
+def lane_model(lane_state, primary):
+    """The model the runner must actually invoke right now (RM-056 D2).
+
+    The primary lane (`--model`) until the per-run switch fires, the fallback
+    id after. Both the real `opencode run --model` argument AND the record's
+    attribution go through this holder, so a post-switch record never carries
+    the dead lane's name while the process still calls it (true attribution).
+    """
+    if lane_state and lane_state.get("active"):
+        return lane_state.get("fallback_model") or primary
+    return primary
+
+
 def model_lane(model):
     """Plain lane label for a concrete `--model` id (AC1 conflict reporting).
 
@@ -1678,7 +1691,10 @@ def main(argv=None):
             return load_event_fixture(args.event_fixture)
         if args.stub_output is not None:
             return stub_result(e, args.stub_output, _stub_calls, state)
-        return invoke_opencode(e, model=args.model, turn=turn)
+        # RM-056 D2: the real invocation follows the per-run lane holder, so a
+        # post-switch eval genuinely runs on the fallback lane — not merely
+        # attributed to it.
+        return invoke_opencode(e, model=lane_model(state, args.model), turn=turn)
 
     # Catalog preflight (2026-09-28, RM-021): ADVISORY only. `opencode models`
     # is not a reliable oracle across environments (CI lists 12 gateway models
@@ -1738,7 +1754,7 @@ def main(argv=None):
         return 4
 
     for i, e in enumerate(selected):
-        model_now = state["fallback_model"] if state["active"] else args.model
+        model_now = lane_model(state, args.model)
         # RM-021 AC2: isolate per-eval exceptions so one crash cannot drop the
         # rest of the shard. Record an infra error and continue.
         try:

@@ -1433,6 +1433,18 @@ def test_fallback_is_provider_classed_error():
     print("PASS  is_provider_classed_error separates provider vs env classes")
 
 
+def test_fallback_lane_model_holder():
+    """RM-056 residual fix (a): the switched lane is the model ACTUALLY passed
+    to `opencode run`, not merely the record's attribution — a post-switch
+    record may not name the primary lane while the process still calls it."""
+    state = {"active": False, "fallback_model": FALLBACK_DRILL_MODEL}
+    assert runner.lane_model(state, DRILL_PRIMARY_MODEL) == DRILL_PRIMARY_MODEL
+    state["active"] = True
+    assert runner.lane_model(state, DRILL_PRIMARY_MODEL) == FALLBACK_DRILL_MODEL
+    assert runner.lane_model(None, DRILL_PRIMARY_MODEL) == DRILL_PRIMARY_MODEL
+    print("PASS  lane_model follows the per-run lane holder")
+
+
 def test_fallback_drill_switch_and_marking():
     """RM-056 AC1/AC2: >=3 terminal provider deaths -> ONE evidence record then
     ONE switch record (in order, kind=eval/eval_pass=None); every post-switch
@@ -1720,6 +1732,7 @@ def main():
         test_zero_selection_quarantine_diagnostics,
         test_emit_flushes_print,
         test_fallback_is_provider_classed_error,
+        test_fallback_lane_model_holder,
         test_fallback_drill_switch_and_marking,
         test_fallback_disabled_exits_three,
         test_fallback_enabled_no_key_unavailable,
