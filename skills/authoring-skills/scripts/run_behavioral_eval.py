@@ -740,6 +740,14 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             fresh += 1
             delay = FRESH_RETRY_BACKOFF_SECONDS[min(fresh - 1, len(FRESH_RETRY_BACKOFF_SECONDS) - 1)]
             sleep(delay)
+            sig = _error_signature(ctx)
+            # RM-056 residual fix (b): a provider-classed verdict-less death
+            # that participates in the trigger window carries the evidence mark.
+            marked = _note_provider_death(lane_state, eval_key(e), sig)
+            detail = (f"fresh retry {fresh}: session died with no work "
+                      f"({sig}); restarting fresh")
+            if marked:
+                detail = FALLBACK_EVIDENCE_PREFIX + detail
             log_run.log_record({
                 "kind": "eval",
                 "skill": e["skill"],
@@ -747,8 +755,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
                 "model": model or e["model_tier"],
                 "outcome": "error",
                 "eval_pass": None,
-                "detail": (f"fresh retry {fresh}: session died with no work "
-                           f"({_error_signature(ctx)}); restarting fresh")[:DETAIL_MAX],
+                "detail": detail[:DETAIL_MAX],
             }, logs_dir=logs_dir)
             if isinstance(result, EvalResult):
                 result.close()
@@ -780,11 +787,20 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
                 # Infra failure, not a content miss: keep the cause visible and
                 # separable from `failure` so the report/green-run signals are
                 # not polluted by provider errors (RM-021, 2026-09-28).
-                detail = (f"dead session: {_error_signature(ctx)} — "
-                          f"no work produced")[:DETAIL_MAX]
+                sig = _error_signature(ctx)
+                marked = _note_provider_death(lane_state, eval_key(e), sig)
+                detail = f"dead session: {sig} — no work produced"
+                if marked:
+                    detail = FALLBACK_EVIDENCE_PREFIX + detail
+                detail = detail[:DETAIL_MAX]
             else:
+                # A content miss is not a degradation death: close the window.
+                if lane_state is not None and not lane_state.get("active"):
+                    lane_state["consecutive_deaths"] = 0
                 detail = ("missing: " + " | ".join(best_missing))[:DETAIL_MAX]
             _persist_event_streams(logs_dir, e, turns)
+        elif lane_state is not None and not lane_state.get("active"):
+            lane_state["consecutive_deaths"] = 0  # a pass closes the window
         tok_in, tok_out, tok_cost = _token_totals(turns)
         rec = {
             "kind": "eval",
@@ -952,6 +968,35 @@ def is_provider_classed_error(detail):
     if is_model_resolution_error(text):
         return True
     return bool(_DEAD_SESSION_WRAPPER_RE.search(text))
+
+
+def _note_provider_death(lane_state, key, signature):
+    """RM-056 residual fix: register one dead turn's signature in the run's
+    degradation window and return whether its record carries the evidence mark.
+
+    The mark (`lane-degradation-evidence:` prefix) is required on EVERY
+    provider-classed death record in the window (the D1 classes: the
+    model-resolution class and the dead-session wrapper), never on the
+    external-directory env class. The consecutive-death counter (trigger T1)
+    advances only for the model-resolution class; any other outcome resets it,
+    so the threshold is genuinely three CONSECUTIVE deaths. Never mutates state
+    after the run has switched — the window is pre-switch evidence only.
+    """
+    if lane_state is None or lane_state.get("active"):
+        return False
+    text = signature or ""
+    if ("external_directory auto-reject" in text
+            or not is_provider_classed_error(text)):
+        lane_state["consecutive_deaths"] = 0
+        return False
+    lane_state.setdefault("degraded_evals", set()).add(key)
+    if is_model_resolution_error(text):
+        lane_state["consecutive_deaths"] = lane_state.get("consecutive_deaths", 0) + 1
+        lane_state.setdefault("window_classes", set()).add("ProviderModelNotFoundError")
+    else:
+        lane_state["consecutive_deaths"] = 0
+        lane_state.setdefault("window_classes", set()).add("dead-session UnknownError")
+    return True
 
 
 def _per_eval_provider_trigger(turns, lane_state):
@@ -1250,13 +1295,19 @@ def _drill_fallback_pass(e):
     return res
 
 
-def stub_result(e, mode, calls):
+def stub_result(e, mode, calls, lane_state=None):
     """Hermetic test output for one eval (ALL / :MISS: / :FLAKY:).
 
     Plus the RM-056 rehearsal modes: `:FALLBACK-DRILL:` (provider-classed
-    dead streams that resolve to a passing fallback lane) and
+    dead streams on the primary lane, then the healthy direct-key lane once
+    the runner's threshold has switched — a faithful per-run rehearsal) and
     `:EXTERNAL-REJECT:` (the env class that must never switch)."""
     if mode.startswith(":FALLBACK-DRILL:"):
+        # D6: once the switch has fired, further calls return the passing
+        # direct-key synthesis, so a post-switch eval (the failed smoke's
+        # record-4 shape) demonstrably runs on the healthy fallback lane.
+        if lane_state is not None and lane_state.get("active"):
+            return _drill_fallback_pass(e)
         key = eval_key(e)
         n = calls.get(key, 0)
         calls[key] = n + 1
@@ -1353,35 +1404,20 @@ def _missing_eval_keys(selected, logs_dir):
     return [eval_key(e) for e in selected if eval_key(e) not in final]
 
 
-def _dead_provider_keys(latest):
-    """RM-056: eval keys whose latest final record is a provider-classed error."""
-    return [k for k, rec in latest.items()
-            if rec.get("outcome") == "error"
-            and is_provider_classed_error(rec.get("detail"))]
-
-
 # ---------------------------------------------------------------------------
 # RM-056 D3: lane marks ride `detail` prefixes + `model` (log_run.build_record
 # drops unknown keys, so novel per-record fields would be silently lost).
-# Both annotation records carry kind=eval, eval_pass=None so they never count
-# toward a pass rate (query_runs skips eval_pass=None before counting).
+# The single switch annotation carries kind=eval/eval_pass=None so it never
+# counts toward a pass rate (query_runs skips eval_pass=None before counting);
+# the degradation evidence itself rides EVERY provider-classed death record's
+# `detail` prefix (RM-056 residual fix b — no separate evidence record).
 # ---------------------------------------------------------------------------
 
-def _write_evidence_record(primary, keys, logs_dir=None):
-    detail = (FALLBACK_EVIDENCE_PREFIX
-              + f"{len(keys)} provider-classed infra death(s); evals: "
-              + ", ".join(keys))[:DETAIL_MAX]
-    return log_run.log_record({
-        "kind": "eval", "skill": None, "agent": None,
-        "model": primary, "outcome": "error",
-        "eval_pass": None, "detail": detail,
-    }, logs_dir=logs_dir)
-
-
-def _write_switch_record(primary_label, fallback, keys, logs_dir=None):
+def _write_switch_record(primary_label, fallback, keys, classes=None, logs_dir=None):
+    evidence = ", ".join(sorted(classes or [])) or "provider-classed infra deaths"
     detail = (FALLBACK_SWITCH_PREFIX
               + f"{primary_label} -> {fallback}; per-run; evidence: "
-              + ", ".join(keys))[:DETAIL_MAX]
+              + f"{evidence} ({', '.join(keys)})")[:DETAIL_MAX]
     return log_run.log_record({
         "kind": "eval", "skill": None, "agent": None,
         "model": fallback, "outcome": "error",
@@ -1641,7 +1677,7 @@ def main(argv=None):
         if args.event_fixture:
             return load_event_fixture(args.event_fixture)
         if args.stub_output is not None:
-            return stub_result(e, args.stub_output, _stub_calls)
+            return stub_result(e, args.stub_output, _stub_calls, state)
         return invoke_opencode(e, model=args.model, turn=turn)
 
     # Catalog preflight (2026-09-28, RM-021): ADVISORY only. `opencode models`
@@ -1667,18 +1703,23 @@ def main(argv=None):
         "has_key": bool(os.environ.get("DEEPSEEK_API_KEY")),
         "active": False,
         "switched": False,
-        "evidence_written": False,
         "spend": 0.0,
         "ceiling": cfg["ceiling_usd"],
         "eval_deaths": cfg["eval_deaths"],
         "max_reruns": cfg["max_reruns"],
         "eval_trigger": False,
+        # RM-056 residual fix: the run's degradation window — consecutive
+        # provider-classed deaths (T1), the eval keys that contributed one
+        # (for the post-switch re-attempt pass), and the trigger classes
+        # (named in the lane-switch mark).
+        "consecutive_deaths": 0,
+        "degraded_evals": set(),
+        "window_classes": set(),
     }
     # The per-eval trigger covers the per-change single-canary job; on a
     # multi-eval run the run-level T1/T2 counter owns the switch so the log
     # shows the aggregate degradation first (RM-056 D1 / AC1).
     per_eval_allowed = (len(selected) == 1)
-    infra_deaths = 0
     provider_dead = 0
     attempted = 0
     latest = {}
@@ -1721,16 +1762,11 @@ def main(argv=None):
                 # made a model/provider failure look like a failed assertion in
                 # CI logs (RM-021, 2026-09-28).
                 _emit(f"      infra error: {rec.get('detail') or 'dead session'}")
-                infra_deaths = (infra_deaths + 1
-                                if is_model_resolution_error(rec.get("detail")) else 0)
                 if is_provider_classed_error(rec.get("detail")):
                     provider_dead += 1
             else:
-                infra_deaths = 0
                 for m in missing:
                     _emit(f"      missing: {m[:120]}")
-        else:
-            infra_deaths = 0
 
         # Spend guardrail (RM-056 D5): only fallback-attributed runs accrue.
         if state["active"]:
@@ -1738,47 +1774,53 @@ def main(argv=None):
             if state["spend"] > state["ceiling"]:
                 return _ceiling_stop([eval_key(x) for x in selected[i + 1:]])
 
-        # Trigger evaluation (RM-056 D1). T1 = consecutive model-resolution
-        # deaths (the early-abort counter); T2 = provider-classed share of the
-        # run; T-eval = the per-eval single-canary path.
+        # Trigger evaluation (RM-056 D1). T1 = consecutive provider-classed
+        # deaths, counted from the death records themselves so a single eval's
+        # fresh-retry budget can arm the switch (the failed live smoke); T2 =
+        # provider-classed share of the run; T-eval = the per-eval single-canary
+        # path. The consecutive counter is maintained by run_eval's
+        # `_note_provider_death` as each death record is written.
         if not state["active"]:
-            t1 = infra_deaths >= cfg["deaths"]
-            t2 = (attempted >= cfg["min_attempted"]
+            t1 = state.get("consecutive_deaths", 0) >= cfg["deaths"]
+            t2 = (attempted >= cfg["min_attempted"] and provider_dead > 0
                   and (provider_dead / attempted * 100.0) >= cfg["infra_share"])
             t_eval = bool(per_eval_allowed and state.get("eval_trigger"))
             state["eval_trigger"] = False
             if t1 or t2 or t_eval:
-                keys = _dead_provider_keys(latest) or [eval_key(e)]
-                _write_evidence_record(primary_label, keys, logs_dir=args.logs_dir)
-                state["evidence_written"] = True
+                keys = sorted(state.get("degraded_evals") or {eval_key(e)})
                 if state["enabled"] and state["has_key"]:
                     _write_switch_record(primary_label, cfg["model"], keys,
+                                         state.get("window_classes"),
                                          logs_dir=args.logs_dir)
                     state["switched"] = True
                     state["active"] = True
                     _emit(f"lane switched for this run: {primary_label} -> "
-                          f"{cfg['model']} (evidence recorded)", file=sys.stderr)
+                          f"{cfg['model']} (evidence in the death records)",
+                          file=sys.stderr)
                 elif state["enabled"] and not state["has_key"]:
                     _emit("lane-fallback-unavailable: DEEPSEEK_API_KEY not set",
                           file=sys.stderr)
                     return 3
                 elif t1:
-                    # Degradation proven but the fallback is not opted in:
-                    # today's early abort, now with the evidence record.
+                    # Degradation proven (the death records carry the evidence
+                    # mark) but the fallback is not opted in: today's early
+                    # abort, evidence still in the log.
                     _emit("aborting: model resolution failed for 3 consecutive "
-                          "evals (infra, not a regression)", file=sys.stderr)
+                          "turns (infra, not a regression)", file=sys.stderr)
                     return 3
                 # A t2/t_eval trigger without the opt-in leaves behavior as
                 # today (no abort) — only the evidence is now in the log.
 
-    # RM-056 D2: re-attempt provider-classed verdict-less failures on the
-    # fallback lane (bounded per eval), honoring the spend ceiling.
+    # RM-056 D2 + residual fix (c): re-attempt the degraded evals on the
+    # fallback lane. An eval qualifies when it contributed a provider-classed
+    # death to the run's window (verdict-less fresh-retry deaths included), its
+    # latest record is not already a pass, and it has not exhausted MAX_RERUNS.
     if state["active"]:
         for i, e in enumerate(selected):
             key = eval_key(e)
-            rec = latest.get(key) or {}
-            if not (rec.get("outcome") == "error"
-                    and is_provider_classed_error(rec.get("detail"))):
+            if key not in (state.get("degraded_evals") or set()):
+                continue
+            if (latest.get(key) or {}).get("eval_pass") is True:
                 continue
             if reruns.get(key, 0) >= int(state["max_reruns"]):
                 continue

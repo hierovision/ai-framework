@@ -1446,19 +1446,17 @@ def test_fallback_drill_switch_and_marking():
         assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
         recs = _read_logs(logs)
         ev, sw, ceil = _lane_records(logs)
-        assert len(ev) == 1 and len(sw) == 1, (ev, sw)
-        assert not ceil, ceil
-        idx_ev = recs.index(ev[0])
+        assert len(sw) == 1 and not ceil, (ev, sw, ceil)
         idx_sw = recs.index(sw[0])
-        assert idx_ev < idx_sw, "evidence must precede the switch"
-        # >=3 terminal provider-classed error records BEFORE the switch.
+        # >=3 provider-classed death records BEFORE the switch — the
+        # verdict-less fresh-retry deaths count toward the consecutive-death
+        # threshold (RM-056 residual fix) — each carrying the evidence mark.
         before = [rec for rec in recs[:idx_sw]
-                  if rec.get("eval_pass") is False and rec.get("outcome") == "error"
-                  and runner.is_model_resolution_error(rec.get("detail"))]
+                  if runner.is_provider_classed_error(rec.get("detail"))]
         assert len(before) >= 3, before
-        for rec in (ev[0], sw[0]):
-            assert rec["kind"] == "eval" and rec["eval_pass"] is None, rec
-        assert ev[0]["model"] == DRILL_PRIMARY_MODEL, ev[0]
+        assert all((rec.get("detail") or "").startswith(
+            "lane-degradation-evidence: ") for rec in before), before
+        assert sw[0]["kind"] == "eval" and sw[0]["eval_pass"] is None, sw[0]
         assert sw[0]["model"] == FALLBACK_DRILL_MODEL, sw[0]
         # Every post-switch final verdict is attributed to the fallback lane.
         post = [rec for rec in recs[idx_sw + 1:] if rec.get("eval_pass") is not None]
@@ -1481,7 +1479,10 @@ def test_fallback_disabled_exits_three():
         assert r.returncode == 3, (r.returncode, r.stdout, r.stderr)
         ev, sw, ceil = _lane_records(logs)
         assert not sw and not ceil, (sw, ceil)
-        assert len(ev) == 1, ev  # degradation is still proven in the log
+        # degradation is still proven in the log: every window death carries
+        # the evidence mark (RM-056 residual fix b).
+        assert ev and all((rec.get("detail") or "").startswith(
+            "lane-degradation-evidence: ") for rec in ev), ev
         assert not any(rec.get("model") == FALLBACK_DRILL_MODEL
                        for rec in _read_logs(logs)), "no fallback verdicts when disabled"
     finally:
@@ -1501,7 +1502,9 @@ def test_fallback_enabled_no_key_unavailable():
         assert ("lane-fallback-unavailable: DEEPSEEK_API_KEY not set"
                 in (r.stderr or "")), r.stderr
         ev, sw, ceil = _lane_records(logs)
-        assert len(ev) == 1 and not sw and not ceil, (ev, sw, ceil)
+        assert ev and not sw and not ceil, (ev, sw, ceil)
+        assert all((rec.get("detail") or "").startswith(
+            "lane-degradation-evidence: ") for rec in ev), ev
         assert not any(rec.get("model") == FALLBACK_DRILL_MODEL
                        for rec in _read_logs(logs))
     finally:
@@ -1594,11 +1597,68 @@ def test_fallback_per_eval_single_canary():
         r = _run_drill(root, logs, ":FALLBACK-DRILL:", env)
         assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
         ev, sw, ceil = _lane_records(logs)
-        assert len(ev) == 1 and len(sw) == 1, (ev, sw)
+        assert ev and len(sw) == 1, (ev, sw)
+        assert all((rec.get("detail") or "").startswith(
+            "lane-degradation-evidence: ") for rec in ev), ev
         verdicts = [rec for rec in _read_logs(logs)
                     if rec.get("eval_pass") is True]
         assert verdicts, "the single canary must pass on the fallback lane"
         assert all(rec.get("model") == FALLBACK_DRILL_MODEL for rec in verdicts)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+
+
+def test_fallback_real_shape_lane_marks():
+    """RM-056 residual fix (d): the failed live-smoke's record shape.
+
+    Two evals on a healthy-fallback drill: eval #1 burns its whole retry
+    budget on the primary lane (3 provider-classed deaths), the switch arms on
+    the 3rd death, and eval #2 — record 4 of the failed smoke — runs and
+    passes on the fallback lane. Asserts every primary death carries the
+    evidence mark, exactly one lane-switch mark spans the run, and no record
+    after the switch carries the dead lane's name (record 4's two defects).
+    """
+    root = _make_drill_root(2)
+    logs = tempfile.mkdtemp(prefix="beval-realshape-logs-")
+    env = _fallback_env(BEVAL_FALLBACK_ENABLED="1",
+                        DEEPSEEK_API_KEY="sk-test")
+    try:
+        r = _run_drill(root, logs, ":FALLBACK-DRILL:", env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        recs = _read_logs(logs)
+        ev, sw, ceil = _lane_records(logs)
+        assert len(sw) == 1 and not ceil, (ev, sw, ceil)
+
+        # (b) every primary-lane model-resolution death carries the evidence
+        # mark: the two verdict-less fresh-retry deaths AND the terminal one.
+        deaths = [rec for rec in recs
+                  if rec.get("model") == DRILL_PRIMARY_MODEL
+                  and runner.is_model_resolution_error(rec.get("detail"))]
+        assert len(deaths) == 3, deaths
+        assert all((rec.get("detail") or "").startswith(
+            "lane-degradation-evidence: ") for rec in deaths), deaths
+
+        # (a) the switch record names the primary id, the fallback lane, the
+        # per-run scope, and the trigger class (not a bare list of keys).
+        det = sw[0]["detail"]
+        assert det.startswith("lane-switch: "), det
+        assert (f"{DRILL_PRIMARY_MODEL} -> {FALLBACK_DRILL_MODEL}; per-run"
+                in det), det
+        assert "ProviderModelNotFoundError" in det, det
+        assert sw[0]["model"] == FALLBACK_DRILL_MODEL, sw[0]
+
+        # (a) record-4 shape: post-switch verdicts (eval #2's success and
+        # eval #1's rescue) carry the true lane model, never the dead lane's.
+        idx_sw = recs.index(sw[0])
+        post = [rec for rec in recs[idx_sw:] if rec.get("eval_pass") is not None]
+        assert post, "post-switch verdicts expected"
+        assert all(rec["model"] == FALLBACK_DRILL_MODEL for rec in post), post
+        assert all(rec.get("eval_pass") is True for rec in post), post
+        assert not any(rec.get("model") == DRILL_PRIMARY_MODEL
+                       for rec in recs[idx_sw:]), recs[idx_sw:]
+        # zero stray records: exactly the 3 marked deaths + 1 switch + 2 verdicts
+        assert len(recs) == 6, recs
     finally:
         shutil.rmtree(root, ignore_errors=True)
         shutil.rmtree(logs, ignore_errors=True)
@@ -1667,6 +1727,7 @@ def main():
         test_fallback_primary_healthy_records_no_lane,
         test_fallback_ceiling_stops_with_exit_four,
         test_fallback_per_eval_single_canary,
+        test_fallback_real_shape_lane_marks,
     ]
     failed = 0
     for t in tests:
