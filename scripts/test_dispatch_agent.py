@@ -148,8 +148,36 @@ if mode == "surrogate":
                    "text": "Verification: ok\\nHandoff: \\ud800"}})
     sys.exit(0)
 
+if mode == "commitdir":
+    # emulate a child that touches branches: commit a file in its --dir (the
+    # 2026-10-13 wrong-branch class; the worktree must confine this)
+    import subprocess
+    d = argv[argv.index("--dir") + 1] if "--dir" in argv else os.getcwd()
+    with open(os.path.join(d, "child.txt"), "w", encoding="utf-8") as fh:
+        fh.write("child\\n")
+    subprocess.run(["git", "-C", d, "add", "child.txt"], check=True,
+                   capture_output=True, text=True)
+    subprocess.run(["git", "-C", d, "commit", "-m", "child commit"], check=True,
+                   capture_output=True, text=True)
+    valid_body("ses_stub_valid")
+    sys.exit(0)
+
 # valid
 valid_body("ses_stub_valid")
+'''
+
+# Stub completion-observer: records its argv, so the dispatcher's spawn of the
+# observer (via OBSERVE_COMPLETION_PATH) can be asserted hermetically.
+OBSERVER_STUB = r'''#!/usr/bin/env python3
+import json
+import os
+import sys
+
+out = os.environ.get("OBSERVER_STUB_OUT")
+if out:
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(sys.argv[1:], fh)
+sys.exit(0)
 '''
 
 
@@ -181,7 +209,8 @@ def _make_stub(td):
     return bin_dir
 
 
-def _run(mode, extra=None, timeout="10", env_extra=None):
+def _run(mode, extra=None, timeout="10", env_extra=None, cwd=REPO,
+         agent="architect"):
     """Invoke dispatch_agent.py against the stub -> result namespace."""
     assert os.path.isfile(DISPATCH), "scripts/dispatch_agent.py missing (red-first)"
     td = tempfile.mkdtemp(prefix="dispatch-test-")
@@ -195,19 +224,22 @@ def _run(mode, extra=None, timeout="10", env_extra=None):
         out = os.path.join(td, "result.md")
         logs = os.path.join(td, "logs")
         cmd = [
-            sys.executable, DISPATCH, "--agent", "architect",
+            sys.executable, DISPATCH, "--agent", agent,
             "--prompt-file", prompt, "--out", out, "--logs-dir", logs,
             "--timeout", timeout,
         ] + list(extra or [])
         env = dict(os.environ)
         env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
         env["STUB_MODE"] = mode
+        # the ambient opencode session exports its own OPENCODE_CONFIG_CONTENT;
+        # drop it so the dispatch's own merge is what the stub observes
+        env.pop("OPENCODE_CONFIG_CONTENT", None)
         if env_extra:
             env.update(env_extra)
 
         started = time.monotonic()
         proc = subprocess.run(cmd, capture_output=True, text=True, env=env,
-                              cwd=REPO, timeout=60)
+                              cwd=cwd, timeout=60)
         elapsed = time.monotonic() - started
 
         records = []
@@ -729,6 +761,265 @@ def test_reference_docs_carry_the_recipe():
     for phrase in ("--stream-out", "--heartbeat", "--allow-dirs",
                    "session-resolved"):
         assert phrase in teams, f"agent-teams.md missing {phrase!r}"
+
+
+# --- AC6: per-agent-class permission profile (RM-058 D4) --------------------
+
+def _ext_map(dump_path):
+    env = json.loads(_read(dump_path))
+    return json.loads(env["OPENCODE_CONFIG_CONTENT"])["permission"]["external_directory"]
+
+
+def test_profile_env_merge():
+    """AC6: the recon profile grants the three chronic denied roots; the test
+    class is narrower ($HOME/repos only); --profile none disables defaults;
+    caller settings win on overlap."""
+    work = tempfile.mkdtemp(prefix="dispatch-profile-")
+    try:
+        extra = os.path.join(work, "extra")
+        os.makedirs(extra)
+        dump = os.path.join(work, "env.json")
+        r = _run("valid", extra=["--profile", "auto", "--allow-dirs", extra,
+                                 "--contract", "implement-handoff"],
+                 env_extra={"STUB_DUMP_ENV": dump})
+        assert r.rc == 0, (r.rc, r.stderr)
+        ext = _ext_map(dump)
+        roots = [os.path.expanduser("~/repos"),
+                 os.path.expanduser("~/.config/opencode"),
+                 os.path.expanduser("~/.local/share/opencode"), extra]
+        for d in roots:
+            key = os.path.join(os.path.abspath(d), "**")
+            assert ext.get(key) == "allow", (key, ext)
+
+        # the test class carries $HOME/repos only (D4 least privilege)
+        dump2 = os.path.join(work, "env2.json")
+        r2 = _run("valid", agent="test-writer", extra=["--profile", "auto",
+                                                       "--contract", "implement-handoff"],
+                  env_extra={"STUB_DUMP_ENV": dump2})
+        assert r2.rc == 0, (r2.rc, r2.stderr)
+        ext2 = _ext_map(dump2)
+        assert ext2.get(os.path.join(os.path.expanduser("~/repos"), "**")) == "allow", ext2
+        assert os.path.join(os.path.expanduser("~/.config/opencode"), "**") not in ext2, ext2
+
+        # --profile none disables profile defaults entirely
+        dump3 = os.path.join(work, "env3.json")
+        r3 = _run("valid", extra=["--profile", "none",
+                                  "--contract", "implement-handoff"],
+                  env_extra={"STUB_DUMP_ENV": dump3})
+        assert r3.rc == 0, (r3.rc, r3.stderr)
+        assert "OPENCODE_CONFIG_CONTENT" not in json.loads(_read(dump3)), _read(dump3)
+
+        # an explicit caller setting wins on overlap (setdefault semantics)
+        cfg_key = os.path.join(os.path.expanduser("~/.config/opencode"), "**")
+        caller = json.dumps({"permission": {"external_directory": {cfg_key: "deny"}}})
+        dump4 = os.path.join(work, "env4.json")
+        r4 = _run("valid", extra=["--profile", "auto", "--contract",
+                                  "implement-handoff"],
+                  env_extra={"STUB_DUMP_ENV": dump4,
+                             "OPENCODE_CONFIG_CONTENT": caller})
+        ext4 = _ext_map(dump4)
+        assert ext4[cfg_key] == "deny", ext4
+        assert ext4[os.path.join(os.path.expanduser("~/repos"), "**")] == "allow", ext4
+
+        # an unknown named profile exits 2 before launch
+        r5 = _run("valid", extra=["--profile", "nope",
+                                  "--contract", "implement-handoff"])
+        assert r5.rc == 2, (r5.rc, r5.stderr)
+        assert "session_id=" not in r5.stdout, r5.stdout
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+# --- AC5: worktree-safe dispatch (RM-058 D3) --------------------------------
+
+def _git(repo, *args):
+    return subprocess.run(["git", "-C", repo] + list(args),
+                          capture_output=True, text=True)
+
+
+def _init_repo(path):
+    subprocess.run(["git", "init", "-b", "main", path], check=True,
+                   capture_output=True)
+    _git(path, "config", "user.email", "test@test")
+    _git(path, "config", "user.name", "test")
+    with open(os.path.join(path, "README.md"), "w", encoding="utf-8") as fh:
+        fh.write("init\n")
+    _git(path, "add", "README.md")
+    _git(path, "commit", "-m", "init")
+
+
+def _count(repo):
+    return int(_git(repo, "rev-list", "--count", "HEAD").stdout.strip())
+
+
+def _head(repo):
+    return _git(repo, "symbolic-ref", "--short", "HEAD").stdout.strip()
+
+
+def test_worktree_safety():
+    """AC5: with --worktree the child's commit lands on dispatch/<name> inside
+    .scratch/worktrees/<name> while the parent stays on main with zero new
+    commits; a parent off main exits 2 before launch. The absent-flag case is
+    the red-first 2026-10-13 reproduction (parent branch mutated)."""
+    # (0) red-first rehearsal: WITHOUT --worktree the child mutates the parent
+    repo0 = tempfile.mkdtemp(prefix="dispatch-wt-red-")
+    try:
+        _init_repo(repo0)
+        base0 = _count(repo0)
+        _run("commitdir", extra=[], cwd=repo0)
+        assert _count(repo0) == base0 + 1, \
+            "red-first: pre-fix dispatch did not mutate the parent branch"
+        assert "child commit" in _git(repo0, "log", "--oneline").stdout
+    finally:
+        shutil.rmtree(repo0, ignore_errors=True)
+
+    repo = tempfile.mkdtemp(prefix="dispatch-wt-")
+    try:
+        _init_repo(repo)
+        base = _count(repo)
+        r = _run("commitdir", extra=["--worktree", "t1"], cwd=repo)
+        assert r.rc == 0, (r.rc, r.stdout, r.stderr)
+        assert "dispatch/t1" in r.stdout, r.stdout
+
+        # parent is untouched, still on main
+        assert _head(repo) == "main", _head(repo)
+        assert _count(repo) == base, _count(repo)
+        assert "child commit" not in _git(repo, "log", "--oneline").stdout
+
+        # the commit landed on dispatch/t1 inside the worktree only
+        wt = os.path.join(repo, ".scratch", "worktrees", "t1")
+        assert os.path.isdir(wt), wt
+        assert _head(wt) == "dispatch/t1", _head(wt)
+        assert "child commit" in _git(wt, "log", "--oneline").stdout
+
+        # a --session resume reuses the existing worktree, parent untouched
+        r_resume = _run("valid", extra=["--worktree", "t1",
+                                        "--session", "ses_stub_valid"], cwd=repo)
+        assert r_resume.rc == 0, (r_resume.rc, r_resume.stdout, r_resume.stderr)
+        assert _head(repo) == "main", _head(repo)
+        assert _count(repo) == base, _count(repo)
+
+        # a resume against a missing worktree refuses before opencode launches
+        r_missing = _run("valid", extra=["--worktree", "nope",
+                                         "--session", "ses_stub_valid"], cwd=repo)
+        assert r_missing.rc == 2, (r_missing.rc, r_missing.stderr)
+        assert "not found" in r_missing.stderr, r_missing.stderr
+        assert "session_id=" not in r_missing.stdout, r_missing.stdout
+
+        # a parent off main refuses before opencode launches (no session)
+        _git(repo, "checkout", "-b", "off-main")
+        r2 = _run("commitdir", extra=["--worktree", "t2"], cwd=repo)
+        assert r2.rc == 2, (r2.rc, r2.stdout, r2.stderr)
+        assert "not on main" in r2.stderr, r2.stderr
+        assert "session_id=" not in r2.stdout, r2.stdout
+    finally:
+        shutil.rmtree(repo, ignore_errors=True)
+
+
+def _dispatch_module():
+    spec = importlib.util.spec_from_file_location("dispatch_mod", DISPATCH)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_profile_class_resolution():
+    """D4 coverage: exact key > alias > longest-prefix; dir expansion; the
+    profile-driven worktree name derivation."""
+    mod = _dispatch_module()
+    profiles, aliases = mod.load_profiles()
+    assert mod.resolve_profile_name("architect", profiles, aliases) == "architect"
+    assert mod.resolve_profile_name("council-architecture", profiles,
+                                    aliases) == "council"
+    assert mod.resolve_profile_name("test-writer", profiles, aliases) == "test"
+    assert mod.resolve_profile_name("vision-critic-fast", profiles,
+                                    aliases) == "reviewer"
+    assert mod.resolve_profile_name("debugger", profiles, aliases) == "implementer"
+    assert mod.resolve_profile_name("totally-unknown", profiles,
+                                    aliases) == "default"
+    assert mod.expand_dirs(["$HOME/repos"]) == [os.path.expanduser("~/repos")]
+    assert mod.resolve_profile("x", "none", profiles, aliases)[1]["allow_dirs"] == []
+    assert mod.resolve_profile("x", "nope", profiles, aliases) == (None, None)
+
+    work = tempfile.mkdtemp(prefix="dispatch-wtname-")
+    try:
+        hb = os.path.join(work, "progress.log")
+        with open(hb, "w", encoding="utf-8") as fh:
+            fh.write("# progress: implement RM-058\n")
+        assert mod.default_worktree_name(os.path.join(work, "p.md"), hb) == \
+            "implement-rm-058"
+        assert mod.default_worktree_name(os.path.join(work, "my-task.md"),
+                                         None) == "my-task"
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+# --- AC1 integration: --wake-to spawns the observer (RM-058 D2) -------------
+
+def _write_observer_stub(path):
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(OBSERVER_STUB)
+    os.chmod(path, 0o755)
+
+
+def test_wake_to_spawns_observer():
+    """AC1 integration point: with --wake-to the dispatcher spawns the detached
+    observer once the child session id prints; without it, no observer."""
+    work = tempfile.mkdtemp(prefix="dispatch-wake-")
+    try:
+        hb = os.path.join(work, "progress.log")
+        marker = os.path.join(work, "observer.json")
+        stub = os.path.join(work, "observer_stub.py")
+        _write_observer_stub(stub)
+        r = _run("valid", extra=["--heartbeat", hb, "--wake-to", "ses_orch",
+                                 "--contract", "implement-handoff"],
+                 env_extra={"OBSERVE_COMPLETION_PATH": stub,
+                            "OBSERVER_STUB_OUT": marker})
+        assert r.rc == 0, (r.rc, r.stderr)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not os.path.isfile(marker):
+            time.sleep(0.05)
+        assert os.path.isfile(marker), "observer was not spawned"
+        argv = json.loads(_read(marker))
+        assert "--orchestrator-session" in argv and "ses_orch" in argv, argv
+        assert "--child-session" in argv and "ses_stub_valid" in argv, argv
+        assert "--heartbeat" in argv and hb in argv, argv
+
+        # without --wake-to no observer is spawned
+        marker2 = os.path.join(work, "observer2.json")
+        r2 = _run("valid", extra=["--heartbeat", hb,
+                                  "--contract", "implement-handoff"],
+                  env_extra={"OBSERVE_COMPLETION_PATH": stub,
+                             "OBSERVER_STUB_OUT": marker2})
+        assert r2.rc == 0, (r2.rc, r2.stderr)
+        time.sleep(0.3)
+        assert not os.path.isfile(marker2), "observer spawned without --wake-to"
+
+        # --wake-to without --heartbeat is a usage error (exit 2)
+        r3 = _run("valid", extra=["--wake-to", "ses_orch"])
+        assert r3.rc == 2, (r3.rc, r3.stderr)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+# --- AC7: the launch echo proves intent, never status -----------------------
+
+def test_dispatcher_heartbeat_has_no_survey_claim():
+    """AC7: the dispatcher writes only the envelope (header + START + one
+    terminal line); a `SURVEY running` claim comes only from the observer."""
+    work = tempfile.mkdtemp(prefix="dispatch-hb-")
+    try:
+        hb = os.path.join(work, "progress.log")
+        r = _run("valid", extra=["--heartbeat", hb,
+                                 "--contract", "implement-handoff"])
+        assert r.rc == 0, (r.rc, r.stderr)
+        lines = _lines(r.heartbeat)
+        assert not any(" SURVEY " in l for l in lines), lines
+        assert not any(" WAKE " in l for l in lines), lines
+        terminals = [l for l in lines if " DONE " in l or " BLOCKED " in l]
+        assert len(terminals) == 1 and "DONE ok" in terminals[0], lines
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def main():

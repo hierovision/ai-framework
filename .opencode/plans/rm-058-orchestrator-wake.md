@@ -1,8 +1,9 @@
 ---
 slug: rm-058-orchestrator-wake
 title: Wake the orchestrator on subagent terminal state; worktree-safe dispatch; per-dispatch permission profile
-status: draft
+status: approved
 created: 2026-10-15
+revised: [2026-10-15]
 related: [rm-056-eval-lane-fallback]
 ---
 
@@ -519,3 +520,43 @@ required):
   design-consult lens needed — single durable-surface supervision stack
   with an already-frozen owner policy; the item's open design dimensions
   were resolved against recorded evidence D1–D7 above).
+- 2026-10-15 — **Implemented** (implement pass, branch
+  `feat/rm-058-orchestrator-wake`). Delivered: `scripts/observe_completion.py`
+  (D1 terminal table, D2 wake + rule-1 quiescence gate, D5 `SURVEY`/`WAKE`/
+  `WAKE_DEFERRED` line ownership, D6 `AWAITING` classification, D7 wake text),
+  `scripts/dispatch-profiles.json` (D4), `--worktree`/`--wake-to`/`--profile`
+  on `scripts/dispatch_agent.py` (D2/D3/D4), the reference wake contract
+  (`reference/subagent-supervision.md` §2 + §6), and hermetic tests.
+  - Verification (all exit 0): `test_dispatch_agent.py` (24 cases),
+    `test_observe_completion.py` (7 cases), `test_watch_agent.py` (13),
+    `test_session_guard.py` (26), `test_validate_delegated_result.py` (7).
+  - Red-first evidence: `test_observe_completion.py` failed pre-implementation
+    with `scripts/observe_completion.py missing`; against `main`'s
+    `dispatch_agent.py` the new dispatch cases failed with `unrecognized
+    arguments: --profile/--wake-to/--worktree`, while the AC5 rehearsal step
+    (dispatch WITHOUT `--worktree`) passed by mutating the parent branch — the
+    2026-10-13 reproduction.
+  - Mechanical deviations (feature unchanged): (1) `dispatch-profiles.json`
+    carries a top-level `aliases` map because the plan's own example
+    (`vision-critic-fast → reviewer`) is not expressible by longest-prefix
+    alone; (2) the observer spawn adds plumbing args the D7 wake text needs
+    (`--child-session`, `--result`, `--logs-dir`, `--worktree`, `--branch`)
+    beyond D2's five; (3) profile `worktree` ships `false` for every class in
+    v1 (explicit `--worktree <name>` is the enabling path) so "no behavior
+    change without the new flags" holds and no test mutates a real repo — the
+    honor logic exists and is unit-tested; (4) AC5's worktree suite lives in
+    `test_dispatch_agent.py`; `test_observe_completion.py` covers AC1–AC4,
+    AC7, AC9; (5) `--timeout` default is now `None` (effective default still
+    600) so a profile timeout can apply; (6) `.gitignore` unchanged — the
+    existing `.scratch/` entry already covers `.scratch/worktrees/`.
+  - Not exercised hermetically (owner manual): AC8 live smoke (concurrent
+    owner interaction + real wake turn) — checklist in the handoff.
+
+### Follow-ups
+
+- AC8 live smoke and roadmap closure are owned by the orchestrator at merge;
+  `docs/ROADMAP.md` was deliberately not touched by this pass.
+- `session.idle` opencode plugin hook (latency narrowing) stays an Open
+  Question, unimplemented.
+- `test` profile granularity for consumer `.scratch/` trees: extend
+  `dispatch-profiles.json` on the first recorded denial, never pre-emptively.
