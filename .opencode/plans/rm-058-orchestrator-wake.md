@@ -551,8 +551,60 @@ required):
     existing `.scratch/` entry already covers `.scratch/worktrees/`.
   - Not exercised hermetically (owner manual): AC8 live smoke (concurrent
     owner interaction + real wake turn) — checklist in the handoff.
+- 2026-10-15 — **Live-smoke defect diagnosis: H1 (wake vehicle) confirmed,
+  H2 (gate) refuted. No code change — STOP, blocked on a design pass.** The
+  AC8 live smoke (detached `architect` dispatch, `--wake-to
+  ses_edc9935acffeRgTjT2aQYvLhUD`, opencode **1.19.1**) failed: the observer's
+  `opencode run --session <orch> --format json "DISPATCH WAKE …"` ran the full
+  `WAKE_SUBPROCESS_TIMEOUT` (180 s) and was killed; no `WAKE` line. Evidence
+  from the opencode event log
+  (`~/.local/share/opencode/log/opencode.log`) and the session store:
+  - **H2 refuted.** At delivery (~20:03:31) the orchestrator session was
+    idle: its last TUI turn ended 20:02:36.518 (`step-finish`), the injected
+    wake is the next part (20:03:31.070), and the next turn starts
+    20:03:36.146. `orchestrator_quiescent()` correctly read quiescent — no
+    tool in flight, `time_updated` stable across two polls.
+  - **H1 confirmed.** The wake turn ran in the *subprocess's own server*, not
+    the live TUI. Log: `run=e59d1f4c` (**agent=`build`**, opencode's default
+    primary agent) processed it 20:03:31→20:06:46; the live TUI is
+    `run=be145e63` (**agent=`curator`**) and never saw those events.
+    `opencode run --session` starts its own local server (`--port` default
+    random), so a second process runs a *ghost* turn — persisted to
+    `opencode.db` but never rendered in the TUI. It also ignored the session's
+    agent (`build`, not `curator`) and took 3m15s > the 180 s timeout, so it
+    was killed mid-turn.
+  - Vehicle-in-isolation check (`opencode run` then `opencode run --session
+    <id>` on a throwaway, non-TUI session): both exit 0 quickly — the vehicle
+    is sound for an unheld session; the defect is specific to a live TUI-held
+    session.
+  - The plan's pre-authorized remedy (`opencode attach` against the TUI
+    server) is infeasible on 1.19.1: the TUI process holds **no LISTENING
+    socket** (`ss -tlnp` / `/proc/<pid>/net/tcp`; the only localhost listeners
+    are VS Code server pids 689448/689889) — there is no HTTP URL to attach
+    to. `opencode attach` is also interactive, not a fire-and-forget wake.
+    The only in-process vehicle is a plugin (this environment already loads
+    `~/.config/opencode/plugins/auto-compact-at-threshold.js`), which the
+    plan's Excluded list forbids without a design pass.
+  - **Change: none.** STOP per the H1 branch. `reference/subagent-supervision.md`
+    §6 carries a dated caveat that this vehicle does not deliver a visible
+    turn to a live TUI.
+  - Secondary latent finding (not this smoke's cause): the quiescence gate's
+    `time_updated`-stability signal is blind to a *mid-generation* turn — a
+    step's `time_updated` lands at `step-finish`, so a long model call with no
+    tool in flight can read as quiescent. Recorded for the design pass.
 
 ### Follow-ups
+
+- **Wake vehicle (H1, blocks AC8).** `opencode run --session` cannot deliver
+  a visible wake to a live TUI session (it runs a ghost turn in its own
+  server). Needs a design pass: (a) require the orchestrator to be reachable
+  as a server (`opencode serve` + `opencode attach`, or `opencode --port N`)
+  and deliver with `opencode run --attach <url>`; or (b) an in-process
+  `session.idle` plugin. The plan's Open Question #1 remedy as written
+  (`opencode attach`) is infeasible (no server URL; attach is interactive).
+- **Quiescence-gate generation-blindness.** Harden `orchestrator_quiescent()`
+  with a part-recency signal (age of the newest part), not `time_updated`
+  stability alone; add a regression test for the mid-generation case.
 
 - AC8 live smoke and roadmap closure are owned by the orchestrator at merge;
   `docs/ROADMAP.md` was deliberately not touched by this pass.

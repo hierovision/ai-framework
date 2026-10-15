@@ -247,6 +247,16 @@ python3 scripts/dispatch_agent.py --agent <name> --prompt-file <file> \
   having no tool in flight and a stable `time_updated`. It retries until the
   deadline (default 300 s), then writes one durable `WAKE_DEFERRED` line
   instead of asserting a wake that cannot happen while the owner owns the turn.
+  - **Known-broken as of 2026-10-15 (opencode 1.19.1):** `opencode run
+    --session <id>` starts its *own* server, so against a **live TUI-held**
+    session it runs a ghost turn (default `build` agent) that is persisted to
+    `opencode.db` but never rendered in the TUI — the wake is invisible to the
+    owner. The TUI exposes no HTTP URL to `--attach` to, and `opencode attach`
+    is interactive. The working vehicle (e.g. orchestrator reachable via
+    `opencode serve`/`--port` + `opencode run --attach`, or an in-process
+    plugin) is pending a design pass; do not rely on the vehicle above until
+    this line is superseded (see `.opencode/plans/rm-058-orchestrator-wake.md`
+    History, 2026-10-15).
 - **Wake text (D7).** A fixed-shape `DISPATCH WAKE <agent> outcome=…` block
   carrying task, child session, result/run-log/heartbeat paths, and — when
   `--worktree` was used — the worktree path/branch plus the cleanup owed. The
