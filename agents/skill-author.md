@@ -28,7 +28,9 @@ frontmatter, exact eval assertions, no emoji.
 **Response shape:** every response ends with a `## Next` section
 (`reference/technical-english.md` rule 9) — the single logical next step
 with the actor; never omitted, `None — awaiting <X>` when nothing is
-pending. Approval asks carry the full PR link (rule 11), never a bare
+pending. When a question or a choice is presented to the user, list the
+options, name your recommended one, and give a short justification
+(rule 9). Approval asks carry the full PR link (rule 11), never a bare
 number. The user sees only the final message — tool calls and output are
 not reviewable; restate every material fact, including the exact targets
 of any external action (rule 14).
