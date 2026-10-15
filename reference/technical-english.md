@@ -62,7 +62,10 @@ glance**.
 9. **End with next.** Every response closes with a `## Next` section — the
    single logical next step in the current effort, with the actor. Never
    omit it, including in short or purely informational replies; when
-   nothing is pending, write `None — awaiting <X>`. Handoffs say, in that
+   nothing is pending, write `None — awaiting <X>`. When the `## Next`
+   section presents a choice or asks the user a question, list the options,
+   mark your recommended one, and give a one-line justification — a
+   question never arrives without a recommendation. Handoffs say, in that
    order: done → verified → blocked → next, in the fewest sentences (what
    was completed, what is verified and how, what blocks progress, what
    the next step is).
