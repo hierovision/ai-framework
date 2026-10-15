@@ -52,7 +52,7 @@ scoring uses the Rex Black rubric.
 - "plan" = `docs/maturity-plan.md`; issue refs = `hierovision/ai-framework#NN`.
 
 <<<<<<< Updated upstream
-## Priority order (1–36)
+## Priority order (1–35)
 =======
 ## Priority order (1–35)
 >>>>>>> Stashed changes
@@ -61,7 +61,7 @@ title`. IDs link to that row's full record in `docs/roadmap-detail/`.
 Score = Impact × Urgency. `— in progress` marks the row under work.
 
 <<<<<<< Updated upstream
-### Now (19)
+### Now (18)
 =======
 ### Now (18)
 >>>>>>> Stashed changes
@@ -117,7 +117,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 | ID | Title | Outcome | Horizon | Category | Impact | Urgency | Score | Status | Success measure | Blocked-by | Sources | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | RM-021 | Eval reliability: prompt hygiene + typed migration sweep (runner resilience lands first) | — | Now | evaluation | 3 | 3 | 9 | in-progress | The next weekly run qualifies fully green and is recorded via green-run-status; no silent drops. | — | 2026-09-28 session (weekly run 36410692855: 4/47 pass, 16 dead-session deaths; authoring canary 3/3 dead-session failures) | in-progress; runner resilience + prompt batches landed (#42–#44); residue pass corrected the 3 live canaries (PR #110, merged); the sweep CLOSES at the recorded green run. prev: 2 (priority-1-5-composite); detail: docs/roadmap-detail/RM-021.md. |
-| RM-056 | Eval-lane fallback — direct deepseek-v4.1-flash API on log-proven model/opencode service degradation | — | Now | evaluation | 3 | 3 | 9 | open | A log-proven model/opencode service degradation switches the eval lane to the deepseek-v4.1-flash direct API, marked in the eval report — never silent. | — | user directive 2026-10-11 (open question, RM-052/053 design review); RM-021-diagnosed degradation classes | owner directive 2026-10-11 (design review); per-run lane switch, routing policy stays RM-039/ADR-0013; persistent degradation escalates to a routing review. prev: 2 (priority-1-5-composite); detail: docs/roadmap-detail/RM-056.md. |
+| RM-056 | Eval-lane fallback — direct deepseek-v4.1-flash API on log-proven model/opencode service degradation | — | — | evaluation | — | — | — | done | A log-proven model/opencode service degradation switches the eval lane to the deepseek-v4.1-flash direct API, marked in the eval report — never silent. | — | user directive 2026-10-11 (open question, RM-052/053 design review); RM-021-diagnosed degradation classes | delivered 2026-10-15 (PRs #114+v #115 merged; live smoke green record-by-record: trigger evidence, lane switch, true-lane attribution, ceiling clause, and the eval content retargeted to the artifact layer). prev: 2 (priority-1-5-composite). detail: docs/roadmap-detail/RM-056.md |
 | RM-058 | Orchestrator wake-on-completion — concurrent subagent interaction + owner-free notifications | — | Now | self-improvement | 3 | 3 | 9 | open | A hermetic contract test proves a terminal-state subagent outcome reaches the orchestrator conversation within 5 minutes, owner-ping-free | — (complements RM-022/RM-045) | user directive 2026-10-12; stack RM-022/RM-045/RM-032; AGENTS.md rule 1 boundary | Concurrent interaction while a subagent runs is the working model today; requirement 2 (owner-ping-free wake) is the infra target, standard for this repo and every consumer (uniform via live symlinks). detail: docs/roadmap-detail/RM-058.md |
 | RM-016 | Eval-harness independence — sanitized skill staging | — | Now | evaluation | 3 | 2 | 6 | open | A re-run sourcing-external-skills suite shows zero answer-key reads with unchanged pass/fail — no weakened assertions. | — | 2026-09-28 triage (session) | fired 2026-09-28 (all 7 fresh-agent runs read the answer key); fix belongs in the behavioral runner. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-016.md. |
 | RM-018 | Next.js + Supabase stack reference for `designing-architecture` | — | Now | self-improvement | 2 | 3 | 6 | open | A Next.js + Supabase design pass selects the dedicated stack reference — no Vue-reference hand-translation. | — | hierovision/ai-framework#29; PLN design pass 2026-09-27 | fired 2026-09-27; re-anchored to paragon-learning-network (Decision 1, 2026-10-09). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-018.md. |
@@ -177,7 +177,7 @@ None (threshold: null).
 
 ## Done
 <<<<<<< Updated upstream
-Newest first; 23 closed of 59. The table carries the one-line
+Newest first; 24 closed of 59. The table carries the one-line
 =======
 Newest first; 23 closed of 58. The table carries the one-line
 >>>>>>> Stashed changes
