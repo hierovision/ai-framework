@@ -60,11 +60,7 @@ One list per horizon, rank order. Every line: `[ID](detail) (score) —
 title`. IDs link to that row's full record in `docs/roadmap-detail/`.
 Score = Impact × Urgency. `— in progress` marks the row under work.
 
-<<<<<<< Updated upstream
 ### Now (18)
-=======
-### Now (18)
->>>>>>> Stashed changes
 
 - [RM-021](docs/roadmap-detail/RM-021.md) (9) — Eval reliability: prompt hygiene + typed migration sweep (runner resilience lands first) — in progress
 - [RM-056](docs/roadmap-detail/RM-056.md) (9) — Eval-lane fallback — direct deepseek-v4.1-flash API on log-proven model/opencode service degradation
