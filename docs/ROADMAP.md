@@ -51,11 +51,7 @@ scoring uses the Rex Black rubric.
 - Detail files: per-ID provenance at docs/roadmap-detail/<ID>.md (relocated byte-exact 2026-10-11; owner ruling: no massive detail in the roadmap). Referenced from each row's Notes; consumed at design passes; pruned by the quarterly ALM review.
 - "plan" = `docs/maturity-plan.md`; issue refs = `hierovision/ai-framework#NN`.
 
-<<<<<<< Updated upstream
 ## Priority order (1–35)
-=======
-## Priority order (1–35)
->>>>>>> Stashed changes
 One list per horizon, rank order. Every line: `[ID](detail) (score) —
 title`. IDs link to that row's full record in `docs/roadmap-detail/`.
 Score = Impact × Urgency. `— in progress` marks the row under work.
@@ -121,11 +117,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 | RM-027 | Session convention: capture framework defects mid-session, log them at close | — | Now | self-improvement | 3 | 2 | 6 | open | A session's framework defects are captured mid-session and at close either logged as issues or rejected with a one-line reason — not dependent on recall. | — | hierovision/ai-framework#57; paragon `.opencode/framework-issues.md` | proven informally in the paragon session (5 entries → #52–#56); needs a skill-bodies home. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-027.md. |
 | RM-028 | Plan-close follow-up ingestion into `ROADMAP.md` | — | Now | self-improvement | 3 | 2 | 6 | open | A plan's follow-ups are ingested at close as proposed roadmap rows (or surfaced in the handoff when none exists) — none lost on cleanup. | — | hierovision/ai-framework#83; marvin-slack session 2026-10-01 | fired 2026-10-01 (marvin-slack lost 5 follow-ups); open design decisions listed in the row's detail. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-028.md. |
 | RM-042 | Model-policy checker CI hardening — offline suite + consumer-checker tests | — | Now | tooling | 2 | 3 | 6 | open | The model-policy tools run inside quality-gates with a failing fixture naming the offending binding. | — | plan follow-up `go-first-model-bindings` (merged #96) | fired 2026-10-04 (scripts shipped without a CI slot or tests). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-042.md. |
-<<<<<<< Updated upstream
 | RM-059 | Watchdog STALLED false positive on active generation — gate the verdict on stream state-deltas | — | Now | self-improvement | 2 | 3 | 6 | open | watch_agent no longer reports STALLED for a subagent whose session stream is demonstrably advancing — proven by a drill where a generating child keeps reporting OK/active | — (sibling of RM-049's predicate fix; family of RM-047) | live observations 2026-10-12/13 (design + implement passes both flagged STALLED while stream.jsonl advanced); RM-022's own note that opencode records no tool durations | Observed twice live: stream step events advanced while the verdict printed STALLED — only genuine stalls may flag. Fix = state-delta gating (no events of ANY kind across the window before STALLED may emit). detail: docs/roadmap-detail/RM-059.md |
-=======
-| RM-059 | Watchdog STALLED false positive on active generation — gate the verdict on stream state-deltas | — | Now | self-improvement | 2 | 3 | 6 | open | watch_agent no longer reports STALLED for a subagent whose session stream is demonstrably advancing — proven by a drill where a generating child keeps reporting OK/active | — (sibling of RM-049's predicate fix; family of RM-047) | live observations 2026-10-12/13 (design + implement passes both flagged STALLED while stream.jsonl advanced); RM-022's own note that opencode records no tool durations | Observed twice live: stream step events advanced while the verdict printed STALLED — the contract says only genuine stalls may flag. Fix = state-delta gating (no events of ANY kind across the window before STALLED may emit). detail: docs/roadmap-detail/RM-059.md |
->>>>>>> Stashed changes
 | RM-034 | Plan body carries in-scope policy decisions (cold-executable plan-format) | — | Now | self-improvement | 2 | 2 | 4 | open | A cold implementer executes an in-scope user-frozen policy phase from the plan body alone. | — | RM-031 candidate `phase-policy-detail-not-in-plan` (`.scratch/skill-gap-analysis/subagent-issues.md`, 2026-09-27) | fired 2026-09-27; plan-policy-into-body rule (RM-034). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-034.md. |
 | RM-036 | Align implementing-features Step 11 with the git-workflow push/PR contract | — | Now | self-improvement | 2 | 2 | 4 | open | Skill body and git-workflow state ONE push/PR contract; an implement pass lands branch + PR unprompted. | — | RM-031 candidate `implementer-stops-before-push-pr`; `reference/git-workflow.md` §Commit discipline / §Push, PR, merge | fired 2026-09-27 (pass ended local-only). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-036.md. |
 | RM-037 | Scoped-slice plan maintenance: History + plan-staging ownership | — | Now | self-improvement | 2 | 2 | 4 | open | A scoped-slice pass records plan History and states who stages the tracked plan file. | — | RM-031 candidate `plan-file-maintenance-skipped-in-scoped-execution` (`.scratch/skill-gap-analysis/subagent-issues.md`, 2026-09-27) | fired 2026-09-27. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-037.md. |
@@ -172,11 +164,7 @@ None.
 None (threshold: null).
 
 ## Done
-<<<<<<< Updated upstream
 Newest first; 24 closed of 59. The table carries the one-line
-=======
-Newest first; 23 closed of 58. The table carries the one-line
->>>>>>> Stashed changes
 
 | ID | Title | Outcome | Horizon | Category | Impact | Urgency | Score | Status | Success measure | Blocked-by | Sources | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
