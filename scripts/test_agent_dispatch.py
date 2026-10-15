@@ -219,13 +219,19 @@ def test_concepts_role_vocabulary():
 
 
 def test_roadmap_rm033_row():
-    """AC8: docs/ROADMAP.md carries the RM-033 row."""
+    """AC8: docs/ROADMAP.md carries the RM-033 row (delivered).
+
+    Column 8 is Status under the thirteen-column contract
+    (skills/triaging-requirements/references/roadmap-format.md): the older
+    "priority" column was removed by the RM-052/053 migration, so the row is
+    asserted by existence + terminal status, not by a priority number.
+    """
     path = os.path.join(REPO, "docs", "ROADMAP.md")
     with open(path, encoding="utf-8") as fh:
         row = next((l for l in fh if l.startswith("| RM-033 ")), None)
     assert row is not None, "RM-033 row missing"
     cells = [c.strip() for c in row.strip().strip("|").split("|")]
-    assert cells[3] in ("1", "2"), f"RM-033 priority is {cells[3]!r}"
+    assert cells[8] == "done", f"RM-033 status is {cells[8]!r}, want 'done'"
 
 
 def test_agent_teams_doc_contract():
@@ -263,13 +269,18 @@ def test_opencode_integration_dated_block():
 
 
 def test_roadmap_rm032_row():
-    """AC9: docs/ROADMAP.md carries the RM-032 row at priority 1."""
+    """AC9: docs/ROADMAP.md carries the RM-032 row (delivered).
+
+    See test_roadmap_rm033_row: the priority column no longer exists under
+    the thirteen-column contract, so the row is asserted by existence +
+    Status == 'done' (column 8).
+    """
     path = os.path.join(REPO, "docs", "ROADMAP.md")
     with open(path, encoding="utf-8") as fh:
         row = next((l for l in fh if l.startswith("| RM-032 ")), None)
     assert row is not None, "RM-032 row missing"
     cells = [c.strip() for c in row.strip().strip("|").split("|")]
-    assert cells[3] == "1", f"RM-032 priority is {cells[3]!r}, want '1'"
+    assert cells[8] == "done", f"RM-032 status is {cells[8]!r}, want 'done'"
 
 
 def test_ci_wiring():
