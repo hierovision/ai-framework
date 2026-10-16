@@ -1,9 +1,9 @@
 ---
 slug: rm-058-orchestrator-wake
 title: Wake the orchestrator on subagent terminal state; worktree-safe dispatch; per-dispatch permission profile
-status: approved
+status: draft
 created: 2026-10-15
-revised: [2026-10-15]
+revised: [2026-10-15, 2026-10-16]
 related: [rm-056-eval-lane-fallback]
 ---
 
@@ -50,10 +50,13 @@ spawned by the dispatcher when `--wake-to <orchestrator-session-id>` is
 given) polling the ONE durable supervision surface — the heartbeat file teed
 by `dispatch_agent.py` plus the run-log record it already emits
 (`skills/observing-runs`, `scripts/log_run.py`) — no event-hook parallel
-surface; (2) a wake delivery that appends to the orchestrator session via
-explicit `opencode run --session <orchestrator> --format json <wake-text>`
-(rule-1-sanctioned form), gated on the orchestrator session being quiescent
-(no tool in flight per `watch_agent`'s running predicate) with bounded retry;
+surface; (2) a wake delivery sent **through the orchestrator's own
+server** via `opencode run --attach <wake-url> --session <orchestrator>
+--agent <orchestrator-agent> --format json <wake-text>` so the live TUI
+renders it (the 2026-10-15 smoke proved the bare `--session` form runs a
+non-rendered ghost turn), gated on the orchestrator session being quiescent
+(no tool in flight and no unclosed assistant step per `watch_agent`'s
+predicates) with bounded retry;
 (3) `--worktree <name>` on `dispatch_agent.py` (branch `dispatch/<name>`,
 worktree at `.scratch/worktrees/<name>` under AGENTS.md rule 3) so the parent
 tree physically cannot leave main; (4) a per-agent-class permission profile
@@ -104,56 +107,135 @@ the dispatcher-written terminal heartbeat line is authoritative — the child
 process cannot write it (dispatcher owns that file region; cross-check only
 hardens the verdict when the DB is present).
 
-### D2. The wake path
+### D2. The wake path (revised 2026-10-16: server-reachable orchestrator)
 
-Who writes what / who reads what / what triggers the turn:
+Who writes what / who reads what / what triggers the turn. Supersedes the
+2026-10-15 draft steps 3–5 after the live smoke proved the bare
+`opencode run --session` vehicle invisible to a live TUI (History,
+2026-10-15). Probe evidence: opencode 1.19.1, throwaway session
+`ses_ebb7770e5ffeSsiBTw1KzDydfz` and TUI-on-`4568`, 2026-10-16.
 
-1. At dispatch time the orchestrator passes one new flag:
-   `--wake-to <orchestrator-session-id>` (the orchestrator's own session id).
-   The dispatcher, immediately after the stream names the child's
-   `session_id` (line it already prints), spawns
-   `scripts/observe_completion.py --heartbeat <hb> --agent <name>
-   --dir <dispatch-dir> --orchestrator-session <sid> --deadline 300`
-   detached (`start_new_session=True`) so it survives after the owner
-   switch. One orchestrator command now dispatches child + observer.
-2. The observer loops every 30 s: it polls the heartbeat file for a
-   dispatcher terminal line and, for corroboration, the run-log daily file
-   and the fixture/real DB (`OPENCODE_DB_PATH` honored, read-only URI via
-   `watch_agent.db`). Each poll is appended to the heartbeat file owned by
-   the observer (third writer, distinct tag — see D5 line ownership).
-3. On terminal state the observer builds a wake text from **durable state
-   only** (outcome, child session id, heartbeat path, result path, run-log
-   path, termination detail) and delivers it with
-   `opencode run --session <orchestrator-sid> --format json --model
-   <orchestrator-binding> <wake-text>` — an **explicit `--session`**, the
-   exact form AGENTS.md rule 1 sanctions; `--continue` is never used.
-   The wake text appends to the orchestrator conversation, which generates
-   one orchestrator turn: the orchestrator reads the wake, reports to the
-   owner, and resumes its own agenda. The orchestrator conversation is the
-   only sink; nothing is sent anywhere else.
-4. **Rule-1 / concurrency gate:** the observer delivers the wake only when
-   the orchestrator session row is quiescent — no tool part in flight (the
-   same running predicate `watch_agent.analyze_session` computes) and
-   `session.time_updated` stable across two polls. While the owner is
-   interacting, the orchestrator turns busy and the wake waits; retries are
-   bounded by the deadline (default 300 s) — wake-at-fifth-minute or as soon
-   as the session quiesces.
-5. **Honest escalation (the only non-automatic path):** if the deadline
-   expires — the owner holds the orchestrator continuously busy for
-   > 5 minutes, or the `opencode run --session` append fails — the observer
-   retries until the deadline, then writes exactly one terminal
-   observation line to the heartbeat (`WAKE_DEFERRED <outcome> <paths>`) and
-   stops. The durable wake summary already sits in the heartbeat and the
-   run-log record; the orchestrator's next turn (owner-initiated or
-   triggered by any later interaction) reads the heartbeat before
-   reporting status. The design does not assert a wake that cannot happen
-   while the owner owns the turn.
+Unchanged from the 2026-10-15 draft (and implemented): the dispatcher spawns
+`scripts/observe_completion.py` detached (`start_new_session=True`) right
+after the child's `session_id=` prints (its plumbing flags incl.
+`--child-session/--result/--logs-dir/--worktree/--branch` per the History
+deviation note), and the observer polls the heartbeat + run-log + read-only
+DB every 30 s (D1, D5 line ownership).
+
+**Evidence for every claim below (probes P1–P8, 2026-10-16):**
+
+- P3/P4/P8 — `opencode run --attach http://127.0.0.1:<port> --session <sid>
+  --agent <agent> --format json "<text>"` exits **0 in ≤ 15 s** (observed
+  3 s / 14 s / 3 s) after streaming one early event (`step_start`) whose
+  payload names the target sessionID; **the turn then runs on the attached
+  server** (after client exit, the session's export shows the appended user
+  message and the assistant reply). Delivery is fast because generation is
+  server-side — the wake subprocess never holds a generation.
+- P8 — with a TUI launched as `opencode --port 4568 --session <sid>` the
+  process **listens** (curl `GET /session` → 200), and the attach-delivered
+  wake **rendered live in the TUI**: the pty capture
+  (`.scratch/rm-058-vehicle-design/tui.capture`) contains the injected
+  `DISPATCH WAKE …` text with the running-turn indicator; the assistant turn
+  recorded `agent=curator` / the agent's own model binding.
+- P4 — agent semantics are **not inherited from the session**: without
+  `--agent`, the appended message records `agent=build` (opencode's default
+  primary agent — the exact 2026-10-15 ghost-turn shape); with
+  `--agent curator` both the user message and the assistant turn record
+  `agent=curator` and the agent's own model binding (glm-5.3-flash). So the
+  wake must force the agent explicitly, and `--model` is dropped (the
+  agent's binding decides — the draft's `--model <orchestrator-binding>` is
+  removed).
+- P1 — `--attach` against an unreachable port fails **in ≤ 1 s, rc=1**
+  (error surfaced, no turn run) — the current 180 s hang class is
+  structurally gone with the attach vehicle.
+- P2 — a server (headless or TUI) writes **no port/state file**
+  (`~/.local/share/opencode/`, `~/.local/state/opencode/` carry no
+  server-port artifact), so the URL cannot be discovered from disk; it must
+  travel with the dispatch contract (below).
+- Default TUI launch (no `--port`) holds no listening socket (the 2026-10-15
+  `ss` diagnosis); only an explicit non-zero `--port` establishes the HTTP
+  server the wake needs.
+
+The revised design:
+
+1. **Launch workflow (owner, one-line change).** The owner launches the
+   orchestrator TUI on a known port with the wake URL in the environment:
+   `OPENCODE_WAKE_URL=http://127.0.0.1:4096 opencode --port 4096`.
+   (Equivalent-but-two-process alternative: `opencode serve --port 4096` +
+   `opencode attach http://127.0.0.1:4096`; rejected for v1 — one process,
+   one env is simpler, and `attach` is interactive.) Trade-off named: the
+   fixed port must be free — a collision fails visible at TUI launch, and
+   the owner picks a stable high port once.
+2. **Dispatch contract additions.** `--wake-to <sid>` gains two companions:
+   `--wake-url <url>` (resolved from `OPENCODE_WAKE_URL` when omitted; the
+   worker context inherits the env from the TUI launch, and the orchestrator
+   may also pass the flag explicitly) and `--wake-agent <name>` (the agent
+   the orchestrator session runs as — required, preflight `exit 2` when
+   `--wake-to` is given without it, because P4 shows the alternative is a
+   `build`-agent ghost). No state file is read (P2: none exists).
+3. **Delivery (attach vehicle).** The observer delivers:
+   `opencode run --attach <wake-url> --session <orchestrator-sid> --agent
+   <wake-agent> --format json "<wake-text>"` — still an explicit session id,
+   never `--continue` (rule 1 unchanged). The subprocess streams stdout;
+   **acceptance proof** = the first streamed event naming the orchestrator
+   sessionID, or a client exit 0 (whichever first). On acceptance proof the
+   observer appends exactly one terminal `WAKE <outcome>` heartbeat line and
+   stops — it does NOT wait for wake-turn generation (server-side, ~3 m15 s
+   observed 2026-10-15), and it does not kill the accepted client early: it
+   lets the client exit within `WAKE_SUBPROCESS_TIMEOUT`. No `--dir` on the
+   wake (P4 verified: the client ran in the ai-framework cwd, the session
+   lives in another project — the id identifies it server-side). If the
+   client neither streams evidence nor exits by the timeout, the attempt
+   failed and is retried per step 5.
+4. **No attach target ⇒ immediate honest deferral (no subprocess).** If
+   `--wake-url` cannot be resolved (not given, env unset), the observer
+   still supervises the child, but at terminal state writes exactly one
+   `WAKE_DEFERRED <outcome> reason=no-attach-target` and stops — it never
+   spawns the legacy `--session` form (the ghost vehicle). The durable wake
+   text already sits in the heartbeat and the run-log record; the
+   orchestrator's next turn reads it (D2 step 6 semantics below).
+5. **Bounded retry / escalation.** If delivery fails (rc≠0, no acceptance
+   evidence within `WAKE_SUBPROCESS_TIMEOUT`, deadline pressure), the
+   observer waits one poll interval and retries until `WAKE_DEADLINE`
+   (default 300 s, unchanged — the 5-minute SLA measures *delivery*, not
+   generation), then writes exactly one
+   `WAKE_DEFERRED <outcome> reason=<detail>` and stops. While the owner is
+   interacting, the gate below holds; wake-at-quiescence or
+   wake-deferred-at-deadline, nothing hangs.
+6. **Orchestrator turn semantics (unchanged from the 2026-10-15 draft):**
+   the wake text is the D7 block; the orchestrator turn reports to the
+   owner in ≤ 2 turns, lands the worktree branch, runs cleanup; the
+   orchestrator conversation is the only sink; nothing is sent anywhere
+   else.
+
+**Rule-1 / concurrency gate (revised — the 2026-10-15 latent finding is
+folded in).** The observer delivers only when the orchestrator session is
+quiescent, where quiescent means ALL of:
+
+- **No tool part in flight** — `watch_agent.analyze_session`'s running
+  predicate (unchanged);
+- **No unclosed assistant step** — the newest assistant message's step-part
+  sequence must be *closed* (its last step part is `step-finish`). A
+  trailing `step-start` means a model call is mid-generation: no tool is
+  running, `time_updated` only advances at `step-finish`, and the old
+  predicate read such a turn as quiescent (the 2026-10-15 live smoke's
+  3m15s call is the instance). Computed in the observer from the already
+  loaded parts — no new surface, no RM-059 vocabulary;
+- **`time_updated` stable across two polls** — retained as a belt, no
+  longer load-bearing alone.
+
+With the attach vehicle the gate's job narrows to "do not inject a user
+message into a turn the owner owns"; the SQLite-writer race of the draft
+(two servers writing one store) disappears — wake writes and TUI writes go
+through the one server. The gate stays because the owner-frozen policy 1
+(interaction mid-dispatch) must not regress. Delivery is now ≤ 15 s, so the
+gate costs almost nothing.
 
 Concurrent-interaction safety: the wake never uses `--continue` (rule 1);
-it targets an explicit session id and waits for store quiescence, so a wake
-write never races an in-flight orchestrator turn, and the owner's
-mid-dispatch interaction happens through the same conversation with turns it
-already owns.
+it targets an explicit session id through the session's own server, gated
+on quiescence, so a wake write never lands inside an in-flight orchestrator
+turn, and the owner's mid-dispatch interaction happens through the same
+conversation with turns it already owns.
 
 ### D3. Worktree-safe dispatch
 
@@ -245,7 +327,10 @@ state machine, all on the one durable surface:
   order: one `SURVEY running` after the first poll that finds real child
   evidence (≥1 child-owned heartbeat line beyond the dispatcher envelope, or
   the child session row present in the DB with ≥1 part), then a terminal
-  `WAKE <outcome>` or `WAKE_DEFERRED <outcome>` line. It never writes
+  `WAKE <outcome>` or `WAKE_DEFERRED <outcome> reason=<detail>` line (the
+  `reason=` token is part of the tag's format since the 2026-10-16
+  amendment: `no-attach-target`, `deadline`, or the delivery failure
+  detail). It never writes
   `SURVEY running` from the launch record alone.
 - The dispatch contract adds one rule to
   `reference/subagent-supervision.md` §2's line-ownership block: **an
@@ -304,30 +389,46 @@ reader here, not a run).
 
 ## Acceptance Criteria
 
-1. **Wake-on-success within SLA, owner-ping-free.** A hermetic contract
-   test (`python3 scripts/test_observe_completion.py`, watch 5) runs a stub
-   dispatch that terminates success with
-   `--wake-to` pointing at an orchestrator session in a fixture DB
-   (`OPENCODE_DB_PATH`); within 300 s of the heartbeat terminal line the
-   test's stub `opencode` receives exactly one `run --session
-   <orchestrator-sid>` invocation whose message matches the fixed wake
-   shape (`DISPATCH WAKE` line, task/child/result/log paths, no `--continue`
-   anywhere) — asserted in `scripts/test_observe_completion.py`.
+1. **Wake-on-success within SLA, owner-ping-free, via the attach vehicle.**
+   A hermetic contract test (`python3 scripts/test_observe_completion.py`,
+   watch 5) runs a stub dispatch that terminates success with `--wake-to`
+   pointing at an orchestrator session in a fixture DB
+   (`OPENCODE_DB_PATH`) and a fixture `--wake-url`; the test's stub
+   `opencode` records the exact argv and asserts it contains `--attach
+   <wake-url>`, `--session <orchestrator-sid>`, `--agent <wake-agent>`,
+   `--format json`, and never `--continue` and never `--model`. The stub
+   streams one event line naming the orchestrator sessionID then exits 0;
+   within 300 s of the heartbeat terminal line the test records exactly one
+   delivery attempt, and the heartbeat ends with exactly one `WAKE
+   success` line — asserted in `scripts/test_observe_completion.py`.
 2. **Wake enumerates failure and abort.** Same harness with a
    contract-invalid stub result (markers missing) and with a killed
    stub dispatcher (no terminal line, liveness window short): the wake
    received carries `outcome=failure`+detail naming the missing markers, and
    `outcome=aborted`+detail naming the liveness basis — asserted in the same
    test file.
-3. **Rule-1 gate.** While the fixture orchestrator session shows a tool
-   part in flight (in-flight predicate true), the observer issues zero
-   wake invocations across the window; after a part lands
-   (`has_terminal_result` shape) the wake is issued once exactly —
-   asserted in the same test file.
-4. **Deadline escalation is durable, not silent.** With the deadline forced
-   short and the orchestrator session continuously in-flight, the observer
-   writes exactly one `WAKE_DEFERRED <outcome>` heartbeat line and exits —
-   asserted in the same test file.
+3. **Rule-1 gate, generation-safe (revised).** Two hermetic cases in
+   `scripts/test_observe_completion.py`:
+   - *In-flight tool:* while the fixture orchestrator session shows a tool
+     part in flight (in-flight predicate true), the observer issues zero
+     wake invocations across the window; after a part lands
+     (`has_terminal_result` shape) the wake is issued once exactly.
+   - *Mid-generation (the 2026-10-15 latent finding):* a fixture
+     orchestrator session whose newest assistant message ends with an open
+     `step-start` part, no tool in flight, and `time_updated` stable across
+     two polls reads **NOT quiescent** (zero deliveries); after the
+     fixture's `step-finish` part lands, exactly one delivery is issued.
+     Asserted in the same test file.
+4. **Deadline / no-target escalation is durable, not silent.** Three
+   hermetic cases, each writing exactly one final `WAKE_DEFERRED <outcome>
+   reason=<detail>` heartbeat line and exiting (asserted in the same test
+   file): (a) the deadline forced short with the orchestrator session
+   continuously busy — the stub received zero accepted deliveries, reason
+   names the gate; (b) no `--wake-url` resolvable — the stub received zero
+   invocations at all, `reason=no-attach-target`, written at the first
+   terminal poll without spawning `opencode`; (c) the stub exits 1 (server
+   refuses) on every attempt until deadline — retries bounded by the
+   deadline, `reason=` names the refusal.
 5. **Worktree safety (the 2026-10-13 class).** In a fixture git repo
    squashed to the plan's shape, a stub dispatch with `--worktree t1`
    commits a file "on a child branch": after
@@ -355,12 +456,37 @@ reader here, not a run).
    zero `SURVEY running` lines are present; after the first child-owned
    line, exactly one; terminal `WAKE` line is last (or `WAKE_DEFERRED` on
    escalation). Hermetic assertion in `scripts/test_observe_completion.py`.
-8. **No accidental regression of concurrent interaction.** Live smoke
-   (procedure in Verification): with a real detached dispatch running, the
-   orchestrator conversation accepts a mid-run owner message and completes
-   an unrelated turn while the child's heartbeat advances and `SURVEY`
-   lines appear; after terminal, the wake turn lands without any owner
-   ping. Smoke checklist is recorded in the handoff (not testable hermetically).
+8. **Live smoke proves a rendered, agent-correct wake (revised
+   procedure).** A person runs the following on opencode 1.19.1 and checks
+   the listed observations — each check names where it is observed:
+   1. `OPENCODE_WAKE_URL=http://127.0.0.1:4096 opencode --port 4096` — TUI
+      opens. *Observed:* the TUI came up (a fixed port the owner chose).
+   2. From the orchestrator conversation, dispatch a small recon brief with
+      `--wake-to <this-session-id> --wake-agent <the agent this session runs
+      as>` (wake-url resolved from the env). Mid-run, the owner sends an
+      unrelated message in the TUI and it completes a turn. *Observed:* the
+      unrelated turn completes in the live conversation (owner-frozen
+      policy 1 intact).
+   3. Success path: after the child's heartbeat terminal `DONE ok` line,
+      within ≤ 5 min the wake appears **in the TUI conversation itself** —
+      the `DISPATCH WAKE <agent> outcome=success` block streams in as a user
+      message and the orchestrator's agent answers, without any owner ping.
+      *Observed:* the block is visible in the TUI (not just
+      `opencode export`), and the turn's agent is the session's agent (the
+      TUI turn reads as the session's agent, and `opencode export <sid>`
+      shows the wake user message recorded `agent=<wake-agent>`, never
+      `build`).
+   4. Failure path: a contract-invalid stub brief — the rendered wake
+      carries `outcome=failure` and names the missing markers. *Observed*
+      in the TUI.
+   5. Degrade path: repeat with the TUI launched **without**
+      `OPENCODE_WAKE_URL` and without `--wake-url`. *Observed:* after the
+      child's terminal line, `tail` of the heartbeat shows
+      `WAKE_DEFERRED <outcome> reason=no-attach-target` within one poll
+      interval and the observer exits; `opencode export <sid>` shows no
+      appended message (no ghost turn), and no subprocess lingers (no
+      multi-minute hang).
+   The checklist is recorded at the handoff; not testable hermetically.
 9. **RM-059 seam intact.** `scripts/observe_completion.py` contains no call
    to `watch_agent.verdict` and no STALLED/DEAD/BLOCKING string; quiet
    non-terminal state is labeled `AWAITING` — asserted by a source-grep
@@ -374,24 +500,35 @@ reader here, not a run).
 ## Files to Modify
 
 - `scripts/dispatch_agent.py` — add `--worktree <name>`, `--wake-to
-  <orchestrator-session-id>`, `--profile <name|auto|none>` (default
-  `auto`); worktree setup under preflight; profile env merge; spawn
-  `scripts/observe_completion.py` detached after `session_id=` is printed;
-  wake lines (`WAKE` tag) are written only by the spawn. Keep the edit
+  <orchestrator-session-id>`, `--wake-url <url>` (resolved from env
+  `OPENCODE_WAKE_URL` when omitted), `--wake-agent <name>` (required with
+  `--wake-to`; preflight exit 2 otherwise), `--profile <name|auto|none>`
+  (default `auto`); worktree setup under preflight; profile env merge; spawn
+  `scripts/observe_completion.py` detached after `session_id=` is printed,
+  forwarding `--wake-url`/`--wake-agent`; wake lines (`WAKE` tag) are
+  written only by the spawn. Keep the edit
   surface minimal and documented (docstring flags list).
-- `scripts/observe_completion.py` — NEW; the completion-observer (D2/D5/D6):
-  poll loop, terminal classification, correlation, rule-1 quiescence gate,
-  bounded wake delivery via explicit `--session`, deadline escalation, and
-  the `AWAITING` classification — never the RM-059 liveness vocabulary
-  (STALLED/DEAD/BLOCKING/OK/WARN).
+- `scripts/observe_completion.py` — the completion-observer (D2/D5/D6):
+  poll loop, terminal classification, correlation, rule-1 quiescence gate
+  (revised: closed-assistant-step signal), **attach-vehicle delivery**
+  (`--attach <wake-url> --session <sid> --agent <wake-agent> --format
+  json`, acceptance proof, bounded retry, deadline escalation with
+  `reason=`), `WAKE_SUBPROCESS_TIMEOUT` 180 → 60 (per attempt, bounds
+  pre-acceptance only), and the `AWAITING` classification — never the
+  RM-059 liveness vocabulary (STALLED/DEAD/BLOCKING/OK/WARN).
 - `scripts/dispatch-profiles.json` — NEW; per-class least-privilege
   defaults (D4).
-- `scripts/test_observe_completion.py` — NEW; hermetic contract tests for
-  AC1–AC5, AC7, AC9 (stub `opencode` on PATH, `OPENCODE_DB_PATH` fixture,
-  injectable sleep for the poll loop).
+- `scripts/test_observe_completion.py` — hermetic contract tests for
+  AC1–AC5, AC7, AC9 (stub `opencode` on PATH recording argv, fixture DB
+  via `OPENCODE_DB_PATH`, injectable sleep for the poll loop); the stub
+  identifies a wake delivery by `--attach` and asserts the exact vehicle
+  argv (AC1), the open-`step-start` gate case (AC3), and the three
+  `WAKE_DEFERRED reason=` cases (AC4).
 - `scripts/test_dispatch_agent.py` — extend: worktree setup/teardown on a
   fixture git repo (AC5), profile env merge (AC6), `--wake-to` spawns the
-  observer (AC1 integration point), the launch-echo claim rules (AC7).
+  observer with the resolved/forwarded `--wake-url`/`--wake-agent`
+  (AC1 integration point), preflight `--wake-to` without `--wake-agent`
+  exits 2 before launch, the launch-echo claim rules (AC7).
 - `reference/subagent-supervision.md` — the wake contract lives here
   (this is the reference doc the dispatch contract must cite): §2
   line-ownership gains the observer's three tags (`SURVEY` / `WAKE` /
@@ -467,32 +604,24 @@ commit/PR body):
   map carries each root — the third (`~/.local/share/opencode/*`) is the
   schema-verification fixture itself.
 
-Live smoke (manual, checklist recorded at handoff; owner interaction
-required):
-
-1. Detached dispatch of a small recon brief that reads
-   `~/.config/opencode/` (the second chronic path) with `--wake-to <this
-   orchestrator session>`; verify: mid-run an owner message gets a
-   completed unrelated turn (concurrent interaction intact); ≤ 5 min after
-   the terminal heartbeat line the conversation shows the `DISPATCH WAKE`
-   block without the owner pinging.
-2. A `--worktree` dispatch whose stub is replaced by a real one-line
-   commit: confirm the parent tree's HEAD stayed on `main` and the commit
-   is on `dispatch/<name>` inside the worktree; land it per D3; cleanup
-   verified by `git worktree list` (post-cleanup worktree absent).
-3. One intentional failure (contract-missing markers stub brief) → the
-   wake arrives with `outcome=failure` + named detail.
+Live smoke: the revised AC8 procedure (steps 1–5 above) — manual checklist
+recorded at handoff; owner interaction required. The degrade path (step 5)
+can be exercised by the owner alone. The worktree landing live check from
+the 2026-10-15 draft (parent HEAD on `main`, commit on `dispatch/<name>`,
+post-landing cleanup) is unchanged by this amendment and is exercised the
+first time a `--worktree` dispatch is used in anger (D3).
 
 ## Open Questions
 
-- **Wake append while the owner is typing in the TUI** — SQLite-level,
-  not tool-level races between the TUI server and the wake's `opencode run
-  --session` write. Mitigated by the quiescence gate (D2 step 4) + the
-  escalation (deferral, AC4), which covers the observable failure mode
-  (no write attempted while a tool is in flight). Proposed default:
-  proceed; if live smoke shows a real race, switch the wake vehicle to
-  `opencode attach` against the TUI's server (`opencode attach <url>`
-  exists on 1.18.18) as an implement-time amendment recorded in History.
+- **RESOLVED 2026-10-16 — wake append while the owner is typing in the
+  TUI.** The D2 amendment replaced the cross-server SQLite-writer risk: the
+  wake goes through the orchestrator's own server (`--attach`), so the TUI
+  and the wake share one writer. The residual question — injecting a user
+  message while the owner's turn is in flight — is held by the revised
+  quiescence gate (no tool in flight, no unclosed assistant step, stable
+  `time_updated`) plus the `WAKE_DEFERRED` escalation. No open default.
+  Supersedes the draft's "switch the wake vehicle to `opencode attach` as
+  an implement-time amendment" note.
 - **`session.idle` plugin hook as a second observer** — future narrowing of
   latency from 30 s to event-driven. Out of scope now; recorded here so it
   is not rediscovered. Proposed default: revisit when opencode plugin
@@ -592,19 +721,59 @@ required):
     `time_updated`-stability signal is blind to a *mid-generation* turn — a
     step's `time_updated` lands at `step-finish`, so a long model call with no
     tool in flight can read as quiescent. Recorded for the design pass.
+- 2026-10-16 — **Design amendment: D2 revised to the attach vehicle
+  (server-reachable orchestrator).** Probes of installed opencode 1.19.1
+  (throwaway session `ses_ebb7770e5ffeSsiBTw1KzDydfz`, scratch
+  `.scratch/rm-058-vehicle-design/`, artifacts `p3/p4/p8.json`,
+  `serve.log`, `tui.capture`):
+  - P3/P8 — `opencode run --attach http://127.0.0.1:<port> --session <sid>
+    --agent <agent> --format json <text>` exits 0 in 3–14 s while the turn
+    runs on the attached server (assistant reply present in the session
+    export after client exit); a TUI launched `opencode --port 4568
+    --session <sid>` holds the LISTENING socket (curl 200) and **rendered
+    the delivered wake live** (capture shows the `DISPATCH WAKE …` text +
+    running-turn indicator).
+  - P4 — agent semantics are not inherited: without `--agent` the appended
+    message records `agent=build` (the 2026-10-15 ghost shape); with
+    `--agent curator` both messages record `agent=curator` and curator's own
+    model binding → wake forces `--agent`, drops `--model`.
+  - P1 — attach to an unreachable port fails ≤ 1 s rc=1 → honest
+    degradation, no hang class.
+  - P2 — servers write no port/state file (`~/.local/share/opencode`,
+    `~/.local/state/opencode`) → URL travels via `OPENCODE_WAKE_URL` env /
+    `--wake-url` flag, with required companion `--wake-agent` (preflight
+    exit 2 missing).
+  - Changes: D2 rewritten (launch workflow, dispatch contract, attach
+    delivery + acceptance proof, no-target deferral, bounded retry);
+    quiescence gate gains the closed-assistant-step signal (generation
+    blindness folded in); `WAKE_DEFERRED` tags gain `reason=`;
+    `WAKE_SUBPROCESS_TIMEOUT` 180 → 60 s; AC1/AC3/AC4/AC8 revised; Files to
+    Modify updated; Open Question #1 resolved. D1 (except the gate text it
+    defers to — its child liveness table is unchanged), D3, D4, D6, D7
+    intact: the vehicle does not force any change in them (wake text D7
+    unchanged; D5 changed only by the `reason=` token).
+- 2026-10-16 — Consult outcome: skipped (one-line reason: no external
+  design-consult lens needed — the owner pinned the direction
+  ("server-reachable orchestrator, do not re-litigate"); the amendment's
+  open dimensions were resolved against direct probe evidence of the
+  installed 1.19.1 recorded above).
 
 ### Follow-ups
 
-- **Wake vehicle (H1, blocks AC8).** `opencode run --session` cannot deliver
-  a visible wake to a live TUI session (it runs a ghost turn in its own
-  server). Needs a design pass: (a) require the orchestrator to be reachable
-  as a server (`opencode serve` + `opencode attach`, or `opencode --port N`)
-  and deliver with `opencode run --attach <url>`; or (b) an in-process
-  `session.idle` plugin. The plan's Open Question #1 remedy as written
-  (`opencode attach`) is infeasible (no server URL; attach is interactive).
-- **Quiescence-gate generation-blindness.** Harden `orchestrator_quiescent()`
-  with a part-recency signal (age of the newest part), not `time_updated`
-  stability alone; add a regression test for the mid-generation case.
+- **Wake vehicle (H1, blocks AC8).** RESOLVED BY THE 2026-10-16 D2
+  AMENDMENT (design decided; implementation pending owner approval of this
+  revision): server-reachable orchestrator — owner launches the TUI with an
+  explicit `--port`, the URL travels via `OPENCODE_WAKE_URL`/`--wake-url`,
+  delivery is `opencode run --attach <url> --session <sid> --agent
+  <wake-agent> --format json` (probe-proven render, agent-correct, ≤ 15 s,
+  fails fast), and no-target / refusal degrades to bounded
+  `WAKE_DEFERRED reason=…`. The draft's `opencode attach` remedy and the
+  plugin alternative are both superseded in favor of the attach vehicle
+  (plugins stay excluded).
+- **Quiescence-gate generation-blindness.** RESOLVED BY D2 AMENDMENT
+  (2026-10-16): the quiescence predicate now requires the newest assistant
+  message's step sequence to be closed (a trailing `step-start` reads busy),
+  not `time_updated` stability alone; hermetic regression case in AC3.
 
 - AC8 live smoke and roadmap closure are owned by the orchestrator at merge;
   `docs/ROADMAP.md` was deliberately not touched by this pass.

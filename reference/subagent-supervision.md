@@ -239,24 +239,38 @@ python3 scripts/dispatch_agent.py --agent <name> --prompt-file <file> \
     --wake-to <orchestrator-session-id>
 ```
 
-- **Wake vehicle + rule-1 gate (D2).** The dispatcher spawns
-  `scripts/observe_completion.py` detached once the child's `session_id=`
-  prints. The observer polls the heartbeat and run-log (30 s) and delivers the
-  wake with an explicit `opencode run --session <id> --format json <text>`
-  (never `--continue`; AGENTS.md rule 1), gated on the orchestrator session
-  having no tool in flight and a stable `time_updated`. It retries until the
-  deadline (default 300 s), then writes one durable `WAKE_DEFERRED` line
-  instead of asserting a wake that cannot happen while the owner owns the turn.
-  - **Known-broken as of 2026-10-15 (opencode 1.19.1):** `opencode run
-    --session <id>` starts its *own* server, so against a **live TUI-held**
-    session it runs a ghost turn (default `build` agent) that is persisted to
-    `opencode.db` but never rendered in the TUI — the wake is invisible to the
-    owner. The TUI exposes no HTTP URL to `--attach` to, and `opencode attach`
-    is interactive. The working vehicle (e.g. orchestrator reachable via
-    `opencode serve`/`--port` + `opencode run --attach`, or an in-process
-    plugin) is pending a design pass; do not rely on the vehicle above until
-    this line is superseded (see `.opencode/plans/rm-058-orchestrator-wake.md`
-    History, 2026-10-15).
+- **Wake vehicle + rule-1 gate (D2, revised 2026-10-16).** The dispatcher
+  spawns `scripts/observe_completion.py` detached once the child's
+  `session_id=` prints. The observer polls the heartbeat and run-log (30 s)
+  and delivers the wake through the **orchestrator's own server**:
+  `opencode run --attach <wake-url> --session <orchestrator-sid> --agent
+  <wake-agent> --format json <text>` (never `--continue`; AGENTS.md rule 1).
+  - The orchestrator TUI must be launched on a **known port**:
+    `OPENCODE_WAKE_URL=http://127.0.0.1:4096 opencode --port 4096`. A
+    default launch (random port) exposes no HTTP server; the URL travels to
+    the dispatcher via `--wake-url` or the inherited `OPENCODE_WAKE_URL`
+    env. Servers write no port state file (probed 1.19.1) — no disk
+    discovery exists.
+  - `--agent` is **required**: opencode does not inherit the session's
+    agent — without it the wake records as `agent=build` and runs a wrong
+    bound turn (the 2026-10-15 defect: a ghost `build` turn persisted but
+    never rendered). Delivery accepts in seconds (client streams one event
+    naming the session and exits 0; generation continues server-side); the
+    observer appends `WAKE <outcome>` on the acceptance proof and does not
+    wait for the wake turn to finish generating.
+  - Quiescence gate: deliver only when the orchestrator session has no tool
+    in flight, **no unclosed assistant step** (a trailing `step-start` is a
+    model call mid-generation — `time_updated` stability alone is blind to
+    it), and a stable `time_updated` across two polls. Retries until the
+    deadline (default 300 s), then exactly one `WAKE_DEFERRED <outcome>
+    reason=<detail>` (`no-attach-target` when no URL resolves — deferral is
+    immediate, never a subprocess hang).
+  - **Implementation status:** design decided 2026-10-16 (see
+    `.opencode/plans/rm-058-orchestrator-wake.md` History); the implement
+    pass for this revision is pending owner approval. Until it lands, the
+    shipped observer still uses the pre-amendment delivery and must not be
+    relied on for a wake against a live TUI (the 2026-10-15 caveat's
+    defect persists until then).
 - **Wake text (D7).** A fixed-shape `DISPATCH WAKE <agent> outcome=…` block
   carrying task, child session, result/run-log/heartbeat paths, and — when
   `--worktree` was used — the worktree path/branch plus the cleanup owed. The
