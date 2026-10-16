@@ -1,7 +1,7 @@
 ---
 title: ai-framework Roadmap
 established: 2026-08-28
-last_triaged: 2026-10-11
+last_triaged: 2026-10-16
 rubric: impact-urgency   # switched from priority-1-5-composite on 2026-10-11 (RM-053 contract); prior scores preserved per row
 threshold: null   # no cut threshold in effect
 sources:
@@ -10,11 +10,12 @@ sources:
   - "triage sessions (user directives; dated in row Sources)"
   - "consumer handoff: Stonegate/paragon-learning-network (2026-10-09; two documents in ~/repos/temp — roadmap-structure + exec-operating-system)"
   - "plan follow-up blocks (pending RM-028 ingestion)"
+  - "planner landscape dossier 2026-10-16 (.scratch/landscape-dossier-2026-10-16.md; five candidates vs the as-if-done framework)"
 ---
 
 # ai-framework Roadmap
 
-> Last triaged: 2026-10-11 · Rubric: impact-urgency (1–3 each; Score = Impact × Urgency) · Schema per skills/triaging-requirements/references/roadmap-format.md (merged 2026-10-11, PR #111)
+> Last triaged: 2026-10-16 · Rubric: impact-urgency (1–3 each; Score = Impact × Urgency) · Schema per skills/triaging-requirements/references/roadmap-format.md (merged 2026-10-11, PR #111)
 
 ## Summary
 
@@ -51,7 +52,7 @@ scoring uses the Rex Black rubric.
 - Detail files: per-ID provenance at docs/roadmap-detail/<ID>.md (relocated byte-exact 2026-10-11; owner ruling: no massive detail in the roadmap). Referenced from each row's Notes; consumed at design passes; pruned by the quarterly ALM review.
 - "plan" = `docs/maturity-plan.md`; issue refs = `hierovision/ai-framework#NN`.
 
-## Priority order (1–34)
+## Priority order (1–39)
 One list per horizon, rank order. Every line: `[ID](detail) (score) —
 title`. IDs link to that row's full record in `docs/roadmap-detail/`.
 Score = Impact × Urgency. `— in progress` marks the row under work.
@@ -77,17 +78,18 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 - [RM-035](docs/roadmap-detail/RM-035.md) (2) — Cite exact ADR filenames in plans and dispatch prompts
 
 
-### Next (6)
+### Next (7)
 
 - [RM-011](docs/roadmap-detail/RM-011.md) (6) — Drift detection + quarterly ALM reviews
 - [RM-040](docs/roadmap-detail/RM-040.md) (4) — Go Plus sustainability review (2026-11-01)
+- [RM-062](docs/roadmap-detail/RM-062.md) (4) — Restart-recovery for detached dispatches + stated durability ceiling
 - [RM-017](docs/roadmap-detail/RM-017.md) (2) — Council consult empty-result fallback (`designing-architecture` Step 5b)
 - [RM-020](docs/roadmap-detail/RM-020.md) (2) — Next.js + Supabase guidance for the sibling stack consumers
 - [RM-030](docs/roadmap-detail/RM-030.md) (2) — Per-skill use-case inventories (23 skills)
 - [RM-049](docs/roadmap-detail/RM-049.md) (2) — Session-guard blocking-wait on completed children — gate the append on not-done
 
 
-### Later (11)
+### Later (15)
 
 - [RM-008](docs/roadmap-detail/RM-008.md) (3) — Encoded boundary manifest per agent
 - [RM-055](docs/roadmap-detail/RM-055.md) (3) — Executive operating system — chief-of-staff persona + operating-cadence/health/signals skills
@@ -99,6 +101,10 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 - [RM-013](docs/roadmap-detail/RM-013.md) (2) — Skill retirement flow (registry deprecated → removed)
 - [RM-015](docs/roadmap-detail/RM-015.md) (2) — First-class consumer override mechanism
 - [RM-029](docs/roadmap-detail/RM-029.md) (2) — Remaining skill-gap candidate-search briefs (2–13)
+- [RM-060](docs/roadmap-detail/RM-060.md) (2) — Context-lifecycle protocol — phase-boundary continuation + pointer-based returns
+- [RM-061](docs/roadmap-detail/RM-061.md) (2) — Design-entry process sizing — depth and gate frequency as explicit plan decisions
+- [RM-063](docs/roadmap-detail/RM-063.md) (2) — Brownfield codebase survey skill — candidate brief (RM-029 program)
+- [RM-064](docs/roadmap-detail/RM-064.md) (2) — File-based phase checkpoints — multi-phase run resume
 - [RM-041](docs/roadmap-detail/RM-041.md) (1) — Jev (System One) advisory eval content-failure triage — trigger-gated
 
 
@@ -130,6 +136,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | RM-011 | Drift detection + quarterly ALM reviews | — | Next | optimize | 3 | 2 | 6 | waiting | The first quarterly ALM review is held (2026-11-01), prunes the roadmap, and records a dated entry. | — | plan §5-A/B; ALM | standing cadence; dated 2026-11-01, batched with RM-040 (Decision 5, 2026-10-09). prev: 5 (priority-1-5-composite; biggest mover under the new rubric — the dated review is imminent and it is the roadmap's prune authority); detail: docs/roadmap-detail/RM-011.md. |
 | RM-040 | Go Plus sustainability review (2026-11-01) | — | Next | governance | 2 | 2 | 4 | waiting | A dated 2026-11-01 entry records the Go Plus spend picture and the keep/adjust decision. | — | ADR-0013 review trigger; plan go-first-model-bindings AC9 | dated 2026-11-01 (ADR-0013 review trigger). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-040.md. |
+| RM-062 | Restart-recovery for detached dispatches + stated durability ceiling | — | Next | self-improvement | 2 | 2 | 4 | open | After an orchestrator/host restart, a reconciliation sweep classifies every detached dispatch (completed-but-unlanded / interrupted / dead) and surfaces it for land-or-resume; the file-based model's guarantees and non-guarantees are stated in one place. | — | planner landscape dossier 2026-10-16 (`.scratch/landscape-dossier-2026-10-16.md`); owner call 2026-10-16 (proactive) | Proactive owner call 2026-10-16: restart-recovery now; checkpoint semantics split to RM-064. Horizon Later→Next (horizon-move re-score). Reads the durable surface (heartbeat/worktree/run log/session DB); reference section + small ADR. detail: docs/roadmap-detail/RM-062.md |
 | RM-017 | Council consult empty-result fallback (`designing-architecture` Step 5b) | — | Next | self-improvement | 1 | 2 | 2 | waiting | The next real design pass records its consult outcome — the cause was already removed (council on Go; the recording rule is contractual). | — | hierovision/ai-framework#30; PLN design pass 2026-09-27 | verification-only; accepts on the next pass's dated record. prev: 2 (priority-1-5-composite; down on the new rubric — residual scope is a record, not a build); detail: docs/roadmap-detail/RM-017.md. |
 | RM-020 | Next.js + Supabase guidance for the sibling stack consumers | — | Next | self-improvement | 2 | 1 | 2 | waiting | A Next.js + Supabase implement/verify pass selects role-matching guidance without hand-translating the Vue reference. | RM-018 (design reference must land first) | RM-018 scope 2026-09-28; hierovision/ai-framework#29 | gated on RM-018; trigger source paragon live loop (Decision 1). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-020.md. |
 | RM-030 | Per-skill use-case inventories (23 skills) | — | Next | self-improvement | 2 | 1 | 2 | waiting | Every skill carries a ≥80% eval-mapped use-case inventory or a recorded exemption. | — | skill-gap-analysis gap map (deleted 2026-10-02 — git history), cross-cutting finding 1 | fires with each skill's amendment pass; batchable later. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-030.md. |
@@ -149,6 +156,10 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 | RM-013 | Skill retirement flow (registry deprecated → removed) | — | Later | governance | 2 | 1 | 2 | waiting | A deprecated skill exits every gate with CI green and a retained supersession pointer. | first retirement candidate (external) | 2026-09-24 triage (user); ADR-0009 | registry ready for it. prev: 5 (priority-1-5-composite); detail: docs/roadmap-detail/RM-013.md. |
 | RM-015 | First-class consumer override mechanism | — | Later | integration | 2 | 1 | 2 | waiting | A consumer rebases onto a framework update without hand-diffing; pure-framework shadows are mechanically droppable. | RM-012 (pilot scoping) | 2026-09-25 triage (user) | designed from real exercise evidence. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-015.md. |
 | RM-029 | Remaining skill-gap candidate-search briefs (2–13) | — | Later | self-improvement | 2 | 1 | 2 | waiting | The next adoption wave's candidate-search briefs produce screened candidates through the ADR-0011/0012 gates. | next adoption-wave decision (external) | skill-gap-analysis program (`.opencode/plans/skill-gap-analysis-gap-map.md`, deleted 2026-10-02 — recovered from git history) | the program's remaining backlog; not speculation. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-029.md. |
+| RM-060 | Context-lifecycle protocol — phase-boundary continuation + pointer-based returns | — | Later | self-improvement | 2 | 1 | 2 | waiting | A session reaching a phase boundary continues in a fresh session resumed from artifacts alone (decisions carried, no re-plan), and high-fan-out workers return summary + artifact pointers — relying on silent auto-compaction for neither. | — | planner landscape dossier 2026-10-16 (`.scratch/landscape-dossier-2026-10-16.md`); APM Handoff/Memory docs; Anthropic multi-agent research (subagent output to filesystem) | Trigger: first compaction-divergent dispatch — post-compaction output contradicts an earlier recorded decision (reverts a choice, redoes work, re-asks a settled question). Harnesses auto-compact, so this fires, not exhaustion. detail: docs/roadmap-detail/RM-060.md |
+| RM-061 | Design-entry process sizing — depth and gate frequency as explicit plan decisions | — | Later | self-improvement | 2 | 1 | 2 | waiting | Plans state their chosen process depth (scoped slice vs full loop) and human-gate frequency explicitly — a trivial change is not forced through the full loop, and the default is defensible from the plan alone. | — | planner landscape dossier 2026-10-16 (`.scratch/landscape-dossier-2026-10-16.md`); BMAD right-sized process; APM gate-frequency dial | Trigger: derived — fires with the RM-034 plan-format design pass or the next designing-architecture amendment (owner call 2026-10-16; the earlier mis-sizing observation was not a reliable trigger). Row retained, not merged into RM-034. detail: docs/roadmap-detail/RM-061.md |
+| RM-063 | Brownfield codebase survey skill — candidate brief (RM-029 program) | — | Later | self-improvement | 2 | 1 | 2 | waiting | A survey skill establishes verified context on an inherited codebase — what is actually there, plus the checks its work must satisfy (git hooks, CI required checks, lint/type/test config, branch protection) — before design, screened through ADR-0011/0012. | — | planner landscape dossier 2026-10-16 (`.scratch/landscape-dossier-2026-10-16.md`); BMAD "start in an existing codebase" | 14th brief in the RM-029 program family (RM-029 untouched). Trigger: first inherited-codebase engagement (RM-012-class consumer exercise) — occasion-based and proactive, so the survey precedes any guessed plan verification. detail: docs/roadmap-detail/RM-063.md |
+| RM-064 | File-based phase checkpoints — multi-phase run resume | — | Later | self-improvement | 2 | 1 | 2 | waiting | A multi-phase unattended run persists a phase state machine (phase list, current phase, per-phase checkpoint) so a resumed session continues the sequence from the last checkpoint instead of re-planning. | RM-055 (its design pass is the gate) | planner landscape dossier 2026-10-16 (`.scratch/landscape-dossier-2026-10-16.md`); split from RM-062 (owner call 2026-10-16); MAF checkpoint/time-travel reference | Checkpoint semantics proper — split from RM-062, which ships restart-recovery. Still files, no external engine. detail: docs/roadmap-detail/RM-064.md |
 | RM-041 | Jev (System One) advisory eval content-failure triage — trigger-gated | — | Later | evaluation | 1 | 1 | 1 | waiting | Weekly-run content failures are classified by Jev when its triggers and gates (ADR + spend) fire. | — | jev-system-one-evaluation plan 2026-10-03; `reference/jev-system-one-evaluation.md` | trigger-gated T1–T3 with delete-clause D1–D4; fail-open. prev: 5 (priority-1-5-composite); detail: docs/roadmap-detail/RM-041.md. |
 
 ## Review (category: review)
@@ -160,7 +171,7 @@ None.
 None (threshold: null).
 
 ## Done
-Newest first; 25 closed of 59. The table carries the one-line
+Newest first; 25 closed of 64. The table carries the one-line
 
 | ID | Title | Outcome | Horizon | Category | Impact | Urgency | Score | Status | Success measure | Blocked-by | Sources | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -192,7 +203,9 @@ Newest first; 25 closed of 59. The table carries the one-line
 
 ## Skipped
 
-None.
+- **Run-log OTel export/mapping** — rejected 2026-10-16: no external log consumer; file-based observability is deliberate (plan §8); revisit when a consumer needs export.
+- **Learned/auto-generated org topologies** (MetaGPT Puppeteer / AFlow) — rejected 2026-10-16 as a row: research watch only; judgment-led composition is recorded design (`reference/agent-teams.md`); revisit if composition quality plateaus.
+- **Adopting an end-to-end unattended runtime** (Atoms/Factory-style) — rejected 2026-10-16: contradicts bounded autonomy (CONCEPTS Choice 2); the strategy is verified autonomy, not maximal autonomy.
 
 ## Pass decisions (2026-10-09)
 
@@ -210,6 +223,8 @@ Resolved 2026-10-09 — Decision 5 (user call): **RM-011 — first review dated.
 
 ## Triage log
 
+- **2026-10-16** (owner decisions — landscape rows finalized): RM-060 trigger set to the compaction-divergence case and scope reframed to phase-boundary continuation; RM-061 trigger replaced with a derived gate (rides RM-034's plan-format pass; row retained, not merged); RM-063 gained the repo-checks block in its survey artifact and an occasion trigger (first inherited-codebase engagement); RM-062 re-cast proactive by owner call — restart-recovery now (Horizon Later→Next, re-scored 4, no failure gate) with checkpoint semantics split to new RM-064 (gated to RM-055). RM-060/061/063 flipped proposed → waiting; RM-062 is open. Open 38 → 39 (25 done of 64).
+- **2026-10-16** — landscape pass (planner dossier, five candidates vs the as-if-done framework): 4 `proposed` Later rows added — RM-060 context-lifecycle protocol (context-pressure handoff + pointer-based returns), RM-061 design-entry process sizing (depth + gate frequency; absorbs the area-partitioning pattern), RM-062 durability ceiling + checkpoint-semantics escalation path, RM-063 brownfield survey skill (RM-029 program family). Dated design-input sections appended to RM-008 (declarative boundary schema candidates + tool-level enforcement precedent) and RM-015 (override precedence-chain reference). 3 candidates skipped with reasons (OTel log export; learned org topologies; unattended-runtime adoption). Dossier items already covered by RM-058's delivery (worktree-safe dispatch D3, wake path D1/D2) were dropped, not re-rowed. No re-scores; all prior ranks held. Open 34 → 38 (25 done of 63).
 - **2026-10-16** — retired-plan disposition (RM-058 follow-up). The RM-058 plan's two remaining Open Questions are settled, **not scheduled**: (a) `session.idle` event-driven observer — a latency micro-optimization the shipped 30 s poll makes unnecessary (it meets the 5-min SLA); revisit only if opencode plugin attribution facts change; (b) `test`-class profile granularity — inherent in the least-privilege design (extend `scripts/dispatch-profiles.json` on the first recorded denial). No roadmap row: neither is a schedulable improvement.
 - **2026-10-16** — RM-058 delivered and closed at the merge of [PR #116](https://github.com/hierovision/ai-framework/pull/116): attach-vehicle wake (D2 revised after the 2026-10-15 live-smoke ghost-turn diagnosis — the old `opencode run --session` started its own server and ran the wake as an unrendered `build` ghost), plus worktree-safe dispatch, per-class permission profile, status-claim gate, and the corrected quiescence gate (closed-assistant-step signal). AC8 live smoke passed: an agent-correct wake rendered in a fixed-port TUI ~42 s after terminal. Same pass corrected RM-056's row placement — its 2026-10-15 close left it in the Now table and strip; it now sits in Done (25 closed of 59).
 - **2026-10-09** — restructure pass: rank-ordered backlog (trigger-state × Priority × ID; Priority values preserved verbatim, no re-score); Done separated (17 rows, newest first, Delivered dated); RM-051 ingested from unmapped open issue hierovision/ai-framework#92 as `proposed`; dated annotations on RM-007/008/009/010/011 (no recorded trigger), RM-018/RM-020 (stale trigger source), RM-024/RM-025 (close candidates), RM-049 (trigger wave passed), RM-026 (acceptance surface moved); legend updated (`open`/`waiting`/`proposed`, Rank and Delivered columns); stale Sequencing rationale and Next-session entry refreshed; frontmatter added.
