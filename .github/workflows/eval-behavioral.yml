@@ -166,6 +166,12 @@ jobs:
           fi
           SKILL_ARGS=""
           for s in $SHARD_SKILLS; do SKILL_ARGS="$SKILL_ARGS --skill $s"; done
+          # Lane-catalog diagnostic (2026-10-16): the pinned lane model vanished
+          # from the CI gateway catalog (ProviderModelNotFoundError on both the
+          # primary and the RM-056 fallback). Log the catalog the runner will
+          # resolve against so drift is visible in the run log, not guessed.
+          echo "=== lane catalog (opencode models) ==="
+          opencode models | sort || echo "opencode models failed"
           python3 skills/authoring-skills/scripts/run_behavioral_eval.py \
             --model opencode-go/deepseek-v4.1-flash --logs-dir logs $DEFAULT_ARG $SKILL_ARGS
 
