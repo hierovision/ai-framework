@@ -52,12 +52,12 @@ scoring uses the Rex Black rubric.
 - Detail files: per-ID provenance at docs/roadmap-detail/<ID>.md (relocated byte-exact 2026-10-11; owner ruling: no massive detail in the roadmap). Referenced from each row's Notes; consumed at design passes; pruned by the quarterly ALM review.
 - "plan" = `docs/maturity-plan.md`; issue refs = `hierovision/ai-framework#NN`.
 
-## Priority order (1–39)
+## Priority order (1–41)
 One list per horizon, rank order. Every line: `[ID](detail) (score) —
 title`. IDs link to that row's full record in `docs/roadmap-detail/`.
 Score = Impact × Urgency. `— in progress` marks the row under work.
 
-### Now (17)
+### Now (19)
 
 - [RM-021](docs/roadmap-detail/RM-021.md) (9) — Eval reliability: prompt hygiene + typed migration sweep (runner resilience lands first) — in progress
 - [RM-016](docs/roadmap-detail/RM-016.md) (6) — Eval-harness independence — sanitized skill staging
@@ -67,6 +67,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 - [RM-028](docs/roadmap-detail/RM-028.md) (6) — Plan-close follow-up ingestion into `ROADMAP.md`
 - [RM-042](docs/roadmap-detail/RM-042.md) (6) — Model-policy checker CI hardening — offline suite + consumer-checker tests
 - [RM-059](docs/roadmap-detail/RM-059.md) (6) — Watchdog STALLED false positive on active generation
+- [RM-066](docs/roadmap-detail/RM-066.md) (6) — Roadmap contract coherence — ordering + five more spec conflicts (consumer conformance scan)
 - [RM-034](docs/roadmap-detail/RM-034.md) (4) — Plan body carries in-scope policy decisions (cold-executable plan-format)
 - [RM-036](docs/roadmap-detail/RM-036.md) (4) — Align implementing-features Step 11 with the git-workflow push/PR contract
 - [RM-037](docs/roadmap-detail/RM-037.md) (4) — Scoped-slice plan maintenance: History + plan-staging ownership
@@ -75,6 +76,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 - [RM-044](docs/roadmap-detail/RM-044.md) (4) — Run-vehicle/supervision hardening from the go-first + run-vehicle sessions
 - [RM-051](docs/roadmap-detail/RM-051.md) (4) — UX-consult trigger calibration for conversational surfaces (designing-architecture Step 5b)
 - [RM-054](docs/roadmap-detail/RM-054.md) (4) — Session-guard multi-wave scope, long-lived budget default, watch exit + kill-authority notes
+- [RM-065](docs/roadmap-detail/RM-065.md) (4) — Status ownership belongs to the delivering PR — triage closure cross-ref
 - [RM-035](docs/roadmap-detail/RM-035.md) (2) — Cite exact ADR filenames in plans and dispatch prompts
 
 
@@ -120,6 +122,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 | RM-028 | Plan-close follow-up ingestion into `ROADMAP.md` | — | Now | self-improvement | 3 | 2 | 6 | open | A plan's follow-ups are ingested at close as proposed roadmap rows (or surfaced in the handoff when none exists) — none lost on cleanup. | — | hierovision/ai-framework#83; marvin-slack session 2026-10-01 | fired 2026-10-01 (marvin-slack lost 5 follow-ups); open design decisions listed in the row's detail. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-028.md. |
 | RM-042 | Model-policy checker CI hardening — offline suite + consumer-checker tests | — | Now | tooling | 2 | 3 | 6 | open | The model-policy tools run inside quality-gates with a failing fixture naming the offending binding. | — | plan follow-up `go-first-model-bindings` (merged #96) | fired 2026-10-04 (scripts shipped without a CI slot or tests). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-042.md. |
 | RM-059 | Watchdog STALLED false positive on active generation — gate the verdict on stream state-deltas | — | Now | self-improvement | 2 | 3 | 6 | open | watch_agent no longer reports STALLED for a subagent whose session stream is demonstrably advancing — proven by a drill where a generating child keeps reporting OK/active | — (sibling of RM-049's predicate fix; family of RM-047) | live observations 2026-10-12/13 (design + implement passes both flagged STALLED while stream.jsonl advanced); RM-022's own note that opencode records no tool durations | Observed twice live: stream step events advanced while the verdict printed STALLED — only genuine stalls may flag. Fix = state-delta gating (no events of ANY kind across the window before STALLED may emit). detail: docs/roadmap-detail/RM-059.md |
+| RM-066 | Roadmap contract coherence — ordering + five more spec conflicts (consumer conformance scan) | — | Now | self-improvement | 3 | 2 | 6 | proposed | The shipped triage skill, roadmap-format, and checker are mutually coherent (one ordering rule, a defined proposed→open transition, one meaning for review) and a consumer can produce a conforming roadmap. | — | hierovision/ai-framework#113; consumer conformance scan 2026-10-12/13 (Stonegate-Software/paragon-learning-network) | fired 2026-10-12/13 (six conflicts: ordering, proposed→open, review meaning, Done-migration path, checker usability, section layout); same family as RM-053/RM-057 — the contract landed but the skill/format/checker were not brought along. detail: docs/roadmap-detail/RM-066.md |
 | RM-034 | Plan body carries in-scope policy decisions (cold-executable plan-format) | — | Now | self-improvement | 2 | 2 | 4 | open | A cold implementer executes an in-scope user-frozen policy phase from the plan body alone. | — | RM-031 candidate `phase-policy-detail-not-in-plan` (`.scratch/skill-gap-analysis/subagent-issues.md`, 2026-09-27) | fired 2026-09-27; plan-policy-into-body rule (RM-034). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-034.md. |
 | RM-036 | Align implementing-features Step 11 with the git-workflow push/PR contract | — | Now | self-improvement | 2 | 2 | 4 | open | Skill body and git-workflow state ONE push/PR contract; an implement pass lands branch + PR unprompted. | — | RM-031 candidate `implementer-stops-before-push-pr`; `reference/git-workflow.md` §Commit discipline / §Push, PR, merge | fired 2026-09-27 (pass ended local-only). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-036.md. |
 | RM-037 | Scoped-slice plan maintenance: History + plan-staging ownership | — | Now | self-improvement | 2 | 2 | 4 | open | A scoped-slice pass records plan History and states who stages the tracked plan file. | — | RM-031 candidate `plan-file-maintenance-skipped-in-scoped-execution` (`.scratch/skill-gap-analysis/subagent-issues.md`, 2026-09-27) | fired 2026-09-27. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-037.md. |
@@ -128,6 +131,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 | RM-044 | Run-vehicle/supervision hardening from the go-first + run-vehicle sessions | — | Now | self-improvement | 2 | 2 | 4 | open | Each supervision mechanic (heartbeat Z-format, conditional injection, empty-result classification) carries a hermetic test or recorded live proof. | — | plan follow-ups `run-vehicle-visibility` (#94) + `go-first-model-bindings` (#96) | fired 2026-10-04 (seat-validation dispatches + smoke logs). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-044.md. |
 | RM-051 | UX-consult trigger calibration for conversational surfaces (designing-architecture Step 5b) | — | Now | self-improvement | 2 | 2 | 4 | open | Step 5b consults only on interaction-semantics changes; copy-only changes record an explicit skip; the conversational brief covers message structure, labels, and truncation honesty. | — | hierovision/ai-framework#92; marvin-slack consults 2026-10-03 (user agreement recorded in the issue) | proposed (entered 2026-10-09, merged contracts keep it); fired 2026-10-03. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-051.md. |
 | RM-054 | Session-guard multi-wave scope, long-lived budget default, watch exit + kill-authority notes | — | Now | self-improvement | 2 | 2 | 4 | open | A new wave is supervised cleanly after a historical failure in the same tree; long-lived sessions are not aborted by the budget; --watch exits; kill authority documented or accepted. | — | paragon handoff 2026-10-09 appendix (§C); session `ses_ef8102f5dffevLUPFG0feyKAX8`; family of RM-045/RM-047/048 | fired 2026-10-09/10 (paragon guard appendix); (1)–(2) hermetic red-first tests, (3)–(4) documented contracts. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-054.md. |
+| RM-065 | Status ownership belongs to the delivering PR — triage closure cross-ref | — | Now | self-improvement | 2 | 2 | 4 | proposed | The delivering PR owns status (same-PR closure per reference/git-workflow.md §Roadmap closure); the triage skill cites that rule and never gates status transitions. | — | hierovision/ai-framework#112; consumer handoff 2026-10-12 (paragon status-lifecycle); paragon fix PR #41 (`a5553b3`) | fired 2026-10-12 (paragon drifted: two Done-in-fact items sat Open-on-paper between passes); correction is a citation cross-ref in SKILL.md Step 7 + roadmap-format.md — no behavior change. detail: docs/roadmap-detail/RM-065.md |
 | RM-035 | Cite exact ADR filenames in plans and dispatch prompts | — | Now | self-improvement | 1 | 2 | 2 | open | Plans and dispatch prompts cite exact ADR filenames — zero glob-recovery on first read. | — | RM-031 candidate `adr-reference-by-number-not-path` (`.scratch/skill-gap-analysis/subagent-issues.md`, 2026-09-27) | fired 2026-09-27. prev: 4 (priority-1-5-composite); detail: docs/roadmap-detail/RM-035.md. |
 
 ## Next (dated/near — opportunities in validation)
@@ -171,7 +175,7 @@ None.
 None (threshold: null).
 
 ## Done
-Newest first; 25 closed of 64. The table carries the one-line
+Newest first; 25 closed of 66. The table carries the one-line
 
 | ID | Title | Outcome | Horizon | Category | Impact | Urgency | Score | Status | Success measure | Blocked-by | Sources | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -223,6 +227,7 @@ Resolved 2026-10-09 — Decision 5 (user call): **RM-011 — first review dated.
 
 ## Triage log
 
+- **2026-10-16** — GitHub open-issue pass (owner request): 7 open issues reconciled. Two new rows ingested as `proposed`, both Now — RM-066 ← #113 (roadmap contract coherence: ordering + five spec conflicts; score 6) and RM-065 ← #112 (status ownership belongs to the delivering PR; score 4). Five carried rows re-confirmed already mapped: #92 → RM-051, #83 → RM-028, #57 → RM-027, #29 → RM-018, #56 → RM-026 (Done; upstream improvement candidate). No newly-closed issues since 2026-10-11, no status moves, no re-scores. Open 39 → 41 (25 done of 66).
 - **2026-10-16** (owner decisions — landscape rows finalized): RM-060 trigger set to the compaction-divergence case and scope reframed to phase-boundary continuation; RM-061 trigger replaced with a derived gate (rides RM-034's plan-format pass; row retained, not merged); RM-063 gained the repo-checks block in its survey artifact and an occasion trigger (first inherited-codebase engagement); RM-062 re-cast proactive by owner call — restart-recovery now (Horizon Later→Next, re-scored 4, no failure gate) with checkpoint semantics split to new RM-064 (gated to RM-055). RM-060/061/063 flipped proposed → waiting; RM-062 is open. Open 38 → 39 (25 done of 64).
 - **2026-10-16** — landscape pass (planner dossier, five candidates vs the as-if-done framework): 4 `proposed` Later rows added — RM-060 context-lifecycle protocol (context-pressure handoff + pointer-based returns), RM-061 design-entry process sizing (depth + gate frequency; absorbs the area-partitioning pattern), RM-062 durability ceiling + checkpoint-semantics escalation path, RM-063 brownfield survey skill (RM-029 program family). Dated design-input sections appended to RM-008 (declarative boundary schema candidates + tool-level enforcement precedent) and RM-015 (override precedence-chain reference). 3 candidates skipped with reasons (OTel log export; learned org topologies; unattended-runtime adoption). Dossier items already covered by RM-058's delivery (worktree-safe dispatch D3, wake path D1/D2) were dropped, not re-rowed. No re-scores; all prior ranks held. Open 34 → 38 (25 done of 63).
 - **2026-10-16** — retired-plan disposition (RM-058 follow-up). The RM-058 plan's two remaining Open Questions are settled, **not scheduled**: (a) `session.idle` event-driven observer — a latency micro-optimization the shipped 30 s poll makes unnecessary (it meets the 5-min SLA); revisit only if opencode plugin attribution facts change; (b) `test`-class profile granularity — inherent in the least-privilege design (extend `scripts/dispatch-profiles.json` on the first recorded denial). No roadmap row: neither is a schedulable improvement.
