@@ -50,7 +50,8 @@ Review Progress:
 - [ ] 1. Resolve the change-under-review (the diff) + the plan (if any)
 - [ ] 2. Detect stack & load the matching review-time stack reference
 - [ ] 3. Plan-conformance sweep (when a plan is in play)
-- [ ] 4. Inspect the diff in priority order (the checklist below)
+- [ ] 4. Inspect the diff in priority order (the checklist below — includes
+      doc-completeness for a merging PR)
 - [ ] 5. Classify findings by severity
 - [ ] 6. Issue the verdict
 - [ ] 7. Write REVIEW.md at the repo root; STOP
@@ -201,6 +202,17 @@ outrank taste — do not lead with nits):
    `reference/technical-english.md`), a major when the omission hides
    evidence for an AC. Never accept "see the command above" — tool calls
    and output are not reviewable.
+9. **Doc-completeness (merging PR).** For a PR that will merge and closes
+   or advances a `docs/ROADMAP.md` item, verify the branch carries **every**
+   doc update that leaves the repo accurate the moment it merges: the row
+   (status, date, evidence/PR link); the horizon strip entry and every
+   counter it moves (`### Now/Next/Later (N)`, `## Priority order (1–N)`,
+   the `N closed of M` line — all must agree with the row); the per-ID
+   detail file `docs/roadmap-detail/<ID>.md`; and plan-file retirement
+   (AGENTS.md rule 4) with no reference left citing the retired path. A
+   missing or inconsistent update is a **major** finding; the fix is a
+   commit on the same branch, never a follow-up on `main`. Contract:
+   `reference/git-workflow.md` → *Roadmap closure*.
 
 ### Step 5 — Classify findings by severity (the backbone)
 
