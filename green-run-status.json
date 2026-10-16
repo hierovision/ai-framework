@@ -1,0 +1,16 @@
+{
+  "achieved": true,
+  "run_id": "38915174980",
+  "date": "2026-10-16",
+  "branch": "main",
+  "duration_min": 23.0,
+  "all_pass": true,
+  "quarantine_flips": 0,
+  "infra_retried": 4,
+  "depth": "default",
+  "artifact_url": "https://github.com/hierovision/ai-framework/actions/runs/38915174980",
+  "lane": "primary",
+  "fallback_carried": false,
+  "definition": "reference/eval-green-run-definition.md",
+  "qualified_at": "2026-10-16T14:47:29Z"
+}
