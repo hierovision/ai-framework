@@ -6,8 +6,8 @@
 #     the hermetic per-PR gate in ci.yml.
 #
 # 2026-09-29 — sharded for wall time, on the Go eval lane:
-#   - Lane model: `opencode-go/deepseek-v4-flash` (user directive 2026-09-29). Chosen
-#     over the initial `opencode-go/deepseek-v4-flash` and over
+#   - Lane model: `opencode-go/deepseek-v4.1-flash` (user directive 2026-09-29). Chosen
+#     over the initial `opencode-go/deepseek-v4.1-flash` and over
 #     `mimo-v2.6-flash` on measured evidence: 3/3 canary probes pass, 34 s on a
 #     light eval (vs 70 s), 168 s on the heavy one (vs 147 s), AA 37 intel at
 #     $0.10/$0.50 per M; mimo measured 2x slower on the same light eval (141 s)
@@ -34,7 +34,7 @@
 #   - Run logs uploaded as artifacts with `retention-days: 30`.
 #   - `concurrency` prevents overlapping weekly runs.
 #   - Eval lane (user directive 2026-09-29): opencode-go flat-rate,
-#     `opencode-go/deepseek-v4-flash`, authenticated by OPENCODE_API_KEY.
+#     `opencode-go/deepseek-v4.1-flash`, authenticated by OPENCODE_API_KEY.
 name: Behavioral Eval (weekly)
 
 on:
@@ -129,11 +129,6 @@ jobs:
           # it is NEVER referenced in a `run:` script and never echoed.
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           BEVAL_FALLBACK_ENABLED: "1"
-          # CI gateway catalog renamed the direct-key flash id (2026-10-16):
-          # `deepseek/deepseek-flash` is gone, `deepseek/deepseek-v4-flash` is
-          # listed. Set per-CI so the local default (which still resolves
-          # `deepseek-flash`) is untouched.
-          BEVAL_FALLBACK_MODEL: deepseek/deepseek-v4-flash
           BEVAL_MAX_CONTINUATIONS: "2"
         run: |
           # Depth: weekly = one default eval per skill; monthly (or a manual
@@ -148,7 +143,7 @@ jobs:
           # (2026-10-03, plan go-first-model-bindings) every framework persona
           # is Go-bound — this repo's override map is empty; the guard remains
           # for consumer repos whose wrappers are still free-bound.
-          export OPENCODE_CONFIG_CONTENT="$(python3 scripts/ci-lane-overrides.py --model opencode-go/deepseek-v4-flash)"
+          export OPENCODE_CONFIG_CONTENT="$(python3 scripts/ci-lane-overrides.py --model opencode-go/deepseek-v4.1-flash)"
           # RM-021 AC5: optional targeted dispatch restricts the shard to the
           # intersection of the matrix skill list and the user-supplied list.
           USER_SKILLS="${{ inputs.skills }}"
@@ -178,7 +173,7 @@ jobs:
           echo "=== lane catalog (opencode models) ==="
           opencode models | sort || echo "opencode models failed"
           python3 skills/authoring-skills/scripts/run_behavioral_eval.py \
-            --model opencode-go/deepseek-v4-flash --logs-dir logs $DEFAULT_ARG $SKILL_ARGS
+            --model opencode-go/deepseek-v4.1-flash --logs-dir logs $DEFAULT_ARG $SKILL_ARGS
 
       - name: Upload shard logs (30-day retention)
         if: always()
