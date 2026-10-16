@@ -757,12 +757,64 @@ first time a `--worktree` dispatch is used in anger (D3).
   ("server-reachable orchestrator, do not re-litigate"); the amendment's
   open dimensions were resolved against direct probe evidence of the
   installed 1.19.1 recorded above).
+- 2026-10-16 — **Implemented (attach-vehicle amendment).** Delivered the D2
+  delta on branch `feat/rm-058-orchestrator-wake` (commit to follow):
+  - `scripts/observe_completion.py` — `deliver()` now runs `opencode run
+    --attach <wake-url> --session <sid> --agent <wake-agent> --format json
+    <wake-text>` (never `--continue`; never `--model`). Acceptance proof =
+    the first streamed event naming the orchestrator session, or a client
+    exit 0, whichever first; the client is then allowed to exit within
+    `WAKE_SUBPROCESS_TIMEOUT` (**180 → 60**, per attempt, bounds
+    pre-acceptance only). No resolvable URL → `WAKE_DEFERRED <outcome>
+    reason=no-attach-target` at the first terminal poll with **zero**
+    subprocess spawns. The final `WAKE_DEFERRED` carries `reason=` naming the
+    gate (`quiescence-gate`) or the delivery refusal. The gate adds
+    `_assistant_step_closed` (a trailing `step-start` reads mid-generation) as
+    the load-bearing signal and keeps `time_updated` stability as the belt.
+  - `scripts/dispatch_agent.py` — added `--wake-url <url>` (resolved from
+    `OPENCODE_WAKE_URL` when omitted) and `--wake-agent <name>` (preflight
+    exit 2 with `--wake-to` when missing); both forwarded to the spawned
+    observer.
+  - `scripts/test_observe_completion.py` — stub identifies the wake by
+    `--attach`; AC1 asserts the exact attach argv and the absence of
+    `--continue`/`--model`; AC3b asserts the open-`step-start` gate case;
+    AC4a/b/c assert the three `reason=` cases (gate / no-attach-target /
+    bounded-refusal).
+  - `scripts/test_dispatch_agent.py` — asserts `--wake-url`/`--wake-agent`
+    forwarding (explicit and `OPENCODE_WAKE_URL`-resolved) and the
+    missing-`--wake-agent` preflight exit 2.
+  - `reference/subagent-supervision.md` §6 — implementation-status line
+    flipped to implemented.
+  - Verification (all exit 0): `test_observe_completion.py` (10 cases),
+    `test_dispatch_agent.py` (24), `test_watch_agent.py` (13),
+    `test_session_guard.py` (26), `test_validate_delegated_result.py` (7);
+    `python3 -m py_compile` clean on both touched scripts.
+  - Red-first evidence: against the pre-amendment `deliver()`, AC1's stub
+    recorded zero invocations (`[]` — no `--attach`); AC4b wrote a legacy
+    `WAKE success` via the `--session` ghost vehicle instead of
+    `reason=no-attach-target`; AC4a wrote the old `WAKE_DEFERRED …
+    heartbeat=` form; AC4c's refusal was never invoked. The first red was the
+    absent `--wake-url`/`--wake-agent` CLI contract (verified before the
+    flags were added).
+  - Coverage gate: no rebalance needed (the AC tests are already at the
+    cheapest layer that exercises the seam — observer loop + stub `opencode`
+    + fixture DB). One gap the implementation revealed was closed: AC4c now
+    asserts the refusal was **retried** (≥2) and **bounded** by the deadline
+    (≤8), not merely attempted once.
+  - Mechanical deviations (feature unchanged): none — the plan's Files to
+    Modify matched on disk; `--model` was removed from the observer CLI (the
+    amended D2 says the wake must never use it). No `docs/ROADMAP.md` change
+    (roadmap closure is owned by the orchestrator at merge).
+  - Not exercised hermetically (owner manual, AC8): the live fixed-port TUI
+    smoke (AC8 steps 1–5) was deliberately NOT run — it needs the owner and a
+    live TUI; the procedure is recorded in AC8.
 
 ### Follow-ups
 
 - **Wake vehicle (H1, blocks AC8).** RESOLVED BY THE 2026-10-16 D2
-  AMENDMENT (design decided; implementation pending owner approval of this
-  revision): server-reachable orchestrator — owner launches the TUI with an
+  AMENDMENT (design decided; **implemented 2026-10-16** — see the History
+  entry above; only the owner-manual AC8 live smoke remains): server-reachable
+  orchestrator — owner launches the TUI with an
   explicit `--port`, the URL travels via `OPENCODE_WAKE_URL`/`--wake-url`,
   delivery is `opencode run --attach <url> --session <sid> --agent
   <wake-agent> --format json` (probe-proven render, agent-correct, ≤ 15 s,

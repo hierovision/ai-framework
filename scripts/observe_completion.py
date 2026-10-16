@@ -5,9 +5,11 @@ RM-058 (plan `.opencode/plans/rm-058-orchestrator-wake.md`). Spawned detached by
 `scripts/dispatch_agent.py` immediately after the child's `session_id=` is
 printed (D2). It polls the ONE durable supervision surface — the dispatcher's
 heartbeat envelope plus the run-log record `/scripts/log_run.py` already emits
-(D1) — and delivers a fixed-shape wake into the orchestrator conversation with
-an explicit `opencode run --session <id>` (never `--continue`; AGENTS.md
-rule 1), gated on the orchestrator session being quiescent (D2 step 4).
+(D1) — and delivers a fixed-shape wake into the orchestrator conversation
+**through the orchestrator's own server** with `opencode run --attach
+<wake-url> --session <id> --agent <wake-agent> --format json <text>` (never
+`--continue`; AGENTS.md rule 1; never `--model` — the agent's binding decides),
+gated on the orchestrator session being quiescent (D2, revised 2026-10-16).
 
 Boundaries:
   * The wake vehicle and rule-1 quiescence gate: D2.
@@ -30,8 +32,10 @@ import datetime
 import importlib.util
 import json
 import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 
 
@@ -60,7 +64,10 @@ DEFAULT_INTERVAL = 30
 DEFAULT_DEADLINE = 300
 # 2x the watcher's stall window (D1 abort semantics).
 DEFAULT_LIVENESS_SECONDS = 2 * watch_agent.DEFAULT_STALL_SECONDS
-WAKE_SUBPROCESS_TIMEOUT = 180
+# Per-attempt bound on acceptance proof only: with the attach vehicle the
+# generation runs server-side and the client exits in seconds, so the wake
+# subprocess never holds a generation (D2, revised 2026-10-16: 180 -> 60).
+WAKE_SUBPROCESS_TIMEOUT = 60
 
 
 def now_iso():
@@ -244,28 +251,115 @@ def wake_text(cfg, outcome, detail, run_path, hb_path):
     return "\n".join(lines)
 
 
-def deliver(cfg, text):
-    """Append the wake to the orchestrator conversation via an explicit
-    `--session` (never `--continue`). Returns True on a clean exit."""
-    argv = ["opencode", "run", "--session", cfg.orchestrator_session,
-            "--format", "json"]
-    if cfg.model:
-        argv += ["--model", cfg.model]
-    argv.append(text)
-    try:
-        proc = subprocess.run(argv, capture_output=True, text=True,
-                              timeout=WAKE_SUBPROCESS_TIMEOUT)
-    except (OSError, subprocess.SubprocessError):
+def resolve_wake_url(cfg):
+    """The attach URL: the explicit flag, else the inherited env, else None.
+
+    No port/state file exists to discover it from disk (probe P2, 1.19.1), so
+    the URL must travel with the dispatch contract (D2 step 2).
+    """
+    return cfg.wake_url or os.environ.get("OPENCODE_WAKE_URL") or None
+
+
+def _names_session(line, sid):
+    """True when a streamed event line names `sid` (top-level or part-level)."""
+    if not sid:
         return False
-    return proc.returncode == 0
+    try:
+        ev = json.loads(line)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(ev, dict):
+        return False
+    if ev.get("sessionID") == sid:
+        return True
+    part = ev.get("part")
+    return isinstance(part, dict) and part.get("sessionID") == sid
 
 
-# --- quiescence gate (D2 step 4) ---------------------------------------------
+def deliver(cfg, text, wake_url):
+    """Deliver the wake through the orchestrator's own server (D2, amended).
+
+    `opencode run --attach <wake-url> --session <sid> --agent <wake-agent>
+    --format json <text>` — never `--continue` (AGENTS.md rule 1), never
+    `--model` (the agent's binding decides; without `--agent` opencode records
+    the default `build` ghost). Acceptance proof is the first streamed event
+    naming the orchestrator session or a client exit 0, whichever first; the
+    client is then allowed to exit within `WAKE_SUBPROCESS_TIMEOUT` — the
+    generation runs server-side, so the subprocess never holds it.
+
+    Returns `(accepted, failure_detail)`; `failure_detail` is None on
+    acceptance, else a bounded string naming the refusal.
+    """
+    argv = ["opencode", "run", "--attach", wake_url,
+            "--session", cfg.orchestrator_session,
+            "--agent", cfg.wake_agent, "--format", "json", text]
+    try:
+        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True,
+                                start_new_session=True)
+    except OSError as exc:
+        return False, f"cannot launch opencode: {exc}"
+    accepted = {"v": False}
+
+    def reader():
+        try:
+            for line in proc.stdout:
+                if _names_session(line, cfg.orchestrator_session):
+                    accepted["v"] = True
+        except Exception:  # noqa: BLE001 - a broken pipe is not acceptance
+            pass
+
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+    timed_out = False
+    try:
+        proc.wait(timeout=WAKE_SUBPROCESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+    thread.join(timeout=2)
+    if accepted["v"]:
+        return True, None
+    if timed_out:
+        return False, "attach delivery timed out"
+    rc = proc.returncode if proc.returncode is not None else -1
+    if rc == 0:
+        return True, None
+    return False, f"attach delivery failed rc={rc}"
+
+
+# --- quiescence gate (D2 step 4, revised 2026-10-16) -------------------------
+
+def _assistant_step_closed(parts):
+    """True when the newest assistant step sequence is closed.
+
+    The reader view carries no message roles, so the newest step part decides:
+    a trailing `step-start` (no `step-finish` after it) means a model call is
+    mid-generation — no tool is in flight and `time_updated` only advances at
+    `step-finish`, so the old predicate read such a turn as quiescent (the
+    2026-10-15 latent finding). No step parts at all reads closed.
+    """
+    for _ms, d in reversed(parts or []):
+        t = (d.get("type") or "").replace("_", "-")
+        if t == "step-finish":
+            return True
+        if t == "step-start":
+            return False
+    return True
+
 
 def orchestrator_quiescent(cfg, state):
-    """True when the orchestrator session has no tool in flight and its
-    `time_updated` is stable across two polls. No DB -> cannot gate, deliver
-    (heartbeat-only mode, D1)."""
+    """True when the orchestrator session has no tool in flight, its newest
+    assistant step sequence is closed, and its `time_updated` is stable across
+    two polls. No DB -> cannot gate, deliver (heartbeat-only mode, D1)."""
     try:
         con = watch_agent.db()
     except Exception:  # noqa: BLE001 - best-effort gate
@@ -283,6 +377,8 @@ def orchestrator_quiescent(cfg, state):
         prev = state.get("orchestrator_updated")
         state["orchestrator_updated"] = updated
         if an["running"]:
+            return False
+        if not _assistant_step_closed(parts):
             return False
         return prev is not None and prev == updated
     except Exception:  # noqa: BLE001 - a broken DB must not stall the wake
@@ -349,6 +445,8 @@ def run(cfg, sleep=time.sleep, now=time.monotonic):
     state = {}
     survey_written = False
     terminal_at = None
+    last_failure = None
+    wake_url = resolve_wake_url(cfg)
     while True:
         hb = watch_agent.read_heartbeat(hb_path)
         child_has_parts, _child_terminal, child_running = _child_db_state(cfg)
@@ -370,13 +468,23 @@ def run(cfg, sleep=time.sleep, now=time.monotonic):
 
         if terminal_at is None:
             terminal_at = now()
+        # No attach target -> immediate honest deferral, never a subprocess (the
+        # legacy `--session` ghost vehicle is structurally impossible).
+        if wake_url is None:
+            _append_line(hb_path,
+                         f"WAKE_DEFERRED {outcome} reason=no-attach-target")
+            return 0
         if orchestrator_quiescent(cfg, state):
             text = wake_text(cfg, outcome, detail, run_path, hb_path)
-            if deliver(cfg, text):
+            ok, last_failure = deliver(cfg, text, wake_url)
+            if ok:
                 _append_line(hb_path, f"WAKE {outcome}")
                 return 0
         if now() - terminal_at > cfg.deadline:
-            _append_line(hb_path, f"WAKE_DEFERRED {outcome} heartbeat={hb_path}")
+            # The gate (never quiescent) or a delivery refusal, whichever
+            # prevented acceptance.
+            reason = last_failure or "quiescence-gate"
+            _append_line(hb_path, f"WAKE_DEFERRED {outcome} reason={reason}")
             return 0
         sleep(cfg.interval)
 
@@ -437,8 +545,12 @@ def build_parser():
     ap.add_argument("--worktree", default=None,
                     help="Worktree path when --worktree dispatch was used.")
     ap.add_argument("--branch", default=None, help="Worktree branch name.")
-    ap.add_argument("--model", default=None,
-                    help="Orchestrator model for the wake run (optional).")
+    ap.add_argument("--wake-url", dest="wake_url", default=None,
+                    help="Attach URL of the orchestrator server (falls back to "
+                         "OPENCODE_WAKE_URL).")
+    ap.add_argument("--wake-agent", dest="wake_agent", required=True,
+                    help="Agent the orchestrator session runs as (required: "
+                         "opencode does not inherit it).")
     ap.add_argument("--call-seconds", dest="call_seconds", type=int,
                     default=watch_agent.DEFAULT_CALL_SECONDS)
     ap.add_argument("--loop-repeats", dest="loop_repeats", type=int,

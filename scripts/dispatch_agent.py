@@ -27,7 +27,10 @@ What it does:
     never leave main (D3);
   * with --wake-to SESSION-ID (requires --heartbeat), spawns the detached
     completion-observer (scripts/observe_completion.py) once the child's
-    session id is printed, so the orchestrator is woken on terminal state (D2);
+    session id is printed, forwards the attach target to it (--wake-url,
+    resolved from env OPENCODE_WAKE_URL when omitted, and --wake-agent,
+    required with --wake-to), so the orchestrator is woken on terminal state
+    through its own server (D2);
   * writes the final text to --out (default: <prompt-file>.result.md);
   * with --contract / --markers, validates the result via
     scripts/validate_delegated_result.py (RM-023): an empty or malformed
@@ -454,10 +457,14 @@ def worktree_setup(repo, name, resume):
     return path, branch, None
 
 
-def spawn_observer(a, child_sid, dispatch_dir, out_path, logs_dir, worktree, branch):
+def spawn_observer(a, child_sid, dispatch_dir, out_path, logs_dir, worktree,
+                   branch, wake_url=None, wake_agent=None):
     """Spawn the detached completion-observer (D2). Returns the Popen or None.
 
     `OBSERVE_COMPLETION_PATH` overrides the script path (hermetic test seam).
+    The attach target (--wake-url/--wake-agent) is forwarded so the observer
+    can deliver through the orchestrator's own server; when no URL resolves the
+    observer still supervises and defers with `reason=no-attach-target`.
     """
     observer = (os.environ.get("OBSERVE_COMPLETION_PATH")
                 or os.path.join(SCRIPT_DIR, "observe_completion.py"))
@@ -474,6 +481,10 @@ def spawn_observer(a, child_sid, dispatch_dir, out_path, logs_dir, worktree, bra
         argv += ["--worktree", worktree]
     if branch:
         argv += ["--branch", branch]
+    if wake_url:
+        argv += ["--wake-url", wake_url]
+    if wake_agent:
+        argv += ["--wake-agent", wake_agent]
     try:
         logf = open(a.heartbeat + ".observer.log", "a", encoding="utf-8")
     except OSError:
@@ -607,7 +618,14 @@ def main(argv=None):
     ap.add_argument("--wake-to", dest="wake_to", default=None,
                     metavar="SESSION-ID",
                     help="Spawn the completion-observer for this orchestrator "
-                         "session (requires --heartbeat).")
+                         "session (requires --heartbeat and --wake-agent).")
+    ap.add_argument("--wake-url", dest="wake_url", default=None, metavar="URL",
+                    help="Attach URL of the orchestrator's server for the wake "
+                         "(default: env OPENCODE_WAKE_URL). No URL resolves -> "
+                         "the observer defers with reason=no-attach-target.")
+    ap.add_argument("--wake-agent", dest="wake_agent", default=None, metavar="NAME",
+                    help="Agent the orchestrator session runs as (required with "
+                         "--wake-to: opencode does not inherit the session's agent).")
     ap.add_argument("--stream-out", dest="stream_out", default=None, metavar="FILE",
                     help="Tee the stdout JSON event stream live (fresh truncates, "
                          "--session resume appends).")
@@ -665,6 +683,14 @@ def main(argv=None):
     if a.wake_to and not a.heartbeat:
         print("error: --wake-to requires --heartbeat", file=sys.stderr)
         return 2
+    if a.wake_to and not a.wake_agent:
+        print("error: --wake-to requires --wake-agent (opencode does not "
+              "inherit the session's agent)", file=sys.stderr)
+        return 2
+
+    # The attach URL travels with the dispatch contract; the worker context
+    # inherits OPENCODE_WAKE_URL from the TUI launch (no state file exists).
+    wake_url = a.wake_url or os.environ.get("OPENCODE_WAKE_URL") or None
 
     # Preflight: validate explicit grants and open every target before opencode
     # runs (AC6) — an unopenable target exits 2 with no session created.
@@ -741,7 +767,8 @@ def main(argv=None):
         if a.wake_to:
             spawn_observer(a, sid, dispatch_dir, out_path,
                            a.logs_dir or log_run.DEFAULT_LOGS_DIR,
-                           worktree_path, branch)
+                           worktree_path, branch,
+                           wake_url=wake_url, wake_agent=a.wake_agent)
 
     started = time.monotonic()
     rc_proc, raw, stderr_text, timed_out = run_opencode(

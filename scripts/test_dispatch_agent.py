@@ -964,7 +964,8 @@ def _write_observer_stub(path):
 
 def test_wake_to_spawns_observer():
     """AC1 integration point: with --wake-to the dispatcher spawns the detached
-    observer once the child session id prints; without it, no observer."""
+    observer once the child session id prints and forwards the attach target
+    (--wake-url/--wake-agent); without --wake-to no observer is spawned."""
     work = tempfile.mkdtemp(prefix="dispatch-wake-")
     try:
         hb = os.path.join(work, "progress.log")
@@ -972,6 +973,8 @@ def test_wake_to_spawns_observer():
         stub = os.path.join(work, "observer_stub.py")
         _write_observer_stub(stub)
         r = _run("valid", extra=["--heartbeat", hb, "--wake-to", "ses_orch",
+                                 "--wake-agent", "curator",
+                                 "--wake-url", "http://127.0.0.1:4096",
                                  "--contract", "implement-handoff"],
                  env_extra={"OBSERVE_COMPLETION_PATH": stub,
                             "OBSERVER_STUB_OUT": marker})
@@ -984,6 +987,26 @@ def test_wake_to_spawns_observer():
         assert "--orchestrator-session" in argv and "ses_orch" in argv, argv
         assert "--child-session" in argv and "ses_stub_valid" in argv, argv
         assert "--heartbeat" in argv and hb in argv, argv
+        assert "--wake-agent" in argv and "curator" in argv, argv
+        assert "--wake-url" in argv, argv
+        assert argv[argv.index("--wake-url") + 1] == "http://127.0.0.1:4096", argv
+
+        # --wake-url omitted resolves from OPENCODE_WAKE_URL and is forwarded
+        marker_env = os.path.join(work, "observer_env.json")
+        r_env = _run("valid", extra=["--heartbeat", hb, "--wake-to", "ses_orch",
+                                     "--wake-agent", "curator",
+                                     "--contract", "implement-handoff"],
+                     env_extra={"OBSERVE_COMPLETION_PATH": stub,
+                                "OBSERVER_STUB_OUT": marker_env,
+                                "OPENCODE_WAKE_URL": "http://127.0.0.1:4199"})
+        assert r_env.rc == 0, (r_env.rc, r_env.stderr)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not os.path.isfile(marker_env):
+            time.sleep(0.05)
+        argv_env = json.loads(_read(marker_env))
+        assert "--wake-url" in argv_env, argv_env
+        assert argv_env[argv_env.index("--wake-url") + 1] == \
+            "http://127.0.0.1:4199", argv_env
 
         # without --wake-to no observer is spawned
         marker2 = os.path.join(work, "observer2.json")
@@ -996,8 +1019,15 @@ def test_wake_to_spawns_observer():
         assert not os.path.isfile(marker2), "observer spawned without --wake-to"
 
         # --wake-to without --heartbeat is a usage error (exit 2)
-        r3 = _run("valid", extra=["--wake-to", "ses_orch"])
+        r3 = _run("valid", extra=["--wake-to", "ses_orch",
+                                  "--wake-agent", "curator"])
         assert r3.rc == 2, (r3.rc, r3.stderr)
+
+        # --wake-to without --wake-agent is a usage error, before launch
+        hb4 = os.path.join(work, "noagent.log")
+        r4 = _run("valid", extra=["--heartbeat", hb4, "--wake-to", "ses_orch"])
+        assert r4.rc == 2, (r4.rc, r4.stdout, r4.stderr)
+        assert "session_id=" not in r4.stdout, r4.stdout
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

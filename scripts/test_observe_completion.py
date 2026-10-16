@@ -34,8 +34,9 @@ def _ts(offset=0):
     return (datetime.datetime.now(datetime.timezone.utc)
             + datetime.timedelta(seconds=offset)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-# One stub serves both roles: a wake delivery is identified by `--session`;
-# otherwise it emits a canned `--format json` dispatch stream.
+# One stub serves both roles: a wake delivery is identified by `--attach`
+# (the amended D2 vehicle); otherwise it emits a canned `--format json`
+# dispatch stream.
 STUB_OPENCODE = r'''#!/usr/bin/env python3
 """Stub opencode for test_observe_completion.py (no model calls)."""
 import json
@@ -44,16 +45,17 @@ import sys
 
 argv = sys.argv[1:]
 
-if "--session" in argv:
+if "--attach" in argv:
     out = os.environ.get("WAKE_STUB_OUT")
     if out:
         with open(out, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(argv) + "\n")
     if os.environ.get("WAKE_STUB_FAIL"):
         sys.exit(1)
-    print(json.dumps({"type": "text", "sessionID": "ses_orch",
-                      "part": {"type": "text", "sessionID": "ses_orch",
-                               "text": "wake-ack"}}))
+    sid = argv[argv.index("--session") + 1] if "--session" in argv else "ses_orch"
+    print(json.dumps({"type": "text", "sessionID": sid,
+                      "part": {"type": "text", "sessionID": sid,
+                               "text": "wake-ack"}}), flush=True)
     sys.exit(0)
 
 mode = os.environ.get("STUB_MODE", "valid")
@@ -137,6 +139,9 @@ def _set_parts(path, sid, parts, updated):
 IDLE = [{"type": "text", "text": "done"}, {"type": "step-finish"}]
 IN_FLIGHT = [{"type": "tool", "tool": "bash",
               "state": {"status": "running", "input": {"command": "sleep 999"}}}]
+# mid-generation: the newest assistant step is open (trailing step-start), no
+# tool in flight -- the 2026-10-15 generation-blindness instance (AC3b).
+OPEN_STEP = [{"type": "text", "text": "partial"}, {"type": "step-start"}]
 
 
 def _write_hb(path, lines):
@@ -149,7 +154,8 @@ def _hb_lines(path):
 
 
 def _cfg(obs, hb, agent="architect", sid="ses_orch", child="ses_stub_valid",
-         result=None, logs=None, **extra):
+         result=None, logs=None, wake_url="http://127.0.0.1:4096",
+         wake_agent="curator", **extra):
     argv = ["--heartbeat", hb, "--agent", agent,
             "--orchestrator-session", sid,
             "--interval", "0", "--deadline", "300", "--liveness-seconds", "480"]
@@ -159,6 +165,10 @@ def _cfg(obs, hb, agent="architect", sid="ses_orch", child="ses_stub_valid",
         argv += ["--result", result]
     if logs:
         argv += ["--logs-dir", logs]
+    if wake_agent:
+        argv += ["--wake-agent", wake_agent]
+    if wake_url:
+        argv += ["--wake-url", wake_url]
     for k, v in extra.items():
         argv += ["--" + k.replace("_", "-"), str(v)]
     return obs.build_parser().parse_args(argv)
@@ -169,7 +179,10 @@ def _env(overrides):
     old = {}
     for k, v in overrides.items():
         old[k] = os.environ.get(k)
-        os.environ[k] = v
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
     try:
         yield
     finally:
@@ -222,18 +235,26 @@ def test_ac1_wake_on_success_exactly_once():
         _make_db(dbp, [("ses_orch", IDLE, 1000)])
         inv = os.path.join(td, "inv.jsonl")
         cfg = _cfg(obs, hb, result=os.path.join(td, "result.md"),
-                   logs=os.path.join(td, "logs"))
+                   logs=os.path.join(td, "logs"),
+                   wake_url="http://127.0.0.1:4096", wake_agent="curator")
         shutil.rmtree(os.path.join(td, "logs"), ignore_errors=True)
         with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
-                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv}):
+                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
+                   "OPENCODE_WAKE_URL": None}):
             rc = obs.run(cfg, sleep=lambda s: None)
         assert rc == 0, rc
         invs = _invs(inv)
         assert len(invs) == 1, invs
         argv = invs[0]
+        # AC1: the exact attach vehicle -- and never --continue / --model
         assert argv[:1] == ["run"], argv
+        assert "--attach" in argv, argv
+        assert argv[argv.index("--attach") + 1] == "http://127.0.0.1:4096", argv
         assert "--session" in argv and "ses_orch" in argv, argv
+        assert "--agent" in argv and "curator" in argv, argv
+        assert "--format" in argv and "json" in argv, argv
         assert "--continue" not in argv, argv
+        assert "--model" not in argv, argv
         text = argv[-1]
         assert "DISPATCH WAKE architect outcome=success" in text, text
         assert "child=ses_stub_valid" in text, text
@@ -345,11 +366,62 @@ def test_ac3_gate_blocks_wake_until_quiescent():
         shutil.rmtree(td, ignore_errors=True)
 
 
-# --- AC4: deadline escalation is durable, not silent -------------------------
+# --- AC3b: mid-generation open step blocks the wake (2026-10-15 latent) ------
 
-def test_ac4_deadline_escalates_to_wake_deferred():
+def test_ac3b_gate_blocks_mid_generation_open_step():
     obs = _load_observe()
-    td = tempfile.mkdtemp(prefix="observe-ac4-")
+    td = tempfile.mkdtemp(prefix="observe-ac3b-")
+    try:
+        bin_dir = _stub_bin(td)
+        hb = os.path.join(td, "progress.log")
+        _write_hb(hb, [
+            "# progress: architect dispatch",
+            "2026-10-15T12:00:00Z START p.md",
+            "2026-10-15T12:00:05Z STEP 1/1 recon",
+            "2026-10-15T12:01:00Z DONE ok",
+        ])
+        dbp = os.path.join(td, "opencode.db")
+        # the newest assistant step is open, no tool in flight, time_updated
+        # stable across two polls -- the generation-blind predicate read this
+        # as quiescent; the revised gate must not.
+        _make_db(dbp, [("ses_orch", OPEN_STEP, 1000)])
+        inv = os.path.join(td, "inv.jsonl")
+        cfg = _cfg(obs, hb, logs=None)
+
+        state = {"calls": 0}
+
+        def sleep_hook(_s):
+            state["calls"] += 1
+            if state["calls"] >= 2:
+                # two stable polls with an open step and still no wake
+                assert not os.path.exists(inv), "wake fired mid-generation"
+                _set_parts(dbp, "ses_orch", IDLE, 2000)
+
+        with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
+                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
+                   "OPENCODE_WAKE_URL": None}):
+            rc = obs.run(cfg, sleep=sleep_hook)
+        assert rc == 0, rc
+        invs = _invs(inv)
+        assert len(invs) == 1, invs
+        assert "outcome=success" in invs[0][-1], invs
+        assert state["calls"] >= 2, state
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+# --- AC4: deadline / no-target escalation is durable, not silent --------------
+
+def _deferred_lines(hb):
+    return [l for l in _hb_lines(hb) if " WAKE_DEFERRED " in l]
+
+
+def test_ac4a_deadline_busy_names_gate():
+    """AC4(a): deadline forced short with the orchestrator continuously busy --
+    zero accepted deliveries, exactly one WAKE_DEFERRED whose reason names the
+    gate."""
+    obs = _load_observe()
+    td = tempfile.mkdtemp(prefix="observe-ac4a-")
     try:
         bin_dir = _stub_bin(td)
         hb = os.path.join(td, "progress.log")
@@ -372,15 +444,94 @@ def test_ac4_deadline_escalates_to_wake_deferred():
             clock["t"] += s or 0.05
 
         with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
-                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv}):
+                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
+                   "OPENCODE_WAKE_URL": None}):
             rc = obs.run(cfg, sleep=fake_sleep, now=fake_now)
         assert rc == 0, rc
         assert _invs(inv) == [], "no wake may fire while continuously in flight"
-        lines = _hb_lines(hb)
-        defers = [l for l in lines if " WAKE_DEFERRED " in l]
-        assert len(defers) == 1, lines
-        assert defers[0].endswith("WAKE_DEFERRED success heartbeat=" + hb), defers
-        assert lines[-1] == defers[0], lines
+        defers = _deferred_lines(hb)
+        assert len(defers) == 1, _hb_lines(hb)
+        assert defers[0].endswith("WAKE_DEFERRED success reason=quiescence-gate"), \
+            defers
+        assert _hb_lines(hb)[-1] == defers[0], _hb_lines(hb)
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def test_ac4b_no_attach_target_defers_without_spawning():
+    """AC4(b): no --wake-url resolvable and env unset -- the observer writes
+    WAKE_DEFERRED ... reason=no-attach-target at the first terminal poll and
+    never spawns opencode (the legacy ghost vehicle is structurally gone)."""
+    obs = _load_observe()
+    td = tempfile.mkdtemp(prefix="observe-ac4b-")
+    try:
+        bin_dir = _stub_bin(td)
+        hb = os.path.join(td, "progress.log")
+        _write_hb(hb, [
+            "# progress: architect dispatch",
+            "2026-10-15T12:00:00Z START p.md",
+            "2026-10-15T12:00:05Z STEP 1/1 recon",
+            "2026-10-15T12:01:00Z DONE ok",
+        ])
+        dbp = os.path.join(td, "opencode.db")
+        _make_db(dbp, [("ses_orch", IDLE, 1000)])
+        inv = os.path.join(td, "inv.jsonl")
+        cfg = _cfg(obs, hb, wake_url=None, wake_agent="curator")
+        with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
+                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
+                   "OPENCODE_WAKE_URL": None}):
+            rc = obs.run(cfg, sleep=lambda s: None)
+        assert rc == 0, rc
+        assert _invs(inv) == [], "no opencode subprocess may spawn without a target"
+        defers = _deferred_lines(hb)
+        assert len(defers) == 1, _hb_lines(hb)
+        assert defers[0].endswith("WAKE_DEFERRED success reason=no-attach-target"), \
+            defers
+        assert _hb_lines(hb)[-1] == defers[0], _hb_lines(hb)
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def test_ac4c_refused_delivery_retries_then_defers():
+    """AC4(c): the server refuses (stub exits 1) on every attempt until the
+    deadline -- retries are bounded by the deadline and the one final
+    WAKE_DEFERRED reason= names the refusal."""
+    obs = _load_observe()
+    td = tempfile.mkdtemp(prefix="observe-ac4c-")
+    try:
+        bin_dir = _stub_bin(td)
+        hb = os.path.join(td, "progress.log")
+        _write_hb(hb, [
+            "# progress: architect dispatch",
+            "2026-10-15T12:00:00Z START p.md",
+            "2026-10-15T12:00:05Z STEP 1/1 recon",
+            "2026-10-15T12:01:00Z DONE ok",
+        ])
+        dbp = os.path.join(td, "opencode.db")
+        _make_db(dbp, [("ses_orch", IDLE, 1000)])
+        inv = os.path.join(td, "inv.jsonl")
+        cfg = _cfg(obs, hb, deadline=1.0, interval=0.3)
+        clock = {"t": 0.0}
+
+        def fake_now():
+            return clock["t"]
+
+        def fake_sleep(s):
+            clock["t"] += s or 0.05
+
+        with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
+                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
+                   "WAKE_STUB_FAIL": "1", "OPENCODE_WAKE_URL": None}):
+            rc = obs.run(cfg, sleep=fake_sleep, now=fake_now)
+        assert rc == 0, rc
+        # the refusal was retried (>=2) but bounded by the deadline (not a spin)
+        attempts = len(_invs(inv))
+        assert 2 <= attempts <= 8, f"retries not bounded by the deadline: {attempts}"
+        defers = _deferred_lines(hb)
+        assert len(defers) == 1, _hb_lines(hb)
+        assert "reason=" in defers[0], defers
+        assert "rc=1" in defers[0], defers
+        assert _hb_lines(hb)[-1] == defers[0], _hb_lines(hb)
     finally:
         shutil.rmtree(td, ignore_errors=True)
 
