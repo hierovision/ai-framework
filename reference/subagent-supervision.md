@@ -265,14 +265,15 @@ python3 scripts/dispatch_agent.py --agent <name> --prompt-file <file> \
     deadline (default 300 s), then exactly one `WAKE_DEFERRED <outcome>
     reason=<detail>` (`no-attach-target` when no URL resolves — deferral is
     immediate, never a subprocess hang).
-  - **Implementation status:** implemented 2026-10-16 (see
-    `.opencode/plans/rm-058-orchestrator-wake.md` History). The shipped
+  - **Implementation status:** implemented and live-verified 2026-10-16 (the
+    plan artifact was retired at merge per AGENTS.md rule 4; its history lives
+    in git). The shipped
     observer delivers through the attach vehicle above; the pre-amendment
     `opencode run --session` vehicle (and its not-rendered-TUI ghost turn) is
     gone. With no resolvable URL the observer still supervises and writes
     `reason=no-attach-target` without spawning a subprocess. The AC8 live
-    smoke (a rendered agent-correct wake against a TUI on a fixed port) is
-    owner manual.
+    smoke passed: an agent-correct wake rendered in a TUI on a fixed port
+    within the SLA.
 - **Wake text (D7).** A fixed-shape `DISPATCH WAKE <agent> outcome=…` block
   carrying task, child session, result/run-log/heartbeat paths, and — when
   `--worktree` was used — the worktree path/branch plus the cleanup owed. The
