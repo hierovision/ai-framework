@@ -273,7 +273,9 @@ python3 scripts/dispatch_agent.py --agent <name> --prompt-file <file> \
     gone. With no resolvable URL the observer still supervises and writes
     `reason=no-attach-target` without spawning a subprocess. The AC8 live
     smoke passed: an agent-correct wake rendered in a TUI on a fixed port
-    within the SLA.
+    within the SLA. The observer polls every 30 s by design — comfortably
+    inside the 5-minute SLA; an event-driven `session.idle` observer is not
+    scheduled (revisit if opencode plugin attribution facts change).
 - **Wake text (D7).** A fixed-shape `DISPATCH WAKE <agent> outcome=…` block
   carrying task, child session, result/run-log/heartbeat paths, and — when
   `--worktree` was used — the worktree path/branch plus the cleanup owed. The
