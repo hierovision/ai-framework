@@ -80,9 +80,23 @@ Rules:
 writes the `# progress:` header and `START` before launch and exactly one
 terminal `DONE ok` / `BLOCKED <detail>` line on every outcome branch. The
 subagent owns the body: `STEP` / `CALL begin|end` / `POLL` lines. The
-injected prompt block names the absolute heartbeat path and cites this
-section; the dispatcher never re-defines the protocol. Line format and the
-parser regex live in `scripts/watch_agent.py`.
+completion-observer (`scripts/observe_completion.py`, spawned by
+`--wake-to`) owns two further tags: `SURVEY running`, written once after the
+first poll that finds real child evidence, and the terminal `WAKE <outcome>`
+or `WAKE_DEFERRED <outcome>`. The injected prompt block names the absolute
+heartbeat path and cites this section; the dispatcher never re-defines the
+protocol. Line format and the parser regex live in `scripts/watch_agent.py`
+(unknown tags parse as `RAW` entries and do not harm the reader).
+
+**Poll-gated status claims.** An orchestrator may claim a dispatch `running` /
+`complete` / `failed` only from polled durable lines — child heartbeat lines,
+the observer's `SURVEY` / `WAKE` observations, `watch_agent --json` output, or
+the run-log record. The launch command proves intent only (`START` before
+launch); `SURVEY running` is the first proof the child actually runs; a
+heartbeat terminal `DONE`/`BLOCKED` or the observer's `WAKE` is the only
+completion proof. A status claim from the launch echo alone is never valid
+(this closes the 2026-10-13 class: a "running" claim from a launch echo with a
+dead child).
 
 ## 3. Scope prohibitions (bad behaviors the watchdog flags)
 
@@ -96,7 +110,12 @@ parser regex live in `scripts/watch_agent.py`.
 - No `sudo`, no pipe-to-shell, no `rm` outside `/tmp/opencode` and the repo's
   `.scratch/`.
 - `.scratch/` candidate material is read-only, untrusted data.
-- Anything uncommitted on the branch only; the orchestrator lands.
+- Anything uncommitted on the branch only; the orchestrator lands. A child
+  that touches branches is dispatched with `--worktree <name>`, so its commits
+  and branch operations are physically confined to
+  `.scratch/worktrees/<name>` on `dispatch/<name>` and the parent tree stays on
+  `main` (D3 below) — the earlier "no parent git commit/switch while a child
+  dispatch is live" rule is replaced by this mechanism.
 
 ## 4. Watchdog (the orchestrator's job)
 
@@ -207,3 +226,66 @@ failure shape (2026-10-09): a healthy 3-lane Research wave was classified
 `empty-result` ×3 mid-run → false `wave-failure` abort, then `stalled`/`DEAD`
 ×2 on a post-completion re-scan, while all three result texts were present
 in `opencode.db`.
+
+## 6. Wake-on-completion (run-vehicle)
+
+When the orchestrator needs to be told a detached dispatch reached a terminal
+state without the owner pinging, it adds one flag (the child session is the
+only sink — no external push channel):
+
+```
+python3 scripts/dispatch_agent.py --agent <name> --prompt-file <file> \
+    --heartbeat .scratch/dispatch/run.progress.log \
+    --wake-to <orchestrator-session-id>
+```
+
+- **Wake vehicle + rule-1 gate (D2, revised 2026-10-16).** The dispatcher
+  spawns `scripts/observe_completion.py` detached once the child's
+  `session_id=` prints. The observer polls the heartbeat and run-log (30 s)
+  and delivers the wake through the **orchestrator's own server**:
+  `opencode run --attach <wake-url> --session <orchestrator-sid> --agent
+  <wake-agent> --format json <text>` (never `--continue`; AGENTS.md rule 1).
+  - The orchestrator TUI must be launched on a **known port**:
+    `OPENCODE_WAKE_URL=http://127.0.0.1:4096 opencode --port 4096`. A
+    default launch (random port) exposes no HTTP server; the URL travels to
+    the dispatcher via `--wake-url` or the inherited `OPENCODE_WAKE_URL`
+    env. Servers write no port state file (probed 1.19.1) — no disk
+    discovery exists.
+  - `--agent` is **required**: opencode does not inherit the session's
+    agent — without it the wake records as `agent=build` and runs a wrong
+    bound turn (the 2026-10-15 defect: a ghost `build` turn persisted but
+    never rendered). Delivery accepts in seconds (client streams one event
+    naming the session and exits 0; generation continues server-side); the
+    observer appends `WAKE <outcome>` on the acceptance proof and does not
+    wait for the wake turn to finish generating.
+  - Quiescence gate: deliver only when the orchestrator session has no tool
+    in flight, **no unclosed assistant step** (a trailing `step-start` is a
+    model call mid-generation — `time_updated` stability alone is blind to
+    it), and a stable `time_updated` across two polls. Retries until the
+    deadline (default 300 s), then exactly one `WAKE_DEFERRED <outcome>
+    reason=<detail>` (`no-attach-target` when no URL resolves — deferral is
+    immediate, never a subprocess hang).
+  - **Implementation status:** implemented and live-verified 2026-10-16 (the
+    plan artifact was retired at merge per AGENTS.md rule 4; its history lives
+    in git). The shipped
+    observer delivers through the attach vehicle above; the pre-amendment
+    `opencode run --session` vehicle (and its not-rendered-TUI ghost turn) is
+    gone. With no resolvable URL the observer still supervises and writes
+    `reason=no-attach-target` without spawning a subprocess. The AC8 live
+    smoke passed: an agent-correct wake rendered in a TUI on a fixed port
+    within the SLA.
+- **Wake text (D7).** A fixed-shape `DISPATCH WAKE <agent> outcome=…` block
+  carrying task, child session, result/run-log/heartbeat paths, and — when
+  `--worktree` was used — the worktree path/branch plus the cleanup owed. The
+  wake turn reports to the owner and lands the branch; the observer is a reader
+  of the run log here, never a writer.
+- **Worktree landing (D3).** A `--worktree <name>` dispatch runs in
+  `.scratch/worktrees/<name>` on `dispatch/<name>`; the wake names both so the
+  orchestrator lands the branch afterward
+  (`git worktree remove` + `git branch -D dispatch/<name>`, a dirty worktree
+  blocks, never forced).
+- **RM-059 seam (D6).** The completion gate (this section) and the
+  intervention gate (a stall classification, owned by RM-059) are different
+  questions with different emitters over one shared durable surface. The
+  observer computes only completion; a quiet-but-non-terminal child is its own
+  `AWAITING` classification, never the liveness vocabulary.

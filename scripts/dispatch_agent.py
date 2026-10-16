@@ -19,6 +19,18 @@ What it does:
     canonical supervision block naming that file;
   * with --allow-dirs PATH (repeatable), grants least-privilege external
     directory permission for this run;
+  * with --profile NAME|auto|none (default auto), merges the per-agent-class
+    least-privilege defaults from scripts/dispatch-profiles.json on top of
+    --allow-dirs (D4);
+  * with --worktree NAME, runs the child in its own git worktree at
+    .scratch/worktrees/NAME on branch dispatch/NAME so the parent tree can
+    never leave main (D3);
+  * with --wake-to SESSION-ID (requires --heartbeat), spawns the detached
+    completion-observer (scripts/observe_completion.py) once the child's
+    session id is printed, forwards the attach target to it (--wake-url,
+    resolved from env OPENCODE_WAKE_URL when omitted, and --wake-agent,
+    required with --wake-to), so the orchestrator is woken on terminal state
+    through its own server (D2);
   * writes the final text to --out (default: <prompt-file>.result.md);
   * with --contract / --markers, validates the result via
     scripts/validate_delegated_result.py (RM-023): an empty or malformed
@@ -45,6 +57,9 @@ Usage:
   python3 scripts/dispatch_agent.py --agent architect --prompt-file p.md \
       --stream-out run.events.jsonl --stream-err run.stderr.log \
       --heartbeat run.progress.log --allow-dirs ../sibling-repo
+  python3 scripts/dispatch_agent.py --agent implementer --prompt-file p.md \
+      --heartbeat run.progress.log --worktree feat-x \
+      --wake-to ses_orchestrator
 """
 import argparse
 import datetime
@@ -86,6 +101,8 @@ watch_agent = _load_module(
 
 DEFAULT_TIMEOUT = 600
 HEARTBEAT_PROTOCOL_REF = "reference/subagent-supervision.md"
+PROFILES_PATH = os.path.join(SCRIPT_DIR, "dispatch-profiles.json")
+OBSERVER_DEADLINE = 300
 PERMISSION_DENY_RE = re.compile(
     r"external_directory|auto-reject|permission denied", re.IGNORECASE)
 # ANSI escapes kept out of the record detail: CSI (SGR and non-SGR), OSC
@@ -328,9 +345,162 @@ def permission_config(dirs, existing_raw):
     return config
 
 
+# --- per-agent-class profiles (D4) ------------------------------------------
+
+def load_profiles(path=PROFILES_PATH):
+    """Return (profiles, aliases). Missing/malformed file degrades to empty."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}, {}
+    if not isinstance(data, dict):
+        return {}, {}
+    aliases = data.get("aliases") if isinstance(data.get("aliases"), dict) else {}
+    profiles = {k: v for k, v in data.items()
+                if k != "aliases" and isinstance(v, dict)}
+    return profiles, aliases
+
+
+def resolve_profile_name(agent, profiles, aliases):
+    """Exact agent key wins, then an alias, then longest-prefix profile name."""
+    if agent in profiles:
+        return agent
+    if agent in aliases and aliases[agent] in profiles:
+        return aliases[agent]
+    best = None
+    for name in profiles:
+        if name == "default":
+            continue
+        if agent == name or agent.startswith(name + "-"):
+            if best is None or len(name) > len(best):
+                best = name
+    return best or "default"
+
+
+def resolve_profile(agent, profile_flag, profiles, aliases):
+    """Return (name, settings) or (None, None) for an unknown named profile.
+
+    `auto` resolves by agent class; `none` disables defaults ({} settings);
+    any other value must name a profile.
+    """
+    if profile_flag == "none":
+        return "none", {"allow_dirs": [], "worktree": False, "timeout": None}
+    if profile_flag == "auto":
+        name = resolve_profile_name(agent, profiles, aliases)
+    else:
+        if profile_flag not in profiles:
+            return None, None
+        name = profile_flag
+    merged = dict(profiles.get("default", {}))
+    merged.update(profiles.get(name, {}))
+    return name, merged
+
+
+def expand_dirs(dirs):
+    """Expand `$HOME` / `~` / env vars in profile grant paths."""
+    return [os.path.expanduser(os.path.expandvars(d)) for d in (dirs or [])]
+
+
+def _slug(text):
+    slug = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+    return slug[:40] or "dispatch"
+
+
+def default_worktree_name(prompt_file, heartbeat_path):
+    """Derive a worktree name when a profile sets `worktree: true` and no
+    explicit `--worktree <name>` was given: the heartbeat task, else the
+    prompt-file basename."""
+    task = None
+    if heartbeat_path and os.path.isfile(heartbeat_path):
+        try:
+            with open(heartbeat_path, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith("# progress:"):
+                        task = line.split(":", 1)[1].strip()
+                        break
+        except OSError:
+            task = None
+    if task:
+        return _slug(task)
+    return _slug(os.path.splitext(os.path.basename(prompt_file or ""))[0])
+
+
+# --- worktree-safe dispatch (D3) --------------------------------------------
+
+def worktree_setup(repo, name, resume):
+    """Return (path, branch, error). A fresh dispatch requires the parent
+    checkout on `main`; a resume requires the worktree to already exist."""
+    branch = f"dispatch/{name}"
+    path = os.path.join(repo, ".scratch", "worktrees", name)
+    if resume:
+        if not os.path.isdir(path):
+            return None, branch, f"worktree not found for --session resume: {path}"
+        return path, branch, None
+    head = subprocess.run(["git", "-C", repo, "symbolic-ref", "--short", "HEAD"],
+                          capture_output=True, text=True)
+    current = head.stdout.strip()
+    if head.returncode != 0 or current != "main":
+        return None, branch, (f"parent repo is not on main (HEAD="
+                              f"{current or 'detached'})")
+    if not os.path.isdir(path):
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+        except OSError as exc:
+            return None, branch, f"cannot create worktree parent dir: {exc}"
+        add = subprocess.run(
+            ["git", "-C", repo, "worktree", "add", "-b", branch, path],
+            capture_output=True, text=True)
+        if add.returncode != 0:
+            tail = " ".join((add.stderr or "").split())[:200]
+            return None, branch, f"git worktree add failed: {tail}"
+    return path, branch, None
+
+
+def spawn_observer(a, child_sid, dispatch_dir, out_path, logs_dir, worktree,
+                   branch, wake_url=None, wake_agent=None):
+    """Spawn the detached completion-observer (D2). Returns the Popen or None.
+
+    `OBSERVE_COMPLETION_PATH` overrides the script path (hermetic test seam).
+    The attach target (--wake-url/--wake-agent) is forwarded so the observer
+    can deliver through the orchestrator's own server; when no URL resolves the
+    observer still supervises and defers with `reason=no-attach-target`.
+    """
+    observer = (os.environ.get("OBSERVE_COMPLETION_PATH")
+                or os.path.join(SCRIPT_DIR, "observe_completion.py"))
+    argv = [sys.executable, observer,
+            "--heartbeat", a.heartbeat, "--agent", a.agent,
+            "--orchestrator-session", a.wake_to,
+            "--dir", dispatch_dir or os.getcwd(),
+            "--deadline", str(OBSERVER_DEADLINE),
+            "--child-session", child_sid or "",
+            "--result", out_path]
+    if logs_dir:
+        argv += ["--logs-dir", logs_dir]
+    if worktree:
+        argv += ["--worktree", worktree]
+    if branch:
+        argv += ["--branch", branch]
+    if wake_url:
+        argv += ["--wake-url", wake_url]
+    if wake_agent:
+        argv += ["--wake-agent", wake_agent]
+    try:
+        logf = open(a.heartbeat + ".observer.log", "a", encoding="utf-8")
+    except OSError:
+        logf = subprocess.DEVNULL
+    try:
+        return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=logf,
+                                stderr=subprocess.STDOUT, start_new_session=True,
+                                close_fds=True)
+    except OSError as exc:
+        print(f"warning: cannot spawn completion-observer: {exc}", file=sys.stderr)
+        return None
+
+
 # --- process execution -------------------------------------------------------
 
-def _maybe_print_session(line, printed):
+def _maybe_print_session(line, printed, on_session=None):
     if printed["sid"]:
         return
     try:
@@ -345,16 +515,25 @@ def _maybe_print_session(line, printed):
     if sid:
         printed["sid"] = sid
         print(f"session_id={sid}", flush=True)
+        if on_session is not None:
+            try:
+                on_session(sid)
+            except Exception as exc:  # noqa: BLE001 - never break the stream tee
+                print(f"warning: on_session callback failed: {exc}",
+                      file=sys.stderr)
 
 
-def run_opencode(argv, timeout, tee_out=None, tee_err=None, env=None):
+def run_opencode(argv, timeout, tee_out=None, tee_err=None, env=None,
+                 on_session=None):
     """Run in its own process group; kill the group at timeout.
 
     Returns (returncode, stdout, stderr, timed_out). The session id is
-    printed as soon as the stream names it (question relay). `tee_out` /
-    `tee_err` are optional writable file handles; each line is written and
-    flushed as it is read (AC1/AC2), while the in-memory accumulation stays
-    unchanged so contract validation is untouched.
+    printed as soon as the stream names it (question relay); `on_session`, when
+    given, is called once with that id (the dispatcher spawns the
+    completion-observer from it). `tee_out` / `tee_err` are optional writable
+    file handles; each line is written and flushed as it is read (AC1/AC2),
+    while the in-memory accumulation stays unchanged so contract validation is
+    untouched.
     """
     try:
         proc = subprocess.Popen(
@@ -374,7 +553,7 @@ def run_opencode(argv, timeout, tee_out=None, tee_err=None, env=None):
                     tee.write(line)
                     tee.flush()
                 if is_stdout:
-                    _maybe_print_session(line, printed)
+                    _maybe_print_session(line, printed, on_session)
         finally:
             pipe.close()
 
@@ -424,10 +603,29 @@ def main(argv=None):
                     help="Comma-separated markers (overrides --contract).")
     ap.add_argument("--out", default=None,
                     help="Result file (default: <prompt-file>.result.md).")
-    ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
-                    help=f"Seconds before the run group is killed (default {DEFAULT_TIMEOUT}).")
+    ap.add_argument("--timeout", type=int, default=None,
+                    help=f"Seconds before the run group is killed (default "
+                         f"{DEFAULT_TIMEOUT}, or the profile's timeout).")
     ap.add_argument("--logs-dir", default=None,
                     help="Run-log directory (default: observing-runs repo logs/).")
+    ap.add_argument("--profile", default="auto", metavar="NAME|auto|none",
+                    help="Permission/worktree profile from "
+                         "scripts/dispatch-profiles.json (default: auto by "
+                         "agent class; none disables defaults).")
+    ap.add_argument("--worktree", default=None, metavar="NAME",
+                    help="Run in git worktree .scratch/worktrees/NAME on "
+                         "branch dispatch/NAME (parent must be on main).")
+    ap.add_argument("--wake-to", dest="wake_to", default=None,
+                    metavar="SESSION-ID",
+                    help="Spawn the completion-observer for this orchestrator "
+                         "session (requires --heartbeat and --wake-agent).")
+    ap.add_argument("--wake-url", dest="wake_url", default=None, metavar="URL",
+                    help="Attach URL of the orchestrator's server for the wake "
+                         "(default: env OPENCODE_WAKE_URL). No URL resolves -> "
+                         "the observer defers with reason=no-attach-target.")
+    ap.add_argument("--wake-agent", dest="wake_agent", default=None, metavar="NAME",
+                    help="Agent the orchestrator session runs as (required with "
+                         "--wake-to: opencode does not inherit the session's agent).")
     ap.add_argument("--stream-out", dest="stream_out", default=None, metavar="FILE",
                     help="Tee the stdout JSON event stream live (fresh truncates, "
                          "--session resume appends).")
@@ -466,8 +664,37 @@ def main(argv=None):
     out_path = a.out or (a.prompt_file + ".result.md")
     append = bool(a.session)
 
-    # Preflight: validate grants and open every target before opencode runs
-    # (AC6) — an unopenable target exits 2 with no session created.
+    # Per-agent-class profile (D4): least-privilege grants + worktree default.
+    profiles, aliases = load_profiles()
+    profile_name, profile = resolve_profile(a.agent, a.profile, profiles, aliases)
+    if profile_name is None:
+        print(f"error: unknown --profile {a.profile!r} (known: auto, none, "
+              f"{', '.join(sorted(profiles))})", file=sys.stderr)
+        return 2
+    profile_dirs = expand_dirs(profile.get("allow_dirs"))
+    timeout = a.timeout if a.timeout is not None else (
+        profile.get("timeout") or DEFAULT_TIMEOUT)
+
+    # Worktree (D3): an explicit --worktree wins; else the profile default.
+    worktree_name = a.worktree
+    if worktree_name is None and profile.get("worktree"):
+        worktree_name = default_worktree_name(a.prompt_file, a.heartbeat)
+
+    if a.wake_to and not a.heartbeat:
+        print("error: --wake-to requires --heartbeat", file=sys.stderr)
+        return 2
+    if a.wake_to and not a.wake_agent:
+        print("error: --wake-to requires --wake-agent (opencode does not "
+              "inherit the session's agent)", file=sys.stderr)
+        return 2
+
+    # The attach URL travels with the dispatch contract; the worker context
+    # inherits OPENCODE_WAKE_URL from the TUI launch (no state file exists).
+    wake_url = a.wake_url or os.environ.get("OPENCODE_WAKE_URL") or None
+
+    # Preflight: validate explicit grants and open every target before opencode
+    # runs (AC6) — an unopenable target exits 2 with no session created.
+    # Profile dirs are defaults, applied without an existence check.
     for d in (a.allow_dirs or []):
         if not os.path.isdir(d):
             print(f"error: --allow-dirs requires an existing directory: {d}",
@@ -488,11 +715,28 @@ def main(argv=None):
         print(f"error: cannot open dispatch artifact: {exc}", file=sys.stderr)
         return 2
 
+    # Worktree setup between preflight and launch (D3): the parent checkout
+    # must be on main for a fresh dispatch; a resume reuses the worktree.
+    dispatch_dir = a.dir_
+    worktree_path = branch = None
+    if worktree_name:
+        worktree_path, branch, wt_err = worktree_setup(
+            os.getcwd(), worktree_name, resume=append)
+        if wt_err:
+            for handle in (tee_out, tee_err, hb):
+                if handle is not None:
+                    handle.close()
+            print(f"error: --worktree: {wt_err}", file=sys.stderr)
+            return 2
+        dispatch_dir = worktree_path
+
+    # Profile grants + explicit --allow-dirs union (D4); caller settings win.
+    grant_dirs = profile_dirs + list(a.allow_dirs or [])
     child_env = None
-    if a.allow_dirs:
+    if grant_dirs:
         child_env = dict(os.environ)
         child_env["OPENCODE_CONFIG_CONTENT"] = json.dumps(
-            permission_config(a.allow_dirs,
+            permission_config(grant_dirs,
                               os.environ.get("OPENCODE_CONFIG_CONTENT")))
 
     if hb is not None:
@@ -504,8 +748,8 @@ def main(argv=None):
             prompt = prompt.rstrip() + "\n" + heartbeat_prompt_block(a.heartbeat)
 
     opencode_argv = ["opencode", "run", "--agent", a.agent, "--format", "json"]
-    if a.dir_:
-        opencode_argv += ["--dir", a.dir_]
+    if dispatch_dir:
+        opencode_argv += ["--dir", dispatch_dir]
     if a.model:
         opencode_argv += ["--model", a.model]
     if a.session:
@@ -513,10 +757,23 @@ def main(argv=None):
     opencode_argv.append(prompt)
 
     print(f"dispatch: agent={a.agent} binding={binding or '?'} "
-          f"timeout={a.timeout}s", flush=True)
+          f"timeout={timeout}s profile={profile_name} "
+          f"allow_dirs={len(grant_dirs)}", flush=True)
+    if worktree_path:
+        print(f"worktree={worktree_path} branch={branch}", flush=True)
+
+    def on_session(sid):
+        # spawn the completion-observer once the child session id is known (D2)
+        if a.wake_to:
+            spawn_observer(a, sid, dispatch_dir, out_path,
+                           a.logs_dir or log_run.DEFAULT_LOGS_DIR,
+                           worktree_path, branch,
+                           wake_url=wake_url, wake_agent=a.wake_agent)
+
     started = time.monotonic()
     rc_proc, raw, stderr_text, timed_out = run_opencode(
-        opencode_argv, a.timeout, tee_out=tee_out, tee_err=tee_err, env=child_env)
+        opencode_argv, timeout, tee_out=tee_out, tee_err=tee_err,
+        env=child_env, on_session=on_session)
     duration_ms = int((time.monotonic() - started) * 1000)
     for handle in (tee_out, tee_err):
         if handle is not None:
@@ -536,7 +793,7 @@ def main(argv=None):
     try:
         if timed_out:
             outcome, exit_code = "error", 4
-            detail = f"timeout after {a.timeout}s (process group killed)"
+            detail = f"timeout after {timeout}s (process group killed)"
         elif rc_proc != 0:
             outcome, exit_code = "error", 3
             tail = " ".join((stderr_text or "").split())[:200]

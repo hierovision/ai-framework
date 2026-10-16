@@ -1,0 +1,51 @@
+{
+  "_comment": "RM-058 D4: per-agent-class least-privilege dispatch profiles. `allow_dirs` are external read roots granted via OPENCODE_CONFIG_CONTENT (merged on top of explicit --allow-dirs; explicit caller settings win). `worktree` is the profile default for D3's worktree dispatch (v1 ships false; an explicit --worktree <name> overrides). `timeout` is the default run budget. Class resolution: exact agent key, then `aliases`, then longest-prefix profile name (council-architecture -> council, test-writer -> test).",
+  "aliases": {
+    "vision-critic-fast": "reviewer",
+    "vision-critic-final": "reviewer",
+    "skill-reviewer": "reviewer",
+    "skill-author": "implementer",
+    "debugger": "implementer",
+    "curator": "planner"
+  },
+  "default": {
+    "allow_dirs": [],
+    "worktree": false,
+    "timeout": 600
+  },
+  "architect": {
+    "allow_dirs": ["$HOME/repos", "$HOME/.config/opencode", "$HOME/.local/share/opencode"],
+    "worktree": false,
+    "timeout": 600
+  },
+  "reviewer": {
+    "allow_dirs": ["$HOME/repos", "$HOME/.config/opencode", "$HOME/.local/share/opencode"],
+    "worktree": false,
+    "timeout": 600
+  },
+  "council": {
+    "allow_dirs": ["$HOME/repos", "$HOME/.config/opencode", "$HOME/.local/share/opencode"],
+    "worktree": false,
+    "timeout": 600
+  },
+  "planner": {
+    "allow_dirs": ["$HOME/repos", "$HOME/.config/opencode", "$HOME/.local/share/opencode"],
+    "worktree": false,
+    "timeout": 600
+  },
+  "implementer": {
+    "allow_dirs": ["$HOME/repos"],
+    "worktree": false,
+    "timeout": 600
+  },
+  "test": {
+    "allow_dirs": ["$HOME/repos"],
+    "worktree": false,
+    "timeout": 600
+  },
+  "meta-loop": {
+    "allow_dirs": ["$HOME/repos"],
+    "worktree": false,
+    "timeout": 600
+  }
+}
