@@ -65,7 +65,9 @@ glance**.
    nothing is pending, write `None — awaiting <X>`. When the `## Next`
    section presents a choice or asks the user a question, list the options,
    mark your recommended one, and give a one-line justification — a
-   question never arrives without a recommendation. Handoffs say, in that
+   question never arrives without a recommendation. When you mark a
+   recommendation, the user's reply of `go` (alone) approves it: proceed on
+   the recommendation without re-asking. Handoffs say, in that
    order: done → verified → blocked → next, in the fewest sentences (what
    was completed, what is verified and how, what blocks progress, what
    the next step is).
