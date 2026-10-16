@@ -56,12 +56,25 @@ override the *naming* via their rules file; the *discipline* is fixed.
 
 ## Roadmap closure
 
-- A PR that closes (or advances) a `docs/ROADMAP.md` item updates that row in
-  the **same** PR: status → `done` (or `in-progress`), with the close date and
-  the PR link in the row. The row is part of the change, not a follow-up.
-- A merged PR that leaves its roadmap item `backlog` is incomplete: the next
-  triage pass has to reconstruct what shipped. `reviewing-code` checks the row
-  when the plan's slug is a roadmap ID.
+A PR that closes (or advances) a `docs/ROADMAP.md` item carries **every**
+doc update that leaves the repo accurate the moment it merges — all on the
+branch, never a follow-up commit on `main`:
+
+- The row itself: status → `done` (or `in-progress`), with the close date and
+  the PR link.
+- The item's horizon strip entry and the file counters it moves: the
+  `### Now/Next/Later (N)` counts, `## Priority order (1–N)`, and the
+  `N closed of M` line must all agree with the row's new status.
+- The per-ID detail file `docs/roadmap-detail/<ID>.md` (delivery + evidence).
+- Plan-file retirement (AGENTS.md rule 4) when a plan accompanied the item,
+  plus any reference that cited the retired path.
+
+A merged PR that leaves any of these stale makes the repo inaccurate at the
+merge commit, and the next triage pass has to reconstruct what shipped.
+`reviewing-code` gates doc-completeness for a merging PR (Step 4, the
+doc-completeness bullet). The closure is the orchestrator's to land on the
+branch **before** merge; deferring it to `main` is forbidden. A PR may still
+carry the row-`in-progress` update when the item advances without closing.
 
 ## Push, PR, merge
 

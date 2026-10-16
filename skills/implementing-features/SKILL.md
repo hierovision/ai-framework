@@ -195,10 +195,14 @@ sections or clobber History:
 - The frontmatter `status` only per the user's stated convention — if unknown,
   leave it and surface the question in the handoff. Do not pre-flip.
 - Append the revision date to `revised:` (never replace the array).
-- If the plan's slug is a `docs/ROADMAP.md` ID, flip that row to `done` with
-  the date + PR link in the **same** PR (`reference/git-workflow.md` → Roadmap
-  closure). A PR that closes a roadmap item but leaves the row `backlog` is
-  incomplete.
+- If the plan's slug is a `docs/ROADMAP.md` ID, close it **on the branch**:
+  the row → `done` with the date + PR link, the horizon strip entry and every
+  counter it moves (`### Now/Next/Later (N)`, `## Priority order (1–N)`, the
+  `N closed of M` line), and the per-ID detail file `docs/roadmap-detail/<ID>.md`;
+  retire the plan file itself (AGENTS.md rule 4) and leave no reference citing
+  it. `reference/git-workflow.md` → *Roadmap closure* is the contract. A PR
+  that merges with any of these stale — or defers them to a follow-up commit
+  on `main` — is incomplete.
 
 The plan is the audit trail: a future reader reconstructs the plan, the action,
 and any divergence from the plan file alone.

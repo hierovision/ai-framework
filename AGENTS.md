@@ -24,3 +24,12 @@ state or process detail — propose an ADR instead of adding prose here.
 5. **The cardinal rule** (defined in `skills/debugging-test-failures/
    SKILL.md`, cited everywhere): never green a check by weakening the
    net; an override is honored only with a dated record.
+6. **A merging PR carries its own doc updates.** Every documentation
+   change that leaves the repo accurate the moment it merges rides the
+   branch — never a follow-up commit on `main`: the ROADMAP row (status,
+   date, evidence) **and** its horizon strip and counters, the per-ID
+   detail file `docs/roadmap-detail/<ID>.md`, and plan-file retirement
+   (rule 4). `reference/git-workflow.md` → *Roadmap closure* is the
+   contract; `reviewing-code` gates it before merge. An orchestrator that
+   owns the roadmap lands the closure on the branch **before** merging —
+   deferring it to `main` is the failure this rule forbids.
