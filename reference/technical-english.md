@@ -121,7 +121,7 @@ glance**.
   It is not a hard technical constraint — treat violations as
   self-correctable drift.
 - The `reviewing-code` review pass checks artifact language against items
-  1-15 when reviewing a diff or handoff.
+  1-19 when reviewing a diff or handoff.
 - If an agent's output violates the baseline, point at the specific rule;
   do not restyle wholesale.
 ## Clarity (added 2026-10-12, owner directive)
@@ -136,3 +136,10 @@ glance**.
 18. **Density is the artifact's job, not the status line's.** Keep chat
     status and handoff summaries in plain sentences; put compact
     tables/lists in artifacts, not in the chat prose the owner reads.
+
+19. **The heart first, at a glance** (added 2026-10-24, owner directive). A
+    question, choice, or finding leads with its heart — the one plain
+    sentence the reader must understand to decide — then the
+    recommendation, then one line of why. Rationale never substitutes for
+    the heart. If the heart needs more than one sentence, or its own
+    jargon, the issue is not yet understood: split it or simplify it.
