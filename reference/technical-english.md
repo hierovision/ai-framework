@@ -140,6 +140,8 @@ glance**.
 19. **The heart first, at a glance** (added 2026-10-24, owner directive). A
     question, choice, or finding leads with its heart — the one plain
     sentence the reader must understand to decide — then the
-    recommendation, then one line of why. Rationale never substitutes for
-    the heart. If the heart needs more than one sentence, or its own
+    recommendation, then one line of why. The heart's words stand alone:
+    every piece is concretely distinguishable, and an internal name (a
+    table, a storage shape, a project type) is spelled out in plain words
+    or left out. If the heart needs more than one sentence, or its own
     jargon, the issue is not yet understood: split it or simplify it.
