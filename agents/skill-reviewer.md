@@ -1,7 +1,7 @@
 ---
 name: skill-reviewer
 description: Independent verification of a skill or workflow — docs adherence, evals, structure. Read-only review discipline.
-model: opencode-go/mimo-v2.6-pro
+model: opencode-go/kimi-k3.1-pro
 mode: all
 permission:
   edit: deny

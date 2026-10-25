@@ -30,17 +30,17 @@ import urllib.error
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
 
-# --- the policy: planned bindings per plan go-first-model-bindings ---------
+# --- the policy: approved bindings, 2026-10-25 routing pass ----------------
 
 EXPECTED_AGENT_BINDINGS = {
-    "architect": "opencode-go/glm-5.3-flash",
-    "planner": "opencode-go/glm-5.3-flash",
-    "curator": "opencode-go/glm-5.3-flash",
+    "architect": "opencode-go/kimi-k3.1-pro",
+    "planner": "opencode-go/kimi-k3.1-pro",
+    "curator": "opencode-go/kimi-k3.1-pro",
     "implementer": "opencode-go/deepseek-v4.1-flash",
     "test-writer": "opencode-go/deepseek-v4.1-flash",
-    "debugger": "opencode-go/mimo-v2.6-pro",
+    "debugger": "opencode-go/kimi-k3.1-pro",
     "reviewer": "opencode-go/mimo-v2.6-pro",
-    "skill-reviewer": "opencode-go/mimo-v2.6-pro",
+    "skill-reviewer": "opencode-go/kimi-k3.1-pro",
     "skill-author": "opencode-go/minimax-m3",
     "vision-critic-fast": "opencode-go/minimax-m3",
     "vision-critic-final": "opencode-go/deepseek-v4.1-flash",
@@ -48,8 +48,8 @@ EXPECTED_AGENT_BINDINGS = {
     "council-performance": "opencode-go/gpt-5.6-luna",
     "council-architecture": "opencode-go/glm-5.3-flash",
     "council-security": "opencode-go/deepseek-v4.1-flash",
-    "council-ux": "opencode-go/minimax-m3",
-    "council-product": "opencode-go/mimo-v2.6-flash",
+    "council-ux": "opencode-go/minimax-m3.1-flash",
+    "council-product": "opencode-go/mimo-v2.6-pro",
 }
 
 EXCLUDED_IDS = ("kimi-k3", "glm-5.3", "glm-5.2", "gpt-6-luna", "grok-4.5",

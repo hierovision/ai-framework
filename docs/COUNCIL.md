@@ -22,11 +22,14 @@ council procedure.
 | `council-architecture` | `opencode-go/glm-5.3-flash` | Zhipu | pattern alignment, tech debt, testability |
 | `council-performance` | `opencode-go/gpt-5.6-luna` | OpenAI | bottlenecks, N+1, caching, scaling |
 | `council-security` | `opencode-go/deepseek-v4.1-flash` | DeepSeek | vulnerabilities, edge cases, data safety |
-| `council-ux` | `opencode-go/minimax-m3` | MiniMax | end-user + developer experience |
-| `council-product` | `opencode-go/mimo-v2.6-flash` | Xiaomi | requirements fit, scope, priority |
+| `council-ux` | `opencode-go/minimax-m3.1-flash` | MiniMax | end-user + developer experience |
+| `council-product` | `opencode-go/mimo-v2.6-pro` | Xiaomi | requirements fit, scope, priority |
 
-Frontier opt-in (user-requested only): `claude-opus-5-5` + `muse-spark-1.3` +
-`gpt-5.6-sol`, one family per seat. Never upgrade models on your own.
+Frontier opt-in (user-requested only): `gemini-4-argon` + `muse-spark-1.3` +
+`deepseek/deepseek-flash`, one family per seat. Never upgrade models on your own.
+`claude-opus-5-5` and `gpt-5.6-sol` are catalog-listed but absent from
+opencode's runtime model registry (2026-10-25 probe), so they are not
+bindable.
 
 ## Procedure
 

@@ -338,7 +338,7 @@ def test_valid_dispatch_records_attribution():
     rec = r.records[0]
     assert rec["kind"] == "agent", rec
     assert rec["agent"] == "architect", rec
-    assert rec["model"] == "opencode-go/glm-5.3-flash", rec
+    assert rec["model"] == "opencode-go/kimi-k3.1-pro", rec
     assert rec["outcome"] == "success", rec
     assert rec["tokens_in"] == 100 and rec["tokens_out"] == 50, rec
     assert abs(rec["cost"] - 0.0012) < 1e-9, rec
@@ -626,7 +626,7 @@ def test_record_model_from_session_db():
         assert r.rc == 0, (r.rc, r.stderr)
         assert r.records[0]["model"] == "opencode-go/qwen3.8-flash", r.records
         assert "model=opencode-go/qwen3.8-flash" in r.stdout, r.stdout
-        assert "binding=opencode-go/glm-5.3-flash" in r.stdout, r.stdout
+        assert "binding=opencode-go/kimi-k3.1-pro" in r.stdout, r.stdout
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -640,8 +640,8 @@ def test_model_fallback_without_db():
         r = _run("valid", extra=["--contract", "implement-handoff"],
                  env_extra={"OPENCODE_DB_PATH": missing})
         assert r.rc == 0, (r.rc, r.stderr)
-        assert r.records[0]["model"] == "opencode-go/glm-5.3-flash", r.records
-        assert "model=opencode-go/glm-5.3-flash" in r.stdout, r.stdout
+        assert r.records[0]["model"] == "opencode-go/kimi-k3.1-pro", r.records
+        assert "model=opencode-go/kimi-k3.1-pro" in r.stdout, r.stdout
 
         r2 = _run("valid", extra=["--contract", "implement-handoff",
                                   "--model", "opencode-go/qwen3.8-flash"],
@@ -654,7 +654,7 @@ def test_model_fallback_without_db():
                          {"id": "x", "providerID": "opencode-go"})
         r3 = _run("valid", extra=["--contract", "implement-handoff"],
                   env_extra={"OPENCODE_DB_PATH": dbp})
-        assert r3.records[0]["model"] == "opencode-go/glm-5.3-flash", r3.records
+        assert r3.records[0]["model"] == "opencode-go/kimi-k3.1-pro", r3.records
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
