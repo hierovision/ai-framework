@@ -39,6 +39,7 @@ import re
 import sqlite3
 import sys
 import time
+import urllib.request
 
 DB = os.path.expanduser("~/.local/share/opencode/opencode.db")
 
@@ -57,6 +58,10 @@ DENY_BASH = [
 DEFAULT_CALL_SECONDS = 300
 DEFAULT_STALL_SECONDS = 240
 DEFAULT_LOOP_REPEATS = 3
+# inside an open assistant step the vendor publishes nothing until the block
+# ends (probed 2026-10-25: DB parts and the tee are block-granular), so the
+# stall window stretches to this generation budget before STALLED may fire
+DEFAULT_GENERATION_SECONDS = 600
 
 
 def now_iso():
@@ -190,18 +195,76 @@ def find_session(con, sid=None, title=None, parent=None, cwd=None):
 
 
 def load_parts(con, sid):
+    """The flat [(time_created_ms, data_dict), ...] view every reader consumes.
+
+    A mid-generation stream inserts no new part rows: it grows the current
+    `reasoning`/`text` row in place, so `time_updated` is the only clock that
+    moves (probed 2026-10-24: created_age=47s / updated_age=2s). It is injected
+    into the parsed dict as `_time_updated` — NOT into the tuple — so every
+    `(ms, d)` unpacking stays unchanged. A store without the column (older
+    schema) degrades to creation-only ages instead of failing the pass.
+    """
     cur = con.cursor()
-    cur.execute(
-        "SELECT id,data,time_created FROM part WHERE session_id=? ORDER BY time_created", (sid,)
-    )
+    try:
+        cur.execute(
+            "SELECT id,data,time_created,time_updated FROM part"
+            " WHERE session_id=? ORDER BY time_created", (sid,))
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        cur.execute(
+            "SELECT id,data,time_created FROM part WHERE session_id=?"
+            " ORDER BY time_created", (sid,))
+        rows = cur.fetchall()
     out = []
-    for r in cur.fetchall():
+    for r in rows:
         try:
             d = json.loads(r["data"])
         except (TypeError, ValueError):
             continue
+        if "time_updated" in r.keys():
+            d["_time_updated"] = r["time_updated"]
         out.append((r["time_created"], d))
     return out
+
+
+def session_status(url, sid, timeout=2.0):
+    """The vendor's own liveness map: `GET {url}/session/status`.
+
+    The payload is `{session_id: {"type": "busy"|"retry"|...}}` (probed
+    2026-10-25, opencode 1.19.4). Returns the entry for `sid`, or None when no
+    URL resolves, the server is unreachable, or the payload/entry is absent —
+    the DB lane is the fallback, never a crash.
+    """
+    if not url or not sid:
+        return None
+    endpoint = url.rstrip("/") + "/session/status"
+    try:
+        with urllib.request.urlopen(endpoint, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    entry = payload.get(sid)
+    return entry if isinstance(entry, dict) else None
+
+
+def assistant_step_closed(parts):
+    """True when the newest assistant step sequence is closed.
+
+    Same semantics as `observe_completion._assistant_step_closed` (the
+    parity is tested, and the observer file stays untouched per the RM-058
+    seam): a trailing `step-start` with no `step-finish` after it means a
+    model call is mid-generation, where the vendor publishes nothing until
+    the block ends. No step parts at all reads closed.
+    """
+    for _ms, d in reversed(parts or []):
+        t = (d.get("type") or "").replace("_", "-")
+        if t == "step-finish":
+            return True
+        if t == "step-start":
+            return False
+    return True
 
 
 def has_terminal_result(parts, running):
@@ -234,10 +297,16 @@ def analyze_session(sess, parts, call_seconds, loop_repeats):
     tools, targets = {}, {}
     created, edited, running = 0, 0, []
     blocking_waits, bad = [], []
-    last_ms, writes_last, last_tool = None, None, None
+    last_ms, last_change_ms, writes_last, last_tool = None, None, None, None
     timeline = []
     for i, (ms, d) in enumerate(parts):
         last_ms = ms or last_ms
+        # the freshest stream movement: creation or the in-place change the
+        # loader carries as `_time_updated` (absent -> creation, today's age)
+        change = d.get("_time_updated")
+        change = ms if change is None else change
+        if change is not None and (last_change_ms is None or change > last_change_ms):
+            last_change_ms = change
         nxt = parts[i + 1][0] if i + 1 < len(parts) else None
         if d.get("type") != "tool":
             continue
@@ -299,20 +368,55 @@ def analyze_session(sess, parts, call_seconds, loop_repeats):
         bad=bad,
         loops=loops,
         last_ms=last_ms,
+        last_change_ms=last_change_ms,
         writes_last=writes_last,
         timeline=timeline,
         part_count=len(parts),
         has_result=has_result,
+        step_open=not assistant_step_closed(parts),
     )
 
 
 # --- verdict (pure, testable) -----------------------------------------------
 
+def _stream_age(an):
+    """Age of the freshest stream movement. `last_change_ms` (creation or
+    in-place change, whichever is newer) is the liveness clock; an analysis
+    without it (legacy fixture, older caller) falls back to creation age —
+    today's semantics for that input."""
+    if not an:
+        return None
+    return age_of(an.get("last_change_ms") or an.get("last_ms"))
+
+
+def _retry_basis(status):
+    """The why-line for a vendor `retry` entry, or None for any other status."""
+    if not isinstance(status, dict) or status.get("type") != "retry":
+        return None
+    bits = ["server status: retry"]
+    attempt = status.get("attempt")
+    if attempt is not None:
+        bits.append(f"(attempt {attempt})")
+    message = status.get("message")
+    if message:
+        bits.append(str(message)[:120])
+    return " ".join(bits)
+
+
 def verdict(hb, an, stall_seconds=DEFAULT_STALL_SECONDS,
-            call_seconds=DEFAULT_CALL_SECONDS):
-    """Return (verdict, why) from a heartbeat and a session analysis."""
+            call_seconds=DEFAULT_CALL_SECONDS, status=None,
+            generation_seconds=DEFAULT_GENERATION_SECONDS):
+    """Return (verdict, why) from a heartbeat, a session analysis, and the
+    vendor status entry (Lane A).
+
+    Lane order: the server's own status wins when it exists — `busy` is
+    demonstrably generating (never STALLED/DEAD), `retry` is surfaced and
+    never reads OK. Absent/idle/unknown statuses fall through to the DB lane,
+    where an open assistant step stretches the quiet window to
+    `generation_seconds` (Lane B; the vendor publishes nothing mid-block).
+    """
     hb_age = hb["last_age"] if hb else None
-    s_age = age_of(an["last_ms"]) if an else None
+    s_age = _stream_age(an)
     result, why = "UNKNOWN", []
     if an is None and hb is None:
         why.append("no heartbeat file and no session found")
@@ -320,24 +424,41 @@ def verdict(hb, an, stall_seconds=DEFAULT_STALL_SECONDS,
     if an and an["running"]:
         result = "BLOCKING"
         why.append(f"{len(an['running'])} call(s) in flight > {call_seconds}s")
-    live_age = min([x for x in (hb_age, s_age) if x is not None], default=None)
-    if live_age is not None:
-        # A completed session (non-empty result, no in-flight tool) is done:
-        # post-completion quiet is not a stall. Defensive: an in-flight call
-        # still wins (BLOCKING), so only skip when nothing is running.
-        completed = bool(an and an.get("has_result") and not an["running"])
-        if completed:
-            if result == "UNKNOWN":
-                result = "OK"
-        elif live_age > 2 * stall_seconds:
-            result = "DEAD"
-            why.append(f"no heartbeat and no event for {fmt_age(live_age)}")
-        elif live_age > stall_seconds:
-            if result != "DEAD":
-                result = "STALLED"
-            why.append(f"quiet for {fmt_age(live_age)}")
-        elif result == "UNKNOWN":
+    retry = _retry_basis(status)
+    busy = isinstance(status, dict) and status.get("type") == "busy"
+    if retry:
+        if result == "UNKNOWN":
+            result = "STALLED"
+        why.append(retry)
+    elif busy:
+        if result == "UNKNOWN":
             result = "OK"
+        why.append("server status: busy (generating)")
+    else:
+        live_age = min([x for x in (hb_age, s_age) if x is not None],
+                       default=None)
+        window = generation_seconds if (an and an.get("step_open")) \
+            else stall_seconds
+        if live_age is not None:
+            # A completed session (non-empty result, no in-flight tool) is
+            # done: post-completion quiet is not a stall. Defensive: an
+            # in-flight call still wins (BLOCKING), so only skip when nothing
+            # is running.
+            completed = bool(an and an.get("has_result") and not an["running"])
+            if completed:
+                if result == "UNKNOWN":
+                    result = "OK"
+            elif live_age > 2 * window:
+                result = "DEAD"
+                why.append(f"no heartbeat and no event for {fmt_age(live_age)}")
+            elif live_age > window:
+                if result != "DEAD":
+                    result = "STALLED"
+                suffix = (f" (open step, generation budget {window}s)"
+                          if window != stall_seconds else "")
+                why.append(f"no stream change for {fmt_age(live_age)}{suffix}")
+            elif result == "UNKNOWN":
+                result = "OK"
     if an and an["blocking_waits"]:
         why.append(f"{len(an['blocking_waits'])} quiet gap(s) > {call_seconds}s = invisible blocking black box")
     if s_age is not None and s_age > call_seconds and result == "OK":
@@ -364,7 +485,7 @@ def status_line(label, text):
 
 def _report(a, hb, sess, an, result, why):
     hb_age = hb["last_age"] if hb else None
-    s_age = age_of(an["last_ms"]) if an else None
+    s_age = _stream_age(an)
     print(f"=== watchdog {now_iso()} ===")
     status_line("verdict:", result + ("  " + "; ".join(why) if why else ""))
     if hb:
@@ -399,7 +520,7 @@ def _report(a, hb, sess, an, result, why):
 
 def _json(hb, sess, an, result, why):
     hb_age = hb["last_age"] if hb else None
-    s_age = age_of(an["last_ms"]) if an else None
+    s_age = _stream_age(an)
     print(json.dumps({
         "verdict": result, "why": why, "heartbeat_age_s": hb_age,
         "session": None if not sess else {"id": sess["id"], "title": sess["title"],
@@ -425,16 +546,27 @@ def main(argv=None):
     ap.add_argument("--stall-seconds", type=int, default=DEFAULT_STALL_SECONDS)
     ap.add_argument("--call-seconds", type=int, default=DEFAULT_CALL_SECONDS)
     ap.add_argument("--loop-repeats", type=int, default=DEFAULT_LOOP_REPEATS)
+    ap.add_argument("--server-url", metavar="URL",
+                    help="known-port opencode server for the vendor status lane"
+                         " (default: OPENCODE_WAKE_URL)")
+    ap.add_argument("--generation-seconds", type=int,
+                    default=DEFAULT_GENERATION_SECONDS,
+                    help="quiet budget inside an open assistant step (default"
+                         f" {DEFAULT_GENERATION_SECONDS})")
     ap.add_argument("--watch", type=int, metavar="SECONDS", default=0)
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
+    server_url = a.server_url or os.environ.get("OPENCODE_WAKE_URL") or None
 
     while True:
         hb = read_heartbeat(a.progress)
         con = db()
         sess = find_session(con, a.session, a.title, a.parent, a.cwd) if con and (a.session or a.title or a.parent) else None
         an = analyze_session(sess, load_parts(con, sess["id"]), a.call_seconds, a.loop_repeats) if sess else None
-        result, why = verdict(hb, an, a.stall_seconds, a.call_seconds)
+        status = session_status(server_url, sess["id"]) if sess else None
+        result, why = verdict(hb, an, a.stall_seconds, a.call_seconds,
+                              status=status,
+                              generation_seconds=a.generation_seconds)
         if a.json:
             _json(hb, sess, an, result, why)
         else:

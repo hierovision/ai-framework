@@ -728,6 +728,42 @@ def test_in_flight_child_not_empty_result():
         shutil.rmtree(work, ignore_errors=True)
 
 
+def test_streaming_generation_not_stalled():
+    """AC6 (RM-059): the guard inherits the change-clock gate — a child whose
+    only movement is in-place part updates (creation 300 s old, time_updated
+    5 s old) is neither `stalled` nor a false `empty-result`."""
+    g = _load_guard()
+    work = tempfile.mkdtemp(prefix="guard-streamgen-")
+    try:
+        dbp = os.path.join(work, "opencode.db")
+        root = {"id": "root", "parent_id": None, "title": "orchestrator"}
+        created, changed = T0 + 500, T0 + 295000
+        sessions = [{"id": "streamgen1", "parent_id": "root",
+                     "title": "Review PR 99", "agent": "reviewer",
+                     "time_created": T0, "time_updated": changed}]
+        messages = [{"id": "streamgen1-m1", "session_id": "streamgen1",
+                     "role": "assistant", "time_created": created,
+                     "time_updated": created}]
+        parts = [
+            {"id": "streamgen1-r", "message_id": "streamgen1-m1",
+             "session_id": "streamgen1", "time_created": created,
+             "time_updated": changed,
+             "data": {"type": "reasoning", "text": "thinking"}},
+            {"id": "streamgen1-t", "message_id": "streamgen1-m1",
+             "session_id": "streamgen1", "time_created": created + 100,
+             "time_updated": changed,
+             "data": {"type": "text", "text": "partial answer so far"}},
+        ]
+        _make_db(dbp, [root] + sessions, messages, parts)
+        now = (T0 + 300000) / 1000  # creation 299 s old, change 5 s old
+        hits = _scan(g, dbp, "root", stall_seconds=240, call_seconds=300,
+                     now=now)
+        assert not _hits(hits, "stalled"), _patterns(hits)
+        assert not _hits(hits, "empty-result"), _patterns(hits)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def test_completed_child_not_stalled_or_empty():
     """AC2: a completed child (non-empty result text, no in-flight tool)
     quiet past the stall window produces NO stalled and NO empty-result hit."""
