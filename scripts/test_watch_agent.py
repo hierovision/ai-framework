@@ -5,8 +5,11 @@ Run: python3 scripts/test_watch_agent.py
 """
 import datetime as dt
 import importlib.util
+import json
 import os
 import re
+import shutil
+import sqlite3
 import sys
 import tempfile
 import time
@@ -34,6 +37,43 @@ def _hb_file(seconds_ago, body="START test"):
 
 def _tool(name, ms, **inp):
     return (ms, {"type": "tool", "tool": name, "state": {"status": "completed", "input": inp}})
+
+
+def _db_parts(rows, sid="ses_stream"):
+    """Hermetic opencode.db fixture carrying the `part` rows the watchdog
+    reads (creation + in-place change timestamps). Returns (con, workdir).
+
+    `rows`: [(time_created_ms, time_updated_ms, data_dict), ...] — the
+    time_updated column is what a mid-generation stream advances, while no
+    new part rows are inserted (probed 2026-10-24).
+    """
+    work = tempfile.mkdtemp(prefix="watch-stream-")
+    con = sqlite3.connect(os.path.join(work, "opencode.db"))
+    con.execute(
+        "CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT,"
+        " session_id TEXT, time_created INTEGER, time_updated INTEGER,"
+        " data TEXT)")
+    for i, (created, updated, data) in enumerate(rows):
+        con.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created,"
+            " time_updated, data) VALUES (?,?,?,?,?,?)",
+            (f"p{i}", "m1", sid, created, updated, json.dumps(data)))
+    con.commit()
+    con.row_factory = sqlite3.Row
+    return con, work
+
+
+def _pinned(now):
+    """Context manager pinning watch_agent's clock (age_of reads time.time)."""
+    class _Pinned:
+        def __enter__(self):
+            self.real = time.time
+            time.time = lambda: now
+
+        def __exit__(self, *exc):
+            time.time = self.real
+            return False
+    return _Pinned()
 
 
 def test_heartbeat_parse():
@@ -148,6 +188,142 @@ def test_two_surfaces_agree_on_completion():
     spec.loader.exec_module(guard)
     assert guard.watch.has_terminal_result is watch.has_terminal_result, \
         "guard and watch must share one completion predicate"
+
+
+# --- RM-059: the stream-state gate (change clock) ----------------------------
+
+def test_streaming_generation_not_stalled():
+    """AC1/AC4 (the row's success measure): a mid-generation stream — newest
+    part created 300 s ago, changed in place 5 s ago, no fresh heartbeat — is
+    OK, never STALLED/DEAD. The report's last-event line and --json's
+    session_age_s carry the change-based age, and STALLED (when it does fire)
+    names its quiet basis (AC4)."""
+    now = 1_800_000_000
+    created_ms, updated_ms = int((now - 300) * 1000), int((now - 5) * 1000)
+    con, work = _db_parts([
+        (created_ms, updated_ms, {"type": "reasoning", "text": "thinking"}),
+    ])
+    try:
+        parts = watch.load_parts(con, "ses_stream")
+        assert parts[0][1].get("_time_updated") == updated_ms, \
+            "load_parts must inject the in-place change timestamp"
+        an = watch.analyze_session(None, parts, call_seconds=300, loop_repeats=3)
+        assert an["last_change_ms"] == updated_ms, an
+        with _pinned(now):
+            result, why = watch.verdict(None, an, stall_seconds=240,
+                                        call_seconds=300)
+            assert result == "OK", (result, why)
+            import contextlib
+            import io
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                watch._report(types.SimpleNamespace(progress=None, tail=3),
+                              None, _session(), an, result, why)
+            assert "last-event 5s ago" in buf.getvalue(), buf.getvalue()
+            jbuf = io.StringIO()
+            with contextlib.redirect_stdout(jbuf):
+                watch._json(None, _session(), an, result, why)
+        payload = json.loads(jbuf.getvalue())
+        assert payload["session_age_s"] == 5, payload
+    finally:
+        con.close()
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_true_silence_still_fires():
+    """AC2/AC4 (net holds): with creation == in-place change and both past the
+    window, the verdict still fires STALLED; past twice the window, DEAD. The
+    STALLED `why` names the no-change basis and its duration."""
+    now = 1_800_000_000
+    for age, want in ((300, "STALLED"), (600, "DEAD")):
+        ms = int((now - age) * 1000)
+        con, work = _db_parts([(ms, ms, {"type": "reasoning", "text": "t"})])
+        try:
+            parts = watch.load_parts(con, "ses_stream")
+            an = watch.analyze_session(None, parts, call_seconds=300,
+                                       loop_repeats=3)
+            assert an["last_change_ms"] == ms, an
+            with _pinned(now):
+                result, why = watch.verdict(None, an, stall_seconds=240,
+                                            call_seconds=300)
+            assert result == want, (age, result, why)
+            if want == "STALLED":
+                assert "no stream change for" in " ".join(why), why
+        finally:
+            con.close()
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def test_verdict_reads_the_change_clock():
+    """AC3 (unit, both directions): verdict() gates STALLED/DEAD on
+    last_change_ms — a fresh change keeps OK even when creation is stale; a
+    stale change stalls/deads even when creation is fresh. Heartbeat-only
+    variants: a fresh heartbeat alone never stalls; a stale heartbeat with a
+    stale stream stalls."""
+    now = 1_800_000_000
+    stale_ms = int((now - 300) * 1000)
+    dead_ms = int((now - 600) * 1000)
+    fresh_ms = int((now - 5) * 1000)
+
+    def an(last_ms, last_change_ms):
+        return {"running": [], "blocking_waits": [], "loops": [], "bad": [],
+                "last_ms": last_ms, "last_change_ms": last_change_ms}
+
+    fresh_hb = {"entries": [], "last_age": 5.0, "repeats": 0}
+    stale_hb = {"entries": [], "last_age": 300.0, "repeats": 0}
+    with _pinned(now):
+        assert watch.verdict(None, an(stale_ms, fresh_ms), 240, 300)[0] == "OK"
+        assert watch.verdict(None, an(fresh_ms, stale_ms), 240, 300)[0] == "STALLED"
+        assert watch.verdict(None, an(fresh_ms, dead_ms), 240, 300)[0] == "DEAD"
+        assert watch.verdict(fresh_hb, an(stale_ms, fresh_ms), 240, 300)[0] == "OK"
+        assert watch.verdict(fresh_hb, an(stale_ms, stale_ms), 240, 300)[0] == "OK"
+        assert watch.verdict(stale_hb, an(stale_ms, stale_ms), 240, 300)[0] == "STALLED"
+
+
+def test_legacy_parts_degrade_to_creation_age():
+    """AC7 (honest degradation): a part dict without `_time_updated` (old
+    fixture shape / schema drift) falls back to the creation age, so the
+    verdict is identical to today's semantics for that input."""
+    now = 1_800_000_000
+    old_ms = int((now - 300) * 1000)
+    parts = [(old_ms, {"type": "reasoning", "text": "t"})]
+    an = watch.analyze_session(None, parts, call_seconds=300, loop_repeats=3)
+    assert an["last_change_ms"] == old_ms, an
+    with _pinned(now):
+        result, why = watch.verdict(None, an, stall_seconds=240,
+                                    call_seconds=300)
+    assert result == "STALLED", (result, why)
+
+
+def test_legacy_schema_without_time_updated_column():
+    """AC7 (schema-drift half): a `part` table lacking the time_updated column
+    still loads — the loader degrades to creation-only ages instead of raising,
+    and the verdict keeps today's semantics."""
+    now = 1_800_000_000
+    old_ms = int((now - 300) * 1000)
+    work = tempfile.mkdtemp(prefix="watch-legacy-")
+    con = sqlite3.connect(os.path.join(work, "opencode.db"))
+    con.execute("CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT,"
+                " session_id TEXT, time_created INTEGER, data TEXT)")
+    con.execute("INSERT INTO part (id, message_id, session_id, time_created,"
+                " data) VALUES (?,?,?,?,?)",
+                ("p0", "m1", "ses_stream", old_ms,
+                 json.dumps({"type": "reasoning", "text": "t"})))
+    con.commit()
+    con.row_factory = sqlite3.Row
+    try:
+        parts = watch.load_parts(con, "ses_stream")
+        assert len(parts) == 1 and "_time_updated" not in parts[0][1], parts
+        an = watch.analyze_session(None, parts, call_seconds=300,
+                                   loop_repeats=3)
+        assert an["last_change_ms"] == old_ms, an
+        with _pinned(now):
+            result, _why = watch.verdict(None, an, stall_seconds=240,
+                                         call_seconds=300)
+        assert result == "STALLED", result
+    finally:
+        con.close()
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def test_main_exit_codes_offline():

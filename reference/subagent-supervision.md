@@ -145,7 +145,9 @@ Cross-checks the heartbeat against opencode's own session event stream
 (read-only DB) and prints a verdict:
 
 - `OK` / `WARN` / `STALLED` / `DEAD` / `BLOCKING` — liveness, from the
-  freshest of heartbeat age and last session event age.
+  freshest of heartbeat age and the stream's last change (a part's creation
+  or its in-place `time_updated`, whichever is newer — a mid-generation
+  child advances the latter with no new part rows).
 - `! BLOCKING WAIT` — quiet gaps > `--call-seconds` between session events:
   the invisible black boxes that caused this incident.
 - `! LOOP` — the same `tool:target` repeated (bash/read ≥ `--loop-repeats`).

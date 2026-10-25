@@ -33,6 +33,14 @@ line. Validated **2026-09-06**, except where a section carries its own date.
   `directory`. Dated 2026-10-01 — volatile, re-verify on touch;
   `scripts/watch_agent.py` degrades to heartbeat-only when the DB is absent or
   the schema changes.
+- `part` rows carry **two** clocks: `time_created` (when the row appeared)
+  and `time_updated` (when its content last changed). During a long
+  generation opencode inserts no new part rows — it grows the current
+  `reasoning`/`text` row in place, so `time_updated` is the only clock that
+  advances. Probed read-only **2026-10-24**: a mid-generation `reasoning`
+  part showed `created_age=47s / updated_age=2s`, while quiet sessions show
+  equal ages (`scripts/watch_agent.py` reads it as the in-place generation
+  delta for the liveness verdict; volatile — re-verify on touch).
 - `session.model` is a **JSON blob** —
   `{"id":"glm-5.3-flash","providerID":"opencode-go","variant":"default"}`
   is the shape a Go-bound `architect` run-vehicle session emits (the

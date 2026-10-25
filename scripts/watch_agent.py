@@ -190,16 +190,34 @@ def find_session(con, sid=None, title=None, parent=None, cwd=None):
 
 
 def load_parts(con, sid):
+    """The flat [(time_created_ms, data_dict), ...] view every reader consumes.
+
+    A mid-generation stream inserts no new part rows: it grows the current
+    `reasoning`/`text` row in place, so `time_updated` is the only clock that
+    moves (probed 2026-10-24: created_age=47s / updated_age=2s). It is injected
+    into the parsed dict as `_time_updated` — NOT into the tuple — so every
+    `(ms, d)` unpacking stays unchanged. A store without the column (older
+    schema) degrades to creation-only ages instead of failing the pass.
+    """
     cur = con.cursor()
-    cur.execute(
-        "SELECT id,data,time_created FROM part WHERE session_id=? ORDER BY time_created", (sid,)
-    )
+    try:
+        cur.execute(
+            "SELECT id,data,time_created,time_updated FROM part"
+            " WHERE session_id=? ORDER BY time_created", (sid,))
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        cur.execute(
+            "SELECT id,data,time_created FROM part WHERE session_id=?"
+            " ORDER BY time_created", (sid,))
+        rows = cur.fetchall()
     out = []
-    for r in cur.fetchall():
+    for r in rows:
         try:
             d = json.loads(r["data"])
         except (TypeError, ValueError):
             continue
+        if "time_updated" in r.keys():
+            d["_time_updated"] = r["time_updated"]
         out.append((r["time_created"], d))
     return out
 
@@ -234,10 +252,16 @@ def analyze_session(sess, parts, call_seconds, loop_repeats):
     tools, targets = {}, {}
     created, edited, running = 0, 0, []
     blocking_waits, bad = [], []
-    last_ms, writes_last, last_tool = None, None, None
+    last_ms, last_change_ms, writes_last, last_tool = None, None, None, None
     timeline = []
     for i, (ms, d) in enumerate(parts):
         last_ms = ms or last_ms
+        # the freshest stream movement: creation or the in-place change the
+        # loader carries as `_time_updated` (absent -> creation, today's age)
+        change = d.get("_time_updated")
+        change = ms if change is None else change
+        if change is not None and (last_change_ms is None or change > last_change_ms):
+            last_change_ms = change
         nxt = parts[i + 1][0] if i + 1 < len(parts) else None
         if d.get("type") != "tool":
             continue
@@ -299,6 +323,7 @@ def analyze_session(sess, parts, call_seconds, loop_repeats):
         bad=bad,
         loops=loops,
         last_ms=last_ms,
+        last_change_ms=last_change_ms,
         writes_last=writes_last,
         timeline=timeline,
         part_count=len(parts),
@@ -308,11 +333,21 @@ def analyze_session(sess, parts, call_seconds, loop_repeats):
 
 # --- verdict (pure, testable) -----------------------------------------------
 
+def _stream_age(an):
+    """Age of the freshest stream movement. `last_change_ms` (creation or
+    in-place change, whichever is newer) is the liveness clock; an analysis
+    without it (legacy fixture, older caller) falls back to creation age —
+    today's semantics for that input."""
+    if not an:
+        return None
+    return age_of(an.get("last_change_ms") or an.get("last_ms"))
+
+
 def verdict(hb, an, stall_seconds=DEFAULT_STALL_SECONDS,
             call_seconds=DEFAULT_CALL_SECONDS):
     """Return (verdict, why) from a heartbeat and a session analysis."""
     hb_age = hb["last_age"] if hb else None
-    s_age = age_of(an["last_ms"]) if an else None
+    s_age = _stream_age(an)
     result, why = "UNKNOWN", []
     if an is None and hb is None:
         why.append("no heartbeat file and no session found")
@@ -335,7 +370,7 @@ def verdict(hb, an, stall_seconds=DEFAULT_STALL_SECONDS,
         elif live_age > stall_seconds:
             if result != "DEAD":
                 result = "STALLED"
-            why.append(f"quiet for {fmt_age(live_age)}")
+            why.append(f"no stream change for {fmt_age(live_age)}")
         elif result == "UNKNOWN":
             result = "OK"
     if an and an["blocking_waits"]:
@@ -364,7 +399,7 @@ def status_line(label, text):
 
 def _report(a, hb, sess, an, result, why):
     hb_age = hb["last_age"] if hb else None
-    s_age = age_of(an["last_ms"]) if an else None
+    s_age = _stream_age(an)
     print(f"=== watchdog {now_iso()} ===")
     status_line("verdict:", result + ("  " + "; ".join(why) if why else ""))
     if hb:
@@ -399,7 +434,7 @@ def _report(a, hb, sess, an, result, why):
 
 def _json(hb, sess, an, result, why):
     hb_age = hb["last_age"] if hb else None
-    s_age = age_of(an["last_ms"]) if an else None
+    s_age = _stream_age(an)
     print(json.dumps({
         "verdict": result, "why": why, "heartbeat_age_s": hb_age,
         "session": None if not sess else {"id": sess["id"], "title": sess["title"],
