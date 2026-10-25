@@ -144,10 +144,19 @@ python3 scripts/watch_agent.py \
 Cross-checks the heartbeat against opencode's own session event stream
 (read-only DB) and prints a verdict:
 
-- `OK` / `WARN` / `STALLED` / `DEAD` / `BLOCKING` — liveness, from the
-  freshest of heartbeat age and the stream's last change (a part's creation
-  or its in-place `time_updated`, whichever is newer — a mid-generation
-  child advances the latter with no new part rows).
+- `OK` / `WARN` / `STALLED` / `DEAD` / `BLOCKING` — liveness, in lane
+  order. **Lane A (preferred):** when a known-port server URL resolves
+  (`--server-url` or `OPENCODE_WAKE_URL`), `GET /session/status` for the
+  child — `busy` is demonstrably generating and never stalls; `retry` is
+  surfaced in the `why` and never reads OK. **Lane B (fallback):** the
+  heartbeat plus the DB clock, where a child inside an **open assistant
+  step** (trailing `step-start`, no `step-finish` after) gets a
+  `--generation-seconds` quiet budget (default 600 s) because the vendor
+  publishes nothing mid-block; outside an open step the plain stall window
+  holds. The status map is per owning server (a run-vehicle child on its own
+  embedded server is invisible to a separate `serve` instance), so Lane A
+  covers children owned by the polled server and Lane B the rest. Never map
+  `session.updated` to liveness — trust `session.status` only (herdr #351).
 - `! BLOCKING WAIT` — quiet gaps > `--call-seconds` between session events:
   the invisible black boxes that caused this incident.
 - `! LOOP` — the same `tool:target` repeated (bash/read ≥ `--loop-repeats`).

@@ -33,14 +33,33 @@ line. Validated **2026-09-06**, except where a section carries its own date.
   `directory`. Dated 2026-10-01 — volatile, re-verify on touch;
   `scripts/watch_agent.py` degrades to heartbeat-only when the DB is absent or
   the schema changes.
-- `part` rows carry **two** clocks: `time_created` (when the row appeared)
-  and `time_updated` (when its content last changed). During a long
-  generation opencode inserts no new part rows — it grows the current
-  `reasoning`/`text` row in place, so `time_updated` is the only clock that
-  advances. Probed read-only **2026-10-24**: a mid-generation `reasoning`
-  part showed `created_age=47s / updated_age=2s`, while quiet sessions show
-  equal ages (`scripts/watch_agent.py` reads it as the in-place generation
-  delta for the liveness verdict; volatile — re-verify on touch).
+- **Parts are block-granular (measured 2026-10-25, opencode 1.19.4).** No
+  timestamp in `opencode.db` moves during token streaming: `part` rows are
+  written once per block, with `time_created == time_updated` at write, and
+  `time_updated` does not advance until the next block lands. Three live
+  `planner` dispatches with per-second polling saw **8/8** DB deltas as new
+  row insertions; mid-generation the newest `reasoning` part stayed frozen
+  for up to ~129 s (and ~86 s on an earlier run). The 2026-10-24
+  "in-place growth" reading was a block completion, not a streaming delta.
+  The dispatcher's `--stream-out` tee is block-granular too — a 2111-word
+  generation arrived as three events (`step-start`, `text`, `step-finish`).
+  `scripts/watch_agent.py` keeps the `part.time_updated`/`last_change_ms`
+  handling as the DB lane's clock and defensively (older schema / a vendor
+  that does publish in-place changes), but no DB clock can close a long
+  single-step generation — hence the server lanes below.
+- **Server surfaces (probed 2026-10-25, opencode 1.19.4).**
+  `GET /global/health` → `{"healthy":true,"version":"1.19.4"}`.
+  `GET /session/status` → `{"<sessionID>": {"type": "busy"|"retry"|...}}`:
+  the entry carries **only `type`** — no `parentID` and no timing fields
+  (child identity lives on the `session.parent_id` row). Cross-instance
+  visibility is **per owning server**: a `run`-vehicle child on its own
+  embedded server generated for ~130 s while a separate `opencode serve
+  --port 4096` instance sharing the same DB reported `{}` throughout
+  (consistent with #35472). On the owning server, `busy` → entry absent
+  within ~1 s of process exit (no explicit `idle` entry was observed).
+  `GET /event` is the SSE event stream; event-type discipline: trust
+  `session.status`/`message.part.updated`, never map `session.updated` to
+  liveness (herdr #351). Verified against the running server, not the docs.
 - `session.model` is a **JSON blob** —
   `{"id":"glm-5.3-flash","providerID":"opencode-go","variant":"default"}`
   is the shape a Go-bound `architect` run-vehicle session emits (the

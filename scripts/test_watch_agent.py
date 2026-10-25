@@ -326,6 +326,131 @@ def test_legacy_schema_without_time_updated_column():
         shutil.rmtree(work, ignore_errors=True)
 
 
+# --- RM-059 v2: Lane A (vendor status) + Lane B (open-step grace) -----------
+
+def _status_stub(payload):
+    """Hermetic localhost stub for `GET /session/status` (recorded shape)."""
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - stdlib handler API
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # silence the test log
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
+
+
+def _stale_an(now, open_step=True):
+    old = int((now - 5000) * 1000)
+    return {"running": [], "blocking_waits": [], "loops": [], "bad": [],
+            "last_ms": old, "last_change_ms": old, "step_open": open_step}
+
+
+def test_server_status_reader_defensive():
+    """AC8 (reader): `session_status` parses the recorded `{sid: {type}}`
+    payload, returns None for an absent entry/server, and never raises."""
+    srv, url = _status_stub({"ses_busy": {"type": "busy"},
+                             "ses_retry": {"type": "retry", "attempt": 2}})
+    try:
+        assert watch.session_status(url, "ses_busy") == {"type": "busy"}
+        assert watch.session_status(url, "ses_absent") is None
+        assert watch.session_status(url + "/", "ses_busy") == {"type": "busy"}
+    finally:
+        srv.shutdown()
+    assert watch.session_status(None, "ses_busy") is None
+    assert watch.session_status("http://127.0.0.1:1", "ses_busy") is None
+
+
+def test_server_busy_never_stalls():
+    """AC8 (success measure): a vendor `busy` child is OK even when the DB
+    clock is past every window; the why names the delta basis."""
+    now = 1_800_000_000
+    with _pinned(now):
+        result, why = watch.verdict(None, _stale_an(now), stall_seconds=240,
+                                    call_seconds=300, status={"type": "busy"},
+                                    generation_seconds=600)
+    assert result == "OK", (result, why)
+    assert any("busy" in w for w in why), why
+
+
+def test_open_step_grace_both_directions():
+    """AC9 (Lane B): silence inside an OPEN step (trailing step-start, no
+    step-finish after) is not a stall up to --generation-seconds (600); past
+    it STALLED, past 2x DEAD. Quiet NOT inside an open step keeps the plain
+    window (240 s)."""
+    now = 1_800_000_000
+    with _pinned(now):
+        # 300 s quiet, inside an open step -> grace, OK
+        old = int((now - 300) * 1000)
+        parts = [(old, {"type": "step-start"}),
+                 (old, {"type": "reasoning", "text": "generating"})]
+        an = watch.analyze_session(None, parts, call_seconds=300, loop_repeats=3)
+        assert an["step_open"] is True, an
+        assert watch.verdict(None, an, 240, 300, generation_seconds=600)[0] == "OK"
+        # 700 s quiet, still inside the open step -> past the grace
+        parts = [(int((now - 700) * 1000), {"type": "step-start"}),
+                 (int((now - 700) * 1000), {"type": "reasoning", "text": "g"})]
+        an = watch.analyze_session(None, parts, call_seconds=300, loop_repeats=3)
+        result, why = watch.verdict(None, an, 240, 300, generation_seconds=600)
+        assert result == "STALLED", (result, why)
+        # 1300 s quiet -> past 2x the grace -> DEAD
+        parts = [(int((now - 1300) * 1000), {"type": "step-start"}),
+                 (int((now - 1300) * 1000), {"type": "reasoning", "text": "g"})]
+        an = watch.analyze_session(None, parts, call_seconds=300, loop_repeats=3)
+        assert watch.verdict(None, an, 240, 300, generation_seconds=600)[0] == "DEAD"
+        # 300 s quiet NOT inside an open step -> the plain window (STALLED)
+        parts = [(int((now - 300) * 1000), {"type": "text", "text": "partial"})]
+        an = watch.analyze_session(None, parts, call_seconds=300, loop_repeats=3)
+        assert an["step_open"] is False, an
+        assert watch.verdict(None, an, 240, 300, generation_seconds=600)[0] == "STALLED"
+
+
+def test_server_retry_is_surfaced():
+    """AC10: a vendor `retry` status is named in the why, never reads OK, and
+    keeps the exit code at 2."""
+    now = 1_800_000_000
+    status = {"type": "retry", "attempt": 2, "message": "rate limited"}
+    with _pinned(now):
+        result, why = watch.verdict(None, _stale_an(now), 240, 300,
+                                    status=status, generation_seconds=600)
+    assert result != "OK", (result, why)
+    assert watch.verdict_exit_code(result) == 2, result
+    text = " ".join(why)
+    assert "retry" in text and "attempt 2" in text and "rate limited" in text, why
+
+
+def test_step_predicate_parity_with_observer():
+    """AC9 (one semantics): watch_agent's open-step predicate agrees with
+    observe_completion's `_assistant_step_closed` on every shape (the shared
+    concept, tested rather than redefined silently)."""
+    spec = importlib.util.spec_from_file_location(
+        "observe_completion", os.path.join(HERE, "observe_completion.py"))
+    observer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(observer)
+    shapes = (
+        [],
+        [(1, {"type": "step-start"})],
+        [(1, {"type": "step-start"}), (2, {"type": "reasoning"})],
+        [(1, {"type": "step-start"}), (2, {"type": "text"})],
+        [(1, {"type": "step-start"}), (2, {"type": "text"}),
+         (3, {"type": "step-finish"})],
+        [(1, {"type": "text"})],
+    )
+    for parts in shapes:
+        assert watch.assistant_step_closed(parts) == \
+            observer._assistant_step_closed(parts), parts
+
+
 def test_main_exit_codes_offline():
     import contextlib
     import io
