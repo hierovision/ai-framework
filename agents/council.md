@@ -49,15 +49,17 @@ independent:
 | Agent | Go model | Family | Basis |
 |-------|----------|--------|-------|
 | `council` (chairman) | `opencode-go/qwen3.8-flash` | Qwen | user cost directive 2026-10-03 — max's AA 45 at ~13× the price rejected; seat validated 2026-10-04 (3/3 prompts via the opencode path) |
-| `council-performance` | `opencode-go/gpt-5.6-luna` | OpenAI | AA 38; `/responses` protocol — seat validated 2026-10-04 (3/3 prompts via the opencode path) |
-| `council-architecture` | `opencode-go/glm-5.3-flash` | Zhipu | AA 42; GLM-5.3 excluded on cost (2026-10-01) |
-| `council-security` | `opencode-go/deepseek-v4.1-flash` | DeepSeek | AA 39; this repo's measured eval lane |
-| `council-ux` | `opencode-go/minimax-m3` | MiniMax | native multimodal |
-| `council-product` | `opencode-go/mimo-v2.6-flash` | Xiaomi | AA 38 |
+| `council-performance` | `opencode-go/gpt-5.6-luna` | OpenAI | AA 37.3; `/responses` protocol — seat validated 2026-10-04 (3/3 prompts via the opencode path) |
+| `council-architecture` | `opencode-go/glm-5.3-flash` | Zhipu | AA 41.8; GLM-5.3 excluded on cost (2026-10-01) |
+| `council-security` | `opencode-go/deepseek-v4.1-flash` | DeepSeek | AA 45.1 (1017); this repo's measured eval lane |
+| `council-ux` | `opencode-go/minimax-m3.1-flash` | MiniMax | AA 42.7 (M3 29.2); native multimodal — seat validated 2026-10-25 (3/3 prompts via the opencode path) |
+| `council-product` | `opencode-go/mimo-v2.6-pro` | Xiaomi | AA 46.3 (flash 37.9) — seat validated 2026-10-25 (3/3; one transient 60s timeout, passed on retry) |
 
-Six families in six seats. A **Zen frontier council** (`claude-opus-5-5` +
-`muse-spark-1.3` + `gpt-5.6-sol`) remains the explicit user opt-in; never
-upgrade models on your own.
+Six families in six seats. A **Zen frontier council** (`gemini-4-argon` +
+`muse-spark-1.3` + `deepseek/deepseek-flash`) remains the explicit user
+opt-in; never upgrade models on your own. `claude-opus-5-5` and `gpt-5.6-sol`
+are catalog-listed but absent from opencode's runtime registry (2026-10-25),
+so they are no longer bindable.
 
 **Reasoning effort (`glm-5.3-flash`).** Z.AI's API accepts `reasoning_effort`
 only at `low` / `high` / `max` (default `max`), with `thinking` enabled.

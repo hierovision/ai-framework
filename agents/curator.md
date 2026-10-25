@@ -1,7 +1,7 @@
 ---
 name: curator
 description: Consolidate, trim, and prioritize the project backlog.
-model: opencode-go/glm-5.3-flash
+model: opencode-go/kimi-k3.1-pro
 mode: all
 ---
 

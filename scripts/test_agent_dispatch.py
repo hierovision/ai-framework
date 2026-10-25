@@ -24,15 +24,15 @@ REPO = os.path.dirname(HERE)
 ORCHESTRATORS = ("architect", "curator", "implementer", "council")
 # The 7-persona expansion (plan agent-persona-expansion): role → default
 # binding per the role rows in reference/model-routing.md (Go-first policy,
-# 2026-10-03 — plan go-first-model-bindings).
+# 2026-10-25 routing pass).
 EXPECTED_PERSONAS = {
     "reviewer": "opencode-go/mimo-v2.6-pro",
     "test-writer": "opencode-go/deepseek-v4.1-flash",
-    "debugger": "opencode-go/mimo-v2.6-pro",
+    "debugger": "opencode-go/kimi-k3.1-pro",
     "vision-critic-fast": "opencode-go/minimax-m3",
     "vision-critic-final": "opencode-go/deepseek-v4.1-flash",
     "skill-author": "opencode-go/minimax-m3",
-    "skill-reviewer": "opencode-go/mimo-v2.6-pro",
+    "skill-reviewer": "opencode-go/kimi-k3.1-pro",
 }
 # Single-shot roles: no dispatch authority at all (the one encoded rule).
 NEW_LEAVES = ("reviewer", "skill-reviewer",

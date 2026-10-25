@@ -1,7 +1,7 @@
 ---
 name: architect
 description: Architect multi-file features, plan database changes, produce implementation plans.
-model: opencode-go/glm-5.3-flash
+model: opencode-go/kimi-k3.1-pro
 mode: all
 ---
 

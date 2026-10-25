@@ -1,7 +1,7 @@
 ---
 name: council-ux
 description: User experience and developer experience analysis
-model: opencode-go/minimax-m3
+model: opencode-go/minimax-m3.1-flash
 mode: all
 hidden: true
 temperature: 0.5

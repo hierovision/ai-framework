@@ -1,7 +1,7 @@
 ---
 name: debugger
 description: Diagnose why a failing verification won't converge — reproduce first, fix at root cause, run the full suite.
-model: opencode-go/mimo-v2.6-pro
+model: opencode-go/kimi-k3.1-pro
 mode: all
 ---
 
