@@ -48,6 +48,8 @@ ALLOW_PREFIXES = (
     "skills/authoring-skills/scripts/test_runner.py",
     "skills/authoring-skills/evals/fixtures/",
     "skills/*/evals/fixtures/",
+    ".opencode/package.json",
+    ".opencode/package-lock.json",
 )
 ALLOW_FILES = {"docs/ROADMAP.md"}
 
