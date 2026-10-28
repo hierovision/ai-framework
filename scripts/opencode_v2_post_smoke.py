@@ -141,17 +141,40 @@ def check_db():
         con.close()
 
 
-def drills(framework, consumer):
-    """D1–D7 commands; every failure names the drill."""
+def drills(framework, consumer, evidence_path=None):
+    """D1–D7: D1–D6 are live drills recorded by the owner's drill run; D7 is
+    the offline model doctor. A missing or incomplete evidence file is a FAIL,
+    never a silent pass."""
     results = []
-    checks = [
-        ("D1", [sys.executable, "scripts/dispatch_agent.py",
-                "--agent", "architect", "--prompt-file",
-                os.path.join(REPO, ".scratch", "opencode-v2", "d1.prompt")]),
-    ]
-    # Live drills are documented in the plan; this smoke runs the offline
-    # subset it can prove without a model call and records the rest.
-    results.append(("D7", "[skipped: model-liveness needs the live lane]"))
+    path = evidence_path or os.path.join(REPO, ".scratch", "opencode-v2",
+                                         "drills.json")
+    required = [f"D{i}" for i in range(1, 7)]
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            for name in required:
+                entry = data.get(name)
+                ok = bool(isinstance(entry, dict) and entry.get("pass"))
+                results.append((name, ok, entry.get("detail", "recorded")
+                                if isinstance(entry, dict) else "missing"))
+        except (OSError, ValueError) as exc:
+            results.append(("drill-evidence", False, f"unreadable: {exc}"))
+    else:
+        results.append(("drill-evidence", False,
+                        f"D1-D6 evidence missing: {path}"))
+    # D7: model doctor + consumer bindings (offline / read-only).
+    doctor = os.path.join(REPO, "scripts", "model-liveness-check.py")
+    p1 = subprocess.run([sys.executable, doctor], capture_output=True,
+                        text=True) if os.path.isfile(doctor) else None
+    results.append(("D7-model-doctor", bool(p1 and p1.returncode == 0),
+                    (p1.stdout or p1.stderr or "missing").strip()[:200]
+                    if p1 else "model-liveness-check.py missing"))
+    p2 = subprocess.run([sys.executable, os.path.join(
+        REPO, "scripts", "check-consumer-bindings.py"), framework],
+        capture_output=True, text=True)
+    results.append(("D7-consumer", p2.returncode == 0,
+                    (p2.stdout or p2.stderr or "").strip()[-200:]))
     return results
 
 
@@ -180,8 +203,9 @@ def pre_merge(args):
         ok, detail = check_consumer_ready(args)
         checks.append(("consumer", ok, detail))
     if args.drills:
-        for name, detail in drills(args.framework, args.consumer):
-            checks.append((name, True, detail))
+        for name, ok, detail in drills(args.framework, args.consumer,
+                                       args.drill_evidence):
+            checks.append((name, ok, detail))
 
     failed = [name for name, ok, _ in checks if not ok]
     payload = {
@@ -297,6 +321,9 @@ def main(argv=None):
     ap.add_argument("--agent-snapshot", default=None)
     ap.add_argument("--require-consumer", action="store_true")
     ap.add_argument("--skip-live", action="store_true")
+    ap.add_argument("--drill-evidence", default=None,
+                    help="D1-D6 drill evidence JSON (default "
+                         ".scratch/opencode-v2/drills.json).")
     ap.add_argument("--post-merge", action="store_true")
     ap.add_argument("--rollback-check", action="store_true")
     args = ap.parse_args(argv)
