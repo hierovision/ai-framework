@@ -713,12 +713,15 @@ def main(argv=None):
             # resume would otherwise accumulate `---` blocks each time (M4)
             prompt = prompt.rstrip() + "\n" + heartbeat_prompt_block(a.heartbeat)
 
-    opencode_argv = ["opencode"]
+    # V2 2.1.4 accepts --standalone/--server only on the `run` subcommand
+    # (live 2026-10-28: `opencode --standalone run` exits 1 "Unrecognized
+    # flag"; the consumer runner is the same shape).
+    opencode_argv = ["opencode", "run"]
     if a.server:
         opencode_argv += ["--server", a.server]
     elif a.standalone or grant_dirs:
         opencode_argv += ["--standalone"]
-    opencode_argv += ["run", "--agent", a.agent, "--format", "json",
+    opencode_argv += ["--agent", a.agent, "--format", "json",
                       "--model", binding]
     if a.session:
         opencode_argv += ["--session", a.session]
@@ -796,8 +799,16 @@ def main(argv=None):
                 else:
                     detail = "missing marker(s): " + ", ".join(missing)
         else:
-            outcome, exit_code = "success", 0
-            detail = None
+            # A permission auto-reject means the task could not run, even
+            # when the model narrates the denial and returns a non-empty
+            # answer (D2 negative drill, 2026-10-28).
+            denied = permission_denial(events, stderr_text)
+            if denied:
+                outcome, exit_code = "failure", 1
+                detail = denied
+            else:
+                outcome, exit_code = "success", 0
+                detail = None
 
         try:
             with open(out_path, "w", encoding="utf-8") as fh:

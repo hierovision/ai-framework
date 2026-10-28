@@ -67,6 +67,11 @@ if dump_env:
     with open(dump_env, "w", encoding="utf-8") as fh:
         json.dump(dict(os.environ), fh)
 
+dump_argv = os.environ.get("STUB_DUMP_ARGV")
+if dump_argv:
+    with open(dump_argv, "w", encoding="utf-8") as fh:
+        json.dump(argv, fh)
+
 
 def emit(obj):
     print(json.dumps(obj), flush=True)
@@ -269,6 +274,7 @@ def _run(mode, extra=None, timeout="10", env_extra=None, cwd=REPO,
             heartbeat=_read(_flag_path(extra, "--heartbeat")),
             prompt_dump=_read(env.get("STUB_DUMP_PROMPT")),
             env_dump=_read(env.get("STUB_DUMP_ENV")),
+            argv_dump=_read(env.get("STUB_DUMP_ARGV")),
             elapsed=elapsed)
     finally:
         shutil.rmtree(td, ignore_errors=True)
@@ -360,6 +366,27 @@ def test_valid_dispatch_records_attribution():
     r2 = _run("valid", extra=["--model", "opencode-go/qwen3.8-flash"])
     assert r2.rc == 0, (r2.rc, r2.stderr)
     assert r2.records[0]["model"] == "opencode-go/qwen3.8-flash", r2.records[0]
+
+
+def test_v2_service_flags_follow_run_subcommand():
+    """AC13: V2 2.1.4 accepts `--standalone`/`--server` only on `run`
+    (2026-10-28 live: the global placement exited 1 "Unrecognized flag")."""
+    work = tempfile.mkdtemp(prefix="dispatch-argv-")
+    try:
+        for flag, extra in (("--standalone", []),
+                            ("--server", ["--server", "http://127.0.0.1:4096"])):
+            dump = os.path.join(work, flag.lstrip("-") + ".json")
+            r = _run("valid", extra=extra + ["--contract", "implement-handoff"],
+                     env_extra={"STUB_DUMP_ARGV": dump})
+            assert r.rc == 0, (r.rc, r.stderr)
+            argv = json.loads(r.argv_dump)
+            assert "run" in argv, argv
+            if flag == "--standalone" and flag not in argv:
+                # grant-free agent profile still requests a private server
+                assert False, argv
+            assert argv.index("run") < argv.index(flag), argv
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def test_empty_result_fails_contract():
@@ -752,6 +779,13 @@ def test_permission_denial_classification():
     # N3: non-SGR CSI and OSC escapes are stripped from the record detail
     assert "\x1b" not in detail2, repr(detail2)
     assert "[2K" not in detail2, repr(detail2)
+
+    # A denial is a failed dispatch even without a delegated-result contract:
+    # the D2 negative drill has no markers, yet must exit non-zero.
+    r3 = _run("denied")
+    assert r3.rc != 0, (r3.rc, r3.stdout)
+    detail3 = r3.records[0]["detail"] or ""
+    assert detail3.startswith("permission denied:"), detail3
 
 
 def test_reference_docs_carry_the_recipe():

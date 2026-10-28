@@ -163,16 +163,30 @@ def _permission_denial(parts):
         if st.get("status") != "error":
             continue
         m = None
+        text = ""
         for field in ("output", "error"):
             out = st.get(field)
-            if isinstance(out, str):
-                m = PERMISSION_RE.search(out)
-                if m:
-                    break
-        if not m:
+            if isinstance(out, dict):
+                # V2 2.1.4 live shape: error={type,message}; keep the
+                # message/type text for the regex and the input path below.
+                text = " ".join(
+                    str(out.get(key) or "")
+                    for key in ("message", "type", "name"))
+            elif isinstance(out, str):
+                text = out
+            if not text:
+                continue
+            m = PERMISSION_RE.search(text)
+            if m or re.search(r"permission denied|external_directory",
+                              text, re.IGNORECASE):
+                break
+        if not m and not re.search(r"permission denied|external_directory",
+                                   text, re.IGNORECASE):
             continue
-        latest = {"path": m.group(1) or m.group(2) or "?", "ms": ms,
-                  "index": index}
+        inp = st.get("input") if isinstance(st.get("input"), dict) else {}
+        path = (m.group(1) or m.group(2)) if m else None
+        path = path or inp.get("path") or inp.get("filePath") or "?"
+        latest = {"path": path, "ms": ms, "index": index}
     return latest
 
 

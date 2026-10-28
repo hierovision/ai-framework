@@ -1009,6 +1009,40 @@ def test_hung_interim_text_restored_stalled():
         shutil.rmtree(work, ignore_errors=True)
 
 
+def test_live_v2_error_dict_denial_detected():
+    """D4 live shape (2026-10-28): V2 2.1.4 puts the denial in
+    `state.error = {type: permission.rejected, message: Permission denied:
+    external_directory}` and the target in `state.input.path`. The guard must
+    fire `permission-auto-reject` on that carrier, not only on the old
+    `state.output` string fixture."""
+    g = _load_guard()
+    work = tempfile.mkdtemp(prefix="guard-live-denial-")
+    try:
+        dbp = os.path.join(work, "opencode.db")
+        root = {"id": "root", "parent_id": None, "title": "orchestrator"}
+        s, m, p = _result_session("livedenial", "root", text=None)
+        p.append({
+            "id": "livedenial-t", "message_id": "livedenial-m1",
+            "session_id": "livedenial", "time_created": T0 + 700,
+            "time_updated": T0 + 700,
+            "data": {"type": "tool", "tool": "read",
+                     "state": {"status": "error",
+                               "input": {"path": "/etc/hostname"},
+                               "error": {"type": "permission.rejected",
+                                         "message": "Permission denied: "
+                                                    "external_directory"}}}})
+        _make_db(dbp, [root] + s, m, p)
+        now = (T0 + 700) / 1000 + 600
+        hits = _scan(g, dbp, "root", stall_seconds=240, now=now)
+        patterns = _patterns(hits)
+        assert "permission-auto-reject" in patterns, patterns
+        hit = _hits(hits, "permission-auto-reject")[0]
+        assert "/etc/hostname" in str(hit.get("evidence", "")), hit
+        assert not _hits(hits, "empty-result"), patterns
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def test_denial_preceded_by_text_restored():
     """AC11(c), the restored true positive: a denial preceded by interim text
     in the same unfinished message (no `step-finish`) is NOT done, so the
