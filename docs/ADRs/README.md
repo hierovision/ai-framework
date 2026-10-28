@@ -30,6 +30,7 @@ Every ADR carries `## Status` with one of:
 | [ADR-0011](ADR-0011-license-and-ingest-policy.md) | License and ingest policy (MIT; allow-list / never-list; provenance) | accepted 2026-09-27 |
 | [ADR-0012](ADR-0012-untrusted-content-security-gate.md) | Untrusted-content security gate (pre-scan, script review, sign-off) | accepted 2026-09-27 |
 | [ADR-0013](ADR-0013-go-first-model-policy.md) | Go-first model policy — Go defaults, free opt-in, kimi-k3/gpt-6-luna excluded, 2026-11-01 review | accepted 2026-10-03 |
+| [ADR-0014](ADR-0014-opencode-v2-upgrade.md) | OpenCode V2 cutover — native config, one adapter, drained atomic switch | accepted 2026-10-27 |
 
 ## Where a decision goes
 

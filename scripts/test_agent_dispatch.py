@@ -64,18 +64,31 @@ def _frontmatter(name):
     return yaml.safe_load(raw.split("---", 2)[1])
 
 
-def _allowed(task):
-    """(allowed_set, deny_catch_all_ok) for a `permission.task` value.
+def _rules(fm):
+    value = fm.get("permissions")
+    return value if isinstance(value, list) else []
 
-    A map must catch-all deny and then allow specific globs; a bare
-    `deny` scalar denies everything (leaf).
-    """
-    if isinstance(task, str):
-        return (set(), task == "deny")
-    if not isinstance(task, dict):
-        return (None, False)
-    return ({k for k, v in task.items() if v == "allow" and k != "*"},
-            task.get("*") == "deny")
+
+def _effect(fm, action, resource="*"):
+    """The last matching V2 rule effect (V2: last match wins)."""
+    effect = None
+    for rule in _rules(fm):
+        if not isinstance(rule, dict):
+            continue
+        if rule.get("action") != action:
+            continue
+        res = rule.get("resource")
+        matches = (res == "*") if resource == "*" else (res in ("*", resource))
+        if matches:
+            effect = rule.get("effect")
+    return effect
+
+
+def _allowlist(fm, action):
+    """Allow resources other than the catch-all (a leaf allow-list shape)."""
+    return {r.get("resource") for r in _rules(fm)
+            if r.get("action") == action and r.get("effect") == "allow"
+            and r.get("resource") != "*"}
 
 
 def test_all_personas_dispatchable():
@@ -90,8 +103,8 @@ def test_orchestrators_carry_no_task_allowlist():
     allow-list to work around (2026-10-02 user directive)."""
     for name in ORCHESTRATORS:
         fm = _frontmatter(name)
-        task = (fm.get("permission") or {}).get("task")
-        assert task is None, f"{name}: unexpected permission.task={task!r}"
+        assert _allowlist(fm, "subagent") == set(), \
+            f"{name}: unexpected subagent allow-list {_allowlist(fm, 'subagent')}"
 
 
 def test_leaf_dispatch_denied():
@@ -99,10 +112,9 @@ def test_leaf_dispatch_denied():
     rule)."""
     for name in DENY_ALL_PERSONAS:
         fm = _frontmatter(name)
-        task = (fm.get("permission") or {}).get("task")
-        assert task is not None, f"{name}: leaf needs task deny"
-        allowed, denied = _allowed(task)
-        assert denied and allowed == set(), (name, task)
+        assert _effect(fm, "subagent") == "deny", \
+            (name, _rules(fm))
+        assert _allowlist(fm, "subagent") == set(), (name, _rules(fm))
 
 
 def test_new_personas_files_and_bindings():
@@ -110,7 +122,7 @@ def test_new_personas_files_and_bindings():
     binding."""
     for name, model in EXPECTED_PERSONAS.items():
         fm = _frontmatter(name)
-        assert fm.get("name") == name, (name, fm.get("name"))
+        assert "name" not in fm, (name, "name: must be path-derived")
         assert fm.get("mode") == "all", (name, fm.get("mode"))
         assert fm.get("model") == model, (name, fm.get("model"), model)
 
@@ -160,50 +172,34 @@ def test_new_workers_judgment_led():
     """AC3: the three loop workers carry no task allow-list."""
     for name in NEW_WORKERS:
         fm = _frontmatter(name)
-        task = (fm.get("permission") or {}).get("task")
-        assert task is None, f"{name}: unexpected permission.task={task!r}"
+        assert _allowlist(fm, "subagent") == set(), \
+            f"{name}: unexpected subagent allow-list"
 
 
 def test_new_leaf_permission_posture():
-    """AC3: vision critics deny edit/write/bash; skill-reviewer denies
-    edit/write and carries a read-only bash map with a catch-all.
-
-    The one documented exception is `reviewer`'s path-scoped write surface:
-    `reviewing-code` Step 7 writes REVIEW.md at the repo root and
-    `docs/CONCEPTS.md` states "reviewing-code writes only REVIEW.md and never
-    edits source". The map's catch-all stays deny and REVIEW.md is its ONLY
-    allow entry — any broader allow (another path, or `*`) fails, and `write`
-    must be absent or deny.
-    """
+    """AC8: leaf personas deny edit/shell/subagent; the reviewer keeps its one
+    documented REVIEW.md edit allow; skill-reviewer keeps its read-only shell
+    map. The V2 conversion preserves the same decisions."""
     for name in ("vision-critic-fast", "vision-critic-final"):
-        perm = _frontmatter(name).get("permission") or {}
-        for key in ("edit", "write", "bash"):
-            assert perm.get(key) == "deny", (name, key, perm.get(key))
+        fm = _frontmatter(name)
+        for action in ("edit", "shell", "subagent"):
+            assert _effect(fm, action) == "deny", (name, action, _rules(fm))
 
-    for name in ("skill-reviewer",):
-        perm = _frontmatter(name).get("permission") or {}
-        assert perm.get("edit") == "deny", (name, perm)
-        assert perm.get("write") == "deny", (name, perm)
-        bash = perm.get("bash")
-        assert isinstance(bash, dict), (name, bash)
-        assert bash.get("*") == "ask", (name, bash)
-        assert bash.get("ls *") == "allow", (name, bash)
-        assert bash.get("git commit*") == "deny", (name, bash)
+    fm = _frontmatter("skill-reviewer")
+    assert _effect(fm, "edit") == "deny", (fm.get("permissions"))
+    shell = _rules(fm)
+    assert _effect(fm, "shell", "*") == "ask", shell
+    assert _effect(fm, "shell", "ls *") == "allow", shell
+    assert _effect(fm, "shell", "git commit*") == "deny", shell
 
-    perm = _frontmatter("reviewer").get("permission") or {}
-    edit = perm.get("edit")
-    assert isinstance(edit, dict), ("reviewer", edit)
-    assert edit.get("*") == "deny", ("reviewer", edit)
-    assert edit.get("REVIEW.md") == "allow", ("reviewer", edit)
-    allowed = {k for k, v in edit.items() if v == "allow"}
-    assert allowed == {"REVIEW.md"}, ("reviewer", "over-broad allow", edit)
-    write = perm.get("write")
-    assert write is None or write == "deny", ("reviewer", write)
-    bash = perm.get("bash")
-    assert isinstance(bash, dict), ("reviewer", bash)
-    assert bash.get("*") == "ask", ("reviewer", bash)
-    assert bash.get("ls *") == "allow", ("reviewer", bash)
-    assert bash.get("git commit*") == "deny", ("reviewer", bash)
+    fm = _frontmatter("reviewer")
+    assert _effect(fm, "edit") == "deny", (fm.get("permissions"))
+    assert _effect(fm, "edit", "REVIEW.md") == "allow", (fm.get("permissions"))
+    allows = _allowlist(fm, "edit")
+    assert allows == {"REVIEW.md"}, ("reviewer", "over-broad allow", allows)
+    assert _effect(fm, "shell", "ls *") == "allow", fm.get("permissions")
+    assert _effect(fm, "shell", "git commit*") == "deny", fm.get("permissions")
+    assert _effect(fm, "subagent") == "deny", fm.get("permissions")
 
 
 def test_concepts_role_vocabulary():
@@ -246,7 +242,7 @@ def test_agent_teams_doc_contract():
         assert heading.lower() in text, f"missing heading: {heading}"
     for phrase in ("orchestrator", "worker", "depth ≤ 2", "fan-out ≤ 6",
                    "judgment-led", "nested-capable", "run-vehicle",
-                   "free-bound", "task_id", "description", "--session",
+                   "free-bound", "sessionid", "description", "--session",
                    "resume", "kind=agent", "log_run", "rm-022", "rm-023",
                    "rm-024", "rm-025", "reference/subagent-supervision.md",
                    "reference/delegated-result-contract.md",
@@ -262,9 +258,9 @@ def test_opencode_integration_dated_block():
     path = os.path.join(REPO, "reference", "opencode-integration.md")
     with open(path, encoding="utf-8") as fh:
         text = _norm(fh.read()).lower()
-    assert "2026-10-02" in text, "dated 2026-10-02 block missing"
-    for phrase in ("mode", "permission.task", "frontmatter", "model",
-                   "json blob", "nested", "free tier"):
+    assert "2026-10-26" in text, "dated 2026-10-26 block missing"
+    for phrase in ("mode", "permissions", "frontmatter", "model",
+                   "session_v2", "standalone", "cwd", "nested", "free tier"):
         assert phrase in text, f"missing phrase: {phrase}"
 
 

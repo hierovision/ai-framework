@@ -45,18 +45,23 @@ uninstall() {
   uninstall_dir "$REPO_DIR" "$REFERENCE_TARGET"
 }
 
-# Validate an agent's frontmatter: it must carry a `name:` that matches the
-# file stem and a non-empty `model:` (so a broken agent is skipped, not linked
-# with a silent default). Consistency with skills, which validate SKILL.md.
+# Validate an agent's native V2 frontmatter: the ID is path-derived, so a
+# non-empty description and model are required and a legacy `name:` is
+# rejected (the corpus must not carry one). A malformed agent is skipped with
+# a named reason, never linked with a silent default.
 validate_agent_frontmatter() {
   local file="$1"
-  local fm name model stem
+  local fm description model stem
   fm="$(awk 'BEGIN{c=0} /^---/{c++; next} c==1{print}' "$file")"
-  name="$(printf '%s\n' "$fm" | awk -F': ' '/^name:/{print $2; exit}')"
+  description="$(printf '%s\n' "$fm" | awk -F': ' '/^description:/{print $2; exit}')"
   model="$(printf '%s\n' "$fm" | awk -F': ' '/^model:/{print $2; exit}')"
   stem="${file##*/}"; stem="${stem%.md}"
-  if [ -z "$name" ]; then echo "skip $(basename "$file") (no name in frontmatter)" >&2; return 1; fi
-  if [ "$name" != "$stem" ]; then echo "skip $(basename "$file") (name '$name' != file stem '$stem')" >&2; return 1; fi
+  if [ -z "$stem" ]; then echo "skip $(basename "$file") (empty path-derived id)" >&2; return 1; fi
+  if printf '%s\n' "$fm" | grep -q '^name:'; then
+    echo "skip $(basename "$file") (legacy name: present; the id is path-derived)" >&2
+    return 1
+  fi
+  if [ -z "$description" ]; then echo "skip $(basename "$file") (no description in frontmatter)" >&2; return 1; fi
   if [ -z "$model" ]; then echo "skip $(basename "$file") (no model in frontmatter)" >&2; return 1; fi
   return 0
 }

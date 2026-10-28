@@ -1,9 +1,27 @@
 ---
-name: implementer
 description: Execute coding tasks from an approved plan. Build components, run tests, resolve specific todos.
 model: opencode-go/deepseek-v4.1-flash
 mode: all
+permissions:
+  # Ordered rules — V2 evaluates the LAST matching rule.
+  # shell
+  - action: shell
+    resource: "*"
+    effect: allow
+  # edit
+  - action: edit
+    resource: "*"
+    effect: allow
+  # subagent
+  - action: subagent
+    resource: "*"
+    effect: allow
+  # execute
+  - action: execute
+    resource: "*"
+    effect: deny
 ---
+
 
 # Build Agent
 

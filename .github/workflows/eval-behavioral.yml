@@ -102,10 +102,10 @@ jobs:
 
       # opencode is NOT preinstalled on GitHub-hosted runners; pinned via npm
       # (the curl|bash path failed 403 under runner-IP rate limiting, 2026-09-20).
-      - name: Install opencode CLI (pinned via npm)
+      - name: Install OpenCode V2 CLI (pinned via npm)
         env:
-          OPENCODE_VERSION: "1.18.18"
-        run: npm install --global "opencode-ai@${OPENCODE_VERSION}"
+          OPENCODE_VERSION: "2.1.4"
+        run: npm install --global "@opencode/cli@${OPENCODE_VERSION}"
 
       - name: Add opencode to PATH
         run: echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
@@ -122,6 +122,7 @@ jobs:
           # Eval lane (user directive 2026-09-29): opencode-go flat-rate,
           # same model family the suite already ran — no personal API key.
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_LOG_LEVEL: ERROR
           # RM-056: opt in to the per-run lane fallback. On a log-proven
           # model/opencode-service degradation the run switches (for that run
           # only, never a re-bind) to the direct-key lane below, marked in the
@@ -137,6 +138,8 @@ jobs:
           if [ "${{ github.event.schedule }}" = "30 10 1 * *" ] || [ "${{ inputs.full }}" = "true" ]; then
             DEFAULT_ARG=""
           fi
+          # V2 lane override shape (2026-10-27): native `agents` + ordered
+          # `permissions`, never the V1 `agent`/`permission` shape.
           # Nested-agent override (2026-09-29): a free-bound subagent is
           # rejected in CI ("OpenCode's free tier can only be used from within
           # OpenCode") and the eval session dies. Since the Go-first flip

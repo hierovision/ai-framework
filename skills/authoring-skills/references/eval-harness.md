@@ -24,7 +24,7 @@ naming only `fixtures/lean-roadmap/` costs two local rounds.
 either satisfying one `expect.artifact` entry: (1) the workdir filesystem
 via `glob.glob(target, recursive=True)` reading each match and checking
 every phrase in `phrases[]` (whitespace-normalized, case-insensitive);
-(2) `write`/`edit` tool events matched via `fnmatch.fnmatchcase` on the
+(2) `edit` tool events matched via `fnmatch.fnmatchcase` on the
 `filePath` (`**/name` collapses to `*`). Surface 1 is alive on the initial
 turn; surface 2 is the live channel after the `finally`-cleanup at line
 ~742. A miss surfaces as one of two shapes (AC3, D2): when a file matched

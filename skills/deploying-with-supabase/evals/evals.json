@@ -18,7 +18,7 @@
       "expect": {
         "action": [
           {
-            "tool": "bash",
+            "tool": "shell",
             "args": {
               "command": "*verify-supabase.cjs*"
             }

@@ -181,13 +181,9 @@ def test_check_cli():
 
 
 def test_agent_bash_permission_maps_have_catch_all():
-    """An agent whose `bash` permission is a pattern map must carry a `*` rule.
-
-    opencode evaluates the LAST matching rule (customize-opencode), so a map
-    without a catch-all leaves unmatched commands at the tool default instead of
-    the intended ask/deny. 2026-09-29: the planner moved from `bash: ask` to a
-    read-only allowlist + deny list.
-    """
+    """An agent whose V2 shell permissions are a pattern map must carry a `*`
+    rule (last match wins, so without a catch-all an unmatched command falls
+    through to the tool default)."""
     import yaml
     agents_dir = os.path.join(REPO_ROOT, "agents")
     checked = 0
@@ -196,13 +192,17 @@ def test_agent_bash_permission_maps_have_catch_all():
             continue
         raw = open(os.path.join(agents_dir, name), encoding="utf-8").read()
         fm = yaml.safe_load(raw.split("---", 2)[1])
-        bash = (fm.get("permission") or {}).get("bash")
-        if isinstance(bash, dict):
+        rules = fm.get("permissions") or []
+        shell = [r for r in rules
+                 if isinstance(r, dict) and r.get("action") == "shell"]
+        if len(shell) > 1:
             checked += 1
-            assert "*" in bash, f"{name}: bash permission map needs a '*' catch-all"
-            bad = {k: v for k, v in bash.items() if v not in ("allow", "ask", "deny")}
-            assert not bad, f"{name}: invalid bash actions {bad}"
-    assert checked >= 1, "expected at least one agent with a bash map (planner)"
+            assert any(r.get("resource") == "*" for r in shell), \
+                f"{name}: shell permission map needs a '*' catch-all"
+            bad = {r.get("effect") for r in shell
+                   if r.get("effect") not in ("allow", "ask", "deny")}
+            assert not bad, f"{name}: invalid shell effects {bad}"
+    assert checked >= 1, "expected at least one agent with a shell map (planner)"
 
 
 def main():

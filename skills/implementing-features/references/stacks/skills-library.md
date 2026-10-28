@@ -57,5 +57,5 @@ If the project declares a different stack, do not read this file.
   one place —
   [../../../../reference/opencode-integration.md](../../../../reference/opencode-integration.md)
   (`opencode run` has no `--skill`; there is no `hooks` JSON key; hooks are
-  TypeScript plugins). Use `--dir` + installed skills; never invent a flag or
+  TypeScript plugins). Use `cwd`/`PWD` + installed skills; never invent a flag or
   key — cite that file, not the guess.

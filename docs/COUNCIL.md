@@ -34,7 +34,7 @@ bindable.
 ## Procedure
 
 1. Orchestrator extracts the question; if unclear, one clarifying question.
-2. Spawn the seats in parallel via the Task tool (`subagent_type: "council-*"`),
+2. Spawn the seats in parallel via the V2 `subagent` tool (`agent: "council-*"`, plus a `sessionID` when resuming),
    passing the question (2–3 sentences).
 3. Collect all results. Validate each against
    `reference/delegated-result-contract.md` (`council-lens`): an **empty or

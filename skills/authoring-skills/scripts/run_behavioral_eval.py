@@ -43,6 +43,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import signal
 import sys
@@ -366,14 +367,25 @@ def extract_final_text(events):
     return "\n".join(chunks)
 
 
+V2_TOOL_ALIASES = {"bash": "shell", "write": "edit", "patch": "edit",
+                   "task": "subagent"}
+
+
 def extract_tool_calls(events):
-    """Return the parsed tool events as `{"tool": ..., "args": {...}}`."""
+    """Return the parsed tool events as `{"tool": ..., "args": {...}}`.
+
+    V2 names are native; a V1 alias in a consumer manifest is accepted and
+    logged (the predicate schema is unchanged).
+    """
     calls = []
     for ev in events:
         if _event_type(ev) != "tool":
             continue
         part = _event_part(ev)
-        tool = part.get("tool") or ev.get("tool")
+        raw_tool = part.get("tool") or ev.get("tool")
+        tool = V2_TOOL_ALIASES.get(raw_tool, raw_tool)
+        if tool != raw_tool:
+            print(f"alias: tool {raw_tool!r} -> {tool!r}", file=sys.stderr)
         args = None
         state = part.get("state")
         if isinstance(state, dict) and isinstance(state.get("input"), dict):
@@ -431,7 +443,11 @@ def assert_action(entries, events):
     calls = extract_tool_calls(events)
     missing = []
     for entry in entries:
-        tool = entry.get("tool")
+        raw_tool = entry.get("tool")
+        tool = V2_TOOL_ALIASES.get(raw_tool, raw_tool)
+        if tool != raw_tool:
+            print(f"alias: predicate tool {raw_tool!r} -> {tool!r}",
+                  file=sys.stderr)
         args_spec = entry.get("args") or {}
         ok = any(
             _glob_match(call["tool"], tool)
@@ -459,7 +475,7 @@ def assert_artifact(entries, workdir, events=None):
 
     Two match surfaces, either satisfies the predicate:
     1. the workdir filesystem (a file the agent wrote directly), and
-    2. `write` tool events from the session stream — filePath glob + content
+    2. `edit` tool events from the session stream — path glob + content
        phrases. (2026-09-21: a correctly-behaving authoring agent installs
        the drafted skill into the global opencode layout, OUTSIDE the eval
        workdir; the write event is the observable per the protocol's nature
@@ -494,10 +510,10 @@ def assert_artifact(entries, workdir, events=None):
             _consider(fp, content)
             if found:
                 break
-        # Surface 2: write events (path glob + event content).
+        # Surface 2: edit events (path glob + event content).
         if not found and events:
             for call in extract_tool_calls(events):
-                if call["tool"] not in ("write", "edit"):
+                if call["tool"] != "edit":
                     continue
                 if not _glob_match(call["args"].get("filePath"), path):
                     continue
@@ -597,9 +613,9 @@ def _has_work_activity(ctx):
     write/edit call, or a bash command that writes.
     """
     for call in extract_tool_calls(ctx.get("events") or []):
-        if call["tool"] in ("write", "edit"):
+        if call["tool"] == "edit":
             return True
-        if call["tool"] == "bash":
+        if call["tool"] == "shell":
             cmd = (call.get("args") or {}).get("command") or ""
             if _WRITE_ISH_RE.search(cmd):
                 return True
@@ -872,10 +888,10 @@ def augment_prompt(prompt, workdir, files, skill=None, skills_root=None):
 def opencode_run_args(tmp, prompt, model=None):
     """argv for one fresh-agent invocation (after `opencode`) — pure, hermetic.
 
-    Validated 2026-09-06 against https://opencode.ai/docs/cli/#run-1:
-    `opencode run [message..]` with `--dir`, `--agent`, `--model/-m`, `--file/-f`,
-    `--format` flags. There is NO `--skill` flag — the skill resolves from the
-    installed layout via `--dir`.
+    V2 (validated 2026-10-27, opencode 2.1.4): `opencode run [message..]` with
+    `--agent`, `--model/-m`, `--file/-f`, `--format`, `--standalone`,
+    `--server`. There is NO `--dir` (the workdir is `cwd`/`PWD`) and NO
+    `--skill` flag (the skill resolves from the installed layout).
 
     `model` MUST be passed in CI (workflow selects the free generalist; see
     reference/model-routing.md): opencode's environment default on a fresh CI
@@ -883,7 +899,7 @@ def opencode_run_args(tmp, prompt, model=None):
     RM-002 AC5 live gate, 2026-09-16. Omitted only for developer-local runs
     that intentionally use the environment default.
     """
-    args = ["run", "--print-logs", "--log-level", "ERROR", "--dir", tmp]
+    args = ["run", "--standalone", "--format", "json"]
     if model:
         args += ["--model", model]
     # RM-003 pass 5: capture the newline-delimited JSON event stream so typed
@@ -892,7 +908,7 @@ def opencode_run_args(tmp, prompt, model=None):
     # on stderr at ERROR level, so a dead-session `UnknownError ... ref=err_*`
     # (an opencode-server error with no client-visible cause) is resolvable
     # from the uploaded artifact instead of "check server logs" with no logs.
-    args += ["--format", "json", prompt]
+    args.append(prompt)
     return args
 
 
@@ -925,7 +941,7 @@ def assert_ci_free_model(model):
 def _resolved_cause(stderr):
     """Concrete error the opencode server logged, extracted from stderr.
 
-    `opencode run --print-logs` writes e.g.
+    the V2 `OPENCODE_LOG_LEVEL=ERROR` server log writes e.g.
     `level=ERROR ... error="ProviderModelNotFoundError: Model not found: deepseek/deepseek-flash"`.
     Returns the first quoted error (bounded), else the model-resolution class
     name when the text matches it, else "".
@@ -1035,6 +1051,8 @@ def preflight_model(model):
     fine there). A listing gap therefore means "cannot tell", never "broken".
     The behaviour-based guard is the consecutive-death early abort instead.
     """
+    if os.environ.get("BEVAL_SKIP_PREFLIGHT") == "1":
+        return None, "preflight skipped (BEVAL_SKIP_PREFLIGHT=1)"
     try:
         proc = subprocess.run(["opencode", "models"], capture_output=True,
                               text=True, timeout=60)
@@ -1124,6 +1142,35 @@ def eval_timeout(e, environ):
     return int(t)
 
 
+def v2_session_get(sid, env):
+    """(exists, payload): the service preflight, else the read-only DB row."""
+    try:
+        proc = subprocess.run(["opencode", "api", "GET",
+                               f"/api/session/{sid}"],
+                              capture_output=True, text=True, env=env,
+                              timeout=20)
+        out = proc.stdout or ""
+        if "SessionNotFoundError" in out or "HTTP 404" in out:
+            return False, None
+        if proc.returncode == 0 and '"data"' in out:
+            return True, None
+    except (OSError, subprocess.SubprocessError):
+        pass
+    db = env.get("OPENCODE_DB")
+    if db and os.path.isfile(db):
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            try:
+                row = con.execute("SELECT 1 FROM session_v2 WHERE id=?",
+                                  (sid,)).fetchone()
+            finally:
+                con.close()
+            return (row is not None), None
+        except sqlite3.Error:
+            return None, None
+    return None, None
+
+
 def invoke_opencode(e, model=None, turn=None):
     """Real fresh-agent invocation (CI only; needs the model credential).
 
@@ -1139,6 +1186,32 @@ def invoke_opencode(e, model=None, turn=None):
     stall_timeout = eval_timeout(e, os.environ)
     keep = False
     try:
+        # Per-run V2 isolation: a fresh DB and state/cache; the config tree
+        # (installed agents/skills) stays the host default.
+        v2_root = os.path.join(tmp, ".opencode-v2")
+        os.makedirs(v2_root, exist_ok=True)
+        run_env = sandbox_env(os.environ)
+        run_env.update({
+            "OPENCODE_DB": os.path.join(v2_root, "opencode.db"),
+            "XDG_STATE_HOME": os.path.join(v2_root, "state"),
+            "XDG_CACHE_HOME": os.path.join(v2_root, "cache"),
+            "XDG_RUNTIME_DIR": os.path.join(v2_root, "runtime"),
+            "TMPDIR": os.path.join(v2_root, "tmp"),
+            "PWD": tmp,
+            "OPENCODE_LOG_LEVEL": "ERROR",
+        })
+        for key in ("XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR",
+                    "TMPDIR"):
+            os.makedirs(run_env[key], exist_ok=True)
+
+        # Continuation preflight: a missing session is logged and restarted
+        # fresh, never silently `--session`-created as a new ghost.
+        if turn and turn.get("session_id"):
+            exists, _ = v2_session_get(turn["session_id"], run_env)
+            if exists is False:
+                print("continuation_lost: " + turn["session_id"] +
+                      " (unknown session; starting fresh)", file=sys.stderr)
+                turn = None
         if not (turn and turn.get("session_id")):
             _copy_fixture_files(tmp, e["skill"], e.get("files"))
         # The model credential must already be in the environment (repo secret);
@@ -1147,10 +1220,11 @@ def invoke_opencode(e, model=None, turn=None):
         # (zombie `opencode` servers); the whole group must be re-apable, so
         # the TimeoutExpired handler below kills the group, not just the child.
         if turn and turn.get("session_id"):
-            argv = ["opencode", "run", "--dir", tmp, "--format", "json",
-                    "-s", turn["session_id"], turn["nudge"]]
+            argv = ["opencode", "run", "--standalone", "--format", "json",
+                    "--session", turn["session_id"]]
             if model:
                 argv += ["--model", model]
+            argv.append(turn["nudge"])
         else:
             argv = ["opencode"] + opencode_run_args(
                     tmp, augment_prompt(e["prompt"], tmp, e.get("files"),
@@ -1159,7 +1233,7 @@ def invoke_opencode(e, model=None, turn=None):
             proc = subprocess.Popen(
                 argv,
                 cwd=tmp, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, env=sandbox_env(os.environ),
+                text=True, env=run_env,
                 start_new_session=True,
             )
         except OSError as exc:
@@ -1210,7 +1284,7 @@ def _persist_event_streams(logs_dir, e, turns):
                 with open(fn, "w", encoding="utf-8") as fh:
                     fh.write(raw)
             # Server-log capture (2026-09-28, RM-021): `opencode run
-            # --print-logs` writes the resolving cause of an err_* ref to
+            # OPENCODE_LOG_LEVEL=ERROR writes the resolving cause of an err_* ref to
             # stderr; persist it (redacted, bounded) so a dead session is
             # diagnosable from the uploaded artifact alone.
             if err:

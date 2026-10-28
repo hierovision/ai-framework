@@ -84,7 +84,7 @@
     {
       "id": 4,
       "prompt": "we're about to build feat-pomodoro-label but the module isn't written yet. plan's at .opencode/plans/feat-pomodoro-label.md and it's approved. author the unit tests RED-FIRST \u2014 one per AC \u2014 and run them BEFORE the module exists. confirm each fails for the right reason (naming the missing behaviour, NOT a harness defect). DON'T implement the module \u2014 that's a separate implementing-features pass; just author the red-first tests and record which mode ran. the repo is at fixtures/phasewave/unit-redfirst/ \u2014 treat that directory as the repo root",
-      "expect": {"artifact": [{"path": "**/tests/pomodoro-label.test.js", "phrases": ["pomodoroLabel", "Work"]}], "action": [{"tool": "bash", "args": {"command": "*npm run test*"}}], "text": ["red"]},
+      "expect": {"artifact": [{"path": "**/tests/pomodoro-label.test.js", "phrases": ["pomodoroLabel", "Work"]}], "action": [{"tool": "shell", "args": {"command": "*npm run test*"}}], "text": ["red"]},
       "expected_behavior": [
         "Reads the approved plan at .opencode/plans/feat-pomodoro-label.md before writing any test; derives the cases from the ACs",
         "Caller-states RED-FIRST mode (pre-implementation): the prompt says the module isn't written yet and to author red-first; the agent runs the authored tests BEFORE any implementation (src/lib/pomodoro-label.js is intentionally ABSENT in this fixture)",

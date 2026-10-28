@@ -46,40 +46,51 @@ def _load(name, path):
 # --- fixture DB --------------------------------------------------------------
 
 def _make_db(path, sessions, messages=(), parts=()):
-    """Minimal opencode.db-shaped fixture. Sessions/messages/parts rows carry
-    only the columns the guard reads (names match the live schema)."""
+    """Minimal V2-shaped fixture (`session_v2` + `session_message`)."""
     con = sqlite3.connect(path)
     con.execute(
-        "CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, title TEXT,"
-        " agent TEXT, directory TEXT, model TEXT, cost REAL, tokens_input INTEGER,"
-        " tokens_output INTEGER, time_created INTEGER, time_updated INTEGER)")
+        "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT,"
+        " title TEXT, agent TEXT, directory TEXT, model TEXT, cost REAL,"
+        " tokens_input INTEGER, tokens_output INTEGER, time_created INTEGER,"
+        " time_updated INTEGER, time_idle INTEGER, idle_outcome TEXT)")
     con.execute(
-        "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT,"
-        " time_created INTEGER, time_updated INTEGER, data TEXT)")
-    con.execute(
-        "CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,"
-        " time_created INTEGER, time_updated INTEGER, data TEXT)")
+        "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT,"
+        " type TEXT, seq INTEGER, time_created INTEGER, time_updated INTEGER,"
+        " data TEXT)")
     for s in sessions:
         con.execute(
-            "INSERT INTO session (id, parent_id, title, agent, directory,"
+            "INSERT INTO session_v2 (id, parent_id, title, agent, directory,"
             " time_created, time_updated) VALUES (?,?,?,?,?,?,?)",
             (s["id"], s.get("parent_id"), s.get("title", ""), s.get("agent"),
              s.get("directory", "/tmp/repo"), s.get("time_created", T0),
              s.get("time_updated", T0)))
+    by_message = {}
     for m in messages:
-        con.execute(
-            "INSERT INTO message (id, session_id, time_created, time_updated,"
-            " data) VALUES (?,?,?,?,?)",
-            (m["id"], m["session_id"], m.get("time_created", T0),
-             m.get("time_updated", T0),
-             json.dumps({"role": m.get("role", "assistant")})))
+        by_message[m["id"]] = {"content": []}
     for p in parts:
+        body = by_message.setdefault(p.get("message_id"),
+                                     {"content": []})
+        d = p["data"]
+        t = (d.get("type") or "").replace("_", "-")
+        if t == "text":
+            body["content"].append({"type": "text", "text": d.get("text") or ""})
+        elif t == "reasoning":
+            body["content"].append({"type": "reasoning",
+                                    "text": d.get("text") or ""})
+        elif t == "tool":
+            body["content"].append({"type": "tool", "name": d.get("tool"),
+                                    "state": d.get("state") or {}})
+        elif t == "step-finish":
+            body["finish"] = "stop"
+    seq = 0
+    for m in messages:
+        seq += 1
         con.execute(
-            "INSERT INTO part (id, message_id, session_id, time_created,"
-            " time_updated, data) VALUES (?,?,?,?,?,?)",
-            (p["id"], p.get("message_id"), p["session_id"],
-             p.get("time_created", T0), p.get("time_updated", T0),
-             json.dumps(p["data"])))
+            "INSERT INTO session_message (id, session_id, type, seq,"
+            " time_created, time_updated, data) VALUES (?,?,?,?,?,?,?)",
+            (m["id"], m["session_id"], m.get("role", "assistant"), seq,
+             m.get("time_created", T0), m.get("time_updated", T0),
+             json.dumps(by_message.get(m["id"], {"content": []}))))
     con.commit()
     con.close()
 
@@ -104,11 +115,11 @@ def _result_session(sid, parent_id, text, created=T0, title="Review PR 9",
                       "session_id": sid, "time_created": created + 600,
                       "time_updated": created + 600,
                       "data": {"type": "text", "text": text}})
-        if terminal:
-            parts.append({"id": sid + "-pf", "message_id": sid + "-m1",
-                          "session_id": sid, "time_created": created + 650,
-                          "time_updated": created + 650,
-                          "data": {"type": "step-finish"}})
+    if terminal and make_result:
+        parts.append({"id": sid + "-pf", "message_id": sid + "-m1",
+                      "session_id": sid, "time_created": created + 650,
+                      "time_updated": created + 650,
+                      "data": {"type": "step-finish"}})
     return sessions, messages, parts
 
 
@@ -291,21 +302,29 @@ def test_liveness_reuse():
         # it can no longer exercise the stalled path here.
         s1, m1, p1 = _result_session("stuck1", "root", text=None, created=T0)
         # two tool calls 400s apart -> invisible blocking black box
-        p1.append({"id": "stuck1-p2", "message_id": "stuck1-m1",
+        # V2 carries per-message times: model the two calls as separate
+        # assistant messages so the quiet gap is representable.
+        m1.append({"id": "stuck1-m2", "session_id": "stuck1",
+                   "role": "assistant", "time_created": T0 + 2000,
+                   "time_updated": T0 + 2000})
+        m1.append({"id": "stuck1-m3", "session_id": "stuck1",
+                   "role": "assistant", "time_created": T0 + 402000,
+                   "time_updated": T0 + 402000})
+        p1.append({"id": "stuck1-p2", "message_id": "stuck1-m2",
                    "session_id": "stuck1", "time_created": T0 + 2000,
                    "time_updated": T0 + 2000,
-                   "data": {"type": "tool", "tool": "bash",
+                   "data": {"type": "tool", "tool": "shell",
                             "state": {"status": "completed",
                                       "input": {"command": "pytest -q"}}}})
-        p1.append({"id": "stuck1-p3", "message_id": "stuck1-m1",
+        p1.append({"id": "stuck1-p3", "message_id": "stuck1-m3",
                    "session_id": "stuck1", "time_created": T0 + 402000,
                    "time_updated": T0 + 402000,
-                   "data": {"type": "tool", "tool": "bash",
+                   "data": {"type": "tool", "tool": "shell",
                             "state": {"status": "completed",
                                       "input": {"command": "pytest -q"}}}})
         _make_db(dbp, [root] + s1, m1, p1)
         # now = 10 min after the last event: last-event age 600s > stall 240s
-        now = (T0 + 402000) / 1000 + 600
+        now = (T0 + 402000) / 1000 + 700
         hits = _scan(g, dbp, "root", call_seconds=300, stall_seconds=240,
                      now=now, contract="council-lens")
         patterns = _patterns(hits)
@@ -870,9 +889,13 @@ def test_permission_scan_ignores_successful_tool_output():
             "reader1", "root",
             text="## Findings\nread the guard source\n## Recommendation\nmerge")
         # line-numbered source (a completed read's output) quoting the guard's
-        # own PERMISSION_RE literals and the --allow-dirs hint
+        # own PERMISSION_RE literals and the --allow-dirs hint, in the earlier
+        # assistant message so the final message remains the completed turn.
+        m.insert(0, {"id": "reader1-m0", "session_id": "reader1",
+                     "role": "assistant", "time_created": T0 + 100,
+                     "time_updated": T0 + 100})
         p.append({
-            "id": "reader1-p2", "message_id": "reader1-m1",
+            "id": "reader1-p2", "message_id": "reader1-m0",
             "session_id": "reader1", "time_created": T0 + 700,
             "time_updated": T0 + 700,
             "data": {"type": "tool", "tool": "read",
@@ -976,7 +999,7 @@ def test_hung_interim_text_restored_stalled():
                                "state": {"status": "completed",
                                          "input": {"command": cmd}}}})
         _make_db(dbp, [root] + s, m, p)
-        now = (T0 + 3000) / 1000 + 300  # quiet > stall window (240)
+        now = (T0 + 3000) / 1000 + 700  # quiet past the open-step grace (600)
         hits = _scan(g, dbp, "root", stall_seconds=240, call_seconds=300,
                      now=now)
         patterns = _patterns(hits)

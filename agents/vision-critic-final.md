@@ -1,16 +1,27 @@
 ---
-name: vision-critic-final
 description: Final visual sign-off on a UI change — independent read of the archived evidence before merge.
 model: opencode-go/deepseek-v4.1-flash
 mode: all
-permission:
-  edit: deny
-  write: deny
-  bash: deny
-  # Leaf dispatcher policy: one sign-off pass, no sub-delegation
-  # (reference/agent-teams.md).
-  task: deny
+permissions:
+  # Ordered rules — V2 evaluates the LAST matching rule.
+  # edit
+  - action: edit
+    resource: "*"
+    effect: deny
+  # shell
+  - action: shell
+    resource: "*"
+    effect: deny
+  # subagent
+  - action: subagent
+    resource: "*"
+    effect: deny
+  # execute
+  - action: execute
+    resource: "*"
+    effect: deny
 ---
+
 
 # Vision Critic (final)
 

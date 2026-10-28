@@ -41,7 +41,12 @@ import sys
 import time
 import urllib.request
 
-DB = os.path.expanduser("~/.local/share/opencode/opencode.db")
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+import opencode_v2 as v2  # noqa: E402 - shared V2 adapter
+
+DB = v2.DEFAULT_DB
 
 # --- bad-behavior heuristics -------------------------------------------------
 
@@ -89,29 +94,8 @@ def fmt_age(sec):
 
 
 def session_model(sess):
-    """Resolve the session row's `model` JSON blob to `<providerID>/<id>`.
-
-    The blob is volatile (probed 2026-10-02:
-    `{"id":"nemotron-3-ultra-free","providerID":"opencode","variant":"default"}`).
-    Every missing/odd shape degrades to None — never a crash
-    (reference/opencode-integration.md).
-    """
-    try:
-        raw = sess["model"]
-    except (KeyError, IndexError, TypeError):
-        return None
-    if not raw:
-        return None
-    try:
-        data = json.loads(raw)
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    provider, model_id = data.get("providerID"), data.get("id")
-    if not provider or not model_id:
-        return None
-    return f"{provider}/{model_id}"
+    """Resolve the V2 `model` blob to `<providerID>/<id>` (adapter owned)."""
+    return v2.session_model(sess)
 
 
 # --- heartbeat source --------------------------------------------------------
@@ -153,100 +137,55 @@ def read_heartbeat(path):
 # --- session event-stream source --------------------------------------------
 
 def db_path():
-    """The session DB path: `OPENCODE_DB_PATH` override (read at call time,
-    so hermetic tests and the dispatcher can share one reader), else the
-    default location."""
-    return os.path.expanduser(os.environ.get("OPENCODE_DB_PATH") or DB)
+    """`OPENCODE_DB_PATH` > `OPENCODE_DB` > the vendor location."""
+    return v2.db_path()
 
 
 def db():
-    path = db_path()
-    if not os.path.isfile(path):
-        return None
-    try:
-        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
-        con.row_factory = sqlite3.Row
-        return con
-    except sqlite3.Error:
-        return None
+    return v2.connect()
 
 
 def find_session(con, sid=None, title=None, parent=None, cwd=None):
-    cur = con.cursor()
-    if sid:
-        cur.execute("SELECT * FROM session WHERE id=?", (sid,))
-        return cur.fetchone()
-    where, args = [], []
-    if title:
-        where.append("title LIKE ?")
-        args.append(f"%{title}%")
-    if parent:
-        where.append("parent_id=?")
-        args.append(parent)
-    if cwd:
-        where.append("directory=?")
-        args.append(os.path.abspath(cwd))
-    sql = "SELECT * FROM session"
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY time_updated DESC LIMIT 1"
-    cur.execute(sql, args)
-    return cur.fetchone()
+    return v2.find_session(con, sid=sid, title=title, parent=parent, cwd=cwd)
 
 
 def load_parts(con, sid):
-    """The flat [(time_created_ms, data_dict), ...] view every reader consumes.
-
-    A mid-generation stream inserts no new part rows: it grows the current
-    `reasoning`/`text` row in place, so `time_updated` is the only clock that
-    moves (probed 2026-10-24: created_age=47s / updated_age=2s). It is injected
-    into the parsed dict as `_time_updated` — NOT into the tuple — so every
-    `(ms, d)` unpacking stays unchanged. A store without the column (older
-    schema) degrades to creation-only ages instead of failing the pass.
-    """
-    cur = con.cursor()
-    try:
-        cur.execute(
-            "SELECT id,data,time_created,time_updated FROM part"
-            " WHERE session_id=? ORDER BY time_created", (sid,))
-        rows = cur.fetchall()
-    except sqlite3.OperationalError:
-        cur.execute(
-            "SELECT id,data,time_created FROM part WHERE session_id=?"
-            " ORDER BY time_created", (sid,))
-        rows = cur.fetchall()
-    out = []
-    for r in rows:
-        try:
-            d = json.loads(r["data"])
-        except (TypeError, ValueError):
-            continue
-        if "time_updated" in r.keys():
-            d["_time_updated"] = r["time_updated"]
-        out.append((r["time_created"], d))
-    return out
+    """The flat [(time_created_ms, data), ...] view from V2 `session_message`."""
+    return v2.load_parts(con, sid)
 
 
 def session_status(url, sid, timeout=2.0):
-    """The vendor's own liveness map: `GET {url}/session/status`.
+    """V2 liveness: the active map, then the typed session row.
 
-    The payload is `{session_id: {"type": "busy"|"retry"|...}}` (probed
-    2026-10-25, opencode 1.19.4). Returns the entry for `sid`, or None when no
-    URL resolves, the server is unreachable, or the payload/entry is absent —
-    the DB lane is the fallback, never a crash.
+    `GET /api/session/active` returns the active map; `GET /api/session/{id}`
+    carries `outcome`/`time.idle` for a terminal session. Returns
+    `{"type": "busy"}` while active, `{"type": "idle", "outcome": ...}` when
+    the idle marker is present, or None when no URL resolves / the service is
+    unreachable (the read-only DB lane is the fallback).
     """
     if not url or not sid:
         return None
-    endpoint = url.rstrip("/") + "/session/status"
+    url = url.rstrip("/")
     try:
-        with urllib.request.urlopen(endpoint, timeout=timeout) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except (OSError, ValueError):
+        active = v2.session_active(url)
+        if isinstance(active, dict) and active.get(sid):
+            entry = active.get(sid)
+            return entry if isinstance(entry, dict) else {"type": "busy"}
+        status, payload = v2.api_call("GET", f"/api/session/{sid}",
+                                      server=url, timeout=timeout)
+    except Exception:  # noqa: BLE001 - liveness is best-effort
         return None
-    if not isinstance(payload, dict):
+    if status != 200 or not isinstance(payload, dict):
         return None
-    entry = payload.get(sid)
-    return entry if isinstance(entry, dict) else None
+    data = payload.get("data") if isinstance(payload.get("data"), dict) \
+        else payload
+    outcome = data.get("outcome")
+    t = data.get("time") if isinstance(data.get("time"), dict) else {}
+    if outcome or t.get("idle"):
+        return {"type": "idle", "outcome": outcome}
+    if t.get("updated"):
+        return {"type": "busy"}
+    return None
 
 
 def assistant_step_closed(parts):
@@ -285,9 +224,14 @@ def has_terminal_result(parts, running):
         return False
     if last_text + 1 >= len(parts):
         return False
-    if (parts[last_text + 1][1].get("type") or "") != "step-finish":
-        return False
-    return not running
+    # V2 messages carry the finish at message level, so a step-finish AFTER
+    # the final text completes the turn even when later content blocks (tool
+    # results) sit between them. The V1 immediate-adjacency form is kept for
+    # the legacy/fixture shape.
+    if (parts[last_text + 1][1].get("type") or "") == "step-finish":
+        return not running
+    return any((d.get("type") or "") == "step-finish"
+               for _ms, d in parts[last_text + 1:]) and not running
 
 
 def analyze_session(sess, parts, call_seconds, loop_repeats):
@@ -307,9 +251,12 @@ def analyze_session(sess, parts, call_seconds, loop_repeats):
         change = ms if change is None else change
         if change is not None and (last_change_ms is None or change > last_change_ms):
             last_change_ms = change
-        nxt = parts[i + 1][0] if i + 1 < len(parts) else None
         if d.get("type") != "tool":
             continue
+        # V2 interleaves message-level markers with content blocks, so the
+        # blocking gap is measured to the NEXT TOOL part, not the next row.
+        nxt = next((parts[j][0] for j in range(i + 1, len(parts))
+                    if parts[j][1].get("type") == "tool"), None)
         st = d.get("state", {}) or {}
         inp = st.get("input", {}) or {}
         name = d.get("tool") or "?"
@@ -426,6 +373,8 @@ def verdict(hb, an, stall_seconds=DEFAULT_STALL_SECONDS,
         why.append(f"{len(an['running'])} call(s) in flight > {call_seconds}s")
     retry = _retry_basis(status)
     busy = isinstance(status, dict) and status.get("type") == "busy"
+    idle_done = (isinstance(status, dict) and status.get("type") == "idle"
+                 and (status.get("outcome") or "") in ("succeeded", "success"))
     if retry:
         if result == "UNKNOWN":
             result = "STALLED"
@@ -444,7 +393,8 @@ def verdict(hb, an, stall_seconds=DEFAULT_STALL_SECONDS,
             # done: post-completion quiet is not a stall. Defensive: an
             # in-flight call still wins (BLOCKING), so only skip when nothing
             # is running.
-            completed = bool(an and an.get("has_result") and not an["running"])
+            completed = idle_done or bool(
+                an and an.get("has_result") and not an["running"])
             if completed:
                 if result == "UNKNOWN":
                     result = "OK"
@@ -556,7 +506,8 @@ def main(argv=None):
     ap.add_argument("--watch", type=int, metavar="SECONDS", default=0)
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
-    server_url = a.server_url or os.environ.get("OPENCODE_WAKE_URL") or None
+    server_url = (a.server_url or os.environ.get("OPENCODE_WAKE_URL")
+                  or v2.service_url())
 
     while True:
         hb = read_heartbeat(a.progress)

@@ -176,14 +176,16 @@ def test_lane_and_nested_agent_override():
     # persona is Go-bound, so the nested-agent override map is empty for this
     # repo. The loop stays as a guard for consumer repos whose wrappers are
     # still free-bound.
-    assert cfg["agent"] == {}, cfg
+    assert cfg["agents"] == {}, cfg
+    rules = {(r["action"], r["resource"]): r["effect"]
+             for r in cfg["permissions"]}
     # /tmp allowance (CI ephemeral): agents use /tmp scratch, and those writes
     # were auto-rejected (33 in one run) -> zero-write turns.
-    assert cfg["permission"]["external_directory"]["/tmp/**"] == "allow", cfg
+    assert rules[("external_directory", "/tmp/**")] == "allow", cfg
     # Installed-config reads (2026-10-03): skill references and agent
     # definitions live there; a denied read ended an eval turn.
     installed = os.path.expanduser("~/.config/opencode") + "/**"
-    assert cfg["permission"]["external_directory"][installed] == "allow", cfg
+    assert rules[("external_directory", installed)] == "allow", cfg
 
 
 def test_report_downloads_per_artifact():

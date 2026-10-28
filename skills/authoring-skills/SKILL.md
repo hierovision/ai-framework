@@ -225,8 +225,8 @@ closed taxonomy. The *nature rule* picks the class:
 | Is literally speech (restates, refuses, asks in prose) | `text` |
 
 - **`action`** — a tool-event predicate over the `opencode run --format json`
-  session stream: a tool name plus argument globs (e.g. `write` with a
-  `filePath` glob, `bash` with a `command` glob). Use when the behavior is
+  session stream: a V2 tool name plus argument globs (e.g. `edit` with a
+  `path` glob, `shell` with a `command` glob). Use when the behavior is
   *doing* something to the environment.
 - **`artifact`** — a file the agent wrote (a path glob resolved under the run
   workdir) plus key phrases that must appear in its content. Use when the
@@ -240,7 +240,7 @@ closed taxonomy. The *nature rule* picks the class:
   "id": 1,
   "prompt": "record this eval run and tell me the ROI guardrail",
   "expect": {
-    "action": [{"tool": "bash", "args": {"command": "*log_run.py*"}}],
+    "action": [{"tool": "shell", "args": {"command": "*log_run.py*"}}],
     "artifact": [{"path": "**/SKILL.md", "phrases": ["name:", "description:"]}],
     "text": ["out-of-context"]
   },

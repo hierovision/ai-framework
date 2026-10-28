@@ -23,7 +23,7 @@ validity in `reference/delegated-result-contract.md`.
   `council-*` lens, and the single-shot roles (`reviewer`, `skill-reviewer`,
   `vision-critic-fast`, `vision-critic-final`) deny `task`, so a single-shot
   agent cannot recurse. Orchestrators and the loop workers (`test-writer`,
-  `debugger`, `skill-author`) carry no `permission.task` allow-list
+  `debugger`, `skill-author`) carry no `subagent` allow-list
   (`reference/opencode-integration.md`).
 
 ## Composition
@@ -97,7 +97,8 @@ check the map or a judgment-led lane; consults carry `--contract` (RM-044).
 Two resume paths, one per lane; both preserve the worker's context instead of
 restarting it:
 
-- **Task path**: resume with the Task tool's `task_id`. RM-025 applies — the
+- **Subagent path**: resume with the V2 `subagent` tool's `agent` + `sessionID`
+  fields (no separate task id field). RM-025 applies — the
   resume call MUST carry `description` (a `SchemaError(Missing key
   ["description"])` otherwise). Record the requirement at the call site.
 - **Run-vehicle path**: the dispatch prints the session id; resume with

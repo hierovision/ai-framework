@@ -204,8 +204,10 @@ def test_ci_lane_overrides_yields_empty_agent_map():
          "--model", "opencode-go/deepseek-v4.1-flash", "--repo", REPO],
         capture_output=True, text=True, check=True).stdout
     cfg = json.loads(out)
-    assert cfg["agent"] == {}, cfg
-    assert cfg["permission"]["external_directory"]["/tmp/**"] == "allow", cfg
+    assert cfg["agents"] == {}, cfg
+    rules = {(r["action"], r["resource"]): r["effect"]
+             for r in cfg["permissions"]}
+    assert rules[("external_directory", "/tmp/**")] == "allow", cfg
 
 
 # --- fixture-driven failure classes (AC3) ----------------------------------

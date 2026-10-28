@@ -6,10 +6,12 @@ RM-058 (plan `.opencode/plans/rm-058-orchestrator-wake.md`). Spawned detached by
 printed (D2). It polls the ONE durable supervision surface — the dispatcher's
 heartbeat envelope plus the run-log record `/scripts/log_run.py` already emits
 (D1) — and delivers a fixed-shape wake into the orchestrator conversation
-**through the orchestrator's own server** with `opencode run --attach
-<wake-url> --session <id> --agent <wake-agent> --format json <text>` (never
-`--continue`; AGENTS.md rule 1; never `--model` — the agent's binding decides),
-gated on the orchestrator session being quiescent (D2, revised 2026-10-16).
+**through the orchestrator's own server** with typed V2 calls: `session.get`
+preflight, `session.agent` switch, then `session.prompt` (never `--continue`;
+AGENTS.md rule 1; never `--model` — the agent's binding decides). A 404
+preflight defers with `reason=unknown-session`; no ghost session is created.
+The delivery is gated on the orchestrator session being quiescent (D2,
+revised 2026-10-16).
 
 Boundaries:
   * The wake vehicle and rule-1 quiescence gate: D2.
@@ -49,9 +51,12 @@ def _load_module(path, name):
 
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
 
 # The completion predicate and the read-only session-store readers live in the
-# watcher; imported, never redefined (D6).
+# watcher; the V2 adapter owns every version-specific fact.
+import opencode_v2 as v2  # noqa: E402
 watch_agent = _load_module(os.path.join(SCRIPT_DIR, "watch_agent.py"), "watch_agent")
 
 # Tags written by the dispatcher envelope and by the child, and the observer's
@@ -252,88 +257,38 @@ def wake_text(cfg, outcome, detail, run_path, hb_path):
 
 
 def resolve_wake_url(cfg):
-    """The attach URL: the explicit flag, else the inherited env, else None.
-
-    No port/state file exists to discover it from disk (probe P2, 1.19.1), so
-    the URL must travel with the dispatch contract (D2 step 2).
-    """
-    return cfg.wake_url or os.environ.get("OPENCODE_WAKE_URL") or None
-
-
-def _names_session(line, sid):
-    """True when a streamed event line names `sid` (top-level or part-level)."""
-    if not sid:
-        return False
-    try:
-        ev = json.loads(line)
-    except (TypeError, ValueError):
-        return False
-    if not isinstance(ev, dict):
-        return False
-    if ev.get("sessionID") == sid:
-        return True
-    part = ev.get("part")
-    return isinstance(part, dict) and part.get("sessionID") == sid
+    """The service URL: explicit flag, inherited env, else local discovery."""
+    return (cfg.wake_url or os.environ.get("OPENCODE_WAKE_URL")
+            or v2.service_url())
 
 
 def deliver(cfg, text, wake_url):
-    """Deliver the wake through the orchestrator's own server (D2, amended).
+    """Wake through the V2 service API (no client attach, no new session).
 
-    `opencode run --attach <wake-url> --session <sid> --agent <wake-agent>
-    --format json <text>` — never `--continue` (AGENTS.md rule 1), never
-    `--model` (the agent's binding decides; without `--agent` opencode records
-    the default `build` ghost). Acceptance proof is the first streamed event
-    naming the orchestrator session or a client exit 0, whichever first; the
-    client is then allowed to exit within `WAKE_SUBPROCESS_TIMEOUT` — the
-    generation runs server-side, so the subprocess never holds it.
-
-    Returns `(accepted, failure_detail)`; `failure_detail` is None on
-    acceptance, else a bounded string naming the refusal.
+    Sequence: `session.get` preflight (404 -> `unknown-session` deferral),
+    `session.agent` switch, then `session.prompt` on the SAME session. Returns
+    `(accepted, failure_detail)`.
     """
-    argv = ["opencode", "run", "--attach", wake_url,
-            "--session", cfg.orchestrator_session,
-            "--agent", cfg.wake_agent, "--format", "json", text]
-    try:
-        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, text=True,
-                                start_new_session=True)
-    except OSError as exc:
-        return False, f"cannot launch opencode: {exc}"
-    accepted = {"v": False}
-
-    def reader():
-        try:
-            for line in proc.stdout:
-                if _names_session(line, cfg.orchestrator_session):
-                    accepted["v"] = True
-        except Exception:  # noqa: BLE001 - a broken pipe is not acceptance
-            pass
-
-    thread = threading.Thread(target=reader, daemon=True)
-    thread.start()
-    timed_out = False
-    try:
-        proc.wait(timeout=WAKE_SUBPROCESS_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            pass
-    thread.join(timeout=2)
-    if accepted["v"]:
-        return True, None
-    if timed_out:
-        return False, "attach delivery timed out"
-    rc = proc.returncode if proc.returncode is not None else -1
-    if rc == 0:
-        return True, None
-    return False, f"attach delivery failed rc={rc}"
+    sid = cfg.orchestrator_session
+    status, payload = v2.api_call("GET", f"/api/session/{sid}", server=wake_url)
+    if status == 404:
+        return False, "unknown-session"
+    if status != 200:
+        return False, f"preflight-failed:{status}"
+    returned = None
+    if isinstance(payload, dict):
+        data = payload.get("data") if isinstance(payload.get("data"), dict) \
+            else payload
+        returned = data.get("id")
+    if returned and returned != sid:
+        return False, f"session-mismatch:{returned}"
+    status, _ = v2.session_switch_agent(sid, cfg.wake_agent, server=wake_url)
+    if status not in (200, 201, 202, 204):
+        return False, f"agent-switch-failed:{status}"
+    status, _ = v2.session_prompt(sid, text, server=wake_url)
+    if status not in (200, 201, 202, 204):
+        return False, f"prompt-failed:{status}"
+    return True, None
 
 
 # --- quiescence gate (D2 step 4, revised 2026-10-16) -------------------------

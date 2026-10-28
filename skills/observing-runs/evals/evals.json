@@ -16,7 +16,7 @@
       ],
       "expect": {
         "action": [
-          {"tool": "bash", "args": {"command": "*log_run.py*"}}
+          {"tool": "shell", "args": {"command": "*log_run.py*"}}
         ]
       },
       "files": [
@@ -38,7 +38,7 @@
       ],
       "expect": {
         "action": [
-          {"tool": "bash", "args": {"command": "*coverage-gaps*"}}
+          {"tool": "shell", "args": {"command": "*coverage-gaps*"}}
         ]
       },
       "files": [

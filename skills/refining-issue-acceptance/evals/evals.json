@@ -54,7 +54,7 @@
     {
       "id": 4,
       "prompt": "Prove the refine-issue.mjs validation helpers (findLeaks, analyzeAcs, validateRefined) behave correctly — run the unit suite.",
-      "expect": {"action": [{"tool": "bash", "args": {"command": "*unit.test.mjs*"}}], "text": ["tag"]},
+      "expect": {"action": [{"tool": "shell", "args": {"command": "*unit.test.mjs*"}}], "text": ["tag"]},
       "expected_behavior": [
         "node skills/refining-issue-acceptance/evals/fixtures/unit.test.mjs exits 0",
         "findLeaks flags code context (class/const/src/import) but not plain prose ('export to CSV', 'import records', 'class roster', 'function room')",

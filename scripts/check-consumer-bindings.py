@@ -70,13 +70,35 @@ def model_from_frontmatter(path):
     return match.group(1) if match else None
 
 
+def _model_value(entry):
+    """A V2/legacy agent model entry -> `provider/model` or None.
+
+    V2 accepts a string or `{providerID, model}`; legacy accepts a string or
+    `{providerID, id}`.
+    """
+    if isinstance(entry, str):
+        return entry
+    if not isinstance(entry, dict):
+        return None
+    model = entry.get("model") or entry.get("id")
+    provider = entry.get("providerID") or entry.get("provider")
+    if model and provider and isinstance(model, str) and "/" not in model:
+        return f"{provider}/{model}"
+    return entry.get("model") if isinstance(entry.get("model"), str) else model
+
+
 def collect_bindings(repo, global_agents_dir):
-    """Return [{"surface", "model", "shadowed"}] of reachable bindings."""
+    """Return [{"surface", "model", "shadowed"}] of reachable bindings.
+
+    V2: path-derived wrapper IDs (a `name:` is never authoritative), the
+    native `agents` object, and `agents.title.model`. Legacy `agent` /
+    `small_model` remain accepted for consumer compatibility.
+    """
     bindings = []
     project_wrappers = {}
     for sub in (".opencode/agents", "agents"):
         for path in sorted(glob.glob(os.path.join(repo, sub, "*.md"))):
-            name = os.path.basename(path)[:-3]
+            name = os.path.basename(path)[:-3]  # path-derived ID
             model = model_from_frontmatter(path)
             if not model:
                 continue
@@ -85,17 +107,40 @@ def collect_bindings(repo, global_agents_dir):
                              "model": model, "shadowed": False})
 
     config = os.path.join(repo, "opencode.json")
+    if not os.path.isfile(config):
+        config = os.path.join(repo, "opencode.jsonc")
     if os.path.isfile(config):
         with open(config, encoding="utf-8") as fh:
-            data = json.load(fh)
+            raw = fh.read()
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            data = {}
         for key in ("model", "small_model"):
             if data.get(key):
-                bindings.append({"surface": f"opencode.json:{key}",
+                bindings.append({"surface": f"{os.path.basename(config)}:{key}",
                                  "model": data[key], "shadowed": False})
+        native = data.get("agents")
+        if isinstance(native, dict):
+            title = native.get("title")
+            if isinstance(title, dict):
+                model = _model_value(title.get("model"))
+                if model:
+                    bindings.append({"surface": f"{os.path.basename(config)}:agents.title.model",
+                                     "model": model, "shadowed": False})
+            for name, entry in native.items():
+                if name == "title":
+                    continue
+                model = _model_value(entry)
+                if model:
+                    bindings.append({
+                        "surface": f"{os.path.basename(config)}:agents.{name}.model",
+                        "model": model,
+                        "shadowed": name in project_wrappers})
         for name, entry in (data.get("agent") or {}).items():
-            model = entry.get("model") if isinstance(entry, dict) else None
+            model = _model_value(entry)
             if model:
-                bindings.append({"surface": f"opencode.json:agent.{name}.model",
+                bindings.append({"surface": f"{os.path.basename(config)}:agent.{name}.model",
                                  "model": model,
                                  "shadowed": name in project_wrappers})
 

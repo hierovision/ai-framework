@@ -20,10 +20,15 @@ into `~/.config/opencode/agents/` so all projects discover them globally:
 ./install.sh
 ```
 
+Requires **OpenCode V2 `2.1.4`** (package `@opencode/cli@2.1.4`; exact pin,
+no `latest`, no caret range). `opencode --version` prints `opencode v2.1.4`.
+
 Re-run after adding new skills or agents. `git pull` alone updates the
 content of already-linked skills/agents. Agent files are validated on
-install (frontmatter `name` must match the file and `model` must be set).
-Remove links with:
+install: the ID is **path-derived**, so a legacy `name:` frontmatter key is
+rejected, and `description` + `model` are required. Permissions use the V2
+ordered `permissions` array (`shell`, `subagent`, `edit`, `execute`), never
+the V1 `permission` map. Remove links with:
 
 ```bash
 ./install.sh --uninstall

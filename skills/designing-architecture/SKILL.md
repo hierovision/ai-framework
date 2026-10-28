@@ -161,7 +161,7 @@ backend or internal-logic item gets the explicit skip instead: record
 and proceed. The explicit negative is the closure signal; do not invent
 UI to review.
 
-For a user-facing item, invoke `council-ux` (subagent_type `council-ux`)
+For a user-facing item, invoke `council-ux` through the V2 `subagent` tool (`agent: council-ux`)
 **before drafting**, so concerns land in the plan, not in revisions:
 
 - **Brief**: the goal, the draft acceptance criteria, the Included /

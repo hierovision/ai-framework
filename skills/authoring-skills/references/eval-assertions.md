@@ -21,7 +21,7 @@ line. Relevant shapes:
 
 ```json
 {"type":"text","part":{"type":"text","text":"the final response text"}}
-{"type":"tool","part":{"type":"tool","tool":"write",
+{"type":"tool_use","part":{"type":"tool","tool":"edit",
   "state":{"status":"completed","input":{"filePath":"/work/SKILL.md","content":"..."}}}}
 {"type":"step_finish","part":{"type":"step-finish","tokens":{"input":1200,"output":340}}}
 ```
@@ -41,7 +41,7 @@ a parse error **fails closed** — it is never a silent pass.
 ```json
 "expect": {
   "action": [
-    {"tool": "bash", "args": {"command": "*log_run.py*"}}
+    {"tool": "shell", "args": {"command": "*log_run.py*"}}
   ],
   "artifact": [
     {"path": "**/SKILL.md", "phrases": ["name:", "description:"]}
@@ -134,7 +134,7 @@ logs/eval-streams/<skill>__<id>-<UTCstamp>-turn<N>-<label>-stderr.log
 ```
 
 The `-stderr.log` is the point of the diagnostic channel: the runner invokes
-`opencode run --print-logs --log-level ERROR`, so the server-side cause behind
+`OPENCODE_LOG_LEVEL=ERROR` on the V2 run, so the server-side cause behind
 an `err_*` ref lands on stderr and is uploaded with the artifact (redacted of
 provider keys, capped 8 KiB). Without it, `UnknownError ... Check server logs`
 has no logs to check.
