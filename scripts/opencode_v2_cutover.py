@@ -164,6 +164,48 @@ def readiness(args):
 
 # --- staging / switch --------------------------------------------------------
 
+def default_config_source(home):
+    """Build the reviewed versioned config corpus from the repo + real config."""
+    root = os.path.join(REPO, ".scratch", "opencode-v2", "cutover", "config")
+    if os.path.isdir(root):
+        shutil.rmtree(root)
+    os.makedirs(root, exist_ok=True)
+    agents_src = os.path.join(REPO, "agents")
+    if os.path.isdir(agents_src):
+        shutil.copytree(agents_src, os.path.join(root, "agents"))
+    plugin_src = os.path.join(REPO, "plugins", "auto-compact-at-threshold")
+    if os.path.isdir(plugin_src):
+        shutil.copytree(plugin_src,
+                        os.path.join(root, "plugins",
+                                     "auto-compact-at-threshold"))
+    instructions = [os.path.join(home, ".config", "opencode", "reference",
+                                 "cross-repo-isolation.md")]
+    title = {"providerID": "opencode-go", "model": "deepseek-v4.1-flash"}
+    real_cfg = os.path.join(home, ".config", "opencode", "opencode.jsonc")
+    if os.path.isfile(real_cfg):
+        try:
+            with open(real_cfg, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data.get("instructions"), list):
+                instructions = data["instructions"]
+            small = data.get("small_model")
+            native = ((data.get("agents") or {}).get("title") or {}).get("model")
+            if isinstance(native, dict) and native.get("providerID"):
+                title = native
+            elif isinstance(small, str) and "/" in small:
+                provider, model = small.split("/", 1)
+                title = {"providerID": provider, "model": model}
+        except (OSError, ValueError):
+            pass
+    cfg = {"$schema": "https://opencode.ai/config.json",
+           "instructions": instructions,
+           "agents": {"title": {"model": title}}}
+    with open(os.path.join(root, "opencode.jsonc"), "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, indent=2)
+        fh.write("\n")
+    return root
+
+
 def stage_runtime(home, args):
     """Versioned runtime + config root + wrapper (no live switch yet)."""
     base = os.path.join(home, ".local", "lib", "opencode", VERSION)
@@ -272,6 +314,10 @@ def execute(args):
         return 2
 
     original = original_link_state(link)
+    if original.get("type") == "file":
+        saved = os.path.join(staged["base"], "original-opencode")
+        shutil.copy2(link, saved)
+        original["saved_path"] = saved
     manifest = {
         "created": now_iso(),
         "version": VERSION,
@@ -328,10 +374,11 @@ def rollback(args):
     # 2. Restore the original binary link atomically.
     if original.get("type") == "symlink":
         atomic_link(original["target"], link)
-    elif original.get("type") == "file" and original.get("sha256"):
+    elif original.get("type") == "file" and original.get("saved_path") \
+            and os.path.isfile(original["saved_path"]):
         parent = os.path.dirname(link)
         tmp = os.path.join(parent, f".{os.path.basename(link)}.restore.tmp")
-        shutil.copy2(backup, tmp)  # placeholder; file originals are documented
+        shutil.copy2(original["saved_path"], tmp)
         os.replace(tmp, link)
     else:
         try:
@@ -390,8 +437,8 @@ def main(argv=None):
                     help="Test/automation seam: JSON list of process lines.")
     ap.add_argument("--source-db", default=v2.DEFAULT_DB)
     ap.add_argument("--final-backup", default=None)
-    ap.add_argument("--source-prefix", default=os.path.join(
-        REPO, ".scratch", "v2-prefix"))
+    ap.add_argument("--source-prefix", default=os.environ.get(
+        "OPENCODE_V2_SOURCE_PREFIX", os.path.join(REPO, ".scratch", "v2-prefix")))
     ap.add_argument("--config-source", default=None)
     ap.add_argument("--scratch-root", default=os.path.join(
         REPO, ".scratch", "opencode-v2", "cutover"))
@@ -404,6 +451,9 @@ def main(argv=None):
                     help="Rollback only: restore the final V1 DB.")
     args = ap.parse_args(argv)
 
+    if args.config_source is None and not args.rollback:
+        args.config_source = default_config_source(
+            os.path.abspath(args.home or os.path.expanduser("~")))
     if args.rollback:
         return rollback(args)
     if args.preflight:
