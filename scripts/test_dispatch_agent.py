@@ -714,9 +714,10 @@ def test_allow_dir_grants_external_permission():
         shutil.rmtree(work, ignore_errors=True)
 
 
-def test_permission_config_ignores_caller_env():
-    """M2/V2: caller OPENCODE_CONFIG_CONTENT is not a grant mechanism; the
-    generated config still carries the allow root and the dispatch proceeds."""
+def test_permission_config_warns_on_malformed_caller_env():
+    """M2/V2: an unparsable caller OPENCODE_CONFIG_CONTENT is irrelevant to V2
+    grants (the accepted mechanism is the generated XDG_CONFIG_HOME); the
+    dispatch proceeds and the allow root is still present."""
     work = tempfile.mkdtemp(prefix="dispatch-grant-")
     try:
         granted = os.path.join(work, "sibling")
