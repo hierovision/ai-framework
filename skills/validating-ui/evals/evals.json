@@ -24,7 +24,9 @@
         "fixtures/smoke-basic/journey.mjs",
         "fixtures/smoke-basic/allowlist.json",
         "fixtures/smoke-basic/bad-evidence.json"
-      ]
+      ],
+      "timeout": 600,
+      "notes": "2026-10-28: 600s startup budget — CI hit three 240s zero-event stalls; an isolated 600s probe with the same model/auth emitted a full stream and passed in 53–406 s across two isolated probes (the 406 s run is inside the 240–600 s latency band). Assertions unchanged."
     },
     {
       "id": 2,

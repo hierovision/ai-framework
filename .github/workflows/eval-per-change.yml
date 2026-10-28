@@ -267,6 +267,9 @@ jobs:
           # reference/model-routing.md.
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           OPENCODE_LOG_LEVEL: ERROR
+          # Zero-event stalls have no stream to diagnose; record the exact
+          # spawn command/env/timeout in the job log.
+          BEVAL_STARTUP_LOG: "1"
           # RM-056: opt in to the per-run lane fallback (per-eval path covers
           # this single-canary job). On log-proven degradation the runner
           # switches for that run only to the direct-key lane; DEEPSEEK_API_KEY

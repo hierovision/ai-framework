@@ -165,3 +165,15 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
   implementation-time rule (never invent a flag/key; cite this file).
 - `skills/authoring-skills/scripts/run_behavioral_eval.py` — consumes `cwd`/
   `PWD`, `--standalone`, and per-run `OPENCODE_DB`/XDG isolation.
+
+## Eval startup latency (2026-10-28)
+
+CI run 40709127604's `validating-ui#1` job killed three attempts at 240 s with
+zero JSON events and empty stderr. The same model/auth/runner produced the full
+stream for `designing-architecture#1` (206 s) in the same run. A bounded
+600 s isolated probe of `validating-ui#1` emitted a complete event stream and
+passed in 53–406 s across two isolated probes (406 s inside the 240–600 s band); 60 s-bounded repetitions stalled, so the tail is startup/
+provider latency, not an assertion or config defect. The eval now carries
+`timeout: 600` (the existing per-eval manifest policy); assertions are
+unchanged. `BEVAL_STARTUP_LOG=1` records the spawn command, per-run DB, log
+level, and timeout in the CI job log for the next zero-event occurrence.

@@ -123,6 +123,9 @@ jobs:
           # same model family the suite already ran — no personal API key.
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           OPENCODE_LOG_LEVEL: ERROR
+          # Zero-event stalls have no stream to diagnose; record the exact
+          # spawn command/env/timeout in the job log.
+          BEVAL_STARTUP_LOG: "1"
           # RM-056: opt in to the per-run lane fallback. On a log-proven
           # model/opencode-service degradation the run switches (for that run
           # only, never a re-bind) to the direct-key lane below, marked in the

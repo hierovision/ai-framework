@@ -577,6 +577,61 @@ def test_artifact_predicate():
         shutil.rmtree(d)
 
 
+def test_artifact_hidden_file_discovered():
+    """Regression (CI PR 132): `.opencode/plans/<slug>.md` is a hidden path.
+    The workdir filesystem surface must discover hidden files (plain
+    `glob.glob` does not), otherwise a correctly written plan reads as
+    "no file matching"."""
+    d = tempfile.mkdtemp(prefix="beval-art-hidden-")
+    try:
+        plan = os.path.join(d, ".opencode", "plans", "feat-offline-queue.md")
+        os.makedirs(os.path.dirname(plan))
+        with open(plan, "w", encoding="utf-8") as fh:
+            fh.write("# Plan\n\n## Acceptance Criteria\n\n- works\n"
+                     "## Files to Modify\n\n- src/store.ts\n")
+        ctx = runner.build_context(runner.EvalResult(raw="", workdir=d))
+        exact = {"artifact": [{"path": ".opencode/plans/feat-offline-queue.md",
+                               "phrases": ["Acceptance Criteria",
+                                           "Files to Modify"]}]}
+        assert runner.assert_expect(exact, ctx) == [], runner.assert_expect(exact, ctx)
+        globbed = {"artifact": [{"path": "**/*.md",
+                                 "phrases": ["Acceptance Criteria"]}]}
+        assert runner.assert_expect(globbed, ctx) == [], runner.assert_expect(globbed, ctx)
+        print("PASS  artifact predicate discovers hidden .opencode paths")
+    finally:
+        shutil.rmtree(d)
+
+
+def test_artifact_v2_path_event():
+    """Regression (CI PR 132): V2 `edit` tool input is
+    `{"path": ..., "content": ...}`. The event surface accepted only the V1
+    `filePath`, so a real V2 write event matched no file."""
+    stream = _tool_stream(
+        "edit", path=".opencode/plans/feat-offline-queue.md",
+        content="# Plan\n## Acceptance Criteria\n- works\n")
+    ctx = runner.build_context(runner.EvalResult(raw=stream))
+    expect = {"artifact": [{"path": ".opencode/plans/feat-offline-queue.md",
+                            "phrases": ["Acceptance Criteria"]}]}
+    assert runner.assert_expect(expect, ctx) == [], runner.assert_expect(expect, ctx)
+    # A glob over the V2 path works too.
+    globbed = {"artifact": [{"path": "**/*.md",
+                             "phrases": ["Acceptance Criteria"]}]}
+    assert runner.assert_expect(globbed, ctx) == [], runner.assert_expect(globbed, ctx)
+    print("PASS  artifact predicate reads the V2 path event")
+
+
+def test_artifact_legacy_filepath_event_still_works():
+    """V1 consumer manifests emit `filePath`; the compatibility surface must
+    keep matching after the V2 `path` addition."""
+    stream = _tool_stream(
+        "edit", filePath="src/lib/out.md",
+        content="hello legacy")
+    ctx = runner.build_context(runner.EvalResult(raw=stream))
+    expect = {"artifact": [{"path": "src/lib/out.md", "phrases": ["hello"]}]}
+    assert runner.assert_expect(expect, ctx) == [], runner.assert_expect(expect, ctx)
+    print("PASS  artifact predicate keeps legacy filePath matching")
+
+
 def test_text_predicate_and_expect_wins():
     # expect wins over legacy expected_behavior: the legacy phrase is absent but
     # the typed text phrase is present.
@@ -1704,6 +1759,9 @@ def main():
         test_event_stream_parse_and_final_text,
         test_action_predicate,
         test_artifact_predicate,
+        test_artifact_hidden_file_discovered,
+        test_artifact_v2_path_event,
+        test_artifact_legacy_filepath_event_still_works,
         test_text_predicate_and_expect_wins,
         test_parse_failure_fails_closed,
         test_seven_canaries_replay_fixtures,

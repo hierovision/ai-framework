@@ -461,10 +461,27 @@ def assert_action(entries, events):
 
 
 def _artifact_files(workdir, path):
+    """Files matching an artifact glob, INCLUDING hidden path components.
+
+    2026-10-28 (CI PR 132): a plan at `.opencode/plans/<slug>.md` is a hidden
+    path; plain `glob.glob` skips it, so a correctly written artifact read as
+    "no file matching". `include_hidden=True` (Python 3.11+) closes that.
+    """
     if not workdir:
         return []
     target = path if os.path.isabs(path) else os.path.join(workdir, path)
-    files = [p for p in glob.glob(target, recursive=True) if os.path.isfile(p)]
+    try:
+        matches = glob.glob(target, recursive=True, include_hidden=True)
+    except TypeError:  # Python < 3.11: walk the hidden tree explicitly.
+        matches = glob.glob(target, recursive=True)
+        root = workdir
+        for dirpath, dirnames, filenames in os.walk(root):
+            for name in filenames:
+                candidate = os.path.join(dirpath, name)
+                rel = os.path.relpath(candidate, root)
+                if fnmatch.fnmatchcase(rel, path):
+                    matches.append(candidate)
+    files = [p for p in matches if os.path.isfile(p)]
     if os.path.isfile(target) and target not in files:
         files.append(target)
     return files
@@ -510,15 +527,18 @@ def assert_artifact(entries, workdir, events=None):
             _consider(fp, content)
             if found:
                 break
-        # Surface 2: edit events (path glob + event content).
+        # Surface 2: edit events (path glob + event content). V2 uses
+        # `path` + `content`; V1 consumer manifests still use `filePath`.
         if not found and events:
             for call in extract_tool_calls(events):
                 if call["tool"] != "edit":
                     continue
-                if not _glob_match(call["args"].get("filePath"), path):
+                fp = call["args"].get("path") or call["args"].get("filePath")
+                if not _glob_match(fp, path):
                     continue
-                _consider(call["args"].get("filePath"),
-                          str(call["args"].get("content") or ""))
+                content = (call["args"].get("content")
+                           or call["args"].get("newString") or "")
+                _consider(fp, str(content))
                 if found:
                     break
         if not found:
@@ -1171,6 +1191,16 @@ def v2_session_get(sid, env):
     return None, None
 
 
+def _startup_log(message):
+    """Opt-in startup diagnostics (`BEVAL_STARTUP_LOG=1`) for a stuck eval.
+
+    A zero-event stall has no stream to diagnose; this records the exact
+    command, cwd, per-run DB, log level, and timeout before the spawn.
+    """
+    if os.environ.get("BEVAL_STARTUP_LOG") == "1":
+        print(f"[beval-startup] {message}", file=sys.stderr, flush=True)
+
+
 def invoke_opencode(e, model=None, turn=None):
     """Real fresh-agent invocation (CI only; needs the model credential).
 
@@ -1229,6 +1259,12 @@ def invoke_opencode(e, model=None, turn=None):
             argv = ["opencode"] + opencode_run_args(
                     tmp, augment_prompt(e["prompt"], tmp, e.get("files"),
                                         skill=e["skill"]), model=model)
+        _startup_log(
+            f"spawn eval={eval_key(e)} argv={argv} cwd={tmp} "
+            f"db={run_env.get('OPENCODE_DB')} "
+            f"log_level={run_env.get('OPENCODE_LOG_LEVEL')} "
+            f"timeout={stall_timeout}s pid_env="
+            f"{sorted(k for k in run_env if k.startswith('OPENCODE'))}")
         try:
             proc = subprocess.Popen(
                 argv,
@@ -1236,11 +1272,14 @@ def invoke_opencode(e, model=None, turn=None):
                 text=True, env=run_env,
                 start_new_session=True,
             )
+            _startup_log(f"spawned pid={proc.pid}")
         except OSError as exc:
             return EvalResult(raw=f"opencode invocation failed: {exc}")
         try:
             out, err = proc.communicate(timeout=stall_timeout)
         except subprocess.TimeoutExpired:
+            _startup_log(f"timeout pid={proc.pid} after {stall_timeout}s; "
+                         "killing the process group")
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
