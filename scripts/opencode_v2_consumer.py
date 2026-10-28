@@ -23,9 +23,11 @@ Usage:
 """
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -188,7 +190,36 @@ def isolated_smoke(root, workdir, timeout=180):
     env.update(v2.scratch_env(scratch))
     env["OPENCODE_DB"] = db
     env["OPENCODE_LOG_LEVEL"] = "ERROR"
-    binary = env.get("OPENCODE_BIN") or "opencode"
+    default_v2 = os.path.join(REPO, ".scratch", "v2-prefix", "bin",
+                              "opencode2")
+    binary = env.get("OPENCODE_BIN") or (
+        default_v2 if os.path.isfile(default_v2) else "opencode")
+    # Seed the scratch DB from the current V1 auth.json (the credential store
+    # moved into the selected DB in V2). No secret is printed or persisted.
+    auth_path = os.path.expanduser("~/.local/share/opencode/auth.json")
+    if os.path.isfile(auth_path):
+        try:
+            with open(auth_path, encoding="utf-8") as fh:
+                auth = json.load(fh)
+            payload = [{
+                "id": hashlib.sha256(provider.encode()).hexdigest()[:24],
+                "integrationID": provider,
+                "label": "default",
+                "active": True,
+                "value": {"type": "key", "key": entry["key"]},
+            } for provider, entry in (auth or {}).items()
+                if isinstance(entry, dict) and entry.get("key")]
+            if payload:
+                subprocess.run([binary, "auth", "import", "--standalone"],
+                               input=json.dumps(payload), capture_output=True,
+                               text=True, env=env, timeout=120)
+                con = sqlite3.connect(db)
+                con.execute("UPDATE credential SET active=0")
+                con.execute("UPDATE credential SET active=1 WHERE label='default'")
+                con.commit()
+                con.close()
+        except (OSError, ValueError, sqlite3.Error):
+            pass
     try:
         proc = subprocess.run(
             [binary, "run", "--standalone", "--model",
