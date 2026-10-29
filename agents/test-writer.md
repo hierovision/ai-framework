@@ -1,9 +1,27 @@
 ---
-name: test-writer
 description: Author tests for a change — unit, integration, or e2e by layer — under red-first discipline.
 model: opencode-go/deepseek-v4.1-flash
 mode: all
+permissions:
+  # Ordered rules — V2 evaluates the LAST matching rule.
+  # shell
+  - action: shell
+    resource: "*"
+    effect: allow
+  # edit
+  - action: edit
+    resource: "*"
+    effect: allow
+  # subagent
+  - action: subagent
+    resource: "*"
+    effect: allow
+  # execute
+  - action: execute
+    resource: "*"
+    effect: deny
 ---
+
 
 # Test Writer Agent
 

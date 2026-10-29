@@ -15,7 +15,7 @@
         "Net discipline (R1): console errors AND warnings AND pageerrors block unless allowlisted; the report carries the offending message text; allowlist entries would be dated + justified (no blanket suppression)",
         "R3: with the crash present, the run is RED for the right reason — the failure names the missing behaviour (expected-red shape: 'Expected no console errors, but found 4' / the Vue unhandled-error-in-event-handler warnings) — recorded as red evidence",
         "Where no real browser is available in the harness: runs the bundled objective self-check (npm run test in the fixture dir → verify-smoke.js --all) and it exits 0; documents the real-browser journey run as DEFERRED (not silently skipped); reports the fixture states (green 0, allowlisted 0, error/warning/pageerror negatives non-zero, bad-evidence rejected)",
-        "Invokes council-ux (subagent_type council-ux) with the TEXT evidence bundle: harness report + exit code, evidence.json text fields (console_errors/console_warnings/page_errors/allowlisted), the aria_snapshot accessibility tree, the journey module, and the ACs/diff summary — does NOT ask council-ux to judge screenshots (text-only model)",
+        "Invokes council-ux (agent council-ux) with the TEXT evidence bundle: harness report + exit code, evidence.json text fields (console_errors/console_warnings/page_errors/allowlisted), the aria_snapshot accessibility tree, the journey module, and the ACs/diff summary — does NOT ask council-ux to judge screenshots (text-only model)",
         "Returns findings across correctness / appropriateness / accessibility (3-5 bullets, each: what/where/why/suggested in-scope fix) + the net verdict + evidence paths",
         "Records residuals/follow-ups; does NOT fix out-of-scope findings during this pass"
       ],
@@ -24,7 +24,9 @@
         "fixtures/smoke-basic/journey.mjs",
         "fixtures/smoke-basic/allowlist.json",
         "fixtures/smoke-basic/bad-evidence.json"
-      ]
+      ],
+      "timeout": 600,
+      "notes": "2026-10-28: 600s startup budget — CI hit three 240s zero-event stalls; an isolated 600s probe with the same model/auth emitted a full stream and passed in 53–406 s across two isolated probes (the 406 s run is inside the 240–600 s latency band). Assertions unchanged."
     },
     {
       "id": 2,

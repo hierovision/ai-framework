@@ -238,10 +238,10 @@ jobs:
       # PINNED to the version validated locally (1.18.18) instead of
       # resolving "latest" (version drift is a correctness hazard: the CLI
       # emits different event-stream shapes across versions).
-      - name: Install opencode CLI (pinned via npm)
+      - name: Install OpenCode V2 CLI (pinned via npm)
         env:
-          OPENCODE_VERSION: "1.18.18"
-        run: npm install --global "opencode-ai@${OPENCODE_VERSION}"
+          OPENCODE_VERSION: "2.1.4"
+        run: npm install --global "@opencode/cli@${OPENCODE_VERSION}"
 
       - name: Add opencode to PATH
         run: echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
@@ -266,6 +266,10 @@ jobs:
           # canary probes, 34s light / 168s heavy, cheapest adequate). See
           # reference/model-routing.md.
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_LOG_LEVEL: ERROR
+          # Zero-event stalls have no stream to diagnose; record the exact
+          # spawn command/env/timeout in the job log.
+          BEVAL_STARTUP_LOG: "1"
           # RM-056: opt in to the per-run lane fallback (per-eval path covers
           # this single-canary job). On log-proven degradation the runner
           # switches for that run only to the direct-key lane; DEEPSEEK_API_KEY
@@ -278,12 +282,22 @@ jobs:
           # shakedown data asked for (clamp max 3 in the runner).
           BEVAL_MAX_CONTINUATIONS: "2"
         run: |
+          # V2 lane override shape (2026-10-27): native `agents` + ordered
+          # `permissions`, never the V1 `agent`/`permission` shape.
           # Nested-agent override (2026-09-29): a free-bound subagent is
           # rejected in CI ("OpenCode's free tier can only be used from within
           # OpenCode") and the eval session dies. Since the Go-first flip
           # (2026-10-03) every framework persona is Go-bound — this repo's
           # override map is empty; the guard remains for consumer wrappers.
-          export OPENCODE_CONFIG_CONTENT="$(python3 scripts/ci-lane-overrides.py --model opencode-go/deepseek-v4.1-flash)"
+          # V2 does not activate OPENCODE_CONFIG_CONTENT for agents or
+          # permissions. Generate the proven XDG_CONFIG_HOME root instead:
+          # deny-first external_directory, then explicit allow roots.
+          CONFIG_ROOT="$RUNNER_TEMP/opencode-eval-config"
+          rm -rf "$CONFIG_ROOT"
+          python3 scripts/ci-lane-overrides.py --model opencode-go/deepseek-v4.1-flash \
+            --xdg-root "$CONFIG_ROOT" --allow-dir "$RUNNER_TEMP" > /dev/null
+          export XDG_CONFIG_HOME="$CONFIG_ROOT"
+          export TMPDIR="${RUNNER_TEMP:-/tmp}"
           set -euo pipefail
           RUNNER="skills/authoring-skills/scripts/run_behavioral_eval.py"
           if [ "${{ matrix.mode }}" = "core" ]; then

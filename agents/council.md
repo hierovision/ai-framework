@@ -1,9 +1,27 @@
 ---
-name: council
 description: Multi-perspective analysis and discussion on architecture, design decisions, and tradeoffs. Discussion-only — does not implement. Use for validation, brainstorming, and risk assessment.
 model: opencode-go/qwen3.8-flash
 mode: all
+permissions:
+  # Ordered rules — V2 evaluates the LAST matching rule.
+  # shell
+  - action: shell
+    resource: "*"
+    effect: allow
+  # edit
+  - action: edit
+    resource: "*"
+    effect: allow
+  # subagent
+  - action: subagent
+    resource: "*"
+    effect: allow
+  # execute
+  - action: execute
+    resource: "*"
+    effect: deny
 ---
+
 
 # Council Agent
 
@@ -75,7 +93,7 @@ rules, and the bounds: `reference/agent-teams.md`.
 
 1. **Extract** the question from user input. If unclear, ask one clarifying question.
 2. **Summon** — Send a single message with 5 parallel `task` tool calls, one per
-   council member. Use `subagent_type: "council-{name}"` and
+   council member. Use the V2 `subagent` tool with `agent: "council-{name}"` and
    `description: "council: {name}"`. Each prompt is the user's question
    (2-3 sentences). The agent files define each member's role lens and model.
 3. **Collect** — Wait for all 5 to return. Validate each against
@@ -103,7 +121,7 @@ members" or "fast council".
 
 ## Fallback
 
-If named subagents (`subagent_type: "council-*"`) are not available, STOP.
+If named subagents (`agent: "council-*"`) are not available, STOP.
 Report which agents are missing and refuse to run a degraded council.
 A council on a single model family produces false objectivity.
 

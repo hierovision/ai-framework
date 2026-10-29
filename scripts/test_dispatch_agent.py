@@ -43,6 +43,24 @@ import time
 
 mode = os.environ.get("STUB_MODE", "valid")
 argv = sys.argv[1:]
+if argv[:1] == ["api"]:
+    path = argv[-1] if argv else ""
+    dump_api_path = os.environ.get("STUB_DUMP_API")
+    if dump_api_path:
+        with open(dump_api_path, "a", encoding="utf-8") as fh:
+            fh.write((argv[1] if len(argv) > 1 else "?") + " " + path + chr(10))
+    if path.endswith("/active"):
+        print('{"data": {}}')
+        sys.exit(0)
+    if path.endswith("/interrupt"):
+        print('{"interrupted": true}')
+        sys.exit(0)
+    if "ses_stub_valid" in path or "ses_stub_timeout" in path:
+        print('{"data": {"id": "ses_stub_valid"}}')
+        sys.exit(0)
+    print('{"_tag": "SessionNotFoundError"}')
+    print("HTTP 404 Not Found")
+    sys.exit(0)
 assert "run" in argv, argv
 assert "--format" in argv, argv
 
@@ -55,6 +73,16 @@ dump_env = os.environ.get("STUB_DUMP_ENV")
 if dump_env:
     with open(dump_env, "w", encoding="utf-8") as fh:
         json.dump(dict(os.environ), fh)
+
+dump_cwd = os.environ.get("STUB_DUMP_CWD")
+if dump_cwd:
+    with open(dump_cwd, "w", encoding="utf-8") as fh:
+        fh.write(os.getcwd())
+
+dump_argv = os.environ.get("STUB_DUMP_ARGV")
+if dump_argv:
+    with open(dump_argv, "w", encoding="utf-8") as fh:
+        json.dump(argv, fh)
 
 
 def emit(obj):
@@ -152,7 +180,7 @@ if mode == "commitdir":
     # emulate a child that touches branches: commit a file in its --dir (the
     # 2026-10-13 wrong-branch class; the worktree must confine this)
     import subprocess
-    d = argv[argv.index("--dir") + 1] if "--dir" in argv else os.getcwd()
+    d = os.getcwd()
     with open(os.path.join(d, "child.txt"), "w", encoding="utf-8") as fh:
         fh.write("child\\n")
     subprocess.run(["git", "-C", d, "add", "child.txt"], check=True,
@@ -231,6 +259,7 @@ def _run(mode, extra=None, timeout="10", env_extra=None, cwd=REPO,
         env = dict(os.environ)
         env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
         env["STUB_MODE"] = mode
+        env["OPENCODE_V2_NO_SERVICE"] = "1"
         # the ambient opencode session exports its own OPENCODE_CONFIG_CONTENT;
         # drop it so the dispatch's own merge is what the stub observes
         env.pop("OPENCODE_CONFIG_CONTENT", None)
@@ -257,6 +286,9 @@ def _run(mode, extra=None, timeout="10", env_extra=None, cwd=REPO,
             heartbeat=_read(_flag_path(extra, "--heartbeat")),
             prompt_dump=_read(env.get("STUB_DUMP_PROMPT")),
             env_dump=_read(env.get("STUB_DUMP_ENV")),
+            argv_dump=_read(env.get("STUB_DUMP_ARGV")),
+            api_dump=_read(env.get("STUB_DUMP_API")),
+            cwd_dump=_read(env.get("STUB_DUMP_CWD")),
             elapsed=elapsed)
     finally:
         shutil.rmtree(td, ignore_errors=True)
@@ -278,6 +310,7 @@ def _spawn(mode, extra=None):
     env = dict(os.environ)
     env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
     env["STUB_MODE"] = mode
+    env["OPENCODE_V2_NO_SERVICE"] = "1"
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, env=env, cwd=REPO)
     return td, proc
@@ -349,6 +382,58 @@ def test_valid_dispatch_records_attribution():
     assert r2.records[0]["model"] == "opencode-go/qwen3.8-flash", r2.records[0]
 
 
+def test_v2_service_flags_follow_run_subcommand():
+    """AC13: V2 2.1.4 accepts `--standalone`/`--server` only on `run`
+    (2026-10-28 live: the global placement exited 1 "Unrecognized flag")."""
+    work = tempfile.mkdtemp(prefix="dispatch-argv-")
+    try:
+        for flag, extra in (("--standalone", []),
+                            ("--server", ["--server", "http://127.0.0.1:4096"])):
+            dump = os.path.join(work, flag.lstrip("-") + ".json")
+            r = _run("valid", extra=extra + ["--contract", "implement-handoff"],
+                     env_extra={"STUB_DUMP_ARGV": dump})
+            assert r.rc == 0, (r.rc, r.stderr)
+            argv = json.loads(r.argv_dump)
+            assert "run" in argv, argv
+            if flag == "--standalone" and flag not in argv:
+                # grant-free agent profile still requests a private server
+                assert False, argv
+            assert argv.index("run") < argv.index(flag), argv
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_dispatch_sets_cwd_and_pwd():
+    """AC13: --dir is passed as cwd + PWD, never as a V1 CLI flag."""
+    work = tempfile.mkdtemp(prefix="dispatch-cwd-")
+    try:
+        dispatch_dir = os.path.join(work, "target")
+        os.makedirs(dispatch_dir)
+        env_dump = os.path.join(work, "env.json")
+        cwd_dump = os.path.join(work, "cwd.txt")
+        r = _run("valid", extra=["--dir", dispatch_dir,
+                                 "--contract", "implement-handoff"],
+                 env_extra={"STUB_DUMP_ENV": env_dump,
+                            "STUB_DUMP_CWD": cwd_dump})
+        assert r.rc == 0, (r.rc, r.stdout, r.stderr)
+        assert os.path.realpath(r.cwd_dump) == os.path.realpath(dispatch_dir), r.cwd_dump
+        env = json.loads(r.env_dump)
+        assert os.path.realpath(env.get("PWD", "")) == os.path.realpath(dispatch_dir), env.get("PWD")
+        argv = json.loads(r.argv_dump) if r.argv_dump else []
+        assert "--dir" not in argv, argv
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_missing_model_binding_exits_2_before_launch():
+    """AC18: an agent with no model: binding exits 2, no session, no launch."""
+    r = _run("valid", agent="no-such-agent")
+    assert r.rc == 2, (r.rc, r.stdout, r.stderr)
+    assert "no model binding" in r.stderr, r.stderr
+    assert "session_id=" not in r.stdout, r.stdout
+    assert not r.records, r.records
+
+
 def test_empty_result_fails_contract():
     """AC5: an empty stream exits non-zero and the record is not success."""
     r = _run("empty", extra=["--contract", "implement-handoff"])
@@ -373,6 +458,29 @@ def test_timeout_kills_and_records_error():
     assert r.elapsed < 15, r.elapsed
     assert r.records and r.records[0]["outcome"] == "error", r.records
     assert "timeout" in (r.records[0]["detail"] or "").lower(), r.records
+
+
+def test_shared_server_timeout_interrupts_and_verifies():
+    """AC15: --server + --allow-dirs remains shared-service; timeout calls
+    interrupt, verifies /api/session/active, and records interrupt=ok."""
+    work = tempfile.mkdtemp(prefix="dispatch-interrupt-")
+    try:
+        granted = os.path.join(work, "granted")
+        os.makedirs(granted)
+        dump = os.path.join(work, "api.log")
+        r = _run("timeout", timeout="1",
+                 extra=["--server", "http://127.0.0.1:4096",
+                        "--allow-dirs", granted],
+                 env_extra={"STUB_DUMP_API": dump,
+                            "OPENCODE_V2_API_VIA_CLI": "1"})
+        assert r.rc == 4, (r.rc, r.stdout, r.stderr)
+        detail = r.records[0]["detail"] or ""
+        assert "interrupt=ok" in detail, detail
+        calls = r.api_dump
+        assert "interrupt" in calls, calls
+        assert "/active" in calls, calls
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def test_nonzero_exit_records_error():
@@ -602,11 +710,11 @@ def test_stream_open_failure_exits_2_before_launch():
 def _make_session_db(path, sid, model_blob):
     con = sqlite3.connect(path)
     con.execute(
-        "CREATE TABLE session (id TEXT PRIMARY KEY, model TEXT, title TEXT, "
+        "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, model TEXT, title TEXT, "
         "agent TEXT, cost REAL, tokens_input INTEGER, tokens_output INTEGER, "
         "time_updated INTEGER, directory TEXT, parent_id TEXT)")
     con.execute(
-        "INSERT INTO session (id, model, title, agent) VALUES (?, ?, ?, ?)",
+        "INSERT INTO session_v2 (id, model, title, agent) VALUES (?, ?, ?, ?)",
         (sid, json.dumps(model_blob), "probe", "architect"))
     con.commit()
     con.close()
@@ -662,8 +770,8 @@ def test_model_fallback_without_db():
 # --- AC12/AC13/AC14: grants + denial classification -------------------------
 
 def test_allow_dir_grants_external_permission():
-    """AC12: --allow-dirs emits the external_directory allow-map, merges
-    caller settings (caller wins), and rejects a non-existent path."""
+    """AC16: --allow-dirs emits deny-first ordered V2 rules with an explicit
+    allow root, and rejects a non-existent path before launch."""
     work = tempfile.mkdtemp(prefix="dispatch-grant-")
     try:
         granted = os.path.join(work, "sibling")
@@ -674,19 +782,13 @@ def test_allow_dir_grants_external_permission():
                                  "--contract", "implement-handoff"],
                  env_extra={"STUB_DUMP_ENV": dump})
         assert r.rc == 0, (r.rc, r.stderr)
-        env = json.loads(r.env_dump)
-        cfg = json.loads(env["OPENCODE_CONFIG_CONTENT"])
-        assert cfg["permission"]["external_directory"][key] == "allow", cfg
-
-        # caller-supplied settings win on conflict
-        caller = json.dumps({"permission": {"external_directory": {key: "deny"}}})
-        dump2 = os.path.join(work, "env2.json")
-        r2 = _run("valid", extra=["--allow-dirs", granted,
-                                  "--contract", "implement-handoff"],
-                  env_extra={"STUB_DUMP_ENV": dump2,
-                             "OPENCODE_CONFIG_CONTENT": caller})
-        cfg2 = json.loads(json.loads(r2.env_dump)["OPENCODE_CONFIG_CONTENT"])
-        assert cfg2["permission"]["external_directory"][key] == "deny", cfg2
+        rules = _ext_map(dump)
+        # deny-first catch-all, allow after it, execute deny last
+        assert rules[0] == {"action": "external_directory", "resource": "*",
+                            "effect": "deny"}, rules
+        assert key in _allow_set(rules), rules
+        assert rules[-1]["action"] == "execute" and \
+            rules[-1]["effect"] == "deny", rules
 
         # a non-existent path exits 2 before a session is created
         r3 = _run("valid", extra=["--allow-dirs", os.path.join(work, "nope"),
@@ -708,8 +810,9 @@ def test_allow_dir_grants_external_permission():
 
 
 def test_permission_config_warns_on_malformed_caller_env():
-    """M2: an unparsable caller OPENCODE_CONFIG_CONTENT warns to stderr and is
-    discarded, but --allow-dirs is still merged and the dispatch proceeds."""
+    """M2/V2: an unparsable caller OPENCODE_CONFIG_CONTENT is irrelevant to V2
+    grants (the accepted mechanism is the generated XDG_CONFIG_HOME); the
+    dispatch proceeds and the allow root is still present."""
     work = tempfile.mkdtemp(prefix="dispatch-grant-")
     try:
         granted = os.path.join(work, "sibling")
@@ -721,9 +824,7 @@ def test_permission_config_warns_on_malformed_caller_env():
                  env_extra={"STUB_DUMP_ENV": dump,
                             "OPENCODE_CONFIG_CONTENT": "{not valid json"})
         assert r.rc == 0, (r.rc, r.stderr)
-        assert "OPENCODE_CONFIG_CONTENT" in r.stderr, r.stderr
-        cfg = json.loads(json.loads(r.env_dump)["OPENCODE_CONFIG_CONTENT"])
-        assert cfg["permission"]["external_directory"][key] == "allow", cfg
+        assert key in _allow_set(_ext_map(dump))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -747,6 +848,13 @@ def test_permission_denial_classification():
     assert "\x1b" not in detail2, repr(detail2)
     assert "[2K" not in detail2, repr(detail2)
 
+    # A denial is a failed dispatch even without a delegated-result contract:
+    # the D2 negative drill has no markers, yet must exit non-zero.
+    r3 = _run("denied")
+    assert r3.rc != 0, (r3.rc, r3.stdout)
+    detail3 = r3.records[0]["detail"] or ""
+    assert detail3.startswith("permission denied:"), detail3
+
 
 def test_reference_docs_carry_the_recipe():
     """AC8/AC14: the reference docs name the flag trio, --allow-dirs, and
@@ -767,13 +875,19 @@ def test_reference_docs_carry_the_recipe():
 
 def _ext_map(dump_path):
     env = json.loads(_read(dump_path))
-    return json.loads(env["OPENCODE_CONFIG_CONTENT"])["permission"]["external_directory"]
+    root = env["XDG_CONFIG_HOME"]
+    with open(os.path.join(root, "opencode", "opencode.jsonc")) as fh:
+        return json.load(fh)["permissions"]
+
+
+def _allow_set(rules):
+    return {r["resource"] for r in rules
+            if r["action"] == "external_directory" and r["effect"] == "allow"}
 
 
 def test_profile_env_merge():
-    """AC6: the recon profile grants the three chronic denied roots; the test
-    class is narrower ($HOME/repos only); --profile none disables defaults;
-    caller settings win on overlap."""
+    """AC16/D4: profile grants become ordered V2 allow roots; the test class
+    is narrower; --profile none leaves only the deny-first baseline."""
     work = tempfile.mkdtemp(prefix="dispatch-profile-")
     try:
         extra = os.path.join(work, "extra")
@@ -783,43 +897,30 @@ def test_profile_env_merge():
                                  "--contract", "implement-handoff"],
                  env_extra={"STUB_DUMP_ENV": dump})
         assert r.rc == 0, (r.rc, r.stderr)
-        ext = _ext_map(dump)
+        allowed = _allow_set(_ext_map(dump))
         roots = [os.path.expanduser("~/repos"),
                  os.path.expanduser("~/.config/opencode"),
                  os.path.expanduser("~/.local/share/opencode"), extra]
         for d in roots:
-            key = os.path.join(os.path.abspath(d), "**")
-            assert ext.get(key) == "allow", (key, ext)
+            assert os.path.join(os.path.abspath(d), "**") in allowed, \
+                (d, allowed)
 
-        # the test class carries $HOME/repos only (D4 least privilege)
         dump2 = os.path.join(work, "env2.json")
         r2 = _run("valid", agent="test-writer", extra=["--profile", "auto",
                                                        "--contract", "implement-handoff"],
                   env_extra={"STUB_DUMP_ENV": dump2})
         assert r2.rc == 0, (r2.rc, r2.stderr)
-        ext2 = _ext_map(dump2)
-        assert ext2.get(os.path.join(os.path.expanduser("~/repos"), "**")) == "allow", ext2
-        assert os.path.join(os.path.expanduser("~/.config/opencode"), "**") not in ext2, ext2
+        allowed2 = _allow_set(_ext_map(dump2))
+        assert os.path.join(os.path.expanduser("~/repos"), "**") in allowed2
+        assert os.path.join(os.path.expanduser("~/.config/opencode"), "**") \
+            not in allowed2, allowed2
 
-        # --profile none disables profile defaults entirely
         dump3 = os.path.join(work, "env3.json")
         r3 = _run("valid", extra=["--profile", "none",
                                   "--contract", "implement-handoff"],
                   env_extra={"STUB_DUMP_ENV": dump3})
         assert r3.rc == 0, (r3.rc, r3.stderr)
-        assert "OPENCODE_CONFIG_CONTENT" not in json.loads(_read(dump3)), _read(dump3)
-
-        # an explicit caller setting wins on overlap (setdefault semantics)
-        cfg_key = os.path.join(os.path.expanduser("~/.config/opencode"), "**")
-        caller = json.dumps({"permission": {"external_directory": {cfg_key: "deny"}}})
-        dump4 = os.path.join(work, "env4.json")
-        r4 = _run("valid", extra=["--profile", "auto", "--contract",
-                                  "implement-handoff"],
-                  env_extra={"STUB_DUMP_ENV": dump4,
-                             "OPENCODE_CONFIG_CONTENT": caller})
-        ext4 = _ext_map(dump4)
-        assert ext4[cfg_key] == "deny", ext4
-        assert ext4[os.path.join(os.path.expanduser("~/repos"), "**")] == "allow", ext4
+        assert _allow_set(_ext_map(dump3)) == set(), _ext_map(dump3)
 
         # an unknown named profile exits 2 before launch
         r5 = _run("valid", extra=["--profile", "nope",

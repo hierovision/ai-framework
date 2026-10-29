@@ -5,7 +5,7 @@
     {
       "id": 1,
       "prompt": "audit our dashboard route for accessibility \u2014 http://localhost:5173/dashboard, mobile + desktop. auth fixture's at auth/auth.mjs. the repo is at fixtures/phasewave/scenario-1-violations/ \u2014 treat that directory as the repo root. stack's vue-supabase. I want a WCAG 2.2 AA audit with each violation classified by severity + the WCAG criterion + a fix pointer \u2014 don't fix anything, just report and tell me where to route the fixes",
-      "expect": {"artifact": [{"path": "**/report.json", "phrases": ["verdict"]}], "action": [{"tool": "bash", "args": {"command": "*audit.mjs*"}}]},
+      "expect": {"artifact": [{"path": "**/report.json", "phrases": ["verdict"]}], "action": [{"tool": "shell", "args": {"command": "*audit.mjs*"}}]},
       "expected_behavior": [
         "Reads the project rules file (AGENTS.md) — detects stack vue-supabase and loads the matching audit-stack reference (references/stacks/vue-supabase.md) before auditing",
         "Classifies the target as app mode (a running route on a dev-server URL, route /dashboard) and uses the auth fixture for the session (auth/auth.mjs default-exports setup(context) seeding the token via addInitScript) — does NOT replay the login UI before the audit",
@@ -41,7 +41,7 @@
     {
       "id": 2,
       "prompt": "same dashboard page — does it have any actual WCAG violations? report only what's there, don't pad it. I need an honest pass/fail, mobile + desktop, WCAG AA",
-      "expect": {"artifact": [{"path": "**/report.json", "phrases": ["verdict", "manual"]}], "action": [{"tool": "bash", "args": {"command": "*audit.mjs*"}}]},
+      "expect": {"artifact": [{"path": "**/report.json", "phrases": ["verdict", "manual"]}], "action": [{"tool": "shell", "args": {"command": "*audit.mjs*"}}]},
       "expected_behavior": [
         "Runs the audit against the genuinely accessible page; the emitted report.json is schema-valid with verdict pass, ZERO violations, ZERO severity in the rollup",
         "FALSE-POSITIVE DISCIPLINE (from reviewing-code): does NOT manufacture a violation, does NOT inflate a nit into a blocker just to seem thorough — a genuinely accessible page gets a clean report",

@@ -5,7 +5,7 @@
     {
       "id": 1,
       "prompt": "we need integration tests for the focus_sessions RLS isolation. plan's at .opencode/plans/feat-sessions-rls.md, approved. I want to prove user B can't see user A's sessions when they query the store. there's a seeded broken leaky policy at db/policies.broken.js you can use to prove the test catches a leak. the repo is at fixtures/phasewave/rls-seam/ \u2014 treat that directory as the repo root \u2014 write the integration test",
-      "expect": {"artifact": [{"path": "**/tests/rls.test.js", "phrases": ["createFocusTimerStore", "authUid"]}], "action": [{"tool": "bash", "args": {"command": "*meaningfulness*"}}]},
+      "expect": {"artifact": [{"path": "**/tests/rls.test.js", "phrases": ["createFocusTimerStore", "authUid"]}], "action": [{"tool": "shell", "args": {"command": "*meaningfulness*"}}]},
       "expected_behavior": [
         "Reads the plan at .opencode/plans/feat-sessions-rls.md before writing \u2014 derives the test from the ACs, not from guessing",
         "Classifies the behaviour as integration: the isolation lives at the DB + client seam (the store is a thin passthrough); real store, faked transport at the outermost boundary",
@@ -88,7 +88,7 @@
     {
       "id": 4,
       "prompt": "we're about to build feat-share-session but the store action isn't written yet. plan's at .opencode/plans/feat-share-session.md and it's approved. author the integration test RED-FIRST \u2014 it drives the REAL store (createShareStore) through the FAKED client (createClient with authUid) and calls store.shareSession \u2014 and run it BEFORE the action exists. confirm it fails for the right reason (naming the missing seam behaviour, NOT a harness defect). DON'T implement the action \u2014 that's a separate implementing-features pass; just author the red-first test and record which mode ran. the repo is at fixtures/phasewave/int-redfirst/ \u2014 treat that directory as the repo root",
-      "expect": {"artifact": [{"path": "**/tests/share.test.js", "phrases": ["shareSession"]}], "action": [{"tool": "bash", "args": {"command": "*npm run test*"}}], "text": ["red-first"]},
+      "expect": {"artifact": [{"path": "**/tests/share.test.js", "phrases": ["shareSession"]}], "action": [{"tool": "shell", "args": {"command": "*npm run test*"}}], "text": ["red-first"]},
       "expected_behavior": [
         "Reads the approved plan at .opencode/plans/feat-share-session.md before writing; derives the test from the ACs",
         "Classifies the behaviour as integration (the share lives at the store + client seam; real store, faked transport at the edge)",

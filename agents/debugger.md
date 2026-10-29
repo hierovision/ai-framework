@@ -1,9 +1,27 @@
 ---
-name: debugger
 description: Diagnose why a failing verification won't converge — reproduce first, fix at root cause, run the full suite.
 model: opencode-go/kimi-k3.1-pro
 mode: all
+permissions:
+  # Ordered rules — V2 evaluates the LAST matching rule.
+  # shell
+  - action: shell
+    resource: "*"
+    effect: allow
+  # edit
+  - action: edit
+    resource: "*"
+    effect: allow
+  # subagent
+  - action: subagent
+    resource: "*"
+    effect: allow
+  # execute
+  - action: execute
+    resource: "*"
+    effect: deny
 ---
+
 
 # Debug Agent
 

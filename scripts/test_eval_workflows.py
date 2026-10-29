@@ -9,9 +9,12 @@ workflows carry the node24 upload-artifact pin, and the weekly ceiling is 150
 
 Structural only: this parses the YAML, it does not run GitHub Actions.
 """
+import importlib.util
 import json
 import os
+import shutil
 import sys
+import tempfile
 
 import yaml
 
@@ -158,8 +161,12 @@ def test_lane_and_nested_agent_override():
                 if "run_behavioral_eval.py" not in run or "--model" not in run:
                     continue
                 found += 1
-                assert "OPENCODE_CONFIG_CONTENT" in run and "ci-lane-overrides.py" in run, \
-                    f"{path}/{step.get('name')}: runner step lacks the nested-agent override"
+                assert "export OPENCODE_CONFIG_CONTENT" not in run, \
+                    f"{path}/{step.get('name')}: V1 env injection remains"
+                assert "ci-lane-overrides.py" in run and "--xdg-root" in run, \
+                    f"{path}/{step.get('name')}: runner step lacks the generated config root"
+                assert "XDG_CONFIG_HOME" in run, \
+                    f"{path}/{step.get('name')}: runner step does not select the generated config"
                 assert "opencode-go/deepseek-v4.1-flash" in run, \
                     f"{path}/{step.get('name')}: lane model missing in the runner step"
                 env = step.get("env") or {}
@@ -168,22 +175,42 @@ def test_lane_and_nested_agent_override():
                 assert env.get("BEVAL_FALLBACK_ENABLED") == "1", \
                     f"{path}/{step.get('name')}: runner step lacks the fallback opt-in"
     assert found >= 2, f"expected a runner step in both workflows, found {found}"
-    out = subprocess.run([sys.executable, os.path.join(HERE, "ci-lane-overrides.py"),
-                          "--model", "opencode-go/deepseek-v4.1-flash"], capture_output=True,
-                         text=True, check=True).stdout
-    cfg = json.loads(out)
-    # Go-first flip (2026-10-03, plan go-first-model-bindings): every framework
-    # persona is Go-bound, so the nested-agent override map is empty for this
-    # repo. The loop stays as a guard for consumer repos whose wrappers are
-    # still free-bound.
-    assert cfg["agent"] == {}, cfg
-    # /tmp allowance (CI ephemeral): agents use /tmp scratch, and those writes
-    # were auto-rejected (33 in one run) -> zero-write turns.
-    assert cfg["permission"]["external_directory"]["/tmp/**"] == "allow", cfg
-    # Installed-config reads (2026-10-03): skill references and agent
-    # definitions live there; a denied read ended an eval turn.
-    installed = os.path.expanduser("~/.config/opencode") + "/**"
-    assert cfg["permission"]["external_directory"][installed] == "allow", cfg
+    import subprocess
+    base = os.path.join(os.path.dirname(HERE), ".scratch", "test-tmp")
+    os.makedirs(base, exist_ok=True)
+    work = tempfile.mkdtemp(prefix="eval-config-", dir=base)
+    try:
+        root = os.path.join(work, "xdg")
+        out = subprocess.run([sys.executable, os.path.join(HERE, "ci-lane-overrides.py"),
+                              "--model", "opencode-go/deepseek-v4.1-flash",
+                              "--xdg-root", root, "--allow-dir", work],
+                             capture_output=True, text=True, check=True).stdout
+        assert json.loads(out)["config"].endswith("opencode.jsonc"), out
+        cfg = json.load(open(os.path.join(root, "opencode", "opencode.jsonc")))
+        # Go-first flip (2026-10-03, plan go-first-model-bindings): every
+        # framework persona is Go-bound, so the nested-agent override map is
+        # empty for this repo. The loop stays as a guard for consumer repos.
+        assert cfg["agents"] == {}, cfg
+        rules = cfg["permissions"]
+        assert rules[0] == {"action": "external_directory", "resource": "*",
+                            "effect": "deny"}, rules
+        assert any(r["resource"] == "/tmp/**" and r["effect"] == "allow"
+                   for r in rules), rules
+        installed = os.path.expanduser("~/.config/opencode") + "/**"
+        assert any(r["resource"] == installed and r["effect"] == "allow"
+                   for r in rules), rules
+        assert any(r["resource"] == os.path.join(os.path.abspath(work), "**")
+                   and r["effect"] == "allow" for r in rules), rules
+        # Negative: an unlisted path still dies on the catch-all deny.
+        spec = importlib.util.spec_from_file_location(
+            "ci_lane_overrides", os.path.join(HERE, "ci-lane-overrides.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        assert module.decide(rules, "/etc/passwd") == "deny", rules
+        assert module.decide(rules, "/tmp/beval/x") == "allow", rules
+        assert module.decide(rules, os.path.join(work, "beval", "x")) == "allow", rules
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def test_report_downloads_per_artifact():

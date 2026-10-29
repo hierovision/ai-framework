@@ -1,16 +1,27 @@
 ---
-name: vision-critic-fast
 description: Fast visual iteration lens for UI work — screenshot and computed-CSS critique during a fix loop.
 model: opencode-go/minimax-m3
 mode: all
-permission:
-  edit: deny
-  write: deny
-  bash: deny
-  # Leaf dispatcher policy: one advisory pass, no sub-delegation
-  # (reference/agent-teams.md).
-  task: deny
+permissions:
+  # Ordered rules — V2 evaluates the LAST matching rule.
+  # edit
+  - action: edit
+    resource: "*"
+    effect: deny
+  # shell
+  - action: shell
+    resource: "*"
+    effect: deny
+  # subagent
+  - action: subagent
+    resource: "*"
+    effect: deny
+  # execute
+  - action: execute
+    resource: "*"
+    effect: deny
 ---
+
 
 # Vision Critic (fast)
 

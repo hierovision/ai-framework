@@ -48,6 +48,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import watch_agent as watch  # noqa: E402 - shared module object (identity-tested)
+import opencode_v2 as v2  # noqa: E402 - shared V2 adapter
 
 # --- pattern registry v1 -----------------------------------------------------
 # (pattern, default action). Actions: flag | kill-child | abort.
@@ -78,6 +79,8 @@ PATTERN_DOC = {
 
 PERMISSION_RE = re.compile(
     r"permission requested: external_directory \(([^)]*)\)[^.\n]*auto-rejecting"
+    r"|permission requested: \S+ \(([^)]*)\)[^.\n]*auto-rejecting"
+    r"|cannot ask the user for permission"
     r"|permission denied: \S+ (\S+)")
 
 _validate_mod = None
@@ -130,68 +133,15 @@ def connect(path=None):
 # --- tree enumeration (AC1) --------------------------------------------------
 
 def enumerate_tree(con, root_id, max_depth=2):
-    """Root + descendants, depth-capped. Nodes: id, parent_id, depth, agent,
-    title, time_created. A depth-3 node and any unrelated root never appear.
-    """
-    cur = con.cursor()
-    cur.execute("SELECT * FROM session WHERE id=?", (root_id,))
-    row = cur.fetchone()
-    if row is None:
-        return []
-    nodes = []
-    frontier = [(dict(row), 0)]
-    seen = {root_id}
-    while frontier:
-        node, depth = frontier.pop(0)
-        nodes.append({
-            "id": node["id"], "parent_id": node["parent_id"], "depth": depth,
-            "agent": node["agent"], "title": node["title"],
-            "time_created": node["time_created"],
-        })
-        if depth >= max_depth:
-            continue
-        cur.execute("SELECT * FROM session WHERE parent_id=?", (node["id"],))
-        for child in cur.fetchall():
-            if child["id"] in seen:
-                continue
-            seen.add(child["id"])
-            frontier.append((dict(child), depth + 1))
-    nodes.sort(key=lambda n: (n["depth"], n["time_created"] or 0))
-    return nodes
+    """Root + descendants from V2 `session_v2`, depth-capped."""
+    return v2.enumerate_tree(con, root_id, max_depth=max_depth)
 
 
 # --- per-node result + evidence readers --------------------------------------
 
 def result_text(con, session_id):
-    """Final result text: the text parts of the last assistant message.
-    Empty string when the session produced no assistant text (RM-023's
-    empty-result shape)."""
-    cur = con.cursor()
-    cur.execute(
-        "SELECT id, data FROM message WHERE session_id=? ORDER BY time_created",
-        (session_id,))
-    last_id = None
-    for r in cur.fetchall():
-        try:
-            d = json.loads(r["data"])
-        except (TypeError, ValueError):
-            continue
-        if d.get("role") == "assistant":
-            last_id = r["id"]
-    if last_id is None:
-        return ""
-    cur.execute(
-        "SELECT data FROM part WHERE message_id=? ORDER BY time_created",
-        (last_id,))
-    texts = []
-    for r in cur.fetchall():
-        try:
-            d = json.loads(r["data"])
-        except (TypeError, ValueError):
-            continue
-        if d.get("type") == "text" and (d.get("text") or "").strip():
-            texts.append(d["text"])
-    return "\n".join(texts)
+    """Final assistant text from V2 `session_message` (empty when none)."""
+    return v2.result_text(con, session_id)
 
 
 def _permission_denial(parts):
@@ -206,30 +156,50 @@ def _permission_denial(parts):
     (AC12), never the part index.
     """
     latest = None
-    for ms, d in parts:
+    for index, (ms, d) in enumerate(parts):
         if d.get("type") != "tool":
             continue
         st = d.get("state") or {}
         if st.get("status") != "error":
             continue
         m = None
+        text = ""
         for field in ("output", "error"):
             out = st.get(field)
-            if isinstance(out, str):
-                m = PERMISSION_RE.search(out)
-                if m:
-                    break
-        if not m:
+            if isinstance(out, dict):
+                # V2 2.1.4 live shape: error={type,message}; keep the
+                # message/type text for the regex and the input path below.
+                text = " ".join(
+                    str(out.get(key) or "")
+                    for key in ("message", "type", "name"))
+            elif isinstance(out, str):
+                text = out
+            if not text:
+                continue
+            m = PERMISSION_RE.search(text)
+            if m or re.search(r"permission denied|external_directory",
+                              text, re.IGNORECASE):
+                break
+        if not m and not re.search(r"permission denied|external_directory",
+                                   text, re.IGNORECASE):
             continue
-        latest = {"path": m.group(1) or m.group(2) or "?", "ms": ms}
+        inp = st.get("input") if isinstance(st.get("input"), dict) else {}
+        path = (m.group(1) or m.group(2)) if m else None
+        path = path or inp.get("path") or inp.get("filePath") or "?"
+        latest = {"path": path, "ms": ms, "index": index}
     return latest
 
 
 def _count_rows(con, table, session_id):
-    cur = con.cursor()
-    cur.execute(f"SELECT COUNT(*) FROM {table} WHERE session_id=?",
-                (session_id,))
-    return cur.fetchone()[0]
+    """`message`/`part` counts from V2 storage.
+
+    V2 stores messages in `session_message`; parts are the flattened content
+    blocks. The dead-stream predicate only needs zero/non-zero, so the message
+    count is authoritative and the part count is the flattened block count.
+    """
+    if table in ("message", "session_message"):
+        return v2.message_count(con, session_id)
+    return len(v2.load_parts(con, session_id))
 
 
 def _load_parts(con, session_id):
@@ -314,8 +284,10 @@ def detect_patterns(con, nodes, *, contract=None, wave_ratio=0.6,
         # working is not a denial-death; a child whose SUCCESSFUL tool output
         # merely quotes denial-shaped text is not a denial at all (AC9).
         denial = _permission_denial(parts)
-        latest_ms = max((ms for ms, _ in parts if ms is not None), default=None)
-        if denial and denial["ms"] == latest_ms and not has_result:
+        latest_event_index = max(
+            (i for i, (_ms, d) in enumerate(parts)
+             if d.get("type") in ("tool", "text")), default=None)
+        if denial and denial.get("index") == latest_event_index and not has_result:
             path = denial["path"]
             denied[sid] = path
             failed[sid] = "permission-auto-reject"
@@ -507,7 +479,7 @@ def select_root(con, args):
     if args.cwd:
         cur = con.cursor()
         cur.execute(
-            "SELECT id FROM session WHERE parent_id IS NULL AND directory=?"
+            "SELECT id FROM session_v2 WHERE parent_id IS NULL AND directory=?"
             " ORDER BY time_updated DESC LIMIT 1",
             (os.path.abspath(args.cwd),))
         row = cur.fetchone()

@@ -29,7 +29,8 @@ a hang. Promoted from `.scratch/skill-gap-analysis/SUBAGENT-PROTOCOL.md`
     copies. An unopenable target exits 2 before opencode launches (no
     session created).
   - **External grants**: `--allow-dirs PATH` (repeatable) grants opencode's
-    `permission.external_directory` allow-map for one declared path,
+    a deny-first ordered `permissions` rule set with one explicit `<abs>/**`
+    allow root,
     `<abs-path>/**`, least privilege. Without it behavior is unchanged.
 
 ## 1. Bound the dispatch (the orchestrator's job)
@@ -146,7 +147,8 @@ Cross-checks the heartbeat against opencode's own session event stream
 
 - `OK` / `WARN` / `STALLED` / `DEAD` / `BLOCKING` — liveness, in lane
   order. **Lane A (preferred):** when a known-port server URL resolves
-  (`--server-url` or `OPENCODE_WAKE_URL`), `GET /session/status` for the
+  (`--server-url`, `OPENCODE_WAKE_URL`, or adapter discovery),
+  `GET /api/session/active` + `GET /api/session/{id}` for the
   child — `busy` is demonstrably generating and never stalls; `retry` is
   surfaced in the `why` and never reads OK. **Lane B (fallback):** the
   heartbeat plus the DB clock, where a child inside an **open assistant
@@ -254,7 +256,7 @@ python3 scripts/dispatch_agent.py --agent <name> --prompt-file <file> \
   spawns `scripts/observe_completion.py` detached once the child's
   `session_id=` prints. The observer polls the heartbeat and run-log (30 s)
   and delivers the wake through the **orchestrator's own server**:
-  `opencode run --attach <wake-url> --session <orchestrator-sid> --agent
+  typed V2 calls (`session.get` → `session.agent` → `session.prompt`) on the orchestrator session; never a client attach flag and never a new session. The V1 form was `opencode run
   <wake-agent> --format json <text>` (never `--continue`; AGENTS.md rule 1).
   - The orchestrator TUI must be launched on a **known port**:
     `OPENCODE_WAKE_URL=http://127.0.0.1:4096 opencode --port 4096`. A

@@ -1,9 +1,27 @@
 ---
-name: skill-author
 description: Author and improve agent skills — evals before body, structure and boundary discipline.
 model: opencode-go/minimax-m3
 mode: all
+permissions:
+  # Ordered rules — V2 evaluates the LAST matching rule.
+  # shell
+  - action: shell
+    resource: "*"
+    effect: allow
+  # edit
+  - action: edit
+    resource: "*"
+    effect: allow
+  # subagent
+  - action: subagent
+    resource: "*"
+    effect: allow
+  # execute
+  - action: execute
+    resource: "*"
+    effect: deny
 ---
+
 
 # Skill Author Agent
 

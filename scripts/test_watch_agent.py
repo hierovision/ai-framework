@@ -40,24 +40,34 @@ def _tool(name, ms, **inp):
 
 
 def _db_parts(rows, sid="ses_stream"):
-    """Hermetic opencode.db fixture carrying the `part` rows the watchdog
-    reads (creation + in-place change timestamps). Returns (con, workdir).
-
-    `rows`: [(time_created_ms, time_updated_ms, data_dict), ...] — the
-    time_updated column is what a mid-generation stream advances, while no
-    new part rows are inserted (probed 2026-10-24).
-    """
+    """Hermetic V2 fixture: one assistant message whose content blocks are
+    the supplied parts; a trailing step-finish becomes `finish: stop`."""
     work = tempfile.mkdtemp(prefix="watch-stream-")
     con = sqlite3.connect(os.path.join(work, "opencode.db"))
     con.execute(
-        "CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT,"
-        " session_id TEXT, time_created INTEGER, time_updated INTEGER,"
-        " data TEXT)")
-    for i, (created, updated, data) in enumerate(rows):
-        con.execute(
-            "INSERT INTO part (id, message_id, session_id, time_created,"
-            " time_updated, data) VALUES (?,?,?,?,?,?)",
-            (f"p{i}", "m1", sid, created, updated, json.dumps(data)))
+        "CREATE TABLE session_message (id TEXT, session_id TEXT, type TEXT,"
+        " seq INTEGER, time_created INTEGER, time_updated INTEGER, data TEXT)")
+    blocks, finish, updated = [], None, None
+    for created, upd, data in rows:
+        updated = upd
+        t = (data.get("type") or "").replace("_", "-")
+        if t == "step-finish":
+            finish = "stop"
+        elif t == "tool":
+            blocks.append({"type": "tool", "name": data.get("tool"),
+                           "state": data.get("state") or {}})
+        elif t == "text":
+            blocks.append({"type": "text", "text": data.get("text") or ""})
+        elif t == "reasoning":
+            blocks.append({"type": "reasoning", "text": data.get("text") or ""})
+    body = {"content": blocks}
+    if finish:
+        body["finish"] = finish
+    created0 = rows[0][0] if rows else 0
+    con.execute(
+        "INSERT INTO session_message (id, session_id, type, seq, time_created,"
+        " time_updated, data) VALUES (?,?,?,?,?,?,?)",
+        ("m1", sid, "assistant", 1, created0, updated, json.dumps(body)))
     con.commit()
     con.row_factory = sqlite3.Row
     return con, work
@@ -237,7 +247,8 @@ def test_true_silence_still_fires():
     now = 1_800_000_000
     for age, want in ((300, "STALLED"), (600, "DEAD")):
         ms = int((now - age) * 1000)
-        con, work = _db_parts([(ms, ms, {"type": "reasoning", "text": "t"})])
+        con, work = _db_parts([(ms, ms, {"type": "reasoning", "text": "t"}),
+                               (ms, ms, {"type": "step-finish"})])
         try:
             parts = watch.load_parts(con, "ses_stream")
             an = watch.analyze_session(None, parts, call_seconds=300,
@@ -303,17 +314,18 @@ def test_legacy_schema_without_time_updated_column():
     old_ms = int((now - 300) * 1000)
     work = tempfile.mkdtemp(prefix="watch-legacy-")
     con = sqlite3.connect(os.path.join(work, "opencode.db"))
-    con.execute("CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT,"
-                " session_id TEXT, time_created INTEGER, data TEXT)")
-    con.execute("INSERT INTO part (id, message_id, session_id, time_created,"
-                " data) VALUES (?,?,?,?,?)",
-                ("p0", "m1", "ses_stream", old_ms,
-                 json.dumps({"type": "reasoning", "text": "t"})))
+    con.execute("CREATE TABLE session_message (id TEXT, session_id TEXT,"
+                " type TEXT, seq INTEGER, time_created INTEGER, data TEXT)")
+    con.execute("INSERT INTO session_message (id, session_id, type, seq,"
+                " time_created, data) VALUES (?,?,?,?,?,?)",
+                ("m0", "ses_stream", "assistant", 1, old_ms,
+                 json.dumps({"content": [{"type": "reasoning", "text": "t"}],
+                             "finish": "stop"})))
     con.commit()
     con.row_factory = sqlite3.Row
     try:
         parts = watch.load_parts(con, "ses_stream")
-        assert len(parts) == 1 and "_time_updated" not in parts[0][1], parts
+        assert parts and all("_time_updated" not in d for _, d in parts), parts
         an = watch.analyze_session(None, parts, call_seconds=300,
                                    loop_repeats=3)
         assert an["last_change_ms"] == old_ms, an
@@ -328,15 +340,23 @@ def test_legacy_schema_without_time_updated_column():
 
 # --- RM-059 v2: Lane A (vendor status) + Lane B (open-step grace) -----------
 
-def _status_stub(payload):
-    """Hermetic localhost stub for `GET /session/status` (recorded shape)."""
+def _status_stub(active, sessions=None):
+    """Hermetic localhost stub for the V2 `active` + session endpoints."""
     import http.server
     import threading
 
+    sessions = sessions or {}
+
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - stdlib handler API
+            if self.path.startswith("/api/session/active"):
+                payload = {"data": active}
+            else:
+                sid = self.path.rstrip("/").rsplit("/", 1)[-1]
+                payload = {"data": sessions.get(sid)} if sid in sessions \
+                    else {"_tag": "SessionNotFoundError"}
             body = json.dumps(payload).encode("utf-8")
-            self.send_response(200)
+            self.send_response(200 if "data" in payload else 404)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -360,10 +380,15 @@ def test_server_status_reader_defensive():
     """AC8 (reader): `session_status` parses the recorded `{sid: {type}}`
     payload, returns None for an absent entry/server, and never raises."""
     srv, url = _status_stub({"ses_busy": {"type": "busy"},
-                             "ses_retry": {"type": "retry", "attempt": 2}})
+                             "ses_retry": {"type": "retry", "attempt": 2}},
+                            {"ses_idle": {"id": "ses_idle",
+                                          "outcome": "succeeded",
+                                          "time": {"idle": 1}}})
     try:
         assert watch.session_status(url, "ses_busy") == {"type": "busy"}
         assert watch.session_status(url, "ses_absent") is None
+        assert watch.session_status(url, "ses_idle") == {
+            "type": "idle", "outcome": "succeeded"}
         assert watch.session_status(url + "/", "ses_busy") == {"type": "busy"}
     finally:
         srv.shutdown()

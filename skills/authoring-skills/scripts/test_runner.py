@@ -32,8 +32,10 @@ def _hermetic_env():
     explicitly — the new CI gate (2026-09-29) exposed two that passed locally
     and failed under CI=true.
     """
-    return {k: v for k, v in os.environ.items()
-            if k not in ("CI", "AI_FRAMEWORK_FREE_TIER")}
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("CI", "AI_FRAMEWORK_FREE_TIER")}
+    env["BEVAL_SKIP_PREFLIGHT"] = "1"
+    return env
 
 
 
@@ -406,10 +408,9 @@ def test_model_flag_and_ci_guard():
     """
     args = runner.opencode_run_args("/tmp/x", "prompt p",
                                     model="opencode/nemotron-3-ultra-free")
-    assert args == ["run", "--print-logs", "--log-level", "ERROR",
-                    "--dir", "/tmp/x",
+    assert args == ["run", "--standalone", "--format", "json",
                     "--model", "opencode/nemotron-3-ultra-free",
-                    "--format", "json", "prompt p"], args
+                    "prompt p"], args
     # no model -> no --model flag (opencode default; developer-local runs only)
     args2 = runner.opencode_run_args("/tmp/x", "prompt p", model=None)
     assert "--model" not in args2, args2
@@ -534,19 +535,22 @@ def test_event_stream_parse_and_final_text():
     assert ctx["parse_error"] is None, ctx["parse_error"]
     assert "ROI guardrail" in ctx["final_text"], ctx["final_text"]
     calls = runner.extract_tool_calls(ctx["events"])
-    assert calls and calls[0]["tool"] == "bash", calls
+    assert calls and calls[0]["tool"] == "shell", calls
     assert "log_run.py" in calls[0]["args"]["command"], calls
     print("PASS  parse event stream -> tool calls + final text")
 
 
 def test_action_predicate():
     ctx = runner.build_context(_load_fixture("observing-runs", 1))
-    ok = {"action": [{"tool": "bash", "args": {"command": "*log_run.py*"}}]}
+    ok = {"action": [{"tool": "shell", "args": {"command": "*log_run.py*"}}]}
     assert runner.assert_expect(ok, ctx) == [], runner.assert_expect(ok, ctx)
-    bad = {"action": [{"tool": "bash", "args": {"command": "*never-runs*"}}]}
+    bad = {"action": [{"tool": "shell", "args": {"command": "*never-runs*"}}]}
     assert runner.assert_expect(bad, ctx), "non-matching command glob must fail"
-    bad_tool = {"action": [{"tool": "write"}]}
+    bad_tool = {"action": [{"tool": "edit"}]}
     assert runner.assert_expect(bad_tool, ctx), "non-matching tool must fail"
+    # V1 aliases remain accepted for consumer manifests (and log the alias).
+    alias = {"action": [{"tool": "bash", "args": {"command": "*log_run.py*"}}]}
+    assert runner.assert_expect(alias, ctx) == [], runner.assert_expect(alias, ctx)
     print("PASS  action predicate: matches tool+arg globs, misses otherwise")
 
 
@@ -571,6 +575,61 @@ def test_artifact_predicate():
         print("PASS  artifact predicate: reads a written file + glob paths")
     finally:
         shutil.rmtree(d)
+
+
+def test_artifact_hidden_file_discovered():
+    """Regression (CI PR 132): `.opencode/plans/<slug>.md` is a hidden path.
+    The workdir filesystem surface must discover hidden files (plain
+    `glob.glob` does not), otherwise a correctly written plan reads as
+    "no file matching"."""
+    d = tempfile.mkdtemp(prefix="beval-art-hidden-")
+    try:
+        plan = os.path.join(d, ".opencode", "plans", "feat-offline-queue.md")
+        os.makedirs(os.path.dirname(plan))
+        with open(plan, "w", encoding="utf-8") as fh:
+            fh.write("# Plan\n\n## Acceptance Criteria\n\n- works\n"
+                     "## Files to Modify\n\n- src/store.ts\n")
+        ctx = runner.build_context(runner.EvalResult(raw="", workdir=d))
+        exact = {"artifact": [{"path": ".opencode/plans/feat-offline-queue.md",
+                               "phrases": ["Acceptance Criteria",
+                                           "Files to Modify"]}]}
+        assert runner.assert_expect(exact, ctx) == [], runner.assert_expect(exact, ctx)
+        globbed = {"artifact": [{"path": "**/*.md",
+                                 "phrases": ["Acceptance Criteria"]}]}
+        assert runner.assert_expect(globbed, ctx) == [], runner.assert_expect(globbed, ctx)
+        print("PASS  artifact predicate discovers hidden .opencode paths")
+    finally:
+        shutil.rmtree(d)
+
+
+def test_artifact_v2_path_event():
+    """Regression (CI PR 132): V2 `edit` tool input is
+    `{"path": ..., "content": ...}`. The event surface accepted only the V1
+    `filePath`, so a real V2 write event matched no file."""
+    stream = _tool_stream(
+        "edit", path=".opencode/plans/feat-offline-queue.md",
+        content="# Plan\n## Acceptance Criteria\n- works\n")
+    ctx = runner.build_context(runner.EvalResult(raw=stream))
+    expect = {"artifact": [{"path": ".opencode/plans/feat-offline-queue.md",
+                            "phrases": ["Acceptance Criteria"]}]}
+    assert runner.assert_expect(expect, ctx) == [], runner.assert_expect(expect, ctx)
+    # A glob over the V2 path works too.
+    globbed = {"artifact": [{"path": "**/*.md",
+                             "phrases": ["Acceptance Criteria"]}]}
+    assert runner.assert_expect(globbed, ctx) == [], runner.assert_expect(globbed, ctx)
+    print("PASS  artifact predicate reads the V2 path event")
+
+
+def test_artifact_legacy_filepath_event_still_works():
+    """V1 consumer manifests emit `filePath`; the compatibility surface must
+    keep matching after the V2 `path` addition."""
+    stream = _tool_stream(
+        "edit", filePath="src/lib/out.md",
+        content="hello legacy")
+    ctx = runner.build_context(runner.EvalResult(raw=stream))
+    expect = {"artifact": [{"path": "src/lib/out.md", "phrases": ["hello"]}]}
+    assert runner.assert_expect(expect, ctx) == [], runner.assert_expect(expect, ctx)
+    print("PASS  artifact predicate keeps legacy filePath matching")
 
 
 def test_text_predicate_and_expect_wins():
@@ -662,7 +721,7 @@ def test_typed_stub_synthesis():
         json.dump({"evals": [{
             "id": 1, "prompt": "p",
             "expect": {
-                "action": [{"tool": "bash", "args": {"command": "*log_run.py*"}}],
+                "action": [{"tool": "shell", "args": {"command": "*log_run.py*"}}],
                 "artifact": [{"path": "**/out.md", "phrases": ["hi"]}],
                 "text": ["typed text"],
             },
@@ -714,11 +773,12 @@ def test_dead_session_error_signature_in_log():
 
 
 def test_opencode_run_args_capture_server_logs():
-    """RM-021: `opencode run --print-logs --log-level ERROR` so a dead session's
-    server-side err_* cause lands on stderr and is persisted."""
+    """V2: `run --standalone --format json`; server-log level travels via
+    OPENCODE_LOG_LEVEL in the child env, never a CLI flag."""
     args = runner.opencode_run_args("/tmp/x", "p", model="deepseek/deepseek-flash")
-    assert "--print-logs" in args, args
-    assert args[args.index("--log-level") + 1] == "ERROR", args
+    assert args[:4] == ["run", "--standalone", "--format", "json"], args
+    assert "--print-logs" not in args and "--log-level" not in args, args
+    assert "--dir" not in args, args
 
 
 def test_persist_streams_redacts_stderr_and_writes_it():
@@ -1530,7 +1590,8 @@ def test_external_reject_never_switches():
     root = _make_drill_root(3)
     logs = tempfile.mkdtemp(prefix="beval-reject-logs-")
     env = _fallback_env(BEVAL_FALLBACK_ENABLED="1",
-                        DEEPSEEK_API_KEY="sk-test")
+                        DEEPSEEK_API_KEY="sk-test",
+                        BEVAL_MAX_FRESH_RETRIES="0")
     try:
         r = _run_drill(root, logs, ":EXTERNAL-REJECT:", env)
         assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
@@ -1698,6 +1759,9 @@ def main():
         test_event_stream_parse_and_final_text,
         test_action_predicate,
         test_artifact_predicate,
+        test_artifact_hidden_file_discovered,
+        test_artifact_v2_path_event,
+        test_artifact_legacy_filepath_event_still_works,
         test_text_predicate_and_expect_wins,
         test_parse_failure_fails_closed,
         test_seven_canaries_replay_fixtures,

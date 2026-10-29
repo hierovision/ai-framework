@@ -1,5 +1,5 @@
 {
-  "_comment": "RM-058 D4: per-agent-class least-privilege dispatch profiles. `allow_dirs` are external read roots granted via OPENCODE_CONFIG_CONTENT (merged on top of explicit --allow-dirs; explicit caller settings win). `worktree` is the profile default for D3's worktree dispatch (v1 ships false; an explicit --worktree <name> overrides). `timeout` is the default run budget. Class resolution: exact agent key, then `aliases`, then longest-prefix profile name (council-architecture -> council, test-writer -> test).",
+  "_comment": "RM-058 D4: per-agent-class least-privilege dispatch profiles. `allow_dirs` are external read roots granted through the dispatcher's generated XDG_CONFIG_HOME (ordered deny-first + allow roots; merged with explicit --allow-dirs). `worktree` is the profile default for D3's worktree dispatch (v1 ships false; an explicit --worktree <name> overrides). `timeout` is the default run budget. Class resolution: exact agent key, then `aliases`, then longest-prefix profile name (council-architecture -> council, test-writer -> test).",
   "aliases": {
     "vision-critic-fast": "reviewer",
     "vision-critic-final": "reviewer",

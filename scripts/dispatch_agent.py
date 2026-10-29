@@ -9,8 +9,9 @@ event stream yields session/model attribution.
 
 What it does:
   * reads the prompt from --prompt-file;
-  * runs `opencode run --agent <name> [--model <id>] [--session <id>]
-    [--dir <dir>] --format json <prompt>` in its own process group;
+  * runs `opencode run --agent <name> --model <id> [--session <id>]
+    [--standalone|--server URL] --format json <prompt>` in its own process
+    group, with `cwd`/`PWD` set to the dispatch directory (V2 has no `--dir`);
   * prints `session_id=<id>` as soon as the stream names it (question relay);
   * with --stream-out/--stream-err FILE, tees the raw stdout/stderr lines
     live (fresh dispatch truncates, `--session` resume appends);
@@ -18,7 +19,8 @@ What it does:
     before launch, exactly one terminal DONE/BLOCKED line) and injects the
     canonical supervision block naming that file;
   * with --allow-dirs PATH (repeatable), grants least-privilege external
-    directory permission for this run;
+    directory permission for this run through an ordered V2 rule set written
+    to a temporary XDG_CONFIG_HOME (V2 ignores OPENCODE_CONFIG_CONTENT);
   * with --profile NAME|auto|none (default auto), merges the per-agent-class
     least-privilege defaults from scripts/dispatch-profiles.json on top of
     --allow-dirs (D4);
@@ -70,11 +72,16 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
+import opencode_v2 as v2  # noqa: E402 - shared V2 adapter
 
 
 def _load_module(path, name):
@@ -116,25 +123,10 @@ def now_iso():
         "%Y-%m-%dT%H:%M:%SZ")
 
 
-# --- stream parsing (pure) ---------------------------------------------------
+# --- stream parsing (pure; the adapter owns V2 shapes) ----------------------
 
 def parse_stream(raw):
-    """Return (events, parse_errors) for a newline-delimited JSON stream."""
-    events, errors = [], []
-    for i, line in enumerate((raw or "").splitlines(), start=1):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError as exc:
-            errors.append(f"line {i}: {exc.msg}")
-            continue
-        if isinstance(obj, dict):
-            events.append(obj)
-        else:
-            errors.append(f"line {i}: event is not a JSON object")
-    return events, errors
+    return v2.parse_stream(raw)
 
 
 def _parts(events):
@@ -145,80 +137,61 @@ def _parts(events):
 
 
 def session_id_of(events):
-    """First session id the stream names (top-level or part-level)."""
-    for ev in events:
-        if ev.get("sessionID"):
-            return ev["sessionID"]
-        part = ev.get("part")
-        if isinstance(part, dict) and part.get("sessionID"):
-            return part["sessionID"]
-    return None
+    return v2.session_id_of(events)
 
 
 def final_text(events):
-    """Join the stream's text parts (the delegated result)."""
-    chunks = [p["text"] for p in _parts(events)
-              if p.get("type") == "text" and isinstance(p.get("text"), str)]
-    return "\n".join(chunks).strip()
+    return v2.final_text(events)
 
 
 def token_totals(events):
-    """Sum tokens/cost across step-finish events. Missing stays None."""
-    tokens_in = tokens_out = cost = None
-    for part in _parts(events):
-        if part.get("type") not in ("step-finish", "step_finish"):
-            continue
-        tk = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
-        for key, value in (("input", tk.get("input")), ("output", tk.get("output"))):
-            if isinstance(value, (int, float)):
-                if key == "input":
-                    tokens_in = (tokens_in or 0) + int(value)
-                else:
-                    tokens_out = (tokens_out or 0) + int(value)
-        c = part.get("cost")
-        if isinstance(c, (int, float)):
-            cost = (cost or 0.0) + float(c)
-    return tokens_in, tokens_out, (round(cost, 6) if cost else None)
+    return v2.token_totals(events)
 
 
 def resolve_agent_model(agent, explicit=None):
-    """Explicit --model wins; else the target's frontmatter binding, else None.
+    """Explicit --model wins; else the target's V2 discovery binding.
 
-    Named dispatch honors the target's declared model
-    (reference/opencode-integration.md).
+    V2 discovery order: project `.opencode/agents/<name>.md`, repo
+    `agents/<name>.md`, then the global layout. A missing binding is a
+    usage error (exit 2) — a dispatch never runs on an unintended model.
     """
     if explicit:
         return explicit
-    path = os.path.join(REPO_ROOT, "agents", agent + ".md")
-    try:
-        with open(path, encoding="utf-8") as fh:
-            raw = fh.read()
-    except OSError:
-        return None
-    fm = raw.split("---", 2)[1] if raw.startswith("---") else ""
-    m = re.search(r"^model:\s*(\S+)\s*$", fm, re.MULTILINE)
-    return m.group(1) if m else None
+    candidates = [
+        os.path.join(os.getcwd(), ".opencode", "agents", agent + ".md"),
+        os.path.join(REPO_ROOT, "agents", agent + ".md"),
+        os.path.expanduser(f"~/.config/opencode/agents/{agent}.md"),
+    ]
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                raw = fh.read()
+        except OSError:
+            continue
+        fm = raw.split("---", 2)[1] if raw.startswith("---") else ""
+        m = re.search(r"^model:\s*(\S+)\s*$", fm, re.MULTILINE)
+        if m:
+            return m.group(1)
+    return None
 
 
 def resolve_session_model(session_id):
-    """The model the finished run actually used, from the session row.
+    """The model the finished run actually used, from the V2 session row.
 
-    Read-only through the watcher's reader (AC10). Any absence — no DB,
-    missing row, unreadable blob — degrades to None so the caller falls back
-    to the declared binding (AC11). Does not replicate opencode's
-    agent-resolution precedence; the session row is ground truth.
+    Read-only through the adapter; any absence degrades to None so the caller
+    falls back to the declared binding.
     """
     if not session_id:
         return None
     try:
-        con = watch_agent.db()
+        con = v2.connect()
     except Exception:
         return None
     if con is None:
         return None
     try:
-        sess = watch_agent.find_session(con, sid=session_id)
-        return watch_agent.session_model(sess) if sess is not None else None
+        sess = v2.find_session(con, sid=session_id)
+        return v2.session_model(sess) if sess is not None else None
     except Exception:
         return None
     finally:
@@ -283,66 +256,27 @@ def heartbeat_prompt_block(path):
 
 
 def permission_denial(events, stderr_text):
-    """Name a permission rejection instead of reporting `empty result` (AC13).
-
-    Looks for a tool part with `state.status=error` carrying the
-    external-directory rejection text, else the same text in captured stderr.
-    """
-    for part in _parts(events):
-        if part.get("type") != "tool":
-            continue
-        state = part.get("state") if isinstance(part.get("state"), dict) else {}
-        if state.get("status") != "error":
-            continue
-        if not PERMISSION_DENY_RE.search(json.dumps(state)):
-            continue
-        name = part.get("tool") or "?"
-        inp = state.get("input") if isinstance(state.get("input"), dict) else {}
-        target = (inp.get("command") or inp.get("filePath") or inp.get("path")
-                  or inp.get("pattern") or "")
-        target = str(target).splitlines()[0].strip()[:120] if target else ""
-        return f"permission denied: {name}" + (f" {target}" if target else "")
-    cleaned = ANSI_RE.sub("", stderr_text or "")
-    if PERMISSION_DENY_RE.search(cleaned):
-        m = re.search(r"external_directory\s*\(([^)]+)\)", cleaned, re.IGNORECASE)
-        if m:
-            return f"permission denied: external_directory {m.group(1).strip()}"
-        line = next((l.strip() for l in cleaned.splitlines()
-                     if PERMISSION_DENY_RE.search(l)), "")
-        return "permission denied: " + (line[:200] or "external_directory")
-    return None
+    """Name a V2 permission auto-reject instead of reporting `empty result`."""
+    return v2.classify_denial(events, stderr_text)
 
 
 # --- external-path grants (AC12) --------------------------------------------
 
-def permission_config(dirs, existing_raw):
-    """Merge `<abs-dir>/**` -> allow into OPENCODE_CONFIG_CONTENT.
+def permission_config(dirs, existing_raw=None):
+    """Build the V2 config document carrying deny-first ordered rules.
 
-    Caller-supplied settings win on conflict (existing keys are left intact).
-    An unparsable `existing_raw` is discarded with a named stderr warning and
-    the merge proceeds — a recoverable env issue must not hard-fail the
-    dispatch, but the caller-settings loss is never silent.
+    The adapter owns the rule order (catch-all deny first, explicit allow
+    roots after, execute deny last). Caller `OPENCODE_CONFIG_CONTENT` is kept
+    for observability but V2 does not honor it for grant injection.
     """
-    config = {}
-    if existing_raw:
-        try:
-            parsed = json.loads(existing_raw)
-            if isinstance(parsed, dict):
-                config = parsed
-        except ValueError as exc:
-            print(f"warning: ignoring unparsable OPENCODE_CONFIG_CONTENT: {exc}",
-                  file=sys.stderr)
-    perm = config.get("permission")
-    if not isinstance(perm, dict):
-        perm = {}
-        config["permission"] = perm
-    ext = perm.get("external_directory")
-    if not isinstance(ext, dict):
-        ext = {}
-        perm["external_directory"] = ext
-    for d in dirs:
-        ext.setdefault(os.path.join(os.path.abspath(d), "**"), "allow")
-    return config
+    return v2.config_with_permissions({}, dirs)
+
+
+def validate_grants(dirs):
+    for d in dirs or []:
+        if not os.path.isdir(d):
+            return f"--allow-dirs requires an existing directory: {d}"
+    return None
 
 
 # --- per-agent-class profiles (D4) ------------------------------------------
@@ -524,7 +458,7 @@ def _maybe_print_session(line, printed, on_session=None):
 
 
 def run_opencode(argv, timeout, tee_out=None, tee_err=None, env=None,
-                 on_session=None):
+                 on_session=None, cwd=None):
     """Run in its own process group; kill the group at timeout.
 
     Returns (returncode, stdout, stderr, timed_out). The session id is
@@ -538,7 +472,7 @@ def run_opencode(argv, timeout, tee_out=None, tee_err=None, env=None,
     try:
         proc = subprocess.Popen(
             argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            start_new_session=True, env=env)
+            start_new_session=True, env=env, cwd=cwd)
     except OSError as exc:
         return 127, "", f"cannot launch opencode: {exc}", False
 
@@ -596,7 +530,12 @@ def main(argv=None):
     ap.add_argument("--session", default=None,
                     help="Resume this opencode session id (question relay).")
     ap.add_argument("--dir", dest="dir_", default=None,
-                    help="opencode working directory (default: cwd).")
+                    help="Dispatch working directory (V2: passed as cwd/PWD, "
+                         "never as a CLI flag).")
+    ap.add_argument("--standalone", action="store_true",
+                    help="Run V2 with a private server (no shared service).")
+    ap.add_argument("--server", default=None, metavar="URL",
+                    help="Connect to this V2 server URL instead of the service.")
     ap.add_argument("--contract", default=None,
                     help="Delegated-result contract to validate (RM-023).")
     ap.add_argument("--markers", default=None,
@@ -661,6 +600,9 @@ def main(argv=None):
         markers = validate_delegated_result.CONTRACTS[a.contract]
 
     binding = resolve_agent_model(a.agent, a.model)
+    if not binding:
+        print(f"error: no model binding for {a.agent}", file=sys.stderr)
+        return 2
     out_path = a.out or (a.prompt_file + ".result.md")
     append = bool(a.session)
 
@@ -692,14 +634,28 @@ def main(argv=None):
     # inherits OPENCODE_WAKE_URL from the TUI launch (no state file exists).
     wake_url = a.wake_url or os.environ.get("OPENCODE_WAKE_URL") or None
 
+    # Preflight: a `--session` resume must name a real session; an unknown
+    # id exits 2 with no opencode launch (never creates a ghost session).
+    if a.session:
+        exists, _payload = v2.session_get(a.session, server=a.server)
+        if exists is None:
+            con = v2.connect()
+            try:
+                exists = v2.find_session(con, sid=a.session) is not None
+            finally:
+                if con is not None:
+                    con.close()
+        if not exists:
+            print(f"error: unknown session {a.session}", file=sys.stderr)
+            return 2
+
     # Preflight: validate explicit grants and open every target before opencode
     # runs (AC6) — an unopenable target exits 2 with no session created.
     # Profile dirs are defaults, applied without an existence check.
-    for d in (a.allow_dirs or []):
-        if not os.path.isdir(d):
-            print(f"error: --allow-dirs requires an existing directory: {d}",
-                  file=sys.stderr)
-            return 2
+    grant_error = validate_grants(a.allow_dirs or [])
+    if grant_error:
+        print(f"error: {grant_error}", file=sys.stderr)
+        return 2
     tee_out = tee_err = hb = None
     try:
         if a.stream_out:
@@ -730,14 +686,24 @@ def main(argv=None):
             return 2
         dispatch_dir = worktree_path
 
-    # Profile grants + explicit --allow-dirs union (D4); caller settings win.
+    # Profile grants + explicit --allow-dirs union (D4). V2 ignores
+    # OPENCODE_CONFIG_CONTENT for grants; a generated XDG_CONFIG_HOME root
+    # carries the deny-first rules and links the agent corpus.
     grant_dirs = profile_dirs + list(a.allow_dirs or [])
-    child_env = None
-    if grant_dirs:
-        child_env = dict(os.environ)
-        child_env["OPENCODE_CONFIG_CONTENT"] = json.dumps(
-            permission_config(grant_dirs,
-                              os.environ.get("OPENCODE_CONFIG_CONTENT")))
+    child_env = dict(os.environ)
+    dispatch_root = os.path.join(REPO_ROOT, ".scratch", "dispatch-config")
+    os.makedirs(dispatch_root, exist_ok=True)
+    config_root = tempfile.mkdtemp(prefix="run-", dir=dispatch_root)
+    agents_src = os.path.join(REPO_ROOT, ".opencode", "agents")
+    if not os.path.isdir(agents_src):
+        agents_src = os.path.join(REPO_ROOT, "agents")
+    v2.write_temp_config(
+        config_root,
+        permission_config(grant_dirs, os.environ.get("OPENCODE_CONFIG_CONTENT")),
+        agents_dir=agents_src,
+        skills_dir=os.path.join(REPO_ROOT, "skills"))
+    child_env["XDG_CONFIG_HOME"] = config_root
+    child_env["PWD"] = dispatch_dir or os.getcwd()
 
     if hb is not None:
         heartbeat_begin(hb, f"{a.agent} dispatch", a.prompt_file,
@@ -747,11 +713,16 @@ def main(argv=None):
             # resume would otherwise accumulate `---` blocks each time (M4)
             prompt = prompt.rstrip() + "\n" + heartbeat_prompt_block(a.heartbeat)
 
-    opencode_argv = ["opencode", "run", "--agent", a.agent, "--format", "json"]
-    if dispatch_dir:
-        opencode_argv += ["--dir", dispatch_dir]
-    if a.model:
-        opencode_argv += ["--model", a.model]
+    # V2 2.1.4 accepts --standalone/--server only on the `run` subcommand
+    # (live 2026-10-28: `opencode --standalone run` exits 1 "Unrecognized
+    # flag"; the consumer runner is the same shape).
+    opencode_argv = ["opencode", "run"]
+    if a.server:
+        opencode_argv += ["--server", a.server]
+    elif a.standalone or grant_dirs:
+        opencode_argv += ["--standalone"]
+    opencode_argv += ["--agent", a.agent, "--format", "json",
+                      "--model", binding]
     if a.session:
         opencode_argv += ["--session", a.session]
     opencode_argv.append(prompt)
@@ -773,7 +744,8 @@ def main(argv=None):
     started = time.monotonic()
     rc_proc, raw, stderr_text, timed_out = run_opencode(
         opencode_argv, timeout, tee_out=tee_out, tee_err=tee_err,
-        env=child_env, on_session=on_session)
+        env=child_env, on_session=on_session,
+        cwd=dispatch_dir or os.getcwd())
     duration_ms = int((time.monotonic() - started) * 1000)
     for handle in (tee_out, tee_err):
         if handle is not None:
@@ -793,7 +765,25 @@ def main(argv=None):
     try:
         if timed_out:
             outcome, exit_code = "error", 4
-            detail = f"timeout after {timeout}s (process group killed)"
+            # AC15: a private server (--standalone, or the implicit
+            # standalone used for grants) is killed with its process group;
+            # a shared/--server session must be interrupted AND verified
+            # inactive. `--server` + `--allow-dirs` is still shared-service.
+            private_server = a.standalone or (grant_dirs and not a.server)
+            if private_server:
+                interrupt = "not-needed"
+            elif not session_id:
+                interrupt = "no-session"
+            else:
+                status, _ = v2.session_interrupt(session_id, server=a.server)
+                if status not in (200, 202, 204):
+                    interrupt = "failed"
+                else:
+                    active = v2.session_active(server=a.server)
+                    interrupt = ("ok" if active is not None
+                                 and session_id not in active else "failed")
+            detail = (f"timeout after {timeout}s "
+                      f"(process group killed, interrupt={interrupt})")
         elif rc_proc != 0:
             outcome, exit_code = "error", 3
             tail = " ".join((stderr_text or "").split())[:200]
@@ -819,8 +809,16 @@ def main(argv=None):
                 else:
                     detail = "missing marker(s): " + ", ".join(missing)
         else:
-            outcome, exit_code = "success", 0
-            detail = None
+            # A permission auto-reject means the task could not run, even
+            # when the model narrates the denial and returns a non-empty
+            # answer (D2 negative drill, 2026-10-28).
+            denied = permission_denial(events, stderr_text)
+            if denied:
+                outcome, exit_code = "failure", 1
+                detail = denied
+            else:
+                outcome, exit_code = "success", 0
+                detail = None
 
         try:
             with open(out_path, "w", encoding="utf-8") as fh:

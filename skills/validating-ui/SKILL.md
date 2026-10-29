@@ -104,7 +104,7 @@ visual sign-off.
 
 ### Step 5 — Invoke council-ux on the text evidence
 
-Invoke `council-ux` (subagent_type `council-ux`) with the text evidence
+Invoke `council-ux` through the V2 `subagent` tool (`agent: council-ux`) with the text evidence
 bundle:
 
 - the harness report + exit code and the evidence.json text fields

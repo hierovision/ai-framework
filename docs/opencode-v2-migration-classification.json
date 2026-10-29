@@ -1,0 +1,11 @@
+{
+  "residual_count": 119,
+  "classification": "resumable-backfill",
+  "cursor": "ses_0ad3c92a5ffecY1JU0nF4cXGew",
+  "all_missing_below_cursor": true,
+  "source_untouched": true,
+  "dated": "2026-10-27",
+  "evidence": ".scratch/v2-canary/migration-rehearsal.txt",
+  "source_session_rows": 2195,
+  "session_v2_rows": 2076
+}

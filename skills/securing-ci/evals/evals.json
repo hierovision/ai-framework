@@ -17,7 +17,7 @@
       "expect": {
         "action": [
           {
-            "tool": "bash",
+            "tool": "shell",
             "args": {
               "command": "*verify-ci-security.cjs*"
             }

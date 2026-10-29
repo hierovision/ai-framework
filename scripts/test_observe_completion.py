@@ -45,17 +45,26 @@ import sys
 
 argv = sys.argv[1:]
 
-if "--attach" in argv:
+if argv[:1] == ["api"]:
     out = os.environ.get("WAKE_STUB_OUT")
     if out:
         with open(out, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(argv) + "\n")
     if os.environ.get("WAKE_STUB_FAIL"):
-        sys.exit(1)
-    sid = argv[argv.index("--session") + 1] if "--session" in argv else "ses_orch"
-    print(json.dumps({"type": "text", "sessionID": sid,
-                      "part": {"type": "text", "sessionID": sid,
-                               "text": "wake-ack"}}), flush=True)
+        print('{"_tag": "InternalError"}')
+        print("HTTP 500 Internal Server Error")
+        sys.exit(0)
+    if os.environ.get("WAKE_STUB_404"):
+        print('{"_tag": "SessionNotFoundError"}')
+        print("HTTP 404 Not Found")
+        sys.exit(0)
+    method = argv[1] if len(argv) > 1 else ""
+    path = argv[2] if len(argv) > 2 else ""
+    if method == "GET" and path.startswith("/api/session/"):
+        sid = path.rsplit("/", 1)[-1]
+        print(json.dumps({"data": {"id": sid}}))
+        sys.exit(0)
+    print('{"ok": true}')
     sys.exit(0)
 
 mode = os.environ.get("STUB_MODE", "valid")
@@ -100,38 +109,59 @@ def _stub_bin(td):
     return bin_dir
 
 
+def _blocks(parts):
+    blocks = []
+    closed = False
+    for d in parts:
+        t = d.get("type")
+        if t == "text":
+            blocks.append({"type": "text", "text": d.get("text") or ""})
+        elif t == "tool":
+            blocks.append({"type": "tool", "name": d.get("tool"),
+                           "state": d.get("state") or {}})
+        elif t in ("step-finish", "step_finish"):
+            closed = True
+    return blocks, closed
+
+
+def _insert_messages(con, sid, parts, updated):
+    blocks, closed = _blocks(parts)
+    data = {"content": blocks}
+    if closed:
+        data["finish"] = "stop"
+    con.execute(
+        "INSERT INTO session_message (id, session_id, type, seq, "
+        "time_created, time_updated, data) VALUES (?,?,?,?,?,?,?)",
+        (f"{sid}-m0", sid, "assistant", 1, 1000, updated, json.dumps(data)))
+
+
 def _make_db(path, sessions):
-    """sessions: list of (sid, parts, time_updated)."""
+    """sessions: list of (sid, parts, time_updated) -> V2 storage fixture."""
     con = sqlite3.connect(path)
     con.execute(
-        "CREATE TABLE session (id TEXT PRIMARY KEY, model TEXT, title TEXT, "
+        "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, model TEXT, title TEXT, "
         "agent TEXT, cost REAL, tokens_input INTEGER, tokens_output INTEGER, "
-        "time_updated INTEGER, directory TEXT, parent_id TEXT)")
+        "time_updated INTEGER, time_created INTEGER, directory TEXT, "
+        "parent_id TEXT, time_idle INTEGER, idle_outcome TEXT)")
     con.execute(
-        "CREATE TABLE part (id TEXT, session_id TEXT, data TEXT, "
-        "time_created INTEGER)")
+        "CREATE TABLE session_message (id TEXT, session_id TEXT, type TEXT, "
+        "seq INTEGER, time_created INTEGER, time_updated INTEGER, data TEXT)")
     for sid, parts, updated in sessions:
         con.execute(
-            "INSERT INTO session (id, model, title, agent, cost, tokens_input, "
-            "tokens_output, time_updated) VALUES (?,?,?,?,?,?,?,?)",
-            (sid, None, "orchestrator", "architect", 0, 0, 0, updated))
-        for i, d in enumerate(parts):
-            con.execute(
-                "INSERT INTO part (id, session_id, data, time_created) "
-                "VALUES (?,?,?,?)",
-                (f"{sid}-p{i}", sid, json.dumps(d), 1000 + i))
+            "INSERT INTO session_v2 (id, model, title, agent, cost, "
+            "tokens_input, tokens_output, time_updated, time_created) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (sid, None, "orchestrator", "architect", 0, 0, 0, updated, 1000))
+        _insert_messages(con, sid, parts, updated)
     con.commit()
     con.close()
 
 
 def _set_parts(path, sid, parts, updated):
     con = sqlite3.connect(path)
-    con.execute("DELETE FROM part WHERE session_id=?", (sid,))
-    for i, d in enumerate(parts):
-        con.execute(
-            "INSERT INTO part (id, session_id, data, time_created) VALUES (?,?,?,?)",
-            (f"{sid}-p{i}", sid, json.dumps(d), 1000 + i))
-    con.execute("UPDATE session SET time_updated=? WHERE id=?", (updated, sid))
+    con.execute("DELETE FROM session_message WHERE session_id=?", (sid,))
+    _insert_messages(con, sid, parts, updated)
+    con.execute("UPDATE session_v2 SET time_updated=? WHERE id=?", (updated, sid))
     con.commit()
     con.close()
 
@@ -240,22 +270,22 @@ def test_ac1_wake_on_success_exactly_once():
         shutil.rmtree(os.path.join(td, "logs"), ignore_errors=True)
         with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
                    "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
-                   "OPENCODE_WAKE_URL": None}):
+                   "OPENCODE_WAKE_URL": None, "OPENCODE_V2_API_VIA_CLI": "1",
+                   "OPENCODE_V2_NO_SERVICE": "1"}):
             rc = obs.run(cfg, sleep=lambda s: None)
         assert rc == 0, rc
         invs = _invs(inv)
-        assert len(invs) == 1, invs
-        argv = invs[0]
-        # AC1: the exact attach vehicle -- and never --continue / --model
-        assert argv[:1] == ["run"], argv
-        assert "--attach" in argv, argv
-        assert argv[argv.index("--attach") + 1] == "http://127.0.0.1:4096", argv
-        assert "--session" in argv and "ses_orch" in argv, argv
-        assert "--agent" in argv and "curator" in argv, argv
-        assert "--format" in argv and "json" in argv, argv
-        assert "--continue" not in argv, argv
-        assert "--model" not in argv, argv
-        text = argv[-1]
+        assert len(invs) == 3, invs
+        # AC1/AC19: preflight -> switch agent -> prompt, all on the same id.
+        calls = [(i[1], i[2]) for i in invs]
+        assert calls == [
+            ("GET", "/api/session/ses_orch"),
+            ("POST", "/api/session/ses_orch/agent"),
+            ("POST", "/api/session/ses_orch/prompt"),
+        ], calls
+        assert '"agent": "curator"' in invs[1][-1], invs[1]
+        text = invs[2][-1]
+        assert "DISPATCH WAKE architect outcome=success" in text, text
         assert "DISPATCH WAKE architect outcome=success" in text, text
         assert "child=ses_stub_valid" in text, text
         assert hb in text, text
@@ -286,12 +316,14 @@ def test_ac2_failure_names_missing_markers():
         inv = os.path.join(td, "inv.jsonl")
         cfg = _cfg(obs, hb, result=out, logs=logs, child="ses_stub_valid")
         with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
-                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv}):
+                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
+                   "OPENCODE_V2_API_VIA_CLI": "1",
+                   "OPENCODE_V2_NO_SERVICE": "1"}):
             rc = obs.run(cfg, sleep=lambda s: None)
         assert rc == 0, rc
         invs = _invs(inv)
-        assert len(invs) == 1, invs
-        text = invs[0][-1]
+        assert len(invs) == 3, invs
+        text = invs[2][-1]
         assert "outcome=failure" in text, text
         assert "Handoff" in text, text
     finally:
@@ -312,12 +344,14 @@ def test_ac2_abort_names_liveness_basis():
         missing_db = os.path.join(td, "missing.db")
         cfg = _cfg(obs, hb, child=None, logs=None, liveness_seconds=0)
         with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
-                   "OPENCODE_DB_PATH": missing_db, "WAKE_STUB_OUT": inv}):
+                   "OPENCODE_DB_PATH": missing_db, "WAKE_STUB_OUT": inv,
+                   "OPENCODE_V2_API_VIA_CLI": "1",
+                   "OPENCODE_V2_NO_SERVICE": "1"}):
             rc = obs.run(cfg, sleep=lambda s: None)
         assert rc == 0, rc
         invs = _invs(inv)
-        assert len(invs) == 1, invs
-        text = invs[0][-1]
+        assert len(invs) == 3, invs
+        text = invs[2][-1]
         assert "outcome=aborted" in text, text
         assert "no heartbeat" in text.lower(), text
     finally:
@@ -355,12 +389,14 @@ def test_ac3_gate_blocks_wake_until_quiescent():
                 _set_parts(dbp, "ses_orch", IDLE, 2000)
 
         with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
-                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv}):
+                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
+                   "OPENCODE_V2_API_VIA_CLI": "1",
+                   "OPENCODE_V2_NO_SERVICE": "1"}):
             rc = obs.run(cfg, sleep=sleep_hook)
         assert rc == 0, rc
         invs = _invs(inv)
-        assert len(invs) == 1, invs
-        assert "outcome=success" in invs[0][-1], invs
+        assert len(invs) == 3, invs
+        assert "outcome=success" in invs[2][-1], invs
         assert state["calls"] >= 1, state
     finally:
         shutil.rmtree(td, ignore_errors=True)
@@ -399,12 +435,13 @@ def test_ac3b_gate_blocks_mid_generation_open_step():
 
         with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
                    "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
-                   "OPENCODE_WAKE_URL": None}):
+                   "OPENCODE_WAKE_URL": None, "OPENCODE_V2_API_VIA_CLI": "1",
+                   "OPENCODE_V2_NO_SERVICE": "1"}):
             rc = obs.run(cfg, sleep=sleep_hook)
         assert rc == 0, rc
         invs = _invs(inv)
-        assert len(invs) == 1, invs
-        assert "outcome=success" in invs[0][-1], invs
+        assert len(invs) == 3, invs
+        assert "outcome=success" in invs[2][-1], invs
         assert state["calls"] >= 2, state
     finally:
         shutil.rmtree(td, ignore_errors=True)
@@ -445,7 +482,8 @@ def test_ac4a_deadline_busy_names_gate():
 
         with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
                    "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
-                   "OPENCODE_WAKE_URL": None}):
+                   "OPENCODE_WAKE_URL": None, "OPENCODE_V2_API_VIA_CLI": "1",
+                   "OPENCODE_V2_NO_SERVICE": "1"}):
             rc = obs.run(cfg, sleep=fake_sleep, now=fake_now)
         assert rc == 0, rc
         assert _invs(inv) == [], "no wake may fire while continuously in flight"
@@ -479,7 +517,8 @@ def test_ac4b_no_attach_target_defers_without_spawning():
         cfg = _cfg(obs, hb, wake_url=None, wake_agent="curator")
         with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
                    "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
-                   "OPENCODE_WAKE_URL": None}):
+                   "OPENCODE_WAKE_URL": None, "OPENCODE_V2_API_VIA_CLI": "1",
+                   "OPENCODE_V2_NO_SERVICE": "1"}):
             rc = obs.run(cfg, sleep=lambda s: None)
         assert rc == 0, rc
         assert _invs(inv) == [], "no opencode subprocess may spawn without a target"
@@ -521,7 +560,9 @@ def test_ac4c_refused_delivery_retries_then_defers():
 
         with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
                    "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
-                   "WAKE_STUB_FAIL": "1", "OPENCODE_WAKE_URL": None}):
+                   "WAKE_STUB_FAIL": "1", "OPENCODE_WAKE_URL": None,
+                   "OPENCODE_V2_API_VIA_CLI": "1",
+                   "OPENCODE_V2_NO_SERVICE": "1"}):
             rc = obs.run(cfg, sleep=fake_sleep, now=fake_now)
         assert rc == 0, rc
         # the refusal was retried (>=2) but bounded by the deadline (not a spin)
@@ -530,7 +571,7 @@ def test_ac4c_refused_delivery_retries_then_defers():
         defers = _deferred_lines(hb)
         assert len(defers) == 1, _hb_lines(hb)
         assert "reason=" in defers[0], defers
-        assert "rc=1" in defers[0], defers
+        assert "500" in defers[0], defers
         assert _hb_lines(hb)[-1] == defers[0], _hb_lines(hb)
     finally:
         shutil.rmtree(td, ignore_errors=True)
@@ -569,7 +610,9 @@ def test_ac7_survey_only_after_child_evidence_then_wake_last():
                     fh.write(f"{_ts(2)} DONE ok\n")
 
         with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
-                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv}):
+                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
+                   "OPENCODE_V2_API_VIA_CLI": "1",
+                   "OPENCODE_V2_NO_SERVICE": "1"}):
             rc = obs.run(cfg, sleep=sleep_hook)
         assert rc == 0, rc
         lines = _hb_lines(hb)
@@ -578,7 +621,7 @@ def test_ac7_survey_only_after_child_evidence_then_wake_last():
         survey_i = next(i for i, l in enumerate(lines) if " SURVEY " in l)
         assert survey_i > step_i, lines
         assert lines[-1].endswith("WAKE success"), lines
-        assert len(_invs(inv)) == 1, _invs(inv)
+        assert len(_invs(inv)) == 3, _invs(inv)
     finally:
         shutil.rmtree(td, ignore_errors=True)
 

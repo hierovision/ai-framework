@@ -1,0 +1,10 @@
+{
+  "name": "auto-compact-at-threshold",
+  "version": "2.1.4",
+  "private": true,
+  "type": "module",
+  "description": "V2 auto-compaction plugin at a context fraction",
+  "dependencies": {
+    "@opencode/plugin": "2.1.4"
+  }
+}
