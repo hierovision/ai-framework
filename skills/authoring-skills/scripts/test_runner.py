@@ -1017,6 +1017,39 @@ def test_eval_timeout_override_precedence():
     assert runner.eval_timeout(None, {"BEVAL_TIMEOUT_SECONDS": "300"}) == 300
 
 
+def test_capture_process_measures_first_event_ms():
+    """Startup-latency instrumentation: the spawn-to-first-stdout-line time is
+    measured without replacing the timeout or buffering the stream."""
+    rc, out, err, timed_out, first_ms = runner._capture_process(
+        [sys.executable, "-c",
+         "import sys,time; time.sleep(0.25); print('{}'); time.sleep(0.05)"],
+        timeout=5)
+    assert rc == 0 and not timed_out, (rc, timed_out, err)
+    assert first_ms is not None and 150 <= first_ms < 1000, first_ms
+
+
+def test_capture_process_first_event_ms_is_none_on_zero_event_timeout():
+    """A zero-event stall reports `none`, not a fabricated duration; the
+    timeout still kills the process group."""
+    rc, out, err, timed_out, first_ms = runner._capture_process(
+        [sys.executable, "-c", "import time; time.sleep(5)"], timeout=1)
+    assert timed_out is True and out == "" and first_ms is None, \
+        (rc, out, err, timed_out, first_ms)
+    assert not err, err
+
+
+def test_capture_process_ignores_stderr_for_first_event():
+    """First-event timing is about the JSON stdout stream; early stderr noise
+    must not make a zero-event stall look started."""
+    rc, out, err, timed_out, first_ms = runner._capture_process(
+        [sys.executable, "-c",
+         "import sys,time; print('diag', file=sys.stderr, flush=True); "
+         "time.sleep(0.3); print('{}')"], timeout=5)
+    assert rc == 0 and not timed_out, (rc, timed_out, err)
+    assert "diag" in err, err
+    assert first_ms is not None and first_ms >= 250, first_ms
+
+
 def test_load_skill_evals_carries_timeout():
     """RM-021 (2026-10-04): the normalized eval dict must carry the per-eval
     `timeout`, or the 600 s remedy silently falls back to 240 (first CI rerun:
@@ -1780,6 +1813,9 @@ def main():
         test_fixture_repo_rels_matches_materialized_layout,
         test_sandbox_env_scrubs_ci_paths,
         test_eval_timeout_override_precedence,
+        test_capture_process_measures_first_event_ms,
+        test_capture_process_first_event_ms_is_none_on_zero_event_timeout,
+        test_capture_process_ignores_stderr_for_first_event,
         test_load_skill_evals_carries_timeout,
         test_has_work_activity_counts_bash_writes,
         test_bash_writes_suppress_the_zero_write_nudge,

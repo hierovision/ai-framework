@@ -48,6 +48,7 @@ import subprocess
 import signal
 import sys
 import tempfile
+import threading
 import time
 
 HERE = os.path.dirname(os.path.realpath(__file__))  # skills/authoring-skills/scripts
@@ -302,13 +303,15 @@ def assert_behavior(expected, output):
 class EvalResult:
     """One invocation's raw event stream (+ stderr + workdir for artifacts)."""
 
-    __slots__ = ("raw", "stderr", "workdir", "cleanup")
+    __slots__ = ("raw", "stderr", "workdir", "cleanup", "first_event_ms")
 
-    def __init__(self, raw, stderr="", workdir=None, cleanup=False):
+    def __init__(self, raw, stderr="", workdir=None, cleanup=False,
+                 first_event_ms=None):
         self.raw = raw or ""
         self.stderr = stderr or ""
         self.workdir = workdir
         self.cleanup = cleanup
+        self.first_event_ms = first_event_ms
 
     def close(self):
         if self.cleanup and self.workdir:
@@ -1201,6 +1204,61 @@ def _startup_log(message):
         print(f"[beval-startup] {message}", file=sys.stderr, flush=True)
 
 
+def _capture_process(argv, cwd=None, env=None, timeout=240):
+    """Run a child while measuring spawn -> first stdout event.
+
+    Streaming readers drain stdout/stderr concurrently (no pipe deadlock), so
+    the first JSON event's arrival time is decision-grade evidence for the
+    startup-latency class. The timeout semantics are unchanged: on expiry the
+    whole process group is killed and `timed_out=True` is returned.
+
+    Returns (rc, stdout, stderr, timed_out, first_event_ms).
+    """
+    started = time.monotonic()
+    proc = subprocess.Popen(
+        argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, env=env, start_new_session=True)
+    out_lines, err_lines = [], []
+    first = {"ms": None}
+
+    def reader(pipe, sink, is_stdout):
+        try:
+            for line in iter(pipe.readline, ""):
+                if not line:
+                    break
+                sink.append(line)
+                if is_stdout and line.strip() and first["ms"] is None:
+                    first["ms"] = int((time.monotonic() - started) * 1000)
+        finally:
+            pipe.close()
+
+    threads = [
+        threading.Thread(target=reader,
+                         args=(proc.stdout, out_lines, True), daemon=True),
+        threading.Thread(target=reader,
+                         args=(proc.stderr, err_lines, False), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    timed_out = False
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+    for thread in threads:
+        thread.join()
+    rc = proc.returncode if proc.returncode is not None else -1
+    return rc, "".join(out_lines), "".join(err_lines), timed_out, first["ms"]
+
+
 def invoke_opencode(e, model=None, turn=None):
     """Real fresh-agent invocation (CI only; needs the model credential).
 
@@ -1265,36 +1323,31 @@ def invoke_opencode(e, model=None, turn=None):
             f"log_level={run_env.get('OPENCODE_LOG_LEVEL')} "
             f"timeout={stall_timeout}s pid_env="
             f"{sorted(k for k in run_env if k.startswith('OPENCODE'))}")
+        started = time.monotonic()
         try:
-            proc = subprocess.Popen(
-                argv,
-                cwd=tmp, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, env=run_env,
-                start_new_session=True,
-            )
-            _startup_log(f"spawned pid={proc.pid}")
+            rc, out, err, timed_out, first_ms = _capture_process(
+                argv, cwd=tmp, env=run_env, timeout=stall_timeout)
         except OSError as exc:
             return EvalResult(raw=f"opencode invocation failed: {exc}")
-        try:
-            out, err = proc.communicate(timeout=stall_timeout)
-        except subprocess.TimeoutExpired:
-            _startup_log(f"timeout pid={proc.pid} after {stall_timeout}s; "
-                         "killing the process group")
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass  # group already gone
-            # RM-021 AC4: reap the killed group's pipes so the captured server
-            # stderr (where opencode logs the resolving cause) is persisted.
-            _out, _err = proc.communicate()
+        total_ms = int((time.monotonic() - started) * 1000)
+        if timed_out:
+            seen = "none" if first_ms is None else f"{first_ms}ms"
+            _startup_log(
+                f"timeout after {stall_timeout}s; first_event={seen} "
+                f"total={total_ms}ms; killed the process group")
             return EvalResult(
                 raw=(f"eval stall: subprocess timed out after {stall_timeout}s "
-                     f"with no completion (transient; subprocess group killed)"),
-                stderr=_redact(_err or "")[:4096])
+                     f"with no completion (first event: {seen}; transient; "
+                     "subprocess group killed)"),
+                stderr=_redact(err or "")[:4096],
+                first_event_ms=first_ms)
+        _startup_log(
+            f"completed rc={rc} first_event={first_ms}ms total={total_ms}ms")
         # Keep the workdir: the artifact class reads files the agent wrote
         # there; run_eval closes (removes) it after matching.
         keep = True
-        return EvalResult(raw=out, stderr=err, workdir=tmp, cleanup=True)
+        return EvalResult(raw=out, stderr=err, workdir=tmp, cleanup=True,
+                          first_event_ms=first_ms)
     finally:
         if not keep:
             shutil.rmtree(tmp, ignore_errors=True)
