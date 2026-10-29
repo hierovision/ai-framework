@@ -27,7 +27,6 @@ export interface ObserverConfig {
   loopRepeats: number;
   generationSeconds: number;
   milestoneMinIntervalSeconds: number;
-  statuses: string[];
   milestoneDescription: string;
   titleMaxLength: number;
 }
@@ -40,7 +39,6 @@ export const DEFAULTS: ObserverConfig = {
   loopRepeats: 3,
   generationSeconds: 600,
   milestoneMinIntervalSeconds: 30,
-  statuses: ["running", "waiting", "warning", "failed", "completed"],
   milestoneDescription: "delegation-observer milestone",
   titleMaxLength: 160,
 };
@@ -61,11 +59,11 @@ export interface Delegate {
   phase: string;
   startedAt: number;
   lastActivityAt: number;
-  quietSinceAt: number;
   busy: boolean;
   openStep: boolean;
   toolInFlight: boolean;
   tool: { name: string; target: string; id: string } | null;
+  calls: Map<string, true>;
   loop: { key: string; count: number } | null;
   needsInput: { kind: "permission" | "form"; detail: string; since: number } | null;
   warning: string | null;
@@ -89,7 +87,8 @@ export interface ObserverState {
 export interface Milestone {
   sessionID: string;
   parentID: string;
-  kind: "start" | "first-tool" | "needs-input" | "stall" | "thrash" | "resume" | "terminal";
+  kind: "start" | "first-tool" | "needs-input" | "denied" | "stall" | "thrash"
+    | "retry" | "resume" | "terminal";
   text: string;
   description: string;
   attention: boolean;
@@ -115,6 +114,7 @@ export interface SessionInfoLike {
   parent_id?: string | null;
   title?: string | null;
   agent?: string | null;
+  time?: { created?: number } | null;
 }
 
 // --- title marker contract -------------------------------------------------
@@ -126,13 +126,26 @@ export function parseDelegationTitle(title: unknown) {
   return { orchestratorID: match[1], agent: match[2], task: match[3].trim() };
 }
 
+export function sanitizeSessionID(value: unknown): string {
+  const flat = String(value ?? "").replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return flat || "unknown";
+}
+
+export function sanitizeAgent(value: unknown): string {
+  const flat = String(value ?? "").replace(/[^A-Za-z0-9_.-]+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return flat || "unknown";
+}
+
 export function delegationTitle({ orchestratorID, agent, task }: {
   orchestratorID: string;
   agent: string;
   task?: string;
 }, config: ObserverConfig = DEFAULTS) {
   const flat = String(task ?? "").replace(/\s+/g, " ").trim();
-  const head = `${TITLE_PREFIX}${orchestratorID}] ${agent}: `;
+  const head = `${TITLE_PREFIX}${sanitizeSessionID(orchestratorID)}] `
+    + `${sanitizeAgent(agent)}: `;
   const room = Math.max(8, config.titleMaxLength - head.length);
   const body = flat.length > room ? flat.slice(0, room - 3).trimEnd() + "..." : flat;
   return (head + body).slice(0, config.titleMaxLength);
@@ -171,13 +184,13 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
     task: marker?.task || (info.title ?? "").trim() || "delegated task",
     status: "running",
     phase: "starting",
-    startedAt: state.now(),
+    startedAt: info.time?.created ?? state.now(),
     lastActivityAt: state.now(),
-    quietSinceAt: state.now(),
     busy: false,
     openStep: false,
     toolInFlight: false,
     tool: null,
+    calls: new Map(),
     loop: null,
     needsInput: null,
     warning: null,
@@ -250,7 +263,6 @@ function alert(m: Milestone): Alert {
 
 function touch(d: Delegate, now: number) {
   d.lastActivityAt = now;
-  d.quietSinceAt = now;
   if (d.status === "warning") d.status = "running";
   d.warning = null;
   for (const key of [...d.emitted]) {
@@ -277,19 +289,33 @@ function applyTool(state: ObserverState, d: Delegate, name: string, target: stri
   d.toolInFlight = running;
   d.tool = running ? { name, target, id } : null;
   if (running) {
-    const key = `${name}:${target}`;
-    if (!d.loop || d.loop.key !== key) d.loop = { key, count: 0 };
-    d.loop.count += 1;
-    const first = milestone(state, d, "first-tool", "first-tool",
-      `first tool: ${key}`);
-    if (first) state.pending.push(first);
-    if (d.loop.count >= state.config.loopRepeats) {
-      const thrash = milestone(state, d, "thrash", `thrash:${key}`,
-        `thrash: ${key} x${d.loop.count}`, { attention: true });
-      if (thrash) {
-        d.warning = `thrash: ${key} x${d.loop.count}`;
-        if (d.status === "running") d.status = "warning";
-        state.pending.push(thrash);
+    // One call, one count. `session.message.content.updated` re-delivers the
+    // same tool block (same id, same target) on every delta; counting those
+    // would flag thrash for a single long-running call. The loop key is the
+    // target (tool:target's discriminating half) so a late tool name cannot
+    // re-key an already-counted call.
+    const counted = Boolean(id) && d.calls.has(id);
+    if (id && !counted) {
+      d.calls.set(id, true);
+      if (d.calls.size > 64) {
+        const oldest = d.calls.keys().next().value;
+        if (oldest !== undefined) d.calls.delete(oldest);
+      }
+    }
+    if (target && !counted) {
+      if (!d.loop || d.loop.key !== target) d.loop = { key: target, count: 0 };
+      d.loop.count += 1;
+      const first = milestone(state, d, "first-tool", "first-tool",
+        `first tool: ${name}${target ? `: ${target}` : ""}`);
+      if (first) state.pending.push(first);
+      if (d.loop.count >= state.config.loopRepeats) {
+        const thrash = milestone(state, d, "thrash", `thrash:${target}`,
+          `thrash: ${name}: ${target} x${d.loop.count}`, { attention: true });
+        if (thrash) {
+          d.warning = `thrash: ${name}: ${target} x${d.loop.count}`;
+          if (d.status === "running") d.status = "warning";
+          state.pending.push(thrash);
+        }
       }
     }
   }
@@ -303,7 +329,10 @@ export function observe(state: ObserverState, event: any): ObserveResult {
   const out: ObserveResult = { milestones: [], alerts: [] };
   const type = event?.type ?? "";
   const data = event?.data ?? event?.properties ?? {};
-  const sessionID = data?.sessionID ?? data?.session?.id ?? data?.info?.sessionID;
+  // FormInfo1 nests the session id (`data.form.sessionID`); every other
+  // event used here carries it top-level (client types FormCreated/FormInfo1).
+  const sessionID = data?.sessionID ?? data?.session?.id
+    ?? data?.info?.sessionID ?? data?.form?.sessionID;
   const now = state.now();
   state.lastEventAt = now;
 
@@ -359,7 +388,20 @@ export function observe(state: ObserverState, event: any): ObserveResult {
     case "form.replied":
     case "form.cancelled": {
       if (!d.needsInput) break;
+      const pending = d.needsInput;
       d.needsInput = null;
+      if (type === "permission.replied" && data.reply === "reject") {
+        // A denial is an intervention, not progress (AC8): warn, never
+        // claim the child resumed. The next real activity clears it.
+        touch(d, now);
+        d.warning = `permission denied: ${pending.detail}`;
+        d.status = "warning";
+        d.phase = "permission denied";
+        const m = milestone(state, d, "denied", `denied:${pending.detail}`,
+          `${label(d)} permission DENIED: ${pending.detail}`, { attention: true });
+        if (m) out.milestones.push(m);
+        break;
+      }
       d.status = "running";
       d.phase = "resumed";
       touch(d, now);
@@ -376,22 +418,50 @@ export function observe(state: ObserverState, event: any): ObserveResult {
       if (kind === "retry") {
         d.warning = `retry${status.attempt ? ` attempt ${status.attempt}` : ""}`;
         d.status = "warning";
+        d.phase = d.warning;
+        const key = `retry:${status.attempt ?? "?"}`;
+        const m = milestone(state, d, "retry", key,
+          `${label(d)} ${d.warning}`, { attention: true });
+        if (m) out.milestones.push(m);
       } else if (kind === "busy") {
         d.status = d.needsInput ? "waiting" : "running";
         if (!d.needsInput) d.phase = "generating";
         touch(d, now);
-      } else if (d.status !== "waiting") {
-        d.status = "running";
+      } else {
+        // idle/unknown is still an observed transition: refresh the clock so
+        // a completed turn is not classified dead by the next tick.
+        touch(d, now);
+        if (d.status !== "waiting") d.status = "running";
+        d.phase = "idle";
       }
       break;
     }
     case "session.step.started":
       d.openStep = true;
+      d.phase = "generating";
+      touch(d, now);
       break;
-    case "session.step.ended":
-    case "session.step.failed":
+    case "session.step.ended": {
+      // A long generation ending normally is progress: refresh the clock,
+      // close the step, and take the vendor's totals. Without the refresh the
+      // next tick would classify the completed turn dead (AC8).
+      touch(d, now);
       d.openStep = false;
+      d.phase = "thinking";
+      if (typeof data.cost === "number") d.cost = data.cost;
+      const t = data.tokens ?? {};
+      if (typeof t.input === "number") d.tokens.input = t.input;
+      if (typeof t.output === "number") d.tokens.output = t.output;
       break;
+    }
+    case "session.step.failed": {
+      touch(d, now);
+      d.openStep = false;
+      d.phase = "step failed";
+      d.warning = `step failed: ${data.error?.message ?? "unknown"}`;
+      d.status = "warning";
+      break;
+    }
     case "session.tool.called": {
       const name = data.name ?? data.tool ?? data.metadata?.tool ?? "tool";
       applyTool(state, d, name, toolTarget(name, data.input), String(data.id ?? ""),
@@ -494,4 +564,33 @@ export function disconnect(state: ObserverState, reason = "event stream disconne
 export function reconnect(state: ObserverState) {
   state.connection = "connected";
   state.degradation = null;
+}
+
+// --- shared health record (server -> TUI degradation channel) --------------
+
+/**
+ * The server part cannot push to the TUI: they are separate processes. It
+ * writes this small health record instead, and the TUI reads it only when it
+ * needs the degradation channel — never as the progress source (AC3).
+ */
+export function healthPath(directory: string | null | undefined): string | null {
+  if (!directory) return null;
+  const base = String(directory).replace(/\/+$/, "");
+  return `${base}/.scratch/delegation-observer/health.json`;
+}
+
+export function parseHealthRecord(text: string | null | undefined) {
+  if (!text || !String(text).trim()) return null;
+  try {
+    const data = JSON.parse(String(text));
+    if (!data || typeof data !== "object") return null;
+    return {
+      connection: typeof data.connection === "string" ? data.connection : "unavailable",
+      degradation: typeof data.degradation === "string" && data.degradation
+        ? data.degradation : null,
+      updated: typeof data.updated === "number" ? data.updated : null,
+    };
+  } catch {
+    return null;
+  }
 }

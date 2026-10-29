@@ -192,6 +192,27 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
   both the loader's `loading plugin` line for this directory and the
   `auto-compact-at-threshold initialized` marker. Three pieces of evidence
   are required: config wiring, runtime probe, and loader log.
+- **TUI context correction (probed 2026-10-29, live TUI).** The keymap is
+  `ctx.keymap`, not `ctx.ui.keymap` (the latter is undefined and fails the TUI
+  part at setup). A plugin command registered with `palette: true` / `slash`
+  still does **not** appear in this build's ctrl+p palette or slash completion
+  (both returned "No matching commands"), while `keymap.shortcuts(id)` resolves
+  a declared `bind` — so bindings are the working control surface in 2.1.4.
+  There is **no `--port` flag** on the TUI (`Unrecognized flag: --port`), so a
+  standalone TUI exposes no server URL.
+- **Event shapes that matter (generated 2.1.4 types).**
+  `form.created.data = {form: FormInfo1}` (session id nested at
+  `data.form.sessionID`); `permission.replied.data.reply` is
+  `once|always|reject` (a rejection is a denial, not a resume);
+  `session.step.ended.data` carries `finish`, `cost`, `tokens`;
+  `session.tool.called.data` has **no tool name** (name/target come from
+  `session.message.content.updated`).
+- **Managed service probe (2026-10-29).** `opencode service set port <n>` +
+  `service start` works under an isolated `XDG_CONFIG_HOME` (writes
+  `service.json` there; `OPENCODE_PASSWORD` is required by clients).
+  `GET /api/plugin` is location-scoped and returned an empty list for the
+  service's location, so a plugin wired in the config root is not necessarily
+  the record the TUI sees.
 - **Delegation association marker (RM-069, 2026-10-29).** A run-vehicle child
   is identified by its session **title**
   `[delegate:<orchestrator-session-id>] <agent>: <task>`, set with `run

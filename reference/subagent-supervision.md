@@ -318,8 +318,11 @@ The durable stack above stays in place as the safety fallback.
 **Contract.** Every local delegate — in-session `subagent` or run-vehicle —
 is non-blocking and observable:
 
-- the dispatch returns a **handle**; the owner/orchestrator can take other
-  turns while the child runs;
+- the dispatch returns a **handle**: in-session `subagent` runs as a
+  background tab while the parent model may keep its turn; the run-vehicle
+  form is `dispatch_agent.py --detach` (returns pid + log + heartbeat +
+  session file immediately, the child keeps running). A foreground CLI wait is
+  not the orchestrator's vehicle;
 - a live status surface shows agent, task, elapsed/quiet time, current
   tool/phase, tokens/cost and one of `running | waiting | warning | failed |
   completed`;
@@ -346,10 +349,11 @@ heartbeat files. Quiet/stall evaluation is a local clock over those event
 timestamps (5 s), not a poll of any file.
 
 **Milestones (synthetic, no model turn).** start, first tool, needs-input,
-stall, thrash, resume, terminal. Routine milestones are capped at one per
-delegate per 30 s and deduplicated; attention milestones (needs-input, stall,
-thrash) fire immediately once per distinct condition; terminal fires exactly
-once. The terminal wake remains the single prompt.
+denied, stall, thrash, retry, resume, terminal. Routine milestones are capped
+at one per delegate per 30 s and deduplicated; attention milestones
+(needs-input, denied, stall, thrash, retry) fire immediately once per distinct
+condition; terminal fires exactly once. A denied permission is a warning, never
+a resume. The terminal wake remains the single prompt.
 
 **Thresholds.** One vocabulary, sourced from `scripts/supervision_contract.json`
 (generated from `watch_agent.py` / `observe_completion.py`): stall 240 s,
@@ -362,6 +366,19 @@ association, the strip shows a warning and the footer shows
 `! delegates unavailable`. The watchdog/wake path remains authoritative; the
 system never claims live visibility it does not have. The observer can also
 write the opt-in `--status-file` snapshot as a last-resort status surface.
+
+**Trust boundary.** A title marker is a claim, not proof: before the first
+synthetic message the parent must resolve as a root session
+(`session.get`, no `parentID`). An unverified parent keeps its row locally but
+receives no injected message; the drop is logged and published in the health
+record. Marker fields are sanitized (`[A-Za-z0-9_-]` id, `[A-Za-z0-9_.-]`
+agent) and round-trip tested.
+
+**Health channel.** The server part cannot push to the TUI (separate
+processes), so it writes `<location>/.scratch/delegation-observer/health.json`
+on every state change. The TUI reads that record for the degradation banner
+only — never for progress. The observer's `--status-file` snapshot is the
+last-resort surface and is read by the `delegation.status` command.
 
 **Authority boundary.** The TUI's interrupt is
 `POST /api/session/{id}/interrupt` on the same session — never a new session,

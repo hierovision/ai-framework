@@ -12,23 +12,28 @@
  *   - ctx.data.listen(handler), ctx.data.session.{list,status,permission,form}
  *   - ctx.ui.slot({ append|prepend|before|after|replace, render })
  *     slots: sidebar.content, home.footer.status, session.panel
- *   - ctx.ui.toast.show, ctx.attention.notify, ctx.ui.keymap.layer,
+ *   - ctx.ui.toast.show, ctx.attention.notify, ctx.keymap.layer,
  *     ctx.ui.dialog.{select,prompt}, ctx.ui.tabs.focus, ctx.ui.panel.open
  *   - ctx.client.session.{prompt,interrupt} and ctx.client.plugin.list
  * The loader resolves this file as <plugin-dir>/tui (binary `Zg` probe).
  */
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { readFileSync } from "node:fs";
+import { For, Show, createMemo, createSignal } from "solid-js";
 
 import {
   associateSessionInfo,
   createState,
-  tick,
+  healthPath,
   observe,
+  parseHealthRecord,
+  tick,
 } from "./state.ts";
 import {
+  associationGap,
   createControls,
   degradationBanner,
   footerStatus,
+  readStatusSnapshot,
   sidebarLines,
   visibleRows,
 } from "./view.ts";
@@ -65,7 +70,27 @@ export function createTuiModel(ctx: any) {
   const state = createState(config, Date.now);
   const [version, setVersion] = createSignal(0);
   const [pluginStatus, setPluginStatus] = createSignal({ loaded: true, state: "active" });
+  const [serverHealth, setServerHealth] = createSignal<string | null>(null);
   const bump = () => setVersion((v) => v + 1);
+
+  // Shared degradation channel (server -> TUI). Read on events/degradation
+  // checks only, never as the progress source, and throttled so a busy stream
+  // does not turn into file polling.
+  const healthFile = config.healthFile
+    ?? healthPath(ctx?.location?.directory ?? ctx?.location?.path);
+  let lastHealthRead = 0;
+  const refreshServerHealth = () => {
+    if (!healthFile) return;
+    const now = Date.now();
+    if (now - lastHealthRead < 1_000) return;
+    lastHealthRead = now;
+    try {
+      const record = parseHealthRecord(readFileSync(healthFile, "utf8"));
+      setServerHealth(record?.degradation ?? null);
+    } catch {
+      // Absent health file is not degradation by itself.
+    }
+  };
 
   // Bootstrap: children that already exist when the TUI starts.
   const bootstrap = () => {
@@ -76,6 +101,7 @@ export function createTuiModel(ctx: any) {
           parentID: info.parentID,
           title: info.title,
           agent: info.agent,
+          time: info.time,
         });
       }
     } catch {
@@ -109,25 +135,31 @@ export function createTuiModel(ctx: any) {
 
   const apply = (result: any) => {
     for (const milestone of result.milestones) alertFor(milestone);
-    if (result.milestones.length || result.alerts.length) bump();
   };
 
+  // AC3: every event re-renders. The interval below exists only for the
+  // clock-driven classification (quiet/stall/dead), never as the refresh path.
   const stopListening = ctx.data.listen((event: any) => {
     apply(observe(state, event?.details ?? event));
+    refreshServerHealth();
+    bump();
   });
 
   bootstrap();
   const timer = setInterval(() => {
     apply(tick(state));
+    refreshServerHealth();
     bump();
   }, TICK_MS);
   timer?.unref?.();
 
   const refreshPlugin = async () => {
     setPluginStatus(await readPluginStatus(ctx.client));
+    refreshServerHealth();
     bump();
   };
   void refreshPlugin();
+  refreshServerHealth();
 
   const rows = createMemo(() => {
     version();
@@ -137,13 +169,16 @@ export function createTuiModel(ctx: any) {
   const banner = createMemo(() => {
     version();
     const status = pluginStatus();
-    let running = 0;
+    let sessions: any[] = [];
     try {
-      running = ctx.data.session.list()
-        .filter((s: any) => ctx.data.session.status(s.id) === "running").length;
+      sessions = ctx.data.session.list().map((s: any) => ({
+        ...s,
+        status: ctx.data.session.status(s.id),
+      }));
     } catch {
-      running = 0;
+      sessions = [];
     }
+    const gap = associationGap(sessions, rows());
     const stale = state.lastEventAt !== null
       && rows().some((r) => r.status === "running")
       && Date.now() - state.lastEventAt > state.config.stallSeconds * 2000;
@@ -152,8 +187,9 @@ export function createTuiModel(ctx: any) {
       pluginState: status.state,
       connection: stale ? "unavailable" : state.connection,
       disabled: config.enabled === false,
-      runningSessions: running,
-      associated: rows().filter((r) => r.status === "running").length,
+      serverHealth: serverHealth(),
+      runningChildren: gap.runningChildren,
+      associatedActive: gap.associatedActive,
     });
   });
 
@@ -189,18 +225,55 @@ export function createTuiModel(ctx: any) {
     const result: any = input === undefined
       ? await control.run()
       : await control.run(input);
+    if (id === "interrupt" && result?.ok) {
+      ctx.ui.toast.show({
+        message: `interrupt accepted (session ${row.sessionID}${result.interrupted === null ? "" : `, interrupted=${result.interrupted}`})`,
+        variant: "info",
+      });
+      return;
+    }
     if (result && result.ok === false) {
       ctx.ui.toast.show({ message: result.reason ?? "failed", variant: "warning" });
     }
   }
 
-  ctx.ui.keymap.layer(() => ({
+  async function showStatus() {
+    refreshServerHealth();
+    const warning = banner();
+    if (!warning) {
+      await refreshPlugin();
+      ctx.ui.toast.show({ message: "delegation observer healthy", variant: "info" });
+      return;
+    }
+    let fallback = "";
+    if (config.statusFile) {
+      try {
+        const snapshot = readStatusSnapshot(readFileSync(config.statusFile, "utf8"));
+        if (snapshot) {
+          fallback = ` · watchdog: ${snapshot.agent} ${snapshot.outcome}`
+            + (snapshot.terminal ? " (terminal)" : "");
+        }
+      } catch {
+        fallback = "";
+      }
+    }
+    ctx.ui.toast.show({
+      title: "delegation degraded",
+      message: `${warning}${fallback}`,
+      variant: "warning",
+    });
+  }
+
+  ctx.keymap.layer(() => ({
+    group: "delegation",
     commands: [
       {
         id: "delegation.focus",
         title: "Delegation: focus a delegate",
         group: "delegation",
         palette: true,
+        bind: "alt+d",
+        slash: { name: "delegation-focus" },
         run: () => runControl("focus"),
       },
       {
@@ -208,7 +281,13 @@ export function createTuiModel(ctx: any) {
         title: "Delegation: steer a delegate",
         group: "delegation",
         palette: true,
-        run: async () => {
+        bind: "alt+s",
+        slash: { name: "delegation-steer", arguments: true },
+        run: async (input?: string) => {
+          if (typeof input === "string" && input.trim()) {
+            await runControl("steer", input);
+            return;
+          }
           const text = await ctx.ui.dialog.prompt({
             title: "Steer delegate",
             description: "Sent to the same session id (delivery=steer)",
@@ -222,6 +301,8 @@ export function createTuiModel(ctx: any) {
         title: "Delegation: interrupt a delegate",
         group: "delegation",
         palette: true,
+        bind: "alt+x",
+        slash: { name: "delegation-interrupt" },
         run: () => runControl("interrupt"),
       },
       {
@@ -229,25 +310,33 @@ export function createTuiModel(ctx: any) {
         title: "Delegation: open the delegate panel",
         group: "delegation",
         palette: true,
+        bind: "alt+p",
+        slash: { name: "delegation-panel" },
         run: () => { ctx.ui.panel.open("delegates"); },
       },
       {
         id: "delegation.status",
-        title: "Delegation: re-check observer status",
+        title: "Delegation: check observer health",
         group: "delegation",
         palette: true,
-        run: () => refreshPlugin(),
+        bind: "alt+h",
+        slash: { name: "delegation-status" },
+        run: () => showStatus(),
       },
     ],
   }));
 
-  onCleanup(() => {
-    stopListening?.();
+  const dispose = () => {
+    try {
+      stopListening?.();
+    } catch {
+      // ignore teardown faults
+    }
     clearInterval(timer);
     state.connection = "disconnected";
-  });
+  };
 
-  return { state, rows, banner, refreshPlugin, version };
+  return { state, rows, banner, refreshPlugin, version, dispose };
 }
 
 function StatusStrip(props: any) {
@@ -337,6 +426,7 @@ export function createDefinition(Plugin: any) {
         });
       }
       return () => {
+        model.dispose();
         for (const dispose of disposers) {
           try {
             dispose?.();

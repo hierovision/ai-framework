@@ -1286,6 +1286,106 @@ def test_interactive_dispatch_joins_the_shared_service():
         shutil.rmtree(work, ignore_errors=True)
 
 
+def _run_detached(mode, extra=None):
+    """Launch a detached dispatch; the parent returns a handle, the child runs."""
+    td = tempfile.mkdtemp(prefix="dispatch-detach-")
+    bin_dir = _make_stub(td)
+    prompt = os.path.join(td, "prompt.md")
+    with open(prompt, "w", encoding="utf-8") as fh:
+        fh.write("Do the thing.")
+    out = os.path.join(td, "result.md")
+    logs = os.path.join(td, "logs")
+    hb = os.path.join(td, "progress.log")
+    cmd = [sys.executable, DISPATCH, "--agent", "architect",
+           "--prompt-file", prompt, "--out", out, "--logs-dir", logs,
+           "--timeout", "20", "--heartbeat", hb] + list(extra or [])
+    env = dict(os.environ)
+    env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
+    env["STUB_MODE"] = mode
+    env["OPENCODE_V2_NO_SERVICE"] = "1"
+    env.pop("OPENCODE_CONFIG_CONTENT", None)
+    started = time.monotonic()
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=env,
+                          cwd=REPO, timeout=30)
+    return SimpleNamespace(td=td, proc=proc, heartbeat=hb, result=out, logs=logs,
+                           elapsed=time.monotonic() - started,
+                           session_file=hb + ".session",
+                           log_file=hb + ".dispatch.log")
+
+
+def test_detach_returns_a_handle_and_the_child_keeps_running():
+    """RM-069 AC2: the orchestrator vehicle returns immediately with a handle;
+    heartbeat/result/run-log/session file arrive from the detached child."""
+    r = _run_detached("paced", ["--detach"])
+    try:
+        assert r.proc.returncode == 0, (r.proc.returncode, r.proc.stderr)
+        assert r.elapsed < 5, f"detach blocked for {r.elapsed:.1f}s"
+        assert "detached pid=" in r.proc.stdout, r.proc.stdout
+        assert "heartbeat=" + r.heartbeat in r.proc.stdout, r.proc.stdout
+        assert "session_file=" + r.session_file in r.proc.stdout, r.proc.stdout
+        assert "session_id=" not in r.proc.stdout, r.proc.stdout
+
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            if "DONE" in _read(r.heartbeat) or "BLOCKED" in _read(r.heartbeat):
+                break
+            time.sleep(0.2)
+        hb = _read(r.heartbeat)
+        assert "DONE ok" in hb, hb
+        assert "session_id=ses_stub_paced" in _read(r.session_file), \
+            _read(r.session_file)
+        assert _read(r.result).strip() == "one", _read(r.result)
+        records = []
+        for name in sorted(os.listdir(r.logs)):
+            if name.endswith(".jsonl"):
+                records += [json.loads(l) for l in
+                            _read(os.path.join(r.logs, name)).splitlines() if l]
+        assert len(records) == 1 and records[0]["outcome"] == "success", records
+    finally:
+        shutil.rmtree(r.td, ignore_errors=True)
+
+
+def test_detach_requires_a_durable_surface():
+    work = tempfile.mkdtemp(prefix="dispatch-detach-nohb-")
+    try:
+        bin_dir = _make_stub(work)
+        prompt = os.path.join(work, "prompt.md")
+        with open(prompt, "w", encoding="utf-8") as fh:
+            fh.write("Do it.")
+        env = dict(os.environ)
+        env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
+        env["STUB_MODE"] = "valid"
+        env["OPENCODE_V2_NO_SERVICE"] = "1"
+        proc = subprocess.run(
+            [sys.executable, DISPATCH, "--agent", "architect",
+             "--prompt-file", prompt, "--detach"],
+            capture_output=True, text=True, env=env, cwd=REPO, timeout=30)
+        assert proc.returncode == 2, (proc.returncode, proc.stdout)
+        assert "--detach requires --heartbeat" in proc.stderr, proc.stderr
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_headless_dispatch_does_not_join_the_service():
+    """The shared-service join is gated on an explicit orchestrator marker."""
+    work = tempfile.mkdtemp(prefix="dispatch-headless-service-")
+    try:
+        dump = os.path.join(work, "argv.json")
+        r = _run("valid", extra=["--profile", "none",
+                                 "--contract", "implement-handoff"],
+                 env_extra={"STUB_DUMP_ARGV": dump,
+                            "OPENCODE_V2_NO_SERVICE": "",
+                            "STUB_SERVICE_URL": "http://127.0.0.1:4096"})
+        assert r.rc == 0, (r.rc, r.stderr)
+        v2.reset_service_cache()
+        argv = json.loads(r.argv_dump)
+        assert "--server" not in argv, argv
+        assert "--title" not in argv, argv
+    finally:
+        v2.reset_service_cache()
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

@@ -10,10 +10,13 @@ import test from "node:test";
 
 import { createState, observe, tick } from "./state.ts";
 import {
+  associationGap,
   createControls,
   degradationBanner,
   footerStatus,
+  isChildSession,
   projectDelegate,
+  readStatusSnapshot,
   sidebarLines,
   visibleRows,
 } from "./view.ts";
@@ -97,17 +100,20 @@ test("status transitions surface in the projection", () => {
 
 test("rows are ordered attention-first, then newest", () => {
   const state = seeded();
+  clock += 1_000;
   observe(state, {
     type: "session.created",
     data: { sessionID: "ses_b", parentID: "ses_parent", title: "b", agent: "planner" },
   });
-  clock += 1_000;
+  // no attention state: newest first
+  let rows = visibleRows(state, clock);
+  assert.deepEqual(rows.map((r) => r.sessionID), ["ses_b", "ses_child"]);
   observe(state, {
     type: "permission.asked",
-    data: { sessionID: "ses_b", action: "read", resources: ["x"] },
+    data: { sessionID: "ses_child", action: "read", resources: ["x"] },
   });
-  const rows = visibleRows(state, clock);
-  assert.deepEqual(rows.map((r) => r.sessionID), ["ses_b", "ses_child"]);
+  rows = visibleRows(state, clock);
+  assert.deepEqual(rows.map((r) => r.sessionID), ["ses_child", "ses_b"]);
 });
 
 test("footer and sidebar summaries are compact and countable", () => {
@@ -135,20 +141,36 @@ test("footer is empty when nothing is delegated", () => {
   assert.deepEqual(sidebarLines([], 4), []);
 });
 
-test("controls disable actions the row cannot accept, with a reason", () => {
+test("controls stay available while a row is waiting or merely quiet", () => {
   const state = seeded();
-  let controls = createControls(state.delegates.get("ses_child"), {});
-  const byId = Object.fromEntries(controls.map((c) => [c.id, c]));
-  assert.equal(byId.focus.enabled, true);
-  assert.equal(byId.steer.enabled, true);
-  assert.equal(byId.interrupt.enabled, true);
+  observe(state, {
+    type: "permission.asked",
+    data: { sessionID: "ses_child", action: "read", resources: ["x"] },
+  });
+  let byId = Object.fromEntries(createControls(state.delegates.get("ses_child"), {})
+    .map((c) => [c.id, c]));
+  assert.equal(byId.interrupt.enabled, true, "a waiting child can be interrupted");
+  assert.equal(byId.steer.enabled, true, "a waiting child can still be steered");
+
+  // clock-classified failure is not a terminal state: controls remain
+  const dead = createState({}, now);
+  observe(dead, {
+    type: "session.created",
+    data: { sessionID: "ses_d", parentID: "ses_parent", title: "d", agent: "x" },
+  });
+  clock += 1_000_000;
+  tick(dead, clock);
+  assert.equal(dead.delegates.get("ses_d").status, "failed");
+  byId = Object.fromEntries(createControls(dead.delegates.get("ses_d"), {})
+    .map((c) => [c.id, c]));
+  assert.equal(byId.interrupt.enabled, true, "dead-but-not-terminal stays actionable");
 
   observe(state, {
     type: "session.execution.succeeded",
     data: { sessionID: "ses_child" },
   });
-  controls = createControls(state.delegates.get("ses_child"), {});
-  const done = Object.fromEntries(controls.map((c) => [c.id, c]));
+  const done = Object.fromEntries(createControls(state.delegates.get("ses_child"), {})
+    .map((c) => [c.id, c]));
   assert.equal(done.steer.enabled, false);
   assert.match(done.steer.reason, /terminal/);
   assert.equal(done.interrupt.enabled, false);
@@ -211,8 +233,54 @@ test("degradation banner names the reason and the fallback", () => {
     /disabled.*watchdog/,
   );
   assert.match(
-    degradationBanner({ pluginLoaded: true, runningSessions: 2, associated: 0 }),
-    /2 running.*no delegate association.*watchdog/,
+    degradationBanner({ pluginLoaded: true, serverHealth: "synthetic failed: nope" }),
+    /server.*synthetic failed.*watchdog/,
   );
-  assert.equal(degradationBanner({ pluginLoaded: true, runningSessions: 1, associated: 1 }), null);
+  assert.match(
+    degradationBanner({ pluginLoaded: true, runningChildren: 2, associatedActive: 0 }),
+    /2 running child.*no delegate association.*watchdog/,
+  );
+  assert.equal(degradationBanner({
+    pluginLoaded: true, runningChildren: 1, associatedActive: 1,
+  }), null);
+});
+
+test("the orchestrator/root is never counted as an unassociated child", () => {
+  const sessions = [
+    { id: "ses_root", parentID: undefined, title: "owner session" },
+    { id: "ses_child", parentID: "ses_root", title: "worker" },
+  ];
+  assert.deepEqual(associationGap(sessions, [
+    { sessionID: "ses_child", status: "running", terminal: null },
+    { sessionID: "ses_root", status: "running", terminal: null },
+  ]), { runningChildren: 1, associatedActive: 1, unassociated: 0 });
+  // a busy root alone is not a gap
+  assert.deepEqual(associationGap([sessions[0]], []),
+    { runningChildren: 0, associatedActive: 0, unassociated: 0 });
+  // a run-vehicle child is recognised by its marker
+  assert.equal(isChildSession({
+    id: "ses_v", title: "[delegate:ses_root] reviewer: review",
+  }), true);
+  assert.deepEqual(associationGap([
+    sessions[1],
+    { id: "ses_v", title: "[delegate:ses_root] reviewer: review" },
+  ], [{ sessionID: "ses_child", status: "running", terminal: null }]),
+  { runningChildren: 2, associatedActive: 1, unassociated: 1 });
+});
+
+test("the fallback status snapshot is parsed only when it is real", () => {
+  const parsed = readStatusSnapshot(JSON.stringify({
+    ts: "2026-10-29T20:00:00Z",
+    agent: "architect",
+    child: "ses_c",
+    outcome: "success",
+    terminal: true,
+    heartbeat: "/tmp/x.log",
+  }));
+  assert.equal(parsed.agent, "architect");
+  assert.equal(parsed.outcome, "success");
+  assert.equal(parsed.terminal, true);
+  assert.equal(readStatusSnapshot("not json"), null);
+  assert.equal(readStatusSnapshot(""), null);
+  assert.equal(readStatusSnapshot(JSON.stringify({ outcome: "" })), null);
 });

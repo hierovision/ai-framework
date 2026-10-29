@@ -92,6 +92,9 @@ check the map or a judgment-led lane; consults carry `--contract` (RM-044).
   `--delegation-to <orchestrator-session-id>` (default: `--wake-to`) adds the
   observer's title marker and, when no grant requires a private server, joins
   the running shared service so the TUI event stream owns the child (§7).
+  Orchestrator dispatch uses `--detach`: it returns pid/log/heartbeat/session
+  file immediately and the child keeps writing those durable surfaces; the
+  completion observer still wakes the parent.
 - While a delegated run is in flight, supervision follows RM-022
   (`scripts/watch_agent.py`): a stalled or blocking run is flagged within one
   poll. A dispatch wave runs under the session-tree guard

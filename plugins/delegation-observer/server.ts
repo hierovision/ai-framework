@@ -8,19 +8,29 @@
  * meaningful transitions. Synthetic messages add no model turn — the only
  * progress-path prompt remains the RM-058 terminal wake.
  *
- * Degradation is never silent: a failed subscription, a closed stream, or a
- * rejected synthetic message is logged to stderr (2.1.4's plugin context has
- * no log domain) and recorded on the state the TUI mirrors.
+ * Trust boundary (review M6): a title marker is a claim, not proof. Before the
+ * first synthetic message to a parent, the parent is looked up and must be a
+ * root session (no `parentID`). An unverified parent keeps its delegate row in
+ * the local view but receives NO injected message; the drop is logged and
+ * surfaced in the shared health record.
+ *
+ * Degradation is never silent: a failed subscription, a closed stream, a
+ * rejected synthetic message, or a dropped unverified milestone is written to
+ * stderr AND to the shared health record the TUI part reads
+ * (`<location>/.scratch/delegation-observer/health.json`).
  *
  * V2 contract used (validated against @opencode/plugin 2.1.4,
  * @opencode/client 2.1.4, 2026-10-29):
  *   - Plugin.define({ id, setup })                     -> definition
  *   - ctx.event.subscribe({ signal }) -> AsyncIterable  -> OpenCodeEvent
- *   - ctx.session.list() -> { data: SessionInfo[] }
+ *   - ctx.session.list() / ctx.session.get({ sessionID })
  *   - ctx.session.synthetic({ sessionID, text, description, metadata })
  *   - entrypoints are resolved by the loader as <dir>/server and <dir>/tui
  *     (`Zg` in the 2.1.4 binary), so no package export map is involved.
  */
+
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 import {
   DEFAULTS,
@@ -29,12 +39,14 @@ import {
   createState,
   degrade,
   disconnect,
+  healthPath,
   observe,
   tick,
 } from "./state.ts";
 
 export const PLUGIN_ID = "delegation-observer";
 const TICK_MS = 5_000;
+const TRUST_RETRY_MS = 60_000;
 
 function writeLog(level: string, message: string, extra: Record<string, unknown> = {}) {
   const line = JSON.stringify({ service: PLUGIN_ID, level, message, extra });
@@ -57,6 +69,7 @@ export function startObserver(ctx: any, options: {
   now?: () => number;
   intervalMs?: number;
   config?: Partial<ObserverConfig>;
+  healthFile?: string | null;
 } = {}) {
   const config = {
     ...DEFAULTS,
@@ -69,11 +82,77 @@ export function startObserver(ctx: any, options: {
   const log = (level: string, message: string, extra: Record<string, unknown> = {}) => {
     logs.push(writeLog(level, message, extra));
   };
+  const controller = new AbortController();
   let stopped = false;
   let timer: ReturnType<typeof setInterval> | null = null;
+  let lastHealth = "";
+  const healthFile = options.healthFile
+    ?? config.healthFile
+    ?? healthPath(ctx?.location?.directory);
 
-  const emit = async (result: { milestones: Array<{ parentID: string; sessionID: string; kind: string; text: string; description: string }> }) => {
+  const writeHealth = () => {
+    if (!healthFile) return;
+    const record = {
+      connection: state.connection,
+      degradation: state.degradation,
+      updated: Date.now(),
+    };
+    const text = JSON.stringify(record);
+    if (text === lastHealth) return;
+    lastHealth = text;
+    try {
+      mkdirSync(dirname(healthFile), { recursive: true });
+      const tmp = `${healthFile}.tmp`;
+      writeFileSync(tmp, text + "\n", "utf8");
+      renameSync(tmp, healthFile);
+    } catch (error) {
+      log("warn", "cannot write the observer health record", {
+        file: healthFile, error: String((error as Error)?.message ?? error),
+      });
+    }
+  };
+
+  // --- trust (review M6) ---------------------------------------------------
+  const trust = new Map<string, { trusted: boolean; checkedAt: number }>();
+  const warned = new Set<string>();
+
+  async function trustedParent(parentID: string): Promise<boolean> {
+    if (!parentID) return false;
+    const cached = trust.get(parentID);
+    const now = Date.now();
+    if (cached && (cached.trusted || now - cached.checkedAt < TRUST_RETRY_MS)) {
+      return cached.trusted;
+    }
+    let trusted = false;
+    try {
+      const info = await ctx.session.get({ sessionID: parentID });
+      // A synthetic message belongs in an orchestrator conversation: a root
+      // session. A child-of-child is not an orchestrator of this run.
+      trusted = Boolean(info) && !info.parentID;
+    } catch {
+      trusted = false;
+    }
+    trust.set(parentID, { trusted, checkedAt: now });
+    if (!trusted) {
+      degrade(state, `unverified orchestrator ${parentID}: synthetic milestone dropped`);
+      if (!warned.has(parentID)) {
+        warned.add(parentID);
+        log("warn", "unverified orchestrator: synthetic milestone dropped", {
+          parentID,
+        });
+      }
+    }
+    return trusted;
+  }
+
+  const emit = async (result: {
+    milestones: Array<{
+      parentID: string; sessionID: string; kind: string;
+      text: string; description: string;
+    }>;
+  }) => {
     for (const m of result.milestones) {
+      if (!(await trustedParent(m.parentID))) continue;
       try {
         await ctx.session.synthetic({
           sessionID: m.parentID,
@@ -88,6 +167,7 @@ export function startObserver(ctx: any, options: {
         });
       }
     }
+    writeHealth();
   };
 
   const flush = async () => {
@@ -103,7 +183,9 @@ export function startObserver(ctx: any, options: {
     loopRepeats: config.loopRepeats,
     generationSeconds: config.generationSeconds,
     milestoneMinIntervalSeconds: config.milestoneMinIntervalSeconds,
+    healthFile: healthFile ?? null,
   });
+  writeHealth();
 
   const done = (async () => {
     if (!config.enabled) return;
@@ -116,6 +198,7 @@ export function startObserver(ctx: any, options: {
           parentID: info.parentID,
           title: info.title,
           agent: info.agent,
+          time: info.time,
         });
       }
     } catch (error) {
@@ -127,17 +210,24 @@ export function startObserver(ctx: any, options: {
     }
     let stream;
     try {
-      stream = ctx.event.subscribe();
+      stream = ctx.event.subscribe({ signal: controller.signal });
     } catch (error) {
-      disconnect(state, `event stream failed: ${(error as Error)?.message ?? error}`);
-      log("warn", `event stream ended: ${(error as Error)?.message ?? error}`);
-      return;
+      // Some hosts expose only the no-argument form.
+      try {
+        stream = ctx.event.subscribe();
+      } catch (fatal) {
+        disconnect(state, `event stream failed: ${(fatal as Error)?.message ?? fatal}`);
+        log("warn", `event stream ended: ${(fatal as Error)?.message ?? fatal}`);
+        writeHealth();
+        return;
+      }
     }
     try {
       for await (const event of stream) {
         if (stopped) break;
         const result = observe(state, event);
         if (result.milestones.length) await emit(result);
+        else writeHealth();
       }
       if (!stopped) {
         disconnect(state, "event stream ended");
@@ -149,16 +239,23 @@ export function startObserver(ctx: any, options: {
         log("warn", `event stream ended: ${(error as Error)?.message ?? error}`);
       }
     }
+    writeHealth();
   })();
 
   return {
     state,
     config,
     done,
+    healthFile,
     lastLog: () => logs.join("\n"),
     async stop() {
       stopped = true;
       if (timer) clearInterval(timer);
+      try {
+        controller.abort();
+      } catch {
+        // abort is best-effort on hosts that ignore the signal
+      }
       return undefined;
     },
   };

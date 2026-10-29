@@ -6,6 +6,9 @@
  * Run: node --test plugins/delegation-observer/server.test.ts
  */
 import assert from "node:assert/strict";
+import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { PLUGIN_ID, createDefinition, startObserver } from "./server.ts";
@@ -13,10 +16,13 @@ import { PLUGIN_ID, createDefinition, startObserver } from "./server.ts";
 const Plugin = { define: (d) => d };
 const clock = () => 1_000_000;
 
-function fakeCtx(events, { list = [], failSubscribe = false, syntheticFails = false } = {}) {
+function fakeCtx(events, {
+  list = [], failSubscribe = false, syntheticFails = false, get,
+} = {}) {
   const synthetic = [];
   const prompts = [];
   const logs = [];
+  let signal = null;
   const ctx = {
     options: {},
     session: {
@@ -27,10 +33,11 @@ function fakeCtx(events, { list = [], failSubscribe = false, syntheticFails = fa
         return { id: "msg_x", sessionID: input.sessionID };
       },
       prompt: async (input) => prompts.push(input),
-      get: async ({ sessionID }) => ({ id: sessionID }),
+      get: get ?? (async ({ sessionID }) => ({ id: sessionID })),
     },
     event: {
-      subscribe: () => {
+      subscribe: (options = {}) => {
+        signal = options.signal ?? null;
         if (failSubscribe) throw new Error("stream closed");
         return {
           async *[Symbol.asyncIterator]() {
@@ -40,7 +47,7 @@ function fakeCtx(events, { list = [], failSubscribe = false, syntheticFails = fa
       },
     },
   };
-  return { ctx, synthetic, prompts, logs };
+  return { ctx, synthetic, prompts, logs, signal: () => signal };
 }
 
 const childCreated = (sid = "ses_child", parent = "ses_parent") => ({
@@ -128,6 +135,55 @@ test("a rejected synthetic message degrades visibly but does not stop observatio
     .split("\n")
     .filter((line) => line.includes("synthetic milestone failed"));
   assert.equal(failures.length, 2); // observation continued past the first failure
+});
+
+test("an unverified orchestrator never receives a synthetic milestone", async () => {
+  const { ctx, synthetic } = fakeCtx([childCreated()], {
+    get: async ({ sessionID }) => ({ id: sessionID, parentID: "ses_other" }),
+  });
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  assert.equal(synthetic.length, 0);
+  assert.match(handle.state.degradation, /unverified orchestrator ses_parent/);
+  assert.match(handle.lastLog(), /unverified orchestrator/);
+});
+
+test("a session lookup failure fails closed with a visible reason", async () => {
+  const { ctx, synthetic } = fakeCtx([childCreated()], {
+    get: async () => { throw new Error("not found"); },
+  });
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  assert.equal(synthetic.length, 0);
+  assert.match(handle.state.degradation, /unverified orchestrator/);
+});
+
+test("degradation is published in the shared health record", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rm069-health-"));
+  try {
+    const file = join(dir, "health.json");
+    const { ctx } = fakeCtx([], { failSubscribe: true });
+    const handle = startObserver(ctx, {
+      now: clock, intervalMs: 0, healthFile: file,
+    });
+    await handle.done;
+    const record = JSON.parse(readFileSync(file, "utf8"));
+    assert.equal(record.connection, "disconnected");
+    assert.match(record.degradation, /stream closed/);
+    assert.equal(typeof record.updated, "number");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("teardown aborts the event subscription", async () => {
+  const { ctx, signal } = fakeCtx([], {});
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  assert.ok(signal(), "subscribe received a signal");
+  assert.equal(signal().aborted, false);
+  await handle.stop();
+  assert.equal(signal().aborted, true);
 });
 
 test("disable-by-config leaves the stream silent", async () => {

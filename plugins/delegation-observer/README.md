@@ -45,7 +45,7 @@ Plugin options live under the plugin entry's options object:
 | `enabled` | `true` | disables both parts; the TUI shows the disabled banner |
 | `stallSeconds` | `240` | quiet window before `warning` |
 | `callSeconds` | `300` | quiet window for a tool call in flight |
-| `loopRepeats` | `3` | identical `tool:target` repetitions that flag thrash |
+| `loopRepeats` | `3` | identical tool targets (one count per call id) that flag thrash |
 | `generationSeconds` | `600` | quiet budget inside an open assistant step |
 | `milestoneMinIntervalSeconds` | `30` | routine synthetic-milestone cap per delegate |
 
@@ -61,9 +61,11 @@ The status panel prints the effective values.
 | start | routine | first association |
 | first-tool | routine | first tool call of the child |
 | resume | routine | after a permission/form reply |
-| needs-input | attention | `permission.asked` / `form.created` |
+| needs-input | attention | `permission.asked` / `form.created` (session id at `data.form.sessionID`) |
+| denied | attention | `permission.replied` with `reply:"reject"` — a warning, never a resume |
 | stall | attention | quiet beyond the applicable window (busy is never stalled) |
-| thrash | attention | identical `tool:target` ≥ `loopRepeats` |
+| thrash | attention | identical tool target ≥ `loopRepeats` (one count per call id) |
+| retry | attention | vendor `retry` status, deduped per attempt |
 | terminal | exactly once | `session.execution.succeeded/failed/interrupted` |
 
 Routine milestones are capped at one per delegate per
@@ -82,6 +84,14 @@ is unchanged and remains the only progress-path prompt.
 | `delegation.interrupt` | `client.session.interrupt({sessionID})` |
 | `delegation.panel` | `ui.panel.open("delegates")` |
 
+Bindings in this 2.1.4 TUI: `alt+d` focus, `alt+s` steer, `alt+x` interrupt,
+`alt+p` panel, `alt+h` health. Palette/slash entries are declared but this
+build does not surface plugin commands there (probed 2026-10-29); bindings are
+the working surface.
+
+The run-vehicle orchestrator form is `dispatch_agent.py --detach` (pid, log,
+heartbeat and session file returned immediately; the child keeps writing them).
+
 Interrupt is a typed request on the **same** session id. It is not the session
 guard's kill authority: process-group abort stays guard-owned
 (`scripts/session_guard.py`, `reference/subagent-supervision.md` §5). The
@@ -95,7 +105,10 @@ when:
 - the plugin is not loaded, or the server record is `failed`;
 - the event stream is disconnected/unavailable;
 - the observer is disabled by configuration;
-- running sessions exist with no delegate association (no live visibility).
+- running **child** sessions exist with no delegate association (the
+  orchestrator/root is excluded);
+- the server part reports synthetic-delivery or stream failure through the
+  shared health record (`<location>/.scratch/delegation-observer/health.json`).
 
 In every case the durable watchdog/observer — heartbeat, `watch_agent.py`,
 `observe_completion.py` wake — remains authoritative. The plugin never claims
@@ -119,11 +132,12 @@ live visibility it does not have.
 
 ## Install / apply (owner step — deliberately not performed here)
 
-1. From the merged branch: `npm install --omit=dev` in this directory — the
-   runtime deps (`@opencode/plugin`, `solid-js`, `@opentui/core`,
-   `@opentui/solid`, `@opencode/theme`) must resolve at load. The package's
+1. From the merged branch: `npm install` in this directory. `@opencode/plugin`
+   2.1.4, `solid-js` 1.9.12 and `@opentui/core`/`solid` 0.6.8 are declared as
+   exact **peer** dependencies (the host provides the versions; npm
+   materializes them locally so the loader and typecheck resolve). The
    `typecheck` script (`tsc -p . --noEmit`) is the type-level proof against
-   the 2.1.4 API; it needs a dev install of TypeScript.
+   2.1.4.
 2. Add `{ "package": "./plugins/delegation-observer" }` to the versioned V2
    config `plugins` array (keep the auto-compaction entry).
 3. Restart the service/TUI on a known port

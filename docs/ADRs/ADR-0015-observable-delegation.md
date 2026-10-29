@@ -31,35 +31,44 @@ OpenCode V2 2.1.4 now exposes the missing surfaces (probed 2026-10-29; facts in
    TUI part (`tui.tsx`: strip, footer, panel, toasts, controls). The loader
    resolves `<dir>/server` and `<dir>/tui`; a `tui` entry sets
    `features.tui`. No `cli.json` switch is needed (verified).
-2. **Universal association without a registry.** In-session children map via
+2. **Background handles.** The run-vehicle orchestrator form is
+   `dispatch_agent.py --detach` (pid/log/heartbeat/session file returned
+   immediately; the child keeps writing durable surfaces, the wake still
+   fires). An in-session `subagent` runs as a background tab while the parent
+   model keeps its turn; the parent tool call itself is synchronous.
+3. **Universal association without a registry.** In-session children map via
    `parent_id`; run-vehicle children carry the machine-readable title
    `[delegate:<orchestrator-session-id>] <agent>: <task>`, emitted by the
    shared adapter and set with `run --title`. Interactive dispatch joins the
    shared V2 service so the TUI's event stream owns the child; grant-driven and
    `--standalone` dispatches keep the durable contract.
-3. **Progress is event-driven; polling is only the fallback.** The TUI renders
+4. **Progress is event-driven; polling is only the fallback.** The TUI renders
    from `ctx.data.listen` events and never reads heartbeat files. Quiet/stall
    is a local clock over event timestamps, not a file poll. The 30 s
    completion observer and the terminal wake are unchanged and remain the
    fallback for headless/standalone children and for degradation.
-4. **Milestones are synthetic and bounded.** start / first-tool / needs-input /
+5. **Milestones are synthetic and bounded.** start / first-tool / needs-input /
    stall / thrash / resume / terminal. Routine milestones are capped at one per
    delegate per 30 s and deduplicated; attention milestones fire once per
    distinct condition immediately; the terminal one fires exactly once. The
    terminal wake stays the only progress-path **prompt**.
-5. **One supervision vocabulary.** Thresholds are generated from
+6. **One supervision vocabulary.** Thresholds are generated from
    `watch_agent.py` / `observe_completion.py` into
    `scripts/supervision_contract.json`; the plugin's defaults are asserted
    equal to it. Busy never stalls; an open step gets the generation budget; a
    call in flight gets the blocking budget.
-6. **Controls, with unchanged authority.** Focus/open, steer
+7. **Controls, with unchanged authority.** Focus/open, steer
    (`session.prompt` with `delivery: "steer"`) and interrupt
    (`session.interrupt`) act on the same session id. Tree abort stays the
    session guard's process-group authority; the TUI never gets kill power.
-7. **Degradation is visible.** Absent/failed plugin, disconnected stream,
-   disabled config, or unassociated running sessions produce a banner naming
-   the watchdog/observer fallback. The system never claims visibility it does
-   not have.
+8. **Trust + visible degradation.** A title marker is a claim: before the
+   first synthetic message the parent must resolve as a root session
+   (`session.get`, no `parentID`), else the milestone is dropped and the drop
+   is published. Absent/failed plugin, disconnected stream, disabled config,
+   unassociated running *child* sessions (the root is excluded), or a
+   server-side health failure produce a banner naming the
+   watchdog/observer fallback. The system never claims visibility it does not
+   have.
 
 ## What this supersedes (and what it does not)
 

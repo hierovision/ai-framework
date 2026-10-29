@@ -4,15 +4,18 @@
   "private": true,
   "type": "module",
   "description": "V2 delegation observer: event-driven delegate status, synthetic parent milestones, owner controls",
-  "dependencies": {
+  "scripts": {
+    "test": "node --test state.test.ts tui.test.ts server.test.ts",
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "peerDependencies": {
     "@opencode/plugin": "2.1.4",
-    "@opencode/theme": "2.1.4",
     "@opentui/core": "0.6.8",
     "@opentui/solid": "0.6.8",
     "solid-js": "1.9.12"
   },
-  "scripts": {
-    "test": "node --test state.test.ts tui.test.ts server.test.ts",
-    "typecheck": "tsc -p . --noEmit"
+  "devDependencies": {
+    "@types/node": "24.12.2",
+    "typescript": "5.6.3"
   }
 }
