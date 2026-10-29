@@ -46,7 +46,7 @@ def _framework(root, with_plugin=True):
         d = os.path.join(cfg_dir, "plugins", "auto-compact-at-threshold")
         shutil.copytree(os.path.join(REPO, "plugins",
                                      "auto-compact-at-threshold"), d)
-        cfg = {"plugins": ["plugins/auto-compact-at-threshold/index.js"]}
+        cfg = {"plugins": ["plugins/auto-compact-at-threshold"]}
     else:
         cfg = {}
     with open(os.path.join(cfg_dir, "opencode.jsonc"), "w") as fh:

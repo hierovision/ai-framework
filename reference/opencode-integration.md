@@ -148,7 +148,7 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
   event-hook return contract is not executed).
 - `plugins/auto-compact-at-threshold/` is the canonical port: startup marker,
   threshold re-arm, compaction call, abort cleanup. The versioned config wires
-  it through `plugins: ["plugins/auto-compact-at-threshold/index.js"]`;
+  it through `plugins: ["plugins/auto-compact-at-threshold"]` (a directory; V2 skips file paths);
   `runtime-probe.mjs` emits the ID/source/startup/abort evidence post-smoke
   reads (not source text).
 

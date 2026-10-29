@@ -299,7 +299,7 @@ def default_config_source(home):
            "instructions": instructions,
            "agents": {"title": {"model": title}},
            # AC41: the versioned config loads the native V2 plugin by path.
-           "plugins": ["plugins/auto-compact-at-threshold/index.js"]}
+           "plugins": ["plugins/auto-compact-at-threshold"]}
     with open(os.path.join(root, "opencode.jsonc"), "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=2)
         fh.write("\n")

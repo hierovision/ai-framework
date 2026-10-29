@@ -143,7 +143,7 @@ def check_plugin(manifest=None, framework=None, config_root=None,
         return False, f"versioned config unreadable: {exc}"
     plugins = cfg.get("plugins")
     if not isinstance(plugins, list) or \
-            "plugins/auto-compact-at-threshold/index.js" not in plugins:
+            "plugins/auto-compact-at-threshold" not in plugins:
         return False, "versioned config does not wire auto-compact-at-threshold"
     probe = os.path.join(plugin_dir, "runtime-probe.mjs")
     if not os.path.isfile(probe):
