@@ -153,18 +153,51 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
   A bare `"plugins/auto-compact-at-threshold"` is parsed as an npm package
   spec and fails with `NpmInstallFailedError`; a file path is rejected with
   "configured plugin path must be a directory" (measured 2026-10-29).
+- **Options shape (probed 2026-10-29):** a string entry carries no options; an
+  object entry `{ "package": "./plugins/<dir>", "options": { … } }` is
+  accepted, and the loader forwards `options` to `setup(ctx)` as
+  `ctx.options`. `plugins/delegation-observer` reads
+  `ctx.options.delegationObserver`.
 - 2.1.4's plugin context has **no log domain** (`ctx` carries
   `app/location/options/agent/.../session/shell`, no `log`/`logger`). The
   plugin writes its structured startup marker to `process.stderr`; run
   `opencode run --standalone --print-logs --log-level info` to capture the
   loader and marker on stderr. (`--print-logs`/`--log-level` exist as global
   flags; evals still use `OPENCODE_LOG_LEVEL=ERROR` and do not emit them.)
+- **Plugin entrypoints (probed 2026-10-29, binary `Zg`).** A plugin directory
+  resolves its parts as `<dir>/server` and `<dir>/tui` (and `<dir>/rpc`) via
+  module resolution — no package `exports` map is consulted. A `tui` entry
+  sets `features.tui: true` on the plugin record; the TUI host imports it.
+  `GET /api/plugin` (`opencode api GET /api/plugin`) returns
+  `{id, source, features, state}` with `state.status` `active` or `failed`
+  (with `error`) — the honest source for a degradation banner.
+- **TUI plugin context (same probe).** `@opencode/plugin@2.1.4`'s `./tui`
+  export defines `Plugin.define({id, setup})` with `ctx.data.listen/on`,
+  `ctx.data.session.{list,status,permission,form}`, `ctx.ui.slot`
+  (`sidebar.content`, `home.footer.status`, `session.panel`, …),
+  `ctx.ui.toast/attention/keymap/dialog/tabs/panel/router`,
+  `ctx.client` (typed `session.prompt/interrupt`, `plugin.list`) and
+  `ctx.storage`. JSX intrinsics are `box`/`text`/`span`/… from
+  `@opentui/solid` (peer; `jsxImportSource` in the plugin `tsconfig.json`).
+- **Server event stream + synthetic messages.** `ctx.event.subscribe()`
+  yields `OpenCodeEvent` (`{id, created, type, data}`); the vocabulary used by
+  the delegation observer is `session.created/renamed/status/step.*/tool.*/
+  message.content.updated/usage.updated/execution.*`, `permission.asked/
+  replied`, `form.created/replied/cancelled`. `ctx.session.synthetic({sessionID,
+  text, description, metadata})` appends a synthetic message **without a model
+  turn** (client counterpart: `POST /api/session/{id}/synthetic`).
 - `runtime-probe.mjs` proves the module's `setup`/cleanup behavior, but it is
   not loader proof. `plugin list` does not enumerate local directories, so
   post-smoke also runs the real CLI with the versioned config and requires
   both the loader's `loading plugin` line for this directory and the
   `auto-compact-at-threshold initialized` marker. Three pieces of evidence
   are required: config wiring, runtime probe, and loader log.
+- **Delegation association marker (RM-069, 2026-10-29).** A run-vehicle child
+  is identified by its session **title**
+  `[delegate:<orchestrator-session-id>] <agent>: <task>`, set with `run
+  --title` and read from `session.created.title` / `session.renamed.title` /
+  `SessionInfo.title`. In-session Task children need no marker (`parentID`).
+  This avoids a second registry and any write to the session store.
 
 ## Model reasoning control (Go)
 

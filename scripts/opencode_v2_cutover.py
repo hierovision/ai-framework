@@ -276,6 +276,15 @@ def default_config_source(home):
         shutil.copytree(plugin_src,
                         os.path.join(root, "plugins",
                                      "auto-compact-at-threshold"))
+    # RM-069: the delegation observer is part of the reviewed corpus. Its
+    # TUI part needs no cli.json entry — the loader derives `features.tui`
+    # from the `<dir>/tui` entrypoint (probed 2026-10-29).
+    observer_src = os.path.join(REPO, "plugins", "delegation-observer")
+    if os.path.isdir(observer_src):
+        shutil.copytree(
+            observer_src,
+            os.path.join(root, "plugins", "delegation-observer"),
+            ignore=shutil.ignore_patterns("node_modules", "*.test.ts"))
     instructions = [os.path.join(home, ".config", "opencode", "reference",
                                  "cross-repo-isolation.md")]
     title = {"providerID": "opencode-go", "model": "deepseek-v4.1-flash"}
@@ -300,7 +309,8 @@ def default_config_source(home):
            "agents": {"title": {"model": title}},
            # AC41/N1: a local plugin must be a relative path. A bare
            # `plugins/...` spec is parsed as an npm package and fails to load.
-           "plugins": ["./plugins/auto-compact-at-threshold"]}
+           "plugins": ["./plugins/auto-compact-at-threshold",
+                       "./plugins/delegation-observer"]}
     with open(os.path.join(root, "opencode.jsonc"), "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=2)
         fh.write("\n")

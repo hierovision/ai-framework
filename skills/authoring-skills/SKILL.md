@@ -151,7 +151,9 @@ finalizing.
 ### Step 6: Test with a fresh agent
 
 Run each eval prompt against a fresh agent session with the skill installed
-(subagent via the task tool, or a separate session). Where feasible, also
+(a background `subagent` handle, or a separate session). The delegation is
+observable in the delegation-observer strip (`reference/subagent-supervision.md`
+§7); a fresh-agent session is never run foreground. Where feasible, also
 run a baseline without the skill for comparison. The author must not grade
 its own memory — only the fresh agent's observable behavior counts.
 

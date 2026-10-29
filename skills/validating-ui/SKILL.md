@@ -104,8 +104,13 @@ visual sign-off.
 
 ### Step 5 — Invoke council-ux on the text evidence
 
-Invoke `council-ux` through the V2 `subagent` tool (`agent: council-ux`) with the text evidence
-bundle:
+Delegate to `council-ux` through the V2 `subagent` tool (`agent: council-ux`)
+with the text evidence bundle. The delegation returns a background handle and
+is observable in the delegation-observer strip
+(`reference/subagent-supervision.md` §7) — progress, needs-input and the
+terminal outcome arrive from the event stream; never a foreground wait.
+
+Brief:
 
 - the harness report + exit code and the evidence.json text fields
   (console errors/warnings, pageerrors, journey error, allowlist hits)

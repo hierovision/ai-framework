@@ -168,7 +168,11 @@ server/chromium is recorded as DEFERRED, and the handoff carries the note.
 Long delegated workstreams follow `reference/subagent-supervision.md`: bound
 each dispatch to ≤ ~10 min, require a heartbeat file, and run
 `scripts/watch_agent.py` while it works; long evals detach with a log and are
-polled, never a blocking black box.
+polled, never a blocking black box. Local interactive delegation returns a
+background handle and is observable in the delegation-observer strip (§7):
+progress, needs-input and the terminal outcome arrive from the event stream,
+the milestones are synthetic (no extra model turn), and the terminal wake is
+the only progress-path prompt.
 
 ### Step 9 — Coverage-and-quality gate (rebalance + expand)
 

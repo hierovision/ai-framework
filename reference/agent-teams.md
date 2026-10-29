@@ -12,6 +12,13 @@ validity in `reference/delegated-result-contract.md`.
   the Task tool (in-session) or the run-vehicle
   (`scripts/dispatch_agent.py`). Workers do not dispatch beyond the policy
   below.
+- **Every delegation is a background handle.** A dispatch returns control
+  immediately; the orchestrator keeps taking turns, and progress, questions
+  and terminal state arrive through the delegation observer's event-driven
+  surface plus the RM-058 terminal wake
+  (`reference/subagent-supervision.md` §7). A foreground/blocking delegation,
+  or a launch that returns no observable handle, is invalid — the
+  `check_v2_surfaces.py` contract test enforces the wording.
 - **Depth ≤ 2**: the orchestrator's workers may dispatch their own workers
   (architect → planner), but the chain stops there — a third nesting level is
   forbidden. The leaf side of the permission matrix enforces the stop.
@@ -82,6 +89,9 @@ check the map or a judgment-led lane; consults carry `--contract` (RM-044).
   `--allow-dirs PATH` (repeatable, least privilege) for any brief that
   reaches outside the working directory — see
   `reference/subagent-supervision.md` §Dispatch vehicles.
+  `--delegation-to <orchestrator-session-id>` (default: `--wake-to`) adds the
+  observer's title marker and, when no grant requires a private server, joins
+  the running shared service so the TUI event stream owns the child (§7).
 - While a delegated run is in flight, supervision follows RM-022
   (`scripts/watch_agent.py`): a stalled or blocking run is flagged within one
   poll. A dispatch wave runs under the session-tree guard
@@ -108,6 +118,12 @@ restarting it:
 Never restart a relayed question in a fresh context while the prior session is
 resumable — that discards the worker's state.
 
+Delivery is part of the dispatch contract, not an afterthought: a question
+surfaces as `needs-input` (toast + synthetic parent milestone), a stall or
+thrash as a warning, and the terminal outcome as one terminal milestone plus
+the RM-058 wake — all from the event stream
+(`reference/subagent-supervision.md` §7).
+
 ## Attribution
 
 Every delegated run emits **exactly one** `kind=agent` run-log record with
@@ -132,6 +148,9 @@ non-null `agent` and `model` (schema owner:
 
 ## Integration
 
+- RM-069 — observable delegation: `reference/subagent-supervision.md` §7
+  (event-driven status, synthetic milestones, controls, degradation) and
+  `plugins/delegation-observer/README.md`.
 - RM-022 — supervision: `reference/subagent-supervision.md` (heartbeat,
   bounded calls, watchdog); this document adds the run-vehicle dispatch form
   and the attribution line.

@@ -122,7 +122,9 @@ dead child).
 
 With the visibility flags the operator watches plain files live; the
 watchdog remains the cross-check of heartbeat against opencode's own session
-stream.
+stream, and the fallback whenever the event-driven surface is unavailable
+(§7). Interactive local children are observed from the server event stream;
+headless/standalone children keep this file-based contract unchanged.
 
 ```
 # launch (fresh truncates; --session resume appends)
@@ -286,9 +288,11 @@ python3 scripts/dispatch_agent.py --agent <name> --prompt-file <file> \
     gone. With no resolvable URL the observer still supervises and writes
     `reason=no-attach-target` without spawning a subprocess. The AC8 live
     smoke passed: an agent-correct wake rendered in a TUI on a fixed port
-    within the SLA. The observer polls every 30 s by design — comfortably
-    inside the 5-minute SLA; an event-driven `session.idle` observer is not
-    scheduled (revisit if opencode plugin attribution facts change).
+    within the SLA. The observer polls every 30 s **by design** — comfortably
+    inside the 5-minute SLA, and it is the durable fallback when no event
+    stream exists. The event-driven half deferred by RM-058 is now shipped for
+    progress/control as the delegation observer (§7); the terminal wake itself
+    remains this poll, unchanged (RM-069, 2026-10-29).
 - **Wake text (D7).** A fixed-shape `DISPATCH WAKE <agent> outcome=…` block
   carrying task, child session, result/run-log/heartbeat paths, and — when
   `--worktree` was used — the worktree path/branch plus the cleanup owed. The
@@ -304,3 +308,70 @@ python3 scripts/dispatch_agent.py --agent <name> --prompt-file <file> \
   questions with different emitters over one shared durable surface. The
   observer computes only completion; a quiet-but-non-terminal child is its own
   `AWAITING` classification, never the liveness vocabulary.
+
+## 7. Observable delegation — event-driven surface + controls (RM-069)
+
+RM-058 deliberately deferred event-driven progress. This section ships it as
+one V2 plugin package, `plugins/delegation-observer/` (server + TUI parts).
+The durable stack above stays in place as the safety fallback.
+
+**Contract.** Every local delegate — in-session `subagent` or run-vehicle —
+is non-blocking and observable:
+
+- the dispatch returns a **handle**; the owner/orchestrator can take other
+  turns while the child runs;
+- a live status surface shows agent, task, elapsed/quiet time, current
+  tool/phase, tokens/cost and one of `running | waiting | warning | failed |
+  completed`;
+- progress, needs-input and terminal state arrive from the **event stream**;
+- owner controls: focus/open, steer (same session id), interrupt (typed
+  request on the same session id);
+- the RM-058 terminal wake still arrives exactly once — it is the only
+  progress-path prompt.
+
+**Association.** No side registry. In-session children are in the parent's
+tree (`session_v2.parent_id`, `session.created.parentID`). Run-vehicle
+children carry the title marker
+`--title "[delegate:<orchestrator-session-id>] <agent>: <task>"`
+(`scripts/opencode_v2.py` → `delegation_title`, emitted by
+`dispatch_agent.py --delegation-to`, defaulting to `--wake-to`). Interactive
+dispatch joins the shared V2 service when one is running; `--standalone` or
+grant-driven private servers keep the durable observer contract.
+
+**Status source.** Server events only: `session.created/renamed/status`,
+`session.step.*`, `session.tool.*`, `session.message.content.updated`,
+`session.usage.updated`, `permission.*`, `form.*`,
+`session.execution.succeeded/failed/interrupted`. The TUI never reads
+heartbeat files. Quiet/stall evaluation is a local clock over those event
+timestamps (5 s), not a poll of any file.
+
+**Milestones (synthetic, no model turn).** start, first tool, needs-input,
+stall, thrash, resume, terminal. Routine milestones are capped at one per
+delegate per 30 s and deduplicated; attention milestones (needs-input, stall,
+thrash) fire immediately once per distinct condition; terminal fires exactly
+once. The terminal wake remains the single prompt.
+
+**Thresholds.** One vocabulary, sourced from `scripts/supervision_contract.json`
+(generated from `watch_agent.py` / `observe_completion.py`): stall 240 s,
+call-in-flight 300 s, open-generation 600 s, loop 3 repeats, milestone cap
+30 s, wake deadline 300 s. `state.test.ts` fails if the plugin drifts.
+
+**Degradation is visible.** If the plugin is absent/failed, its event stream
+disconnects, it is disabled by config, or running sessions have no delegate
+association, the strip shows a warning and the footer shows
+`! delegates unavailable`. The watchdog/wake path remains authoritative; the
+system never claims live visibility it does not have. The observer can also
+write the opt-in `--status-file` snapshot as a last-resort status surface.
+
+**Authority boundary.** The TUI's interrupt is
+`POST /api/session/{id}/interrupt` on the same session — never a new session,
+never a kill. Tree abort stays the session guard's (`--wrap` / `--kill-root
+--root-pid`, §5); `session_guard.py --interrupt` is the same typed call for an
+owner-initiated stop. Installation and configuration:
+`plugins/delegation-observer/README.md`; decision: ADR-0015.
+
+**Interaction with the rest of this document.** §1–§6 are unchanged: bounding,
+heartbeat ownership, scope prohibitions, watchdog lanes, guard patterns and
+the terminal wake. For interactive children the event surface is the primary
+view and the watchdog is the cross-check; for headless children §4–§6 remain
+the whole contract.

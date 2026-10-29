@@ -1,0 +1,98 @@
+# ADR-0015 — Observable delegation (event-driven subagent status + owner controls)
+
+## Status
+
+accepted 2026-10-29
+
+## Context
+
+RM-058 shipped concurrent owner turns and wake-on-completion, but deliberately
+deferred live progress: its observer polls the durable surface every 30 s, and
+the plan's Open Question left `session.idle`/plugin progress unimplemented.
+The consequence is the original 2026-09-28 failure shape — a delegated child is
+a black box until it ends; the owner either polls files or waits.
+
+OpenCode V2 2.1.4 now exposes the missing surfaces (probed 2026-10-29; facts in
+`reference/opencode-integration.md`):
+
+- a server event stream (`ctx.event.subscribe()` / `GET /api/event`) with
+  per-step, per-tool, permission, form, usage and execution events;
+- a TUI plugin API (`@opencode/plugin/tui`) with slots, toasts, attention,
+  keymap commands, dialogs and tabs;
+- an explicit child hierarchy (`session_v2.parent_id`, `session.created`);
+- synthetic messages (`ctx.session.synthetic`) that add **no model turn**;
+- `GET /api/plugin`, which reports each plugin's `features` and `state`
+  (`active` / `failed`).
+
+## Decision
+
+1. **One observer plugin, two parts.** `plugins/delegation-observer/` exports a
+   server part (`server.ts`: association, reducer, synthetic milestones) and a
+   TUI part (`tui.tsx`: strip, footer, panel, toasts, controls). The loader
+   resolves `<dir>/server` and `<dir>/tui`; a `tui` entry sets
+   `features.tui`. No `cli.json` switch is needed (verified).
+2. **Universal association without a registry.** In-session children map via
+   `parent_id`; run-vehicle children carry the machine-readable title
+   `[delegate:<orchestrator-session-id>] <agent>: <task>`, emitted by the
+   shared adapter and set with `run --title`. Interactive dispatch joins the
+   shared V2 service so the TUI's event stream owns the child; grant-driven and
+   `--standalone` dispatches keep the durable contract.
+3. **Progress is event-driven; polling is only the fallback.** The TUI renders
+   from `ctx.data.listen` events and never reads heartbeat files. Quiet/stall
+   is a local clock over event timestamps, not a file poll. The 30 s
+   completion observer and the terminal wake are unchanged and remain the
+   fallback for headless/standalone children and for degradation.
+4. **Milestones are synthetic and bounded.** start / first-tool / needs-input /
+   stall / thrash / resume / terminal. Routine milestones are capped at one per
+   delegate per 30 s and deduplicated; attention milestones fire once per
+   distinct condition immediately; the terminal one fires exactly once. The
+   terminal wake stays the only progress-path **prompt**.
+5. **One supervision vocabulary.** Thresholds are generated from
+   `watch_agent.py` / `observe_completion.py` into
+   `scripts/supervision_contract.json`; the plugin's defaults are asserted
+   equal to it. Busy never stalls; an open step gets the generation budget; a
+   call in flight gets the blocking budget.
+6. **Controls, with unchanged authority.** Focus/open, steer
+   (`session.prompt` with `delivery: "steer"`) and interrupt
+   (`session.interrupt`) act on the same session id. Tree abort stays the
+   session guard's process-group authority; the TUI never gets kill power.
+7. **Degradation is visible.** Absent/failed plugin, disconnected stream,
+   disabled config, or unassociated running sessions produce a banner naming
+   the watchdog/observer fallback. The system never claims visibility it does
+   not have.
+
+## What this supersedes (and what it does not)
+
+Superseded from RM-058, exactly as its deferred half:
+
+- the poll-observer choice for **interactive local** progress visibility (the
+  30 s observer remains the headless fallback and the wake vehicle);
+- the deferred `session.idle`/plugin-progress Open Question;
+- the assumption that progress visibility requires the owner to tail files.
+
+**Retained unchanged:** terminal wake (vehicle, quiescence gate, wake text,
+exactly once), worktree-safe dispatch, per-class permission profiles, the
+status-claim ownership rules, and the session guard's kill authority.
+
+## Consequences
+
+- A local delegate is visible within the first event (association is
+  event-driven; the AC1 bound is 2 s), and the owner can act without a new
+  session.
+- Synthetic milestones add context but no turns; the 30 s routine cap bounds
+  chatter while needs-input is never delayed.
+- The plugin is a presentation/control plane, not a second liveness engine: a
+  plugin bug degrades to the durable stack instead of blinding supervision.
+- Headless/standalone children are deliberately outside the live view; their
+  contract is the watchdog + wake, and the banner says so.
+- Host adoption is a separate owner step (install peer deps, add the config
+  entry, restart on a known port); this ADR records the shape, not the install.
+
+## References
+
+- `reference/subagent-supervision.md` §7 — the operational contract.
+- `reference/opencode-integration.md` — dated V2 API facts (events, TUI,
+  synthetic, plugin entrypoints, options).
+- `plugins/delegation-observer/README.md` — configuration, controls, install.
+- `docs/roadmap-detail/RM-069.md` — provenance and verification.
+- RM-058 detail (`docs/roadmap-detail/RM-058.md`) — retained contracts.
