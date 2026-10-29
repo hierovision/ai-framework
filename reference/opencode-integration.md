@@ -207,12 +207,23 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
   `session.step.ended.data` carries `finish`, `cost`, `tokens`;
   `session.tool.called.data` has **no tool name** (name/target come from
   `session.message.content.updated`).
-- **Managed service probe (2026-10-29).** `opencode service set port <n>` +
-  `service start` works under an isolated `XDG_CONFIG_HOME` (writes
-  `service.json` there; `OPENCODE_PASSWORD` is required by clients).
-  `GET /api/plugin` is location-scoped and returned an empty list for the
-  service's location, so a plugin wired in the config root is not necessarily
-  the record the TUI sees.
+- **Managed service probe (2026-10-29, extended).** `opencode service set port
+  <n>` + `service start` works under an isolated `XDG_CONFIG_HOME` (writes
+  `service.json` there; `OPENCODE_PASSWORD` is required by clients). A plugin
+  wired in that config root loads in the service: `GET /api/plugin?directory=
+  <work>` returns it with `features: {server: true, tui: true}` and
+  `state: active`. The list is **location-scoped**: without the directory the
+  same call returns `{"data": []}` for the service's own location, so a TUI
+  must pass its location (`client.plugin.list({location:{directory}})`) or it
+  falsely reads "not loaded". The service also activates a plugin **once per
+  location** (work, home, repo), so a per-location side effect (a synthetic
+  milestone) must be guarded by the instance's own location.
+- **Synthetic messages (2026-10-29).** `session.synthetic` accepts
+  `delivery: "steer"|"queue"` and `resume?: boolean`. With default
+  `resume` a synthetic started a model turn; `{delivery:"steer",
+  resume:false}` queues it for the next turn without generating. TUI plugin
+  `options` are not forwarded to the TUI part by the 2.1.4 host (the server
+  part receives them); use an explicit env seam if both parts need a value.
 - **Delegation association marker (RM-069, 2026-10-29).** A run-vehicle child
   is identified by its session **title**
   `[delegate:<orchestrator-session-id>] <agent>: <task>`, set with `run

@@ -24,6 +24,7 @@ import {
   parseDelegationTitle,
   parseHealthRecord,
   tick,
+  tuiConfig,
 } from "./state.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -503,4 +504,16 @@ test("the shared health record round-trips and rejects junk", () => {
   });
   assert.equal(parseHealthRecord("not json"), null);
   assert.equal(parseHealthRecord(""), null);
+});
+
+test("the TUI threshold seam merges env over options over defaults", () => {
+  const state = createState(tuiConfig({ options: { delegationObserver: { stallSeconds: 9 } } },
+    { DELEGATION_OBSERVER_STALL_SECONDS: "5" }), now);
+  assert.equal(state.config.stallSeconds, 5);
+  const fromOptions = createState(tuiConfig({
+    options: { delegationObserver: { stallSeconds: 9 } },
+  }, {}), now);
+  assert.equal(fromOptions.config.stallSeconds, 9);
+  const fromDefaults = createState(tuiConfig({}, {}), now);
+  assert.equal(fromDefaults.config.stallSeconds, DEFAULTS.stallSeconds);
 });

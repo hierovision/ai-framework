@@ -153,6 +153,21 @@ export function delegationTitle({ orchestratorID, agent, task }: {
 
 // --- state construction ----------------------------------------------------
 
+/**
+ * The TUI host does not always forward a plugin entry's `options` to the TUI
+ * part (probed 2026-10-29: the server saw `stallSeconds: 5`, the TUI did not).
+ * The env seam keeps the interactive thresholds in step on such hosts; the
+ * shared contract remains the default.
+ */
+export function tuiConfig(ctx: any, env: Record<string, string | undefined> = process.env) {
+  const options = ctx?.options?.delegationObserver ?? {};
+  const raw = env?.DELEGATION_OBSERVER_STALL_SECONDS;
+  const envStall = raw === undefined || raw === "" ? NaN : Number(raw);
+  return Number.isFinite(envStall) && envStall > 0
+    ? { ...options, stallSeconds: envStall }
+    : options;
+}
+
 export function createState(overrides: Partial<ObserverConfig> = {},
   now: () => number = Date.now): ObserverState {
   return {

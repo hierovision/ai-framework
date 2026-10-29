@@ -48,10 +48,13 @@ OpenCode V2 2.1.4 now exposes the missing surfaces (probed 2026-10-29; facts in
    completion observer and the terminal wake are unchanged and remain the
    fallback for headless/standalone children and for degradation.
 5. **Milestones are synthetic and bounded.** start / first-tool / needs-input /
-   stall / thrash / resume / terminal. Routine milestones are capped at one per
-   delegate per 30 s and deduplicated; attention milestones fire once per
-   distinct condition immediately; the terminal one fires exactly once. The
-   terminal wake stays the only progress-path **prompt**.
+   denied / stall / thrash / retry / resume / terminal. They are sent with
+   `delivery:"steer", resume:false` (queued for the next turn, never starting
+   one), and only the plugin instance owning the parent's location emits (a
+   service activates the plugin once per location). Routine milestones are
+   capped at one per delegate per 30 s and deduplicated; attention milestones
+   fire once per distinct condition immediately; the terminal one fires
+   exactly once. The terminal wake stays the only progress-path **prompt**.
 6. **One supervision vocabulary.** Thresholds are generated from
    `watch_agent.py` / `observe_completion.py` into
    `scripts/supervision_contract.json`; the plugin's defaults are asserted
@@ -96,6 +99,8 @@ status-claim ownership rules, and the session guard's kill authority.
   contract is the watchdog + wake, and the banner says so.
 - Host adoption is a separate owner step (install peer deps, add the config
   entry, restart on a known port); this ADR records the shape, not the install.
+- 2.1.4 does not forward plugin `options` to the TUI part; the interactive
+  thresholds accept a documented env seam while the server uses the options.
 
 ## References
 

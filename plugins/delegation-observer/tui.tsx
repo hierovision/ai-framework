@@ -27,6 +27,7 @@ import {
   observe,
   parseHealthRecord,
   tick,
+  tuiConfig,
 } from "./state.ts";
 import {
   associationGap,
@@ -50,9 +51,12 @@ function observerOptions(ctx: any) {
  * answer (not loaded); an unreachable list is reported as unknown and the
  * banner says so instead of pretending the observer is healthy.
  */
-export async function readPluginStatus(client: any) {
+export async function readPluginStatus(client: any, directory?: string) {
   try {
-    const result = await client?.plugin?.list?.({});
+    // /api/plugin is location-scoped: without the TUI's location the list is
+    // empty on a shared service, which would read as "not loaded" (review M4).
+    const input = directory ? { location: { directory } } : {};
+    const result = await client?.plugin?.list?.(input);
     const list = Array.isArray(result) ? result : (result?.data ?? []);
     const entry = list.find((p: any) => p?.id === PLUGIN_ID);
     if (!entry) return { loaded: false, state: "missing", tui: false };
@@ -66,7 +70,7 @@ export async function readPluginStatus(client: any) {
 }
 
 export function createTuiModel(ctx: any) {
-  const config = observerOptions(ctx);
+  const config = tuiConfig(ctx);
   const state = createState(config, Date.now);
   const [version, setVersion] = createSignal(0);
   const [pluginStatus, setPluginStatus] = createSignal({ loaded: true, state: "active" });
@@ -154,7 +158,7 @@ export function createTuiModel(ctx: any) {
   timer?.unref?.();
 
   const refreshPlugin = async () => {
-    setPluginStatus(await readPluginStatus(ctx.client));
+    setPluginStatus(await readPluginStatus(ctx.client, ctx?.location?.directory));
     refreshServerHealth();
     bump();
   };

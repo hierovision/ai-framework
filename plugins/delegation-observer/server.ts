@@ -113,26 +113,40 @@ export function startObserver(ctx: any, options: {
   };
 
   // --- trust (review M6) ---------------------------------------------------
-  const trust = new Map<string, { trusted: boolean; checkedAt: number }>();
+  const trust = new Map<string, {
+    trusted: boolean; checkedAt: number; location?: string;
+  }>();
   const warned = new Set<string>();
 
-  async function trustedParent(parentID: string): Promise<boolean> {
-    if (!parentID) return false;
+  function sameDirectory(a?: string | null, b?: string | null): boolean {
+    if (!a || !b) return true; // unknown -> do not suppress
+    return a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+  }
+
+  /**
+   * A synthetic message belongs in an orchestrator conversation: a root
+   * session. The parent is also the location key — the service activates the
+   * plugin once per location, so only the instance that owns the parent's
+   * directory may emit (otherwise every location duplicates the milestone).
+   */
+  async function parentTrust(parentID: string) {
+    if (!parentID) return { trusted: false, location: undefined };
     const cached = trust.get(parentID);
     const now = Date.now();
     if (cached && (cached.trusted || now - cached.checkedAt < TRUST_RETRY_MS)) {
-      return cached.trusted;
+      return cached;
     }
     let trusted = false;
+    let location: string | undefined;
     try {
       const info = await ctx.session.get({ sessionID: parentID });
-      // A synthetic message belongs in an orchestrator conversation: a root
-      // session. A child-of-child is not an orchestrator of this run.
       trusted = Boolean(info) && !info.parentID;
+      location = info?.location?.directory;
     } catch {
       trusted = false;
     }
-    trust.set(parentID, { trusted, checkedAt: now });
+    const entry = { trusted, checkedAt: now, location };
+    trust.set(parentID, entry);
     if (!trusted) {
       degrade(state, `unverified orchestrator ${parentID}: synthetic milestone dropped`);
       if (!warned.has(parentID)) {
@@ -142,7 +156,7 @@ export function startObserver(ctx: any, options: {
         });
       }
     }
-    return trusted;
+    return entry;
   }
 
   const emit = async (result: {
@@ -152,13 +166,23 @@ export function startObserver(ctx: any, options: {
     }>;
   }) => {
     for (const m of result.milestones) {
-      if (!(await trustedParent(m.parentID))) continue;
+      const parent = await parentTrust(m.parentID);
+      if (!parent.trusted) continue;
+      if (!sameDirectory(ctx?.location?.directory, parent.location)) continue;
       try {
+        // A milestone is context, not work: deliver it as a steer message and
+        // never resume generation (AC5). Without `resume:false` the session
+        // starts a turn (observed live 2026-10-29).
         await ctx.session.synthetic({
           sessionID: m.parentID,
           text: m.text,
           description: m.description,
-          metadata: { delegate: m.sessionID, kind: m.kind },
+          delivery: "steer",
+          resume: false,
+          metadata: {
+            delegate: m.sessionID, kind: m.kind,
+            observer: process.pid, location: ctx?.location?.directory ?? null,
+          },
         });
       } catch (error) {
         degrade(state, `synthetic failed: ${(error as Error)?.message ?? error}`);

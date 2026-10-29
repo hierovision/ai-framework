@@ -367,6 +367,13 @@ association, the strip shows a warning and the footer shows
 system never claims live visibility it does not have. The observer can also
 write the opt-in `--status-file` snapshot as a last-resort status surface.
 
+**Synthetic delivery.** Milestones are `session.synthetic` with
+`delivery: "steer"` and `resume: false`: they are queued for the parent's next
+turn and never start one (live: without `resume: false` the parent generated a
+turn). A service activates the plugin once per location, so only the instance
+whose location matches the parent session's directory emits — otherwise every
+location duplicates the milestone.
+
 **Trust boundary.** A title marker is a claim, not proof: before the first
 synthetic message the parent must resolve as a root session
 (`session.get`, no `parentID`). An unverified parent keeps its row locally but
@@ -378,7 +385,10 @@ agent) and round-trip tested.
 processes), so it writes `<location>/.scratch/delegation-observer/health.json`
 on every state change. The TUI reads that record for the degradation banner
 only — never for progress. The observer's `--status-file` snapshot is the
-last-resort surface and is read by the `delegation.status` command.
+last-resort surface and is read by the `delegation.status` command. This TUI
+host does not forward a plugin entry's `options` to the TUI part, so the
+interactive thresholds also accept `DELEGATION_OBSERVER_STALL_SECONDS` (the
+server keeps using the plugin options).
 
 **Authority boundary.** The TUI's interrupt is
 `POST /api/session/{id}/interrupt` on the same session — never a new session,

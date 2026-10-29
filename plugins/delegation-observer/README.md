@@ -48,6 +48,8 @@ Plugin options live under the plugin entry's options object:
 | `loopRepeats` | `3` | identical tool targets (one count per call id) that flag thrash |
 | `generationSeconds` | `600` | quiet budget inside an open assistant step |
 | `milestoneMinIntervalSeconds` | `30` | routine synthetic-milestone cap per delegate |
+| `healthFile` | `<location>/.scratch/delegation-observer/health.json` | shared degradation record |
+| `DELEGATION_OBSERVER_STALL_SECONDS` (env, TUI) | — | this host does not forward plugin options to the TUI part; the seam keeps the interactive threshold in step |
 
 The numeric defaults are the **shared supervision contract**
 (`scripts/supervision_contract.json`, generated from `watch_agent.py` /
@@ -68,8 +70,11 @@ The status panel prints the effective values.
 | retry | attention | vendor `retry` status, deduped per attempt |
 | terminal | exactly once | `session.execution.succeeded/failed/interrupted` |
 
-Routine milestones are capped at one per delegate per
-`milestoneMinIntervalSeconds` and deduplicated; attention milestones fire
+Every milestone is sent with `delivery: "steer"` and `resume: false`: it is
+queued for the parent's next turn and never starts one. A managed service
+activates the plugin once per location, so only the instance owning the
+parent session's directory emits. Routine milestones are capped at one per
+delegate per `milestoneMinIntervalSeconds` and deduplicated; attention milestones fire
 immediately once per distinct condition; the terminal one fires exactly once
 and bypasses the cap. Milestones are `synthetic` messages — they add no model
 turn. The terminal **wake** (`DISPATCH WAKE …`, `scripts/observe_completion.py`)

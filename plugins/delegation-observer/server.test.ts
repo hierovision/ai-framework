@@ -17,7 +17,7 @@ const Plugin = { define: (d) => d };
 const clock = () => 1_000_000;
 
 function fakeCtx(events, {
-  list = [], failSubscribe = false, syntheticFails = false, get,
+  list = [], failSubscribe = false, syntheticFails = false, get, location,
 } = {}) {
   const synthetic = [];
   const prompts = [];
@@ -25,6 +25,7 @@ function fakeCtx(events, {
   let signal = null;
   const ctx = {
     options: {},
+    location: location ?? undefined,
     session: {
       list: async () => ({ data: list, cursor: {} }),
       synthetic: async (input) => {
@@ -174,6 +175,36 @@ test("degradation is published in the shared health record", async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("only the instance owning the parent location emits", async () => {
+  // The managed service activates the plugin once per location; every
+  // instance sees the same event, so the non-owning ones must stay silent.
+  const { ctx, synthetic } = fakeCtx([childCreated()], {
+    location: { directory: "/work" },
+    get: async ({ sessionID }) => ({
+      id: sessionID, location: { directory: "/other" },
+    }),
+  });
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  assert.equal(synthetic.length, 0);
+  assert.doesNotMatch(handle.state.degradation ?? "", /unverified/);
+});
+
+test("the owning location emits exactly once", async () => {
+  const { ctx, synthetic } = fakeCtx([childCreated()], {
+    location: { directory: "/work/" },
+    get: async ({ sessionID }) => ({
+      id: sessionID, location: { directory: "/work" },
+    }),
+  });
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  assert.equal(synthetic.length, 1);
+  assert.equal(synthetic[0].sessionID, "ses_parent");
+  assert.equal(synthetic[0].delivery, "steer");
+  assert.equal(synthetic[0].resume, false);
 });
 
 test("teardown aborts the event subscription", async () => {
