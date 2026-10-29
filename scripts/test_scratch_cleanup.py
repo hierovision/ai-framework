@@ -148,6 +148,26 @@ def test_cleanup_run_config_removes_success_and_keeps_failure():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_prune_test_scratch_count_caps_fresh_workdirs():
+    """`.scratch/test-tmp` is generated debris with its own count cap, not a
+    concurrent run root: the run grace window must not exempt 25 fresh workdirs
+    from the TEST_KEEP prune."""
+    root = _tmp("scratch-testtmp-")
+    try:
+        for i in range(25):
+            path = os.path.join(root, f"work-{i}")
+            os.makedirs(path)
+            _age(path, 100 - i)  # work-24 is newest
+        removed = cleanup.prune_test_scratch(base=root, keep=cleanup.TEST_KEEP)
+        remaining = sorted(os.listdir(root))
+        assert len(remaining) == cleanup.TEST_KEEP, remaining
+        assert len(removed) == 25 - cleanup.TEST_KEEP, removed
+        assert remaining == sorted(f"work-{i}" for i in range(5, 25)), \
+            remaining
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def _dispatch(mode, precreate):
     """Run dispatch_agent with an isolated config root; return (rc, entries)."""
     td = tempfile.mkdtemp(prefix="scratch-dispatch-")

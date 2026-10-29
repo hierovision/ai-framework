@@ -142,9 +142,13 @@ def cleanup_run_config(path, outcome):
 
 def prune_test_scratch(base=None, keep=TEST_KEEP,
                        max_age_seconds=TEST_MAX_AGE):
-    """Bound `.scratch/test-tmp` (or an explicit base) before a test run."""
+    """Bound `.scratch/test-tmp` (or an explicit base) before a test run.
+
+    Test workdirs are generated debris, not a concurrent dispatch's config
+    root, so the run-grace guard is off: the explicit count cap governs.
+    """
     if base is None:
         repo = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
         base = os.path.join(repo, ".scratch", "test-tmp")
     return prune_run_configs(base, keep=keep, max_age_seconds=max_age_seconds,
-                             prefix="")
+                             prefix="", grace_seconds=0)
