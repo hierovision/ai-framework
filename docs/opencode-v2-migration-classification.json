@@ -1,0 +1,11 @@
+{
+  "residual_count": 1498,
+  "classification": "resumable-backfill",
+  "cursor": "ses_f1796d4d9ffedcQ6Z6qEKbMmbB",
+  "all_missing_below_cursor": true,
+  "source_untouched": true,
+  "dated": "2026-10-28",
+  "evidence": ".scratch/opencode-v2/canary-verify/migration-rehearsal.txt",
+  "source_session_rows": 2197,
+  "session_v2_rows": 700
+}

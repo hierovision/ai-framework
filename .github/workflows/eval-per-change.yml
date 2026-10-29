@@ -289,7 +289,15 @@ jobs:
           # OpenCode") and the eval session dies. Since the Go-first flip
           # (2026-10-03) every framework persona is Go-bound — this repo's
           # override map is empty; the guard remains for consumer wrappers.
-          export OPENCODE_CONFIG_CONTENT="$(python3 scripts/ci-lane-overrides.py --model opencode-go/deepseek-v4.1-flash)"
+          # V2 does not activate OPENCODE_CONFIG_CONTENT for agents or
+          # permissions. Generate the proven XDG_CONFIG_HOME root instead:
+          # deny-first external_directory, then explicit allow roots.
+          CONFIG_ROOT="$RUNNER_TEMP/opencode-eval-config"
+          rm -rf "$CONFIG_ROOT"
+          python3 scripts/ci-lane-overrides.py --model opencode-go/deepseek-v4.1-flash \
+            --xdg-root "$CONFIG_ROOT" --allow-dir "$RUNNER_TEMP" > /dev/null
+          export XDG_CONFIG_HOME="$CONFIG_ROOT"
+          export TMPDIR="${RUNNER_TEMP:-/tmp}"
           set -euo pipefail
           RUNNER="skills/authoring-skills/scripts/run_behavioral_eval.py"
           if [ "${{ matrix.mode }}" = "core" ]; then

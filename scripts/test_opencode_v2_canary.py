@@ -43,6 +43,10 @@ if (not os.path.isfile(c5) and args[:1] != ["--version"]
     print("INVOKED-BEFORE-C5", file=sys.stderr)
     sys.exit(9)
 if args[:1] == ["auth"]:
+    dump = os.environ.get("V2_TEST_AUTH_DUMP")
+    if dump:
+        with open(dump, "w", encoding="utf-8") as fh:
+            fh.write(sys.stdin.read())
     print("Imported 2 credentials")
     sys.exit(0)
 if args[:1] == ["models"]:
@@ -177,6 +181,35 @@ def test_c3_secret_never_persisted():
         text = open(os.path.join(out, "C3-real.txt")).read()
         assert secret not in text, "secret leaked into evidence"
         assert "missing_bindings=0" in text, text
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_c3_current_auth_beats_stale_account():
+    """AC33: C3 imports the current auth.json key, not a stale account.json."""
+    root = _tmp("canary-c3-stale-account-")
+    try:
+        home = os.path.join(root, "home")
+        state = os.path.join(home, ".local", "share", "opencode")
+        os.makedirs(state)
+        with open(os.path.join(state, "auth.json"), "w") as fh:
+            json.dump({"opencode-go": {"type": "api", "key": "current-key"}}, fh)
+        with open(os.path.join(state, "account.json"), "w") as fh:
+            json.dump({"opencode-go": {"type": "api", "key": "stale-key"}}, fh)
+        binary = _fake_bin(root)
+        src = _source_db(root)
+        out = os.path.join(root, "ev")
+        dump = os.path.join(root, "auth-dump.json")
+        env = {"HOME": home, "V2_TEST_BINDINGS": ",".join(sorted(set(
+                   _agent_bindings().values()))),
+               "V2_TEST_ALLOW_NO_C5": "1", "V2_TEST_AUTH_DUMP": dump}
+        r = _run(root, ["--gate", "C3", "--scratch-root", out,
+                        "--source-db", src, "--opencode-bin", binary], env)
+        assert r.returncode == 0, (r.stdout, r.stderr)
+        payload = json.load(open(dump))
+        keys = [row["value"]["key"] for row in payload]
+        assert "current-key" in keys, keys
+        assert "stale-key" not in keys, keys
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

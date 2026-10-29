@@ -149,7 +149,15 @@ jobs:
           # (2026-10-03, plan go-first-model-bindings) every framework persona
           # is Go-bound — this repo's override map is empty; the guard remains
           # for consumer repos whose wrappers are still free-bound.
-          export OPENCODE_CONFIG_CONTENT="$(python3 scripts/ci-lane-overrides.py --model opencode-go/deepseek-v4.1-flash)"
+          # V2 does not activate OPENCODE_CONFIG_CONTENT for agents or
+          # permissions. Generate the proven XDG_CONFIG_HOME root instead:
+          # deny-first external_directory, then explicit allow roots.
+          CONFIG_ROOT="$RUNNER_TEMP/opencode-eval-config"
+          rm -rf "$CONFIG_ROOT"
+          python3 scripts/ci-lane-overrides.py --model opencode-go/deepseek-v4.1-flash \
+            --xdg-root "$CONFIG_ROOT" --allow-dir "$RUNNER_TEMP" > /dev/null
+          export XDG_CONFIG_HOME="$CONFIG_ROOT"
+          export TMPDIR="${RUNNER_TEMP:-/tmp}"
           # RM-021 AC5: optional targeted dispatch restricts the shard to the
           # intersection of the matrix skill list and the user-supplied list.
           USER_SKILLS="${{ inputs.skills }}"

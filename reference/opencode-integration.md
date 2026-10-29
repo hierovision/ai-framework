@@ -105,6 +105,10 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
   permission", and stderr carries
   `permission requested: <action> (<target>); auto-rejecting`. Classify it as
   `permission denied: <tool> <target>`, never `empty result`.
+- Migration residual: cutover preflight fails closed unless the canary report
+  shows zero missing sessions or a machine-readable classification
+  (`docs/opencode-v2-migration-classification.json`) / dated owner acceptance
+  matches the reported count.
 - There is no `OPENCODE_PERMISSION` env var. `OPENCODE_CONFIG_CONTENT` /
   `OPENCODE_CONFIG` are recorded as config sources but do **not** activate an
   injected agent/grant under V2 2.1.4; the dispatcher writes a generated
@@ -143,7 +147,10 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
   `{id, setup: v1Function}` wrapper loads but is **not** functional (the V1
   event-hook return contract is not executed).
 - `plugins/auto-compact-at-threshold/` is the canonical port: startup marker,
-  threshold re-arm, compaction call, abort cleanup.
+  threshold re-arm, compaction call, abort cleanup. The versioned config wires
+  it through `plugins: ["plugins/auto-compact-at-threshold/index.js"]`;
+  `runtime-probe.mjs` emits the ID/source/startup/abort evidence post-smoke
+  reads (not source text).
 
 ## Model reasoning control (Go)
 

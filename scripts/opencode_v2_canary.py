@@ -7,7 +7,8 @@ install or invoke V2. Every V2 invocation asserts an explicit scratch
 `OPENCODE_DB` plus isolated XDG state/cache/runtime/TMPDIR; the real session
 DB is never an implicit default.
 
-Gates (see `.opencode/plans/opencode-v2-upgrade.md`):
+Gates (see `docs/ADRs/ADR-0014-opencode-v2-upgrade.md` and
+`reference/opencode-integration.md`):
   C1 isolated install/version   C2 service + /api/info        C3 model catalog
   C4 fresh-DB 10/10 stability   C5 backup (first)             C6 V1 rollback
   C7 config/plugin probe        C8 capability audit

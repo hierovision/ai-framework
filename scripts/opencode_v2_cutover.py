@@ -162,6 +162,104 @@ def readiness(args):
             "consumer_pr_url": data.get("consumer_pr_url")}, None
 
 
+# --- migration residual gate (AC34) -----------------------------------------
+
+MIGRATION_CLASSES = {"resumable-backfill", "lossless-after-resume",
+                     "owner-accepted"}
+
+
+def _first_file(*paths):
+    for path in paths:
+        if path and os.path.isfile(path):
+            return path
+    return None
+
+
+def migration_gate(args):
+    """Classify the migration residual before cutover (AC34).
+
+    A missing residual report, an unclassified positive residual, or a
+    classification that does not match the reported count fails closed. The
+    existing resumable-backfill evidence is accepted via a machine-readable
+    classification; an explicit dated owner acceptance is the alternative.
+    """
+    if args.migration_evidence:
+        evidence = _first_file(args.migration_evidence)
+    else:
+        evidence = _first_file(
+            os.path.join(REPO, ".scratch", "opencode-v2", "canary-verify",
+                         "migration-rehearsal.txt"),
+            os.path.join(REPO, ".scratch", "v2-canary",
+                         "migration-rehearsal.txt"),
+            os.path.join(REPO, ".scratch", "opencode-v2",
+                         "migration-rehearsal.txt"))
+    if not evidence:
+        return False, "migration residual evidence missing"
+    try:
+        with open(evidence, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as exc:
+        return False, f"migration residual evidence unreadable: {exc}"
+    m = re.search(r"^source_sessions_not_migrated=(\d+)$", text, re.MULTILINE)
+    if not m:
+        return False, f"migration residual count missing in {evidence}"
+    residual = int(m.group(1))
+    if residual == 0:
+        return True, f"residual=0 evidence={evidence}"
+    classification_path = (
+        _first_file(args.migration_classification)
+        if args.migration_classification else _first_file(
+            os.path.join(REPO, "docs",
+                         "opencode-v2-migration-classification.json"),
+            os.path.join(REPO, ".scratch", "opencode-v2",
+                         "migration-classification.json"),
+            os.path.join(REPO, ".scratch", "v2-canary",
+                         "migration-classification.json")))
+    acceptance_path = (
+        _first_file(args.migration_acceptance)
+        if args.migration_acceptance else _first_file(
+            os.path.join(REPO, ".scratch", "opencode-v2",
+                         "migration-owner-acceptance.json"),
+            os.path.join(REPO, ".scratch", "v2-canary",
+                         "migration-owner-acceptance.json")))
+    if classification_path:
+        try:
+            with open(classification_path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as exc:
+            return False, f"migration classification unreadable: {exc}"
+        if data.get("residual_count") != residual:
+            return False, ("migration classification residual mismatch: "
+                           f"{data.get('residual_count')} != {residual}")
+        if data.get("classification") not in MIGRATION_CLASSES:
+            return False, "migration classification value not accepted"
+        if not data.get("cursor") or not data.get("dated"):
+            return False, "migration classification missing cursor/date"
+        if data.get("all_missing_below_cursor") is not True:
+            return False, "migration classification does not order every missing ID below the cursor"
+        if data.get("source_untouched") is not True:
+            return False, "migration classification does not prove the source untouched"
+        return True, (f"residual={residual} classified={data['classification']} "
+                      f"cursor={data['cursor']} evidence={evidence}")
+    if acceptance_path:
+        try:
+            with open(acceptance_path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as exc:
+            return False, f"migration owner acceptance unreadable: {exc}"
+        if data.get("owner_acceptance") is not True:
+            return False, "migration owner acceptance is not affirmative"
+        if data.get("residual_count") != residual:
+            return False, ("migration owner acceptance residual mismatch: "
+                           f"{data.get('residual_count')} != {residual}")
+        if not data.get("dated") or not data.get("owner"):
+            return False, "migration owner acceptance missing date/owner"
+        return True, (f"residual={residual} owner-accepted date={data['dated']} "
+                      f"evidence={evidence}")
+    return False, (f"migration residual={residual} is unclassified "
+                   "(classification or dated owner acceptance required)")
+
+
 # --- staging / switch --------------------------------------------------------
 
 def default_config_source(home):
@@ -199,7 +297,9 @@ def default_config_source(home):
             pass
     cfg = {"$schema": "https://opencode.ai/config.json",
            "instructions": instructions,
-           "agents": {"title": {"model": title}}}
+           "agents": {"title": {"model": title}},
+           # AC41: the versioned config loads the native V2 plugin by path.
+           "plugins": ["plugins/auto-compact-at-threshold/index.js"]}
     with open(os.path.join(root, "opencode.jsonc"), "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=2)
         fh.write("\n")
@@ -304,6 +404,11 @@ def execute(args):
     if not ready:
         print(f"error: readiness gate failed: {detail}", file=sys.stderr)
         return 2
+    mig_ok, mig_detail = migration_gate(args)
+    if not mig_ok:
+        print(f"error: migration residual gate failed: {mig_detail}",
+              file=sys.stderr)
+        return 2
     backup, detail = final_backup(args, root)
     if not backup:
         print(f"error: final backup failed: {detail}", file=sys.stderr)
@@ -366,11 +471,12 @@ def rollback(args):
         failed = real_db + ".v2-failed."
         failed += datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
         shutil.copy2(real_db, failed)
-    if args.restore_db:
-        sqlite_backup(backup, real_db)
-        if integrity(real_db) != "ok":
-            print("error: restored DB integrity check failed", file=sys.stderr)
-            return 2
+    # AC38: restoring the final V1 DB is the safe default, not an opt-in.
+    # `--restore-db` remains accepted for compatibility but never gates it.
+    sqlite_backup(backup, real_db)
+    if integrity(real_db) != "ok":
+        print("error: restored DB integrity check failed", file=sys.stderr)
+        return 2
     # 2. Restore the original binary link atomically.
     if original.get("type") == "symlink":
         atomic_link(original["target"], link)
@@ -412,6 +518,8 @@ def preflight(args):
     checks.append(("drain", ok_drain, drain_detail))
     ready, ready_detail = readiness(args)
     checks.append(("readiness", bool(ready), ready_detail or "ok"))
+    mig_ok, mig_detail = migration_gate(args)
+    checks.append(("migration-residual", mig_ok, mig_detail))
     source = os.path.abspath(args.source_db or v2.DEFAULT_DB)
     checks.append(("source-db", os.path.isfile(source), source))
     tty = sys.stdin.isatty()
@@ -448,7 +556,15 @@ def main(argv=None):
     ap.add_argument("--agent-snapshot", default=None)
     ap.add_argument("--agents-dir", default=None)
     ap.add_argument("--restore-db", action="store_true",
-                    help="Rollback only: restore the final V1 DB.")
+                    help="Deprecated compatibility flag; rollback always "
+                         "restores the final V1 DB.")
+    ap.add_argument("--migration-evidence", default=None,
+                    help="Migration rehearsal report (default: scratch "
+                         "canary-verify/migration-rehearsal.txt).")
+    ap.add_argument("--migration-classification", default=None,
+                    help="Machine-readable residual classification JSON.")
+    ap.add_argument("--migration-acceptance", default=None,
+                    help="Dated owner-acceptance JSON for a positive residual.")
     args = ap.parse_args(argv)
 
     if args.config_source is None and not args.rollback:

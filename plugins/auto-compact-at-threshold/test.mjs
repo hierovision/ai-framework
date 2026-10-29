@@ -124,14 +124,28 @@ test("startup marker is emitted", async () => {
 });
 
 test("cleanup aborts the subscription", async () => {
-  const f = fakeCtx({
-    models: [],
-    events: [assistant("s3", { total: 1 })],
-  });
+  const f = fakeCtx({ models: [] });
+  let signalRef = null;
+  f.ctx.event.subscribe = ({ signal } = {}) => {
+    signalRef = signal;
+    return {
+      async *[Symbol.asyncIterator]() {
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, 100);
+          signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            resolve();
+          }, { once: true });
+        });
+      },
+    };
+  };
   const cleanup = await createDefinition(Plugin).setup(f.ctx);
+  assert.equal(typeof cleanup, "function", "setup must return cleanup");
   cleanup();
-  await new Promise((r) => setTimeout(r, 20));
-  assert.ok(f.wasAborted() || true); // cleanup contract: abort() called
+  await new Promise((r) => setTimeout(r, 25));
+  assert.equal(signalRef?.aborted, true,
+    "cleanup must abort the event subscription");
 });
 
 test("default export is a Plugin.define definition with id + setup", () => {

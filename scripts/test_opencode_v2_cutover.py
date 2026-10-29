@@ -117,13 +117,17 @@ def _setup(root):
     with open(empty, "w") as fh:
         json.dump([], fh)
 
+    migration = os.path.join(root, "migration-rehearsal.txt")
+    with open(migration, "w") as fh:
+        fh.write("source_sessions_not_migrated=0\n")
+
     scratch = os.path.join(root, "scratch")
     os.makedirs(scratch)
     return {
         "framework": framework, "consumer": consumer, "artifact": artifact,
         "home": home, "link": link, "v1_bin": v1_bin, "prefix": prefix,
         "config": config, "source_db": source_db, "procs": empty,
-        "scratch": scratch,
+        "scratch": scratch, "migration": migration,
     }
 
 
@@ -137,6 +141,7 @@ def _args(ctx, manifest, extra=()):
         "--source-prefix", ctx["prefix"], "--config-source", ctx["config"],
         "--scratch-root", ctx["scratch"], "--home", ctx["home"],
         "--link", ctx["link"], "--manifest", manifest,
+        "--migration-evidence", ctx["migration"],
     ] + list(extra)
 
 
@@ -279,7 +284,7 @@ def test_rollback_restores_v1():
             fh.write("drifted\n")
         rb = subprocess.run(
             [sys.executable, SCRIPT, "--rollback", "--manifest", manifest,
-             "--home", ctx["home"], "--restore-db",
+             "--home", ctx["home"],
              "--agent-snapshot", snapshot, "--agents-dir", agents_dir],
             capture_output=True, text=True)
         assert rb.returncode == 0, (rb.returncode, rb.stdout, rb.stderr)
@@ -290,6 +295,114 @@ def test_rollback_restores_v1():
         assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert con.execute("SELECT COUNT(*) FROM session").fetchone()[0] == 1
         con.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_rollback_without_flag_restores_db():
+    """AC38: the exact documented rollback command (no --restore-db) restores
+    the final V1 DB and leaves its session rows readable."""
+    root = _tmp("cutover-rollback-default-")
+    try:
+        ctx = _setup(root)
+        manifest = os.path.join(root, "manifest.json")
+        r = _run(_args(ctx, manifest))
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        real_db = os.path.join(ctx["home"], ".local", "share", "opencode",
+                               "opencode.db")
+        os.makedirs(os.path.dirname(real_db))
+        with open(real_db, "w") as fh:
+            fh.write("failed-v2")
+        rb = subprocess.run(
+            [sys.executable, SCRIPT, "--rollback", "--manifest", manifest,
+             "--home", ctx["home"]],
+            capture_output=True, text=True)
+        assert rb.returncode == 0, (rb.returncode, rb.stdout, rb.stderr)
+        con = sqlite3.connect(real_db)
+        assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert con.execute("SELECT COUNT(*) FROM session").fetchone()[0] == 1
+        con.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_migration_residual_missing_refuses():
+    """AC34: absent migration evidence fails closed before the switch."""
+    root = _tmp("cutover-migration-missing-")
+    try:
+        ctx = _setup(root)
+        os.unlink(ctx["migration"])
+        manifest = os.path.join(root, "manifest.json")
+        r = _run(_args(ctx, manifest))
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        assert "migration residual gate failed" in (r.stdout + r.stderr), r.stdout + r.stderr
+        assert os.readlink(ctx["link"]) == ctx["v1_bin"]
+        assert not os.path.exists(manifest)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_migration_residual_unclassified_refuses():
+    """AC34: a positive residual without classification/acceptance refuses."""
+    root = _tmp("cutover-migration-unclassified-")
+    try:
+        ctx = _setup(root)
+        with open(ctx["migration"], "w") as fh:
+            fh.write("source_sessions_not_migrated=2\n")
+        manifest = os.path.join(root, "manifest.json")
+        r = _run(_args(ctx, manifest) +
+                 ["--migration-classification",
+                  os.path.join(root, "absent-classification.json")])
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        assert "unclassified" in (r.stdout + r.stderr), r.stdout + r.stderr
+        assert os.readlink(ctx["link"]) == ctx["v1_bin"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_migration_residual_classification_accepts():
+    """AC34: the classified resumable-backfill evidence is accepted."""
+    root = _tmp("cutover-migration-classified-")
+    try:
+        ctx = _setup(root)
+        with open(ctx["migration"], "w") as fh:
+            fh.write("source_sessions_not_migrated=2\n")
+        cls = os.path.join(root, "classification.json")
+        with open(cls, "w") as fh:
+            json.dump({"residual_count": 2,
+                       "classification": "resumable-backfill",
+                       "cursor": "ses_cursor",
+                       "all_missing_below_cursor": True,
+                       "source_untouched": True,
+                       "dated": "2026-10-29"}, fh)
+        manifest = os.path.join(root, "manifest.json")
+        r = _run(_args(ctx, manifest) + ["--migration-classification", cls])
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert os.readlink(ctx["link"]).endswith("opencode-wrapper")
+        data = json.load(open(manifest))
+        assert data["switched"] is True
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_migration_owner_acceptance_accepts():
+    """AC34: a dated owner acceptance is the alternate positive-residual gate."""
+    root = _tmp("cutover-migration-accept-")
+    try:
+        ctx = _setup(root)
+        with open(ctx["migration"], "w") as fh:
+            fh.write("source_sessions_not_migrated=2\n")
+        acc = os.path.join(root, "acceptance.json")
+        with open(acc, "w") as fh:
+            json.dump({"owner_acceptance": True, "residual_count": 2,
+                       "dated": "2026-10-29", "owner": "owner"}, fh)
+        manifest = os.path.join(root, "manifest.json")
+        r = _run(_args(ctx, manifest) +
+                 ["--migration-acceptance", acc,
+                  "--migration-classification",
+                  os.path.join(root, "absent-classification.json")])
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert os.readlink(ctx["link"]).endswith("opencode-wrapper")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

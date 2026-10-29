@@ -39,13 +39,18 @@ def _framework(root, with_plugin=True):
             fh.write("---\ndescription: d\nmodel: m\npermissions:\n"
                      "  - action: shell\n    resource: '*'\n    effect: allow\n"
                      "---\n")
+    config_root = os.path.join(path, ".scratch", "versioned", "config")
+    cfg_dir = os.path.join(config_root, "opencode")
+    os.makedirs(cfg_dir, exist_ok=True)
     if with_plugin:
-        d = os.path.join(path, "plugins", "auto-compact-at-threshold")
-        os.makedirs(d)
-        with open(os.path.join(d, "index.js"), "w") as fh:
-            fh.write("import {Plugin} from '@opencode/plugin'\n"
-                     "export default Plugin.define({id:"
-                     "'auto-compact-at-threshold', setup(){}})\n")
+        d = os.path.join(cfg_dir, "plugins", "auto-compact-at-threshold")
+        shutil.copytree(os.path.join(REPO, "plugins",
+                                     "auto-compact-at-threshold"), d)
+        cfg = {"plugins": ["plugins/auto-compact-at-threshold/index.js"]}
+    else:
+        cfg = {}
+    with open(os.path.join(cfg_dir, "opencode.jsonc"), "w") as fh:
+        json.dump(cfg, fh)
     _git(path, "init", "-q")
     _git(path, "config", "user.email", "t@example.com")
     _git(path, "config", "user.name", "T")
@@ -54,12 +59,22 @@ def _framework(root, with_plugin=True):
     return path
 
 
+def _config_root(path):
+    return os.path.join(path, ".scratch", "versioned", "config")
+
+
 def _fake_bin(root, version="opencode v2.1.4"):
     d = os.path.join(root, "bin")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "opencode")
     with open(path, "w") as fh:
-        fh.write(f"#!/bin/sh\necho '{version}'\n")
+        fh.write("#!/bin/sh\n"
+                 "if [ \"$1\" = \"plugin\" ]; then\n"
+                 "  echo \"auto-compact-at-threshold local "
+                 "$XDG_CONFIG_HOME/opencode/plugins/auto-compact-at-threshold/index.js\"\n"
+                 "  exit 0\n"
+                 "fi\n"
+                 f"echo '{version}'\n")
     os.chmod(path, 0o755)
     return path
 
@@ -88,8 +103,8 @@ def test_partial_evidence_refused():
         binary = _fake_bin(root)
         db = _db(root)
         out = os.path.join(root, "post.json")
-        r = _run(["--framework", fw, "--default-bin", binary,
-                  "--skip-live", "--artifact", out],
+        r = _run(["--framework", fw, "--config-root", _config_root(fw),
+                  "--default-bin", binary, "--skip-live", "--artifact", out],
                  {"OPENCODE_DB": db})
         assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
         assert "plugin: FAIL" in r.stdout, r.stdout
@@ -107,8 +122,8 @@ def test_passing_pre_merge_writes_artifact():
         binary = _fake_bin(root)
         db = _db(root)
         out = os.path.join(root, "post.json")
-        r = _run(["--framework", fw, "--default-bin", binary,
-                  "--skip-live", "--artifact", out],
+        r = _run(["--framework", fw, "--config-root", _config_root(fw),
+                  "--default-bin", binary, "--skip-live", "--artifact", out],
                  {"OPENCODE_DB": db})
         assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
         data = json.load(open(out))
@@ -127,8 +142,9 @@ def test_consumer_required_fails_without_artifact():
         cs = os.path.join(root, "consumer")
         os.makedirs(cs)
         out = os.path.join(root, "post.json")
-        r = _run(["--framework", fw, "--consumer", cs,
-                  "--default-bin", binary, "--skip-live", "--require-consumer",
+        r = _run(["--framework", fw, "--config-root", _config_root(fw),
+                  "--consumer", cs, "--default-bin", binary,
+                  "--skip-live", "--require-consumer",
                   "--artifact", out,
                   "--consumer-artifact", os.path.join(root, "missing.json")],
                  {"OPENCODE_DB": db})

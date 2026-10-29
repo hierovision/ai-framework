@@ -92,6 +92,7 @@ jobs:
           python3 scripts/test_opencode_v2_consumer.py
           python3 scripts/test_opencode_v2_cutover.py
           python3 scripts/test_opencode_v2_post_smoke.py
+          node --test plugins/auto-compact-at-threshold/test.mjs
 
       - name: Offline eval verifiers
         run: |

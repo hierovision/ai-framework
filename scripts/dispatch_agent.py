@@ -765,13 +765,23 @@ def main(argv=None):
     try:
         if timed_out:
             outcome, exit_code = "error", 4
-            if a.standalone or grant_dirs:
+            # AC15: a private server (--standalone, or the implicit
+            # standalone used for grants) is killed with its process group;
+            # a shared/--server session must be interrupted AND verified
+            # inactive. `--server` + `--allow-dirs` is still shared-service.
+            private_server = a.standalone or (grant_dirs and not a.server)
+            if private_server:
                 interrupt = "not-needed"
             elif not session_id:
                 interrupt = "no-session"
             else:
                 status, _ = v2.session_interrupt(session_id, server=a.server)
-                interrupt = "ok" if status in (200, 202, 204) else "failed"
+                if status not in (200, 202, 204):
+                    interrupt = "failed"
+                else:
+                    active = v2.session_active(server=a.server)
+                    interrupt = ("ok" if active is not None
+                                 and session_id not in active else "failed")
             detail = (f"timeout after {timeout}s "
                       f"(process group killed, interrupt={interrupt})")
         elif rc_proc != 0:

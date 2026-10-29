@@ -45,6 +45,13 @@ mode = os.environ.get("STUB_MODE", "valid")
 argv = sys.argv[1:]
 if argv[:1] == ["api"]:
     path = argv[-1] if argv else ""
+    dump_api_path = os.environ.get("STUB_DUMP_API")
+    if dump_api_path:
+        with open(dump_api_path, "a", encoding="utf-8") as fh:
+            fh.write((argv[1] if len(argv) > 1 else "?") + " " + path + chr(10))
+    if path.endswith("/active"):
+        print('{"data": {}}')
+        sys.exit(0)
     if path.endswith("/interrupt"):
         print('{"interrupted": true}')
         sys.exit(0)
@@ -66,6 +73,11 @@ dump_env = os.environ.get("STUB_DUMP_ENV")
 if dump_env:
     with open(dump_env, "w", encoding="utf-8") as fh:
         json.dump(dict(os.environ), fh)
+
+dump_cwd = os.environ.get("STUB_DUMP_CWD")
+if dump_cwd:
+    with open(dump_cwd, "w", encoding="utf-8") as fh:
+        fh.write(os.getcwd())
 
 dump_argv = os.environ.get("STUB_DUMP_ARGV")
 if dump_argv:
@@ -275,6 +287,8 @@ def _run(mode, extra=None, timeout="10", env_extra=None, cwd=REPO,
             prompt_dump=_read(env.get("STUB_DUMP_PROMPT")),
             env_dump=_read(env.get("STUB_DUMP_ENV")),
             argv_dump=_read(env.get("STUB_DUMP_ARGV")),
+            api_dump=_read(env.get("STUB_DUMP_API")),
+            cwd_dump=_read(env.get("STUB_DUMP_CWD")),
             elapsed=elapsed)
     finally:
         shutil.rmtree(td, ignore_errors=True)
@@ -389,6 +403,37 @@ def test_v2_service_flags_follow_run_subcommand():
         shutil.rmtree(work, ignore_errors=True)
 
 
+def test_dispatch_sets_cwd_and_pwd():
+    """AC13: --dir is passed as cwd + PWD, never as a V1 CLI flag."""
+    work = tempfile.mkdtemp(prefix="dispatch-cwd-")
+    try:
+        dispatch_dir = os.path.join(work, "target")
+        os.makedirs(dispatch_dir)
+        env_dump = os.path.join(work, "env.json")
+        cwd_dump = os.path.join(work, "cwd.txt")
+        r = _run("valid", extra=["--dir", dispatch_dir,
+                                 "--contract", "implement-handoff"],
+                 env_extra={"STUB_DUMP_ENV": env_dump,
+                            "STUB_DUMP_CWD": cwd_dump})
+        assert r.rc == 0, (r.rc, r.stdout, r.stderr)
+        assert os.path.realpath(r.cwd_dump) == os.path.realpath(dispatch_dir), r.cwd_dump
+        env = json.loads(r.env_dump)
+        assert os.path.realpath(env.get("PWD", "")) == os.path.realpath(dispatch_dir), env.get("PWD")
+        argv = json.loads(r.argv_dump) if r.argv_dump else []
+        assert "--dir" not in argv, argv
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_missing_model_binding_exits_2_before_launch():
+    """AC18: an agent with no model: binding exits 2, no session, no launch."""
+    r = _run("valid", agent="no-such-agent")
+    assert r.rc == 2, (r.rc, r.stdout, r.stderr)
+    assert "no model binding" in r.stderr, r.stderr
+    assert "session_id=" not in r.stdout, r.stdout
+    assert not r.records, r.records
+
+
 def test_empty_result_fails_contract():
     """AC5: an empty stream exits non-zero and the record is not success."""
     r = _run("empty", extra=["--contract", "implement-handoff"])
@@ -413,6 +458,29 @@ def test_timeout_kills_and_records_error():
     assert r.elapsed < 15, r.elapsed
     assert r.records and r.records[0]["outcome"] == "error", r.records
     assert "timeout" in (r.records[0]["detail"] or "").lower(), r.records
+
+
+def test_shared_server_timeout_interrupts_and_verifies():
+    """AC15: --server + --allow-dirs remains shared-service; timeout calls
+    interrupt, verifies /api/session/active, and records interrupt=ok."""
+    work = tempfile.mkdtemp(prefix="dispatch-interrupt-")
+    try:
+        granted = os.path.join(work, "granted")
+        os.makedirs(granted)
+        dump = os.path.join(work, "api.log")
+        r = _run("timeout", timeout="1",
+                 extra=["--server", "http://127.0.0.1:4096",
+                        "--allow-dirs", granted],
+                 env_extra={"STUB_DUMP_API": dump,
+                            "OPENCODE_V2_API_VIA_CLI": "1"})
+        assert r.rc == 4, (r.rc, r.stdout, r.stderr)
+        detail = r.records[0]["detail"] or ""
+        assert "interrupt=ok" in detail, detail
+        calls = r.api_dump
+        assert "interrupt" in calls, calls
+        assert "/active" in calls, calls
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def test_nonzero_exit_records_error():

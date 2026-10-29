@@ -106,26 +106,64 @@ def check_config(framework, consumer):
     return not errors, "; ".join(errors) or "ok"
 
 
-def check_plugin(manifest=None, framework=None):
-    """Plugin disposition: ID + startup marker, or a dated approved disable."""
-    versioned = None
+def _versioned_root(manifest=None, config_root=None):
+    if config_root:
+        return config_root
     if manifest and os.path.isfile(manifest):
         with open(manifest, encoding="utf-8") as fh:
             data = json.load(fh)
-        versioned = (data.get("versioned") or {}).get("config_root")
-    candidates = []
-    if versioned:
-        candidates.append(os.path.join(versioned, "opencode", "plugins",
-                                       "auto-compact-at-threshold", "index.js"))
-    candidates.append(os.path.join(framework or REPO, "plugins",
-                                   "auto-compact-at-threshold", "index.js"))
-    for path in candidates:
-        if os.path.isfile(path):
-            with open(path, encoding="utf-8") as fh:
-                body = fh.read()
-            if "Plugin.define" in body and "auto-compact-at-threshold" in body:
-                return True, path
-    return False, "plugin implementation/marker not found"
+        value = (data.get("versioned") or {}).get("config_root")
+        if value:
+            return value
+    return os.path.join(os.path.expanduser("~"), ".local", "lib",
+                        "opencode", v2.VERSION_PIN, "config")
+
+
+def check_plugin(manifest=None, framework=None, config_root=None,
+                 binary="opencode"):
+    """AC41: the versioned config wires the plugin and runtime evidence proves it.
+
+    Runtime evidence, not source text: the plugin's own setup/cleanup probe
+    emits its ID, source, startup marker, and abort proof from the versioned
+    copy.
+    """
+    root = _versioned_root(manifest, config_root)
+    cfg_path = os.path.join(root, "opencode", "opencode.jsonc")
+    plugin_dir = os.path.join(root, "opencode", "plugins",
+                              "auto-compact-at-threshold")
+    index = os.path.join(plugin_dir, "index.js")
+    if not os.path.isfile(cfg_path):
+        return False, f"versioned config missing: {cfg_path}"
+    if not os.path.isfile(index):
+        return False, f"versioned plugin missing: {index}"
+    try:
+        with open(cfg_path, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return False, f"versioned config unreadable: {exc}"
+    plugins = cfg.get("plugins")
+    if not isinstance(plugins, list) or \
+            "plugins/auto-compact-at-threshold/index.js" not in plugins:
+        return False, "versioned config does not wire auto-compact-at-threshold"
+    probe = os.path.join(plugin_dir, "runtime-probe.mjs")
+    if not os.path.isfile(probe):
+        return False, f"runtime probe missing: {probe}"
+    node = subprocess.run(["node", probe], capture_output=True, text=True,
+                          timeout=60)
+    try:
+        evidence = json.loads((node.stdout or "").strip().splitlines()[-1])
+    except (IndexError, ValueError):
+        return False, f"runtime probe emitted no JSON: {node.stderr[:200]}"
+    if node.returncode != 0 or not evidence.get("startup_marker") \
+            or not evidence.get("subscription_aborted"):
+        return False, f"runtime probe failed: {evidence}"
+    source = evidence.get("source") or ""
+    if not source.startswith("file://") or \
+            os.path.realpath(source[7:]) != os.path.realpath(probe):
+        return False, f"runtime source is not the versioned plugin: {source}"
+    return True, (f"runtime id={evidence.get('plugin_id')} "
+                  f"source={source} marker={evidence.get('startup_marker')} "
+                  f"aborted={evidence.get('subscription_aborted')}")
 
 
 def check_db():
@@ -195,7 +233,8 @@ def pre_merge(args):
     checks.append(("agents-load", ok, detail))
     ok, detail = check_config(args.framework, args.consumer)
     checks.append(("config", ok, detail))
-    ok, detail = check_plugin(args.manifest, args.framework)
+    ok, detail = check_plugin(args.manifest, args.framework,
+                              args.config_root, args.default_bin)
     checks.append(("plugin", ok, detail))
     ok, detail = check_db()
     checks.append(("migrated-db", ok, detail))
@@ -321,6 +360,8 @@ def main(argv=None):
     ap.add_argument("--agent-snapshot", default=None)
     ap.add_argument("--require-consumer", action="store_true")
     ap.add_argument("--skip-live", action="store_true")
+    ap.add_argument("--config-root", default=None,
+                    help="Versioned V2 config root for the plugin runtime check.")
     ap.add_argument("--drill-evidence", default=None,
                     help="D1-D6 drill evidence JSON (default "
                          ".scratch/opencode-v2/drills.json).")
