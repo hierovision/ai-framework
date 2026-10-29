@@ -102,7 +102,7 @@ export function startObserver(ctx: any, options: {
     const record = {
       connection: state.connection,
       degradation: state.degradation,
-      updated: Date.now(),
+      updated: state.now(),
     };
     const text = JSON.stringify(record);
     try {

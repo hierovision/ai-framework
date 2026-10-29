@@ -281,11 +281,15 @@ test("the health record is written on state changes only", async () => {
       onHealthWrite: (record) => writes.push(record),
     });
     await handle.done;
-    // init (connected/null) + stream end (disconnected) only
+    // Deterministic property: exactly two writes, one per state change
+    // (init -> connected, stream end -> disconnected). The no-op usage events
+    // must not add a write. Timestamps come from the injected clock, so no
+    // wall-clock equality assumption is involved.
+    assert.deepEqual(writes.map((w) => w.connection),
+      ["connected", "disconnected"]);
     assert.equal(writes.length, 2);
-    assert.equal(writes[0].connection, "connected");
-    assert.equal(writes[1].connection, "disconnected");
-    assert.equal(writes[0].updated, writes[1].updated);
+    assert.equal(writes[0].updated, clock());
+    assert.equal(writes[1].updated, clock());
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
