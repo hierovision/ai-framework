@@ -93,7 +93,11 @@ jobs:
           python3 scripts/test_opencode_v2_cutover.py
           python3 scripts/test_opencode_v2_post_smoke.py
           python3 scripts/test_scratch_cleanup.py
+          python3 scripts/supervision_contract.py --check
+          python3 scripts/test_supervision_contract.py
+          python3 scripts/test_v2_surface_contract.py
           node --test plugins/auto-compact-at-threshold/test.mjs
+          node --test plugins/delegation-observer/state.test.ts plugins/delegation-observer/tui.test.ts plugins/delegation-observer/server.test.ts
 
       - name: Offline eval verifiers
         run: |
