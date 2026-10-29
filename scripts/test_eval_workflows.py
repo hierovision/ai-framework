@@ -19,6 +19,10 @@ import tempfile
 import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import scratch_cleanup  # noqa: E402
+
 WF_DIR = os.path.join(os.path.dirname(HERE), ".github", "workflows")
 PER_CHANGE = os.path.join(WF_DIR, "eval-per-change.yml")
 BEHAVIORAL = os.path.join(WF_DIR, "eval-behavioral.yml")
@@ -178,6 +182,7 @@ def test_lane_and_nested_agent_override():
     import subprocess
     base = os.path.join(os.path.dirname(HERE), ".scratch", "test-tmp")
     os.makedirs(base, exist_ok=True)
+    scratch_cleanup.prune_test_scratch(base)
     work = tempfile.mkdtemp(prefix="eval-config-", dir=base)
     try:
         root = os.path.join(work, "xdg")

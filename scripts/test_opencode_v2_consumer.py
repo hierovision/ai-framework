@@ -19,6 +19,8 @@ REPO = os.path.dirname(HERE)
 SCRIPT = os.path.join(HERE, "opencode_v2_consumer.py")
 sys.path.insert(0, HERE)
 
+import scratch_cleanup  # noqa: E402
+
 import opencode_v2_consumer as consumer  # noqa: E402
 
 WRAPPER = """---
@@ -65,6 +67,7 @@ LEGACY_CONFIG = {
 def _tmp(prefix):
     base = os.path.join(REPO, ".scratch", "test-tmp")
     os.makedirs(base, exist_ok=True)
+    scratch_cleanup.prune_test_scratch(base)
     return tempfile.mkdtemp(prefix=prefix, dir=base)
 
 

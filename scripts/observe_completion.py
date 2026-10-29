@@ -57,6 +57,7 @@ if SCRIPT_DIR not in sys.path:
 # The completion predicate and the read-only session-store readers live in the
 # watcher; the V2 adapter owns every version-specific fact.
 import opencode_v2 as v2  # noqa: E402
+import heartbeat_io  # noqa: E402 - atomic newline-delimited heartbeat appends
 watch_agent = _load_module(os.path.join(SCRIPT_DIR, "watch_agent.py"), "watch_agent")
 
 # Tags written by the dispatcher envelope and by the child, and the observer's
@@ -381,10 +382,9 @@ def _child_db_state(cfg):
 # --- loop --------------------------------------------------------------------
 
 def _append_line(path, text):
+    """Append one complete record with a single O_APPEND write (F11)."""
     try:
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(f"{now_iso()} {text}\n")
-            fh.flush()
+        heartbeat_io.append_records(path, f"{now_iso()} {text}")
     except OSError:
         pass
 

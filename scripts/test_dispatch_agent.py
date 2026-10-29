@@ -17,6 +17,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -260,6 +261,9 @@ def _run(mode, extra=None, timeout="10", env_extra=None, cwd=REPO,
         env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
         env["STUB_MODE"] = mode
         env["OPENCODE_V2_NO_SERVICE"] = "1"
+        # Tests inspect the generated XDG config after the run; the production
+        # default cleans a successful run's tree (F12).
+        env["DISPATCH_KEEP_CONFIG"] = "1"
         # the ambient opencode session exports its own OPENCODE_CONFIG_CONTENT;
         # drop it so the dispatch's own merge is what the stub observes
         env.pop("OPENCODE_CONFIG_CONTENT", None)
@@ -311,6 +315,7 @@ def _spawn(mode, extra=None):
     env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
     env["STUB_MODE"] = mode
     env["OPENCODE_V2_NO_SERVICE"] = "1"
+    env["DISPATCH_KEEP_CONFIG"] = "1"
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, env=env, cwd=REPO)
     return td, proc
@@ -562,6 +567,41 @@ def test_heartbeat_envelope_success():
         assert start_i < lines.index(terminals[0]), lines
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def test_concurrent_append_keeps_complete_heartbeat_records():
+    """F11: the observer's append cannot be clobbered by a held dispatcher
+    writer. Every record stays complete and newline-delimited (no `unning`)."""
+    work = tempfile.mkdtemp(prefix="dispatch-hb-race-")
+    hb = os.path.join(work, "progress.log")
+    td, proc = _spawn("paced", extra=["--heartbeat", hb])
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline and " START " not in _read(hb):
+            time.sleep(0.02)
+        assert " START " in _read(hb), _read(hb)
+        # The completion observer appends while the dispatcher still holds the
+        # run open (paced emits, then sleeps ~1.2s before the terminal line).
+        for i in range(3):
+            with open(hb, "a", encoding="utf-8") as fh:
+                fh.write(f"2026-10-29T00:00:0{i}Z SURVEY running\n")
+            time.sleep(0.05)
+        proc.communicate(timeout=30)
+        text = _read(hb)
+        lines = [l for l in text.splitlines() if l.strip()]
+        assert not any(l.strip() == "unning" for l in lines), text
+        assert text.count("SURVEY running") == 3, text
+        record = re.compile(
+            r"^(# progress:|\d{4}-\d{2}-\d{2}T\S+ "
+            r"(START|DONE|BLOCKED|SURVEY|WAKE|STEP|CALL|POLL)\b)")
+        for line in lines:
+            assert record.match(line), f"partial record: {line!r} in {text!r}"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+        shutil.rmtree(work, ignore_errors=True)
+        shutil.rmtree(td, ignore_errors=True)
 
 
 def test_heartbeat_terminal_blocked():
