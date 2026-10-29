@@ -60,6 +60,36 @@ DENIAL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Run-vehicle association marker (RM-069). A child dispatched through the
+# shared V2 service carries this title prefix so the observer can map it to
+# its orchestrator without a second registry. Keep in exact step with
+# plugins/delegation-observer/state.ts (`delegationTitle`/`parseDelegationTitle`).
+DELEGATION_PREFIX = "[delegate:"
+DELEGATION_TITLE_MAX = 160
+DELEGATION_RE = re.compile(
+    r"^\[delegate:([A-Za-z0-9_-]+)\]\s+([A-Za-z0-9_.-]+):\s*(.*)$")
+
+
+def delegation_title(orchestrator_session, agent, task,
+                     max_length=DELEGATION_TITLE_MAX):
+    """`[delegate:<sid>] <agent>: <task>`, flattened and bounded."""
+    flat = re.sub(r"\s+", " ", str(task or "")).strip()
+    head = f"{DELEGATION_PREFIX}{orchestrator_session}] {agent}: "
+    room = max(8, max_length - len(head))
+    body = flat if len(flat) <= room else flat[:room - 3].rstrip() + "..."
+    return (head + body)[:max_length]
+
+
+def parse_delegation_title(title):
+    """`{orchestratorID, agent, task}` for a marker title, else None."""
+    if not isinstance(title, str):
+        return None
+    match = DELEGATION_RE.match(title.strip())
+    if not match:
+        return None
+    return {"orchestratorID": match.group(1), "agent": match.group(2),
+            "task": match.group(3).strip()}
+
 
 def binary():
     """The opencode executable (test seam: OPENCODE_BIN)."""

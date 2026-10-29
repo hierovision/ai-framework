@@ -29,6 +29,9 @@ from types import SimpleNamespace
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
 DISPATCH = os.path.join(HERE, "dispatch_agent.py")
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import opencode_v2 as v2  # noqa: E402 - the marker contract owner
 
 # The stub mimics `opencode run --agent <n> --format json <prompt>`: a
 # newline-delimited JSON stream with `sessionID` on every event, `text`
@@ -44,6 +47,9 @@ import time
 
 mode = os.environ.get("STUB_MODE", "valid")
 argv = sys.argv[1:]
+if argv[:2] == ["service", "status"]:
+    print(os.environ.get("STUB_SERVICE_URL", "stopped"))
+    sys.exit(0)
 if argv[:1] == ["api"]:
     path = argv[-1] if argv else ""
     dump_api_path = os.environ.get("STUB_DUMP_API")
@@ -1190,6 +1196,93 @@ def test_dispatcher_heartbeat_has_no_survey_claim():
         terminals = [l for l in lines if " DONE " in l or " BLOCKED " in l]
         assert len(terminals) == 1 and "DONE ok" in terminals[0], lines
     finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_delegation_title_marker_associates_run_vehicle():
+    """RM-069 AC1: a run-vehicle child carries the machine-readable marker in
+    its `--title`, so the observer maps it without a side registry. The
+    literal is the cross-language contract asserted by the TS parser test."""
+    work = tempfile.mkdtemp(prefix="dispatch-delegation-")
+    try:
+        dump = os.path.join(work, "argv.json")
+        r = _run("valid", extra=["--delegation-to", "ses_parent",
+                                 "--task-label", "RM-069 drill",
+                                 "--contract", "implement-handoff"],
+                 env_extra={"STUB_DUMP_ARGV": dump})
+        assert r.rc == 0, (r.rc, r.stderr)
+        argv = json.loads(r.argv_dump)
+        title = argv[argv.index("--title") + 1]
+        assert title == "[delegate:ses_parent] architect: RM-069 drill", title
+        assert "delegation=[delegate:ses_parent] architect: RM-069 drill" in r.stdout
+        parsed = v2.parse_delegation_title(title)
+        assert parsed == {"orchestratorID": "ses_parent", "agent": "architect",
+                          "task": "RM-069 drill"}, parsed
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_delegation_title_defaults_to_wake_to_and_flattens():
+    """RM-069: --wake-to already names the orchestrator; the task label
+    defaults to the heartbeat header and the marker never carries newlines."""
+    work = tempfile.mkdtemp(prefix="dispatch-delegation-wake-")
+    try:
+        hb = os.path.join(work, "progress.log")
+        dump = os.path.join(work, "argv.json")
+        prompt = os.path.join(work, "prompt.md")
+        with open(prompt, "w", encoding="utf-8") as fh:
+            fh.write("Do it.")
+        r = _run("valid", extra=["--heartbeat", hb, "--wake-to", "ses_orch",
+                                 "--wake-agent", "curator",
+                                 "--contract", "implement-handoff"],
+                 env_extra={"STUB_DUMP_ARGV": dump})
+        assert r.rc == 0, (r.rc, r.stderr)
+        argv = json.loads(r.argv_dump)
+        title = argv[argv.index("--title") + 1]
+        assert title.startswith("[delegate:ses_orch] architect: "), title
+        assert "\n" not in title, title
+        long_title = v2.delegation_title("ses_orch", "architect", "x " * 400)
+        assert len(long_title) <= v2.DELEGATION_TITLE_MAX, len(long_title)
+        assert long_title.endswith("..."), long_title
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_headless_dispatch_has_no_delegation_marker():
+    """RM-069: a headless/standalone dispatch has no interactive parent and
+    keeps the existing contract — no title marker, no observer assumption."""
+    work = tempfile.mkdtemp(prefix="dispatch-no-delegation-")
+    try:
+        dump = os.path.join(work, "argv.json")
+        r = _run("valid", extra=["--contract", "implement-handoff"],
+                 env_extra={"STUB_DUMP_ARGV": dump})
+        assert r.rc == 0, (r.rc, r.stderr)
+        argv = json.loads(r.argv_dump)
+        assert "--title" not in argv, argv
+        assert "delegation=" not in r.stdout, r.stdout
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_interactive_dispatch_joins_the_shared_service():
+    """RM-069 AC1: with a running service and no private-server reason, the
+    child is dispatched onto that service so the TUI event stream owns it."""
+    work = tempfile.mkdtemp(prefix="dispatch-shared-service-")
+    try:
+        dump = os.path.join(work, "argv.json")
+        r = _run("valid", extra=["--delegation-to", "ses_parent",
+                                 "--profile", "none",
+                                 "--contract", "implement-handoff"],
+                 env_extra={"STUB_DUMP_ARGV": dump,
+                            "OPENCODE_V2_NO_SERVICE": "",
+                            "STUB_SERVICE_URL": "http://127.0.0.1:4096"})
+        assert r.rc == 0, (r.rc, r.stderr)
+        v2.reset_service_cache()
+        argv = json.loads(r.argv_dump)
+        assert argv[argv.index("--server") + 1] == "http://127.0.0.1:4096", argv
+        assert "--standalone" not in argv, argv
+    finally:
+        v2.reset_service_cache()
         shutil.rmtree(work, ignore_errors=True)
 
 

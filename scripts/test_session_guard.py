@@ -1111,6 +1111,49 @@ def test_denial_latest_event_keyed_on_timestamp_not_index():
         shutil.rmtree(work, ignore_errors=True)
 
 
+def test_control_interrupt_is_a_typed_call_without_kill_authority():
+    """RM-069 AC9: the TUI's interrupt is the same typed call the guard
+    exposes; kill authority stays guard-owned and explicit."""
+    guard = _load_guard()
+    td = tempfile.mkdtemp(prefix="guard-interrupt-")
+    try:
+        stub = os.path.join(td, "opencode")
+        out = os.path.join(td, "argv.json")
+        with open(stub, "w", encoding="utf-8") as fh:
+            fh.write(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "with open(os.environ['STUB_OUT'], 'a') as fh:\n"
+                "    fh.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                "if os.environ.get('STUB_REFUSE'):\n"
+                "    print('{\"_tag\": \"Conflict\"}')\n"
+                "    print('HTTP 409 Conflict')\n"
+                "    sys.exit(0)\n"
+                "print('{\"interrupted\": true}')\n")
+        os.chmod(stub, 0o755)
+        env = {**os.environ, "OPENCODE_BIN": stub, "STUB_OUT": out,
+               "OPENCODE_V2_NO_SERVICE": "1", "OPENCODE_V2_API_VIA_CLI": "1"}
+        proc = subprocess.run([sys.executable, GUARD, "--interrupt", "ses_x"],
+                              capture_output=True, text=True, env=env)
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        assert "interrupt ses_x accepted" in proc.stdout, proc.stdout
+        assert "killed" not in proc.stdout.lower(), proc.stdout
+        calls = [json.loads(line) for line in open(out, encoding="utf-8")
+                 if line.strip()]
+        assert calls == [["api", "POST", "/api/session/ses_x/interrupt"]], calls
+
+        refused = subprocess.run([sys.executable, GUARD, "--interrupt", "ses_x"],
+                                 capture_output=True, text=True,
+                                 env={**env, "STUB_REFUSE": "1"})
+        assert refused.returncode == 2, (refused.returncode, refused.stdout)
+        assert "refused" in refused.stdout, refused.stdout
+
+        assert "same session" in guard.CONTROL["tui.interrupt"]
+        assert "guard-only" in guard.CONTROL["guard.kill"]
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

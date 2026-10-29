@@ -7,6 +7,11 @@ Fails on a live surface that still emits a V1 flag/endpoint/package/tool name:
   `@opencode-ai/plugin`, `subagent_type`, `task_id`,
   `permission.external_directory`.
 
+Also fails on guidance that prescribes **foreground/blocking delegation**
+(RM-069 AC12): every delegation must return a background handle and state how
+progress, questions and terminal state are delivered. Historical records
+(AGENTS.md tiers: ADRs, ROADMAP, roadmap detail, plans) are allowlisted.
+
 `--log-level`/`--print-logs` are valid V2 global flags, so they are not
 V1-only. They remain forbidden in the eval workflows (AC24: evals use
 `OPENCODE_LOG_LEVEL=ERROR`); the post-smoke loader probe legitimately uses
@@ -36,6 +41,13 @@ PATTERNS = (
     (r"subagent_type", "subagent_type"),
     (r"\btask_id\b", "task_id"),
     (r"permission\.external_directory", "permission.external_directory"),
+    # RM-069 AC12: guidance may not prescribe a foreground/blocking delegation.
+    (r"(?i)\bforeground\s+(?:task|subagent|delegat\w*)", "foreground delegation"),
+    (r"(?i)\bblock(?:s|ing)?\s+(?:on\s+)?the\s+(?:subagent|child|delegate)\b",
+     "blocking delegation"),
+    (r"(?i)\bwait(?:s|ing)?\s+for\s+the\s+(?:subagent|child|delegate)\s+to\s+"
+     r"(?:finish|complete|return)", "blocking delegation"),
+    (r"(?i)\bfire[- ]and[- ]forget\b", "fire-and-forget delegation"),
 )
 EVAL_LOG_FLAGS = re.compile(r"--(?:log-level|print-logs)\b")
 SCAN_DIRS = ("agents", "scripts", "skills", "reference", "docs",

@@ -379,6 +379,53 @@ def _child_db_state(cfg):
             pass
 
 
+# --- status hook (RM-069 degradation fallback) -------------------------------
+
+def status_snapshot(cfg, hb, outcome, detail, live_age, run_path):
+    """One compact JSON snapshot for the observer's fallback status surface.
+
+    Opt-in (`--status-file`). It carries no prompt and no model turn: the TUI
+    reads it only when the plugin is unavailable, and the terminal wake stays
+    the sole prompt.
+    """
+    return {
+        "ts": now_iso(),
+        "agent": cfg.agent,
+        "child": cfg.child_session or None,
+        "orchestrator": cfg.orchestrator_session,
+        "outcome": outcome,
+        "detail": detail,
+        "live_age_s": None if live_age is None else round(live_age, 1),
+        "terminal": outcome not in ("AWAITING",),
+        "heartbeat": os.path.abspath(cfg.heartbeat),
+        "run_log": run_path,
+        "worktree": cfg.worktree or None,
+        "branch": cfg.branch or None,
+        "thresholds": {
+            "stall_seconds": watch_agent.DEFAULT_STALL_SECONDS,
+            "call_seconds": cfg.call_seconds,
+            "loop_repeats": cfg.loop_repeats,
+            "liveness_seconds": cfg.liveness_seconds,
+        },
+    }
+
+
+def write_status(path, payload):
+    """Atomic replace so a reader never sees a half-written snapshot."""
+    if not path:
+        return
+    directory = os.path.dirname(os.path.abspath(path))
+    try:
+        os.makedirs(directory, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, sort_keys=True)
+            fh.write("\n")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
 # --- loop --------------------------------------------------------------------
 
 def _append_line(path, text):
@@ -416,6 +463,10 @@ def run(cfg, sleep=time.sleep, now=time.monotonic):
         live_age = liveness_age(hb, _child_last_epoch(cfg), time.time())
         outcome, detail = classify(hb, run_rec, live_age,
                                    cfg.liveness_seconds, child_running)
+        if getattr(cfg, "status_file", None):
+            write_status(cfg.status_file,
+                         status_snapshot(cfg, hb, outcome, detail, live_age,
+                                         run_path))
 
         if outcome == "AWAITING":
             sleep(cfg.interval)
@@ -506,6 +557,10 @@ def build_parser():
     ap.add_argument("--wake-agent", dest="wake_agent", required=True,
                     help="Agent the orchestrator session runs as (required: "
                          "opencode does not inherit it).")
+    ap.add_argument("--status-file", dest="status_file", default=None,
+                    metavar="FILE",
+                    help="Opt-in JSON status snapshot per poll (RM-069 "
+                         "degradation fallback; adds no prompt).")
     ap.add_argument("--call-seconds", dest="call_seconds", type=int,
                     default=watch_agent.DEFAULT_CALL_SECONDS)
     ap.add_argument("--loop-repeats", dest="loop_repeats", type=int,
