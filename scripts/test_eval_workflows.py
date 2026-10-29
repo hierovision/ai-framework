@@ -176,8 +176,9 @@ def test_lane_and_nested_agent_override():
                     f"{path}/{step.get('name')}: runner step lacks the fallback opt-in"
     assert found >= 2, f"expected a runner step in both workflows, found {found}"
     import subprocess
-    work = tempfile.mkdtemp(prefix="eval-config-", dir=os.path.join(
-        os.path.dirname(HERE), ".scratch", "test-tmp"))
+    base = os.path.join(os.path.dirname(HERE), ".scratch", "test-tmp")
+    os.makedirs(base, exist_ok=True)
+    work = tempfile.mkdtemp(prefix="eval-config-", dir=base)
     try:
         root = os.path.join(work, "xdg")
         out = subprocess.run([sys.executable, os.path.join(HERE, "ci-lane-overrides.py"),
