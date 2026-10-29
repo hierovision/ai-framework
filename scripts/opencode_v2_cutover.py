@@ -187,11 +187,11 @@ def migration_gate(args):
         evidence = _first_file(args.migration_evidence)
     else:
         evidence = _first_file(
-            os.path.join(REPO, ".scratch", "opencode-v2", "canary-verify",
-                         "migration-rehearsal.txt"),
             os.path.join(REPO, ".scratch", "v2-canary",
                          "migration-rehearsal.txt"),
             os.path.join(REPO, ".scratch", "opencode-v2",
+                         "migration-rehearsal.txt"),
+            os.path.join(REPO, ".scratch", "opencode-v2", "canary-verify",
                          "migration-rehearsal.txt"))
     if not evidence:
         return False, "migration residual evidence missing"

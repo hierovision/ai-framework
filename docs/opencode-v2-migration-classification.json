@@ -1,11 +1,11 @@
 {
-  "residual_count": 1498,
+  "residual_count": 119,
   "classification": "resumable-backfill",
-  "cursor": "ses_f1796d4d9ffedcQ6Z6qEKbMmbB",
+  "cursor": "ses_0ad3c92a5ffecY1JU0nF4cXGew",
   "all_missing_below_cursor": true,
   "source_untouched": true,
-  "dated": "2026-10-28",
-  "evidence": ".scratch/opencode-v2/canary-verify/migration-rehearsal.txt",
-  "source_session_rows": 2197,
-  "session_v2_rows": 700
+  "dated": "2026-10-27",
+  "evidence": ".scratch/v2-canary/migration-rehearsal.txt",
+  "source_session_rows": 2195,
+  "session_v2_rows": 2076
 }
