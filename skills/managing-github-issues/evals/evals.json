@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "I have an established ROADMAP.md at skills/managing-github-issues/evals/fixtures/sample-roadmap.md. Dry-run a sync to GitHub issues — tell me exactly how many issues would be created and confirm none are for done or skipped items.",
+      "prompt": "I have an established ROADMAP.md at skills/managing-github-issues/evals/fixtures/sample-roadmap.md. Dry-run a sync to GitHub issues using the repo script at skills/managing-github-issues/scripts/sync-issues.mjs — tell me exactly how many issues would be created and confirm none are for done or skipped items.",
       "expect": {"action": [{"tool": "shell", "args": {"command": "*sync-issues*"}}], "text": ["dry-run"]},
       "expected_behavior": [
         "Reports exactly 6 planned creates (2 features + 1 bug + 1 debt + 2 chores)",
@@ -14,7 +14,8 @@
       "files": [
         "fixtures/sample-roadmap.md",
         "fixtures/sample-todo.md",
-        "fixtures/verify.mjs"
+        "fixtures/verify.mjs",
+        "../scripts/sync-issues.mjs"
       ],
       "notes": "Self-check by running `node skills/managing-github-issues/evals/fixtures/verify.mjs` — exits 0 when the planned-create count is 6 and every open id carries its roadmap-id label. Real GitHub runs are network side-effects and out of eval scope."
     },
