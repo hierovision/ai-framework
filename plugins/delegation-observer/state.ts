@@ -163,27 +163,34 @@ export function delegationTitle({ orchestratorID, agent, task }: {
  *   DELEGATION_OBSERVER_HEALTH_FILE         path
  *   DELEGATION_OBSERVER_STATUS_FILE         path
  *
- * Options still win when a host does forward them; the env only fills what the
- * host dropped. Numeric/boolean parsing is total (invalid values are ignored).
+ * Precedence is per key: a value the host forwarded in `options` wins; the env
+ * fills only what the host dropped. Numeric/boolean parsing is total (invalid
+ * values are ignored).
  */
 export function tuiConfig(ctx: any, env: Record<string, string | undefined> = process.env) {
   const options = ctx?.options?.delegationObserver ?? {};
   const merged: any = { ...options };
-  const rawStall = env?.DELEGATION_OBSERVER_STALL_SECONDS;
-  const envStall = rawStall === undefined || rawStall === "" ? NaN : Number(rawStall);
-  if (Number.isFinite(envStall) && envStall > 0) merged.stallSeconds = envStall;
-  const rawEnabled = env?.DELEGATION_OBSERVER_ENABLED;
-  if (rawEnabled !== undefined && rawEnabled !== "") {
-    const value = String(rawEnabled).trim().toLowerCase();
-    if (["0", "false", "no", "off"].includes(value)) merged.enabled = false;
-    if (["1", "true", "yes", "on"].includes(value)) merged.enabled = true;
-  }
+  const take = (key: string, raw: unknown, parse: (value: string) => unknown) => {
+    if (options[key] !== undefined) return; // forwarded option wins
+    if (raw === undefined || raw === "") return;
+    const value = parse(String(raw));
+    if (value !== undefined) merged[key] = value;
+  };
+  take("stallSeconds", env?.DELEGATION_OBSERVER_STALL_SECONDS, (raw) => {
+    const value = Number(raw);
+    return Number.isFinite(value) && value > 0 ? value : undefined;
+  });
+  take("enabled", env?.DELEGATION_OBSERVER_ENABLED, (raw) => {
+    const value = raw.trim().toLowerCase();
+    if (["0", "false", "no", "off"].includes(value)) return false;
+    if (["1", "true", "yes", "on"].includes(value)) return true;
+    return undefined;
+  });
   for (const [key, envKey] of [
     ["healthFile", "DELEGATION_OBSERVER_HEALTH_FILE"],
     ["statusFile", "DELEGATION_OBSERVER_STATUS_FILE"],
   ] as const) {
-    const value = env?.[envKey];
-    if (typeof value === "string" && value.trim()) merged[key] = value.trim();
+    take(key, env?.[envKey], (raw) => (raw.trim() ? raw.trim() : undefined));
   }
   return merged;
 }

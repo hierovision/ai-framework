@@ -108,7 +108,12 @@ status-claim ownership rules, and the session guard's kill authority.
 - Host adoption is a separate owner step (install peer deps, add the config
   entry, restart on a known port); this ADR records the shape, not the install.
 - 2.1.4 does not forward plugin `options` to the TUI part; the interactive
-  thresholds accept a documented env seam while the server uses the options.
+  values accept a documented env seam. Precedence is per key: a forwarded
+  option wins, the env fills the gap, the shared contract is the default.
+- A `thrash` warning clears on the next activity (`touch`); the durable signal
+  is the single deduped milestone. Kept as a known limit, not hidden.
+- Trust is root-only: a title naming any existing root passes (local-context
+  boundary, not provenance).
 
 ## Evidence (2026-10-29, final round)
 
@@ -119,7 +124,7 @@ isolated `XDG_CONFIG_HOME`/state/cache/tmp + `OPENCODE_DB`, TUI attached with
 | Drill | What the capture proves | Path |
 |---|---|---|
 | D1 in-session | live `running: tool: sleep 25` row + child `parent_id` in the DB | `service-drill/final2/d1/{pane-running.txt,db.txt}` |
-| D2 run-vehicle | attributable `sleep 20` running row, title marker, one synthetic, `WAKE success` 66 s after DONE | `service-drill/final2/d2/*` |
+| D2 run-vehicle | attributable `sleep 20` running row, title marker, one synthetic, `WAKE success` 40 s after DONE | `service-drill/final2/d2/*` |
 | D3 controls | steer queued on the same child id; interrupt → same child `idle_outcome=interrupted` | `service-drill/final2/d3/{steer.txt,pane-interrupt.txt,db.txt}` |
 | D4-busy | 40 s tool call stays `running` at a 5 s drill threshold | `service-drill/final/busy/*` |
 | D4-stall | quiet child warns at 5 s, fails at 2× | `service-drill/final/stall-pane.txt` |

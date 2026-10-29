@@ -24,6 +24,21 @@ have. The watchdog and the terminal wake remain the authoritative fallback.
 | `DELEGATION_OBSERVER_ENABLED` | — | mirrors the observer's disabled state |
 | `DELEGATION_OBSERVER_HEALTH_FILE` | `<location>/.scratch/delegation-observer/health.json` | observer health record |
 
+## Install / dependencies
+
+The sentinel is a V2 plugin package with peer dependencies only
+(`@opencode/plugin` 2.1.4, `solid-js` 1.9.12, `@opentui/core`/`solid` 0.6.8):
+
+```
+cd plugins/delegation-sentinel && npm install     # materializes the peers + devDeps
+npm test                                          # node --test sentinel.test.ts (no deps needed)
+npm run typecheck                                 # tsc -p . --noEmit (needs npm install)
+```
+
+`node_modules` is never committed; a fresh checkout runs `npm install` once.
+If the observer is installed beside it, npm's peer resolution can reuse the
+same versions; the loader resolves the sentinel's own `node_modules` first.
+
 ## Loading
 
 A plugin directory must resolve a `server` entrypoint (2.1.4 skips a TUI-only

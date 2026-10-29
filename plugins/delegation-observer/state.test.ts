@@ -506,14 +506,14 @@ test("the shared health record round-trips and rejects junk", () => {
   assert.equal(parseHealthRecord(""), null);
 });
 
-test("the TUI threshold seam merges env over options over defaults", () => {
-  const state = createState(tuiConfig({ options: { delegationObserver: { stallSeconds: 9 } } },
-    { DELEGATION_OBSERVER_STALL_SECONDS: "5" }), now);
-  assert.equal(state.config.stallSeconds, 5);
-  const fromOptions = createState(tuiConfig({
-    options: { delegationObserver: { stallSeconds: 9 } },
-  }, {}), now);
-  assert.equal(fromOptions.config.stallSeconds, 9);
+test("the TUI threshold seam merges env under forwarded options", () => {
+  const withOption = createState(tuiConfig(
+    { options: { delegationObserver: { stallSeconds: 9 } } },
+    { DELEGATION_OBSERVER_STALL_SECONDS: "5" },
+  ), now);
+  assert.equal(withOption.config.stallSeconds, 9, "a forwarded option wins");
+  const onlyEnv = createState(tuiConfig({}, { DELEGATION_OBSERVER_STALL_SECONDS: "5" }), now);
+  assert.equal(onlyEnv.config.stallSeconds, 5);
   const fromDefaults = createState(tuiConfig({}, {}), now);
   assert.equal(fromDefaults.config.stallSeconds, DEFAULTS.stallSeconds);
 });
@@ -529,13 +529,31 @@ test("the TUI config env source carries every TUI-relevant value", () => {
   assert.equal(cfg.stallSeconds, 7);
   assert.equal(cfg.healthFile, "/tmp/h.json");
   assert.equal(cfg.statusFile, "/tmp/s.json");
-  // invalid values are ignored, options still win when present
-  const kept = tuiConfig({ options: { delegationObserver: { enabled: true, stallSeconds: 11 } } }, {
+  // per-key precedence: a forwarded option wins; the env only fills gaps
+  const kept = tuiConfig({
+    options: {
+      delegationObserver: {
+        enabled: true, stallSeconds: 11,
+        healthFile: "/opt/h.json", statusFile: "/opt/s.json",
+      },
+    },
+  }, {
+    DELEGATION_OBSERVER_ENABLED: "0",
+    DELEGATION_OBSERVER_STALL_SECONDS: "5",
+    DELEGATION_OBSERVER_HEALTH_FILE: "/tmp/h.json",
+    DELEGATION_OBSERVER_STATUS_FILE: "/tmp/s.json",
+  });
+  assert.equal(kept.enabled, true, "options win over env");
+  assert.equal(kept.stallSeconds, 11);
+  assert.equal(kept.healthFile, "/opt/h.json");
+  assert.equal(kept.statusFile, "/opt/s.json");
+  // invalid env values are ignored and gaps stay unfilled
+  const invalid = tuiConfig({}, {
     DELEGATION_OBSERVER_ENABLED: "nonsense",
     DELEGATION_OBSERVER_STALL_SECONDS: "0",
   });
-  assert.equal(kept.enabled, true);
-  assert.equal(kept.stallSeconds, 11);
+  assert.equal(invalid.enabled, undefined);
+  assert.equal(invalid.stallSeconds, undefined);
 });
 
 test("a clock-classified failed row returns to running on real activity", () => {
