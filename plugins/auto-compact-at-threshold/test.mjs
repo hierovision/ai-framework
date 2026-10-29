@@ -123,6 +123,32 @@ test("startup marker is emitted", async () => {
   cleanup();
 });
 
+test("startup marker reaches stderr when the context has no log domain", async () => {
+  // V2 2.1.4's plugin context has no `log` domain (probed 2026-10-29:
+  // app/location/options/agent/event/model/... but no log/logger). The
+  // startup marker must therefore land on the loader/standalone log stream
+  // (process.stderr with `--print-logs`), not an unobservable console.log.
+  const writes = [];
+  const original = process.stderr.write;
+  process.stderr.write = (chunk) => {
+    writes.push(String(chunk));
+    return true;
+  };
+  try {
+    const f = fakeCtx({ models: [] });
+    delete f.ctx.log;
+    const cleanup = await createDefinition(Plugin).setup(f.ctx);
+    await new Promise((r) => setTimeout(r, 10));
+    cleanup();
+  } finally {
+    process.stderr.write = original;
+  }
+  assert.ok(
+    writes.some((line) => line.includes("auto-compact-at-threshold initialized")),
+    writes,
+  );
+});
+
 test("cleanup aborts the subscription", async () => {
   const f = fakeCtx({ models: [] });
   let signalRef = null;

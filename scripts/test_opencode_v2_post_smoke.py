@@ -18,11 +18,15 @@ import tempfile
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
 SCRIPT = os.path.join(HERE, "opencode_v2_post_smoke.py")
+sys.path.insert(0, HERE)
+
+import scratch_cleanup  # noqa: E402
 
 
 def _tmp(prefix):
     base = os.path.join(REPO, ".scratch", "test-tmp")
     os.makedirs(base, exist_ok=True)
+    scratch_cleanup.prune_test_scratch(base)
     return tempfile.mkdtemp(prefix=prefix, dir=base)
 
 
@@ -31,7 +35,8 @@ def _git(cwd, *args):
                    capture_output=True, text=True)
 
 
-def _framework(root, with_plugin=True):
+def _framework(root, with_plugin=True,
+               plugin_spec="./plugins/auto-compact-at-threshold"):
     path = os.path.join(root, "framework")
     os.makedirs(os.path.join(path, "agents"))
     for i in range(17):
@@ -46,7 +51,7 @@ def _framework(root, with_plugin=True):
         d = os.path.join(cfg_dir, "plugins", "auto-compact-at-threshold")
         shutil.copytree(os.path.join(REPO, "plugins",
                                      "auto-compact-at-threshold"), d)
-        cfg = {"plugins": ["plugins/auto-compact-at-threshold"]}
+        cfg = {"plugins": [plugin_spec]}
     else:
         cfg = {}
     with open(os.path.join(cfg_dir, "opencode.jsonc"), "w") as fh:
@@ -64,17 +69,44 @@ def _config_root(path):
 
 
 def _fake_bin(root, version="opencode v2.1.4"):
+    """Stub the V2 CLI: --version plus a standalone loader log on `run`.
+
+    STUB_LOADER selects the loader evidence shape: pass (default), absent,
+    failed, or wrong. All shapes exit non-zero after the plugin phase because
+    the probe uses an unavailable model; only the captured stderr is asserted.
+    """
     d = os.path.join(root, "bin")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "opencode")
     with open(path, "w") as fh:
-        fh.write("#!/bin/sh\n"
-                 "if [ \"$1\" = \"plugin\" ]; then\n"
-                 "  echo \"auto-compact-at-threshold local "
-                 "$XDG_CONFIG_HOME/opencode/plugins/auto-compact-at-threshold/index.js\"\n"
-                 "  exit 0\n"
-                 "fi\n"
-                 f"echo '{version}'\n")
+        fh.write(f"""#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo '{version}'
+  exit 0
+fi
+if [ "$1" = "run" ]; then
+  cfg="$XDG_CONFIG_HOME/opencode/plugins/auto-compact-at-threshold"
+  case "$STUB_LOADER" in
+    absent)
+      printf '%s\\n' 'timestamp=2026-10-29T00:00:00.000Z level=INFO msg="loading plugin" id=/other/plugin entrypoint=file:///other/plugin/index.js' >&2
+      ;;
+    failed)
+      printf '%s\\n' 'timestamp=2026-10-29T00:00:00.000Z level=INFO msg="loading plugin" id='"$cfg"' entrypoint=file://'"$cfg"'/index.js' >&2
+      printf '%s\\n' 'timestamp=2026-10-29T00:00:00.000Z level=WARN message="failed to load plugin" target=plugins/auto-compact-at-threshold cause=NpmInstallFailedError' >&2
+      ;;
+    wrong)
+      printf '%s\\n' 'timestamp=2026-10-29T00:00:00.000Z level=INFO msg="loading plugin" id=/tmp/not-the-plugin entrypoint=file:///tmp/not-the-plugin/index.js' >&2
+      printf '%s\\n' '{{"service":"auto-compact-at-threshold","level":"info","message":"auto-compact-at-threshold initialized","extra":{{"version":"2.1.4"}}}}' >&2
+      ;;
+    *)
+      printf '%s\\n' 'timestamp=2026-10-29T00:00:00.000Z level=INFO msg="loading plugin" id='"$cfg"' entrypoint=file://'"$cfg"'/index.js' >&2
+      printf '%s\\n' '{{"service":"auto-compact-at-threshold","level":"info","message":"auto-compact-at-threshold initialized","extra":{{"version":"2.1.4"}}}}' >&2
+      ;;
+  esac
+  exit 1
+fi
+echo '{version}'
+""")
     os.chmod(path, 0o755)
     return path
 
@@ -131,6 +163,59 @@ def test_passing_pre_merge_writes_artifact():
         assert data["framework_sha"]
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def _plugin_failure(loader, plugin_spec="./plugins/auto-compact-at-threshold"):
+    """Run a pre-merge smoke whose loader evidence is `loader`; return the run."""
+    root = _tmp(f"smoke-loader-{loader}-")
+    try:
+        fw = _framework(root, plugin_spec=plugin_spec)
+        binary = _fake_bin(root)
+        db = _db(root)
+        out = os.path.join(root, "post.json")
+        r = _run(["--framework", fw, "--config-root", _config_root(fw),
+                  "--default-bin", binary, "--skip-live", "--artifact", out],
+                 {"OPENCODE_DB": db, "STUB_LOADER": loader})
+        return r, json.load(open(out)) if os.path.isfile(out) else None
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_loader_log_without_marker_fails():
+    """N1: the runtime probe alone is insufficient — V2's loader log must
+    name this plugin and carry its startup marker."""
+    r, data = _plugin_failure("absent")
+    assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+    assert "plugin: FAIL" in r.stdout, r.stdout
+    assert "loader" in r.stdout.lower(), r.stdout
+    assert data and data["passed"] is False, data
+
+
+def test_loader_failure_line_fails():
+    """N1: a `failed to load plugin` line is a hard failure even when a
+    loading line is present."""
+    r, _ = _plugin_failure("failed")
+    assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+    assert "plugin: FAIL" in r.stdout, r.stdout
+    assert "failed to load" in r.stdout.lower(), r.stdout
+
+
+def test_loader_marker_for_wrong_plugin_fails():
+    """N1: a marker is not enough; the loaded id must be the versioned plugin."""
+    r, _ = _plugin_failure("wrong")
+    assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+    assert "plugin: FAIL" in r.stdout, r.stdout
+    assert "wrong plugin" in r.stdout.lower() or "did not load" in r.stdout.lower(), \
+        r.stdout
+
+
+def test_bare_plugin_wiring_is_rejected():
+    """N1: a bare `plugins/...` spec is an npm package spec in V2, not a local
+    directory; the versioned config must wire `./plugins/...`."""
+    r, _ = _plugin_failure("pass", plugin_spec="plugins/auto-compact-at-threshold")
+    assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+    assert "plugin: FAIL" in r.stdout, r.stdout
+    assert "./plugins/" in r.stdout or "local" in r.stdout.lower(), r.stdout
 
 
 def test_consumer_required_fails_without_artifact():

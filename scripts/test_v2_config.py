@@ -121,8 +121,6 @@ def test_surfaces_rejects_each_v1_token():
         _write(d, "scripts/live.sh",
                "opencode run --dir . hi\n"
                "curl --attach http://x\n"
-               "opencode --log-level debug\n"
-               "opencode --print-logs\n"
                "GET /session/status\n"
                "npm i opencode-ai@1.19.4\n"
                "npm i @opencode-ai/plugin\n"
@@ -131,11 +129,32 @@ def test_surfaces_rejects_each_v1_token():
                "permission.external_directory\n")
         hits = mod.scan(d)
         labels = " ".join(hits)
-        for label in ("--dir", "--attach", "--log-level", "--print-logs",
+        for label in ("--dir", "--attach",
                       "/session/status", "opencode-ai@", "@opencode-ai/plugin",
                       "subagent_type", "task_id",
                       "permission.external_directory"):
             assert label in labels, (label, hits)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_surfaces_still_rejects_log_switches_in_eval_workflows():
+    """AC24 remains scoped to the eval lanes: V2 has the global flags, but the
+    eval workflows must not use them. The loader probe in post-smoke may."""
+    mod = _load("check_v2_surfaces", os.path.join(HERE, "check_v2_surfaces.py"))
+    d = tempfile.mkdtemp(prefix="v2surf-")
+    try:
+        os.makedirs(os.path.join(d, ".github", "workflows"))
+        os.makedirs(os.path.join(d, "scripts"))
+        _write(d, ".github/workflows/eval-per-change.yml",
+               "run: opencode run --log-level debug --print-logs hi\n")
+        _write(d, "scripts/loader.py",
+               "argv = ['--log-level', 'info', '--print-logs']\n")
+        hits = mod.scan(d)
+        assert any(".github/workflows/eval-per-change.yml" in h for h in hits), hits
+        assert any("--log-level" in h for h in hits), hits
+        assert any("--print-logs" in h for h in hits), hits
+        assert not any(h.startswith("scripts/loader.py") for h in hits), hits
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

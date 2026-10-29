@@ -3,9 +3,14 @@
 
 Fails on a live surface that still emits a V1 flag/endpoint/package/tool name:
 
-  `opencode run --dir`, `--attach`, `--log-level`, `--print-logs`,
-  `/session/status`, `opencode-ai@`, `@opencode-ai/plugin`, `subagent_type`,
-  `task_id`, `permission.external_directory`.
+  `opencode run --dir`, `--attach`, `/session/status`, `opencode-ai@`,
+  `@opencode-ai/plugin`, `subagent_type`, `task_id`,
+  `permission.external_directory`.
+
+`--log-level`/`--print-logs` are valid V2 global flags, so they are not
+V1-only. They remain forbidden in the eval workflows (AC24: evals use
+`OPENCODE_LOG_LEVEL=ERROR`); the post-smoke loader probe legitimately uses
+them to capture the loader/startup marker on stderr.
 
 A fixed allowlist keeps historical records and test fixtures out of the net:
 `docs/ADRs/`, `docs/ROADMAP.md`, `docs/roadmap-detail/`, `.opencode/plans/`,
@@ -25,8 +30,6 @@ REPO = os.path.dirname(HERE)
 PATTERNS = (
     (r"opencode\s+run\s+[^\n]*--dir", "opencode run --dir"),
     (r"--attach\b", "--attach"),
-    (r"--log-level\b", "--log-level"),
-    (r"--print-logs\b", "--print-logs"),
     (r"/session/status\b", "/session/status"),
     (r"opencode-ai@", "opencode-ai@"),
     (r"@opencode-ai/plugin", "@opencode-ai/plugin"),
@@ -34,6 +37,7 @@ PATTERNS = (
     (r"\btask_id\b", "task_id"),
     (r"permission\.external_directory", "permission.external_directory"),
 )
+EVAL_LOG_FLAGS = re.compile(r"--(?:log-level|print-logs)\b")
 SCAN_DIRS = ("agents", "scripts", "skills", "reference", "docs",
              ".github", ".opencode", "plugins")
 SCAN_FILES = ("README.md", "install.sh", "AGENTS.md")
@@ -99,6 +103,11 @@ def scan(root):
             for pattern, label in PATTERNS:
                 if re.search(pattern, line):
                     hits.append(f"{rel}:{lineno}: {label}")
+            if rel.replace(os.sep, "/").startswith(
+                    ".github/workflows/eval-"):
+                for match in EVAL_LOG_FLAGS.finditer(line):
+                    hits.append(
+                        f"{rel}:{lineno}: eval workflow {match.group(0)}")
     return hits
 
 

@@ -21,8 +21,12 @@ import datetime
 import hashlib
 import json
 import os
+import re
+import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
@@ -35,6 +39,11 @@ DEFAULT_ARTIFACT = os.path.join(REPO, ".scratch", "opencode-v2",
                                 "post-smoke.json")
 EXPECTED_AGENTS = 17
 EXPECTED_CONSUMER_AGENTS = 10
+PLUGIN_REL = "./plugins/auto-compact-at-threshold"
+PLUGIN_BARE = "plugins/auto-compact-at-threshold"
+LOADER_MARKER = "auto-compact-at-threshold initialized"
+LOADER_LOG = os.path.join(REPO, ".scratch", "opencode-v2", "plugin-loader.log")
+LOADER_TIMEOUT = 45
 
 
 def sha256(path):
@@ -119,15 +128,101 @@ def _versioned_root(manifest=None, config_root=None):
                         "opencode", v2.VERSION_PIN, "config")
 
 
+def _write_loader_log(text):
+    try:
+        os.makedirs(os.path.dirname(LOADER_LOG), exist_ok=True)
+        with open(LOADER_LOG, "w", encoding="utf-8") as fh:
+            fh.write(text or "")
+    except OSError:
+        pass
+
+
+def loader_evidence(root, binary, plugin_dir):
+    """N1: prove V2's actual loader loaded this local plugin and it started.
+
+    `plugin list` does not enumerate local directories, so this runs a
+    standalone CLI with the versioned config and captures `--print-logs`
+    stderr. An unavailable model makes the run exit quickly after the plugin
+    phase; the evidence is the loader line naming this plugin plus the
+    plugin's own stderr startup marker.
+    """
+    probe_root = os.path.join(REPO, ".scratch", "opencode-v2")
+    os.makedirs(probe_root, exist_ok=True)
+    probe_dir = tempfile.mkdtemp(prefix="loader-probe-", dir=probe_root)
+    env = dict(os.environ)
+    env.update({
+        "XDG_CONFIG_HOME": root,
+        "XDG_STATE_HOME": os.path.join(probe_dir, "state"),
+        "XDG_CACHE_HOME": os.path.join(probe_dir, "cache"),
+        "XDG_DATA_HOME": os.path.join(probe_dir, "data"),
+        "TMPDIR": os.path.join(probe_dir, "tmp"),
+        "OPENCODE_DB": os.path.join(probe_dir, "probe.db"),
+        "OPENCODE_LOG_LEVEL": "info",
+    })
+    env.pop("OPENCODE_CONFIG_CONTENT", None)
+    for key in ("XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "TMPDIR"):
+        os.makedirs(env[key], exist_ok=True)
+    argv = [binary, "run", "--standalone", "--format", "json",
+            "--log-level", "info", "--print-logs",
+            "--model", "loader-probe/none", "plugin loader probe"]
+    timed_out = False
+    try:
+        proc = subprocess.Popen(argv, cwd=probe_dir, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, start_new_session=True)
+        try:
+            _out, err = proc.communicate(timeout=LOADER_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            _out, err = proc.communicate()
+    except OSError as exc:
+        _write_loader_log(f"cannot launch {binary}: {exc}\n")
+        return False, f"loader probe cannot launch {binary}: {exc}"
+    finally:
+        shutil.rmtree(probe_dir, ignore_errors=True)
+    _write_loader_log(err or "")
+    lines = (err or "").splitlines()
+    expected = os.path.realpath(plugin_dir)
+    loaded = []
+    for line in lines:
+        if "loading plugin" not in line:
+            continue
+        match = re.search(r"\bid=(\S+)", line)
+        if match and os.path.realpath(match.group(1)) == expected:
+            loaded.append(line)
+    failures = [line for line in lines
+                if "failed to load plugin" in line
+                and "auto-compact-at-threshold" in line]
+    markers = [line for line in lines
+               if LOADER_MARKER in line
+               and "auto-compact-at-threshold" in line]
+    if failures:
+        return False, f"loader failed to load the versioned plugin: {failures[0][:240]}"
+    if not loaded:
+        suffix = " (loader probe timed out)" if timed_out else ""
+        return False, (f"loader did not load the versioned plugin "
+                       f"{expected}{suffix}; log={LOADER_LOG}")
+    if not markers:
+        return False, (f"startup marker missing from the loader log for "
+                       f"{expected}; log={LOADER_LOG}")
+    return True, (f"loader id={expected} marker={LOADER_MARKER} "
+                  f"log={LOADER_LOG}")
+
+
 def check_plugin(manifest=None, framework=None, config_root=None,
                  binary="opencode"):
-    """AC41: the versioned config wires the plugin and runtime evidence proves it.
+    """AC41/N1: the versioned config wires the plugin, runtime evidence proves
+    its behavior, and V2's actual loader log proves it loaded.
 
-    Runtime evidence, not source text: the plugin's own setup/cleanup probe
-    emits its ID, source, startup marker, and abort proof from the versioned
-    copy.
+    Runtime evidence alone is insufficient: `plugin list` does not enumerate
+    local directories, and a bare `plugins/...` spec is an npm package spec in
+    V2. The loader probe runs the real CLI with the versioned config.
     """
-    root = _versioned_root(manifest, config_root)
+    root = os.path.abspath(_versioned_root(manifest, config_root))
     cfg_path = os.path.join(root, "opencode", "opencode.jsonc")
     plugin_dir = os.path.join(root, "opencode", "plugins",
                               "auto-compact-at-threshold")
@@ -142,8 +237,13 @@ def check_plugin(manifest=None, framework=None, config_root=None,
     except (OSError, ValueError) as exc:
         return False, f"versioned config unreadable: {exc}"
     plugins = cfg.get("plugins")
-    if not isinstance(plugins, list) or \
-            "plugins/auto-compact-at-threshold" not in plugins:
+    if not isinstance(plugins, list):
+        return False, "versioned config does not wire auto-compact-at-threshold"
+    if PLUGIN_REL not in plugins:
+        if PLUGIN_BARE in plugins:
+            return False, ("versioned config wires the bare package spec "
+                           f"{PLUGIN_BARE}; V2 treats it as an npm package. "
+                           f"Wire the local directory as {PLUGIN_REL}")
         return False, "versioned config does not wire auto-compact-at-threshold"
     probe = os.path.join(plugin_dir, "runtime-probe.mjs")
     if not os.path.isfile(probe):
@@ -161,9 +261,13 @@ def check_plugin(manifest=None, framework=None, config_root=None,
     if not source.startswith("file://") or \
             os.path.realpath(source[7:]) != os.path.realpath(probe):
         return False, f"runtime source is not the versioned plugin: {source}"
+    loader_ok, loader_detail = loader_evidence(root, binary, plugin_dir)
+    if not loader_ok:
+        return False, loader_detail
     return True, (f"runtime id={evidence.get('plugin_id')} "
                   f"source={source} marker={evidence.get('startup_marker')} "
-                  f"aborted={evidence.get('subscription_aborted')}")
+                  f"aborted={evidence.get('subscription_aborted')}; "
+                  f"{loader_detail}")
 
 
 def check_db():
