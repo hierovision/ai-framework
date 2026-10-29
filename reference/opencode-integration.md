@@ -156,8 +156,14 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
 - **Options shape (probed 2026-10-29):** a string entry carries no options; an
   object entry `{ "package": "./plugins/<dir>", "options": { … } }` is
   accepted, and the loader forwards `options` to `setup(ctx)` as
-  `ctx.options`. `plugins/delegation-observer` reads
-  `ctx.options.delegationObserver`.
+  `ctx.options` **for the server part only** — the TUI part receives `{}` on
+  2.1.4. A TUI value that must match the server needs an env/file source.
+- **Plugin discovery (probed 2026-10-29):** the loader also scans the config
+  root's `plugins/*` directories and loads a directory even when it is not
+  listed in the `plugins` array. To make a plugin genuinely absent, remove its
+  directory. A directory needs a resolvable `server` entrypoint even for a
+  TUI-only companion (`{server: undefined}` is skipped); `tui` alone is not a
+  loadable plugin. `features.tui` is set from the `<dir>/tui` entrypoint.
 - 2.1.4's plugin context has **no log domain** (`ctx` carries
   `app/location/options/agent/.../session/shell`, no `log`/`logger`). The
   plugin writes its structured startup marker to `process.stderr`; run

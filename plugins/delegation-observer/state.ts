@@ -154,18 +154,38 @@ export function delegationTitle({ orchestratorID, agent, task }: {
 // --- state construction ----------------------------------------------------
 
 /**
- * The TUI host does not always forward a plugin entry's `options` to the TUI
- * part (probed 2026-10-29: the server saw `stallSeconds: 5`, the TUI did not).
- * The env seam keeps the interactive thresholds in step on such hosts; the
- * shared contract remains the default.
+ * The TUI host does not forward a plugin entry's `options` to the TUI part on
+ * 2.1.4 (probed 2026-10-29: the server saw `stallSeconds: 5`, the TUI did
+ * not). The documented env source carries every TUI-relevant value end to end:
+ *
+ *   DELEGATION_OBSERVER_ENABLED             1|0 / true|false (default: options)
+ *   DELEGATION_OBSERVER_STALL_SECONDS       positive number
+ *   DELEGATION_OBSERVER_HEALTH_FILE         path
+ *   DELEGATION_OBSERVER_STATUS_FILE         path
+ *
+ * Options still win when a host does forward them; the env only fills what the
+ * host dropped. Numeric/boolean parsing is total (invalid values are ignored).
  */
 export function tuiConfig(ctx: any, env: Record<string, string | undefined> = process.env) {
   const options = ctx?.options?.delegationObserver ?? {};
-  const raw = env?.DELEGATION_OBSERVER_STALL_SECONDS;
-  const envStall = raw === undefined || raw === "" ? NaN : Number(raw);
-  return Number.isFinite(envStall) && envStall > 0
-    ? { ...options, stallSeconds: envStall }
-    : options;
+  const merged: any = { ...options };
+  const rawStall = env?.DELEGATION_OBSERVER_STALL_SECONDS;
+  const envStall = rawStall === undefined || rawStall === "" ? NaN : Number(rawStall);
+  if (Number.isFinite(envStall) && envStall > 0) merged.stallSeconds = envStall;
+  const rawEnabled = env?.DELEGATION_OBSERVER_ENABLED;
+  if (rawEnabled !== undefined && rawEnabled !== "") {
+    const value = String(rawEnabled).trim().toLowerCase();
+    if (["0", "false", "no", "off"].includes(value)) merged.enabled = false;
+    if (["1", "true", "yes", "on"].includes(value)) merged.enabled = true;
+  }
+  for (const [key, envKey] of [
+    ["healthFile", "DELEGATION_OBSERVER_HEALTH_FILE"],
+    ["statusFile", "DELEGATION_OBSERVER_STATUS_FILE"],
+  ] as const) {
+    const value = env?.[envKey];
+    if (typeof value === "string" && value.trim()) merged[key] = value.trim();
+  }
+  return merged;
 }
 
 export function createState(overrides: Partial<ObserverConfig> = {},
@@ -278,7 +298,9 @@ function alert(m: Milestone): Alert {
 
 function touch(d: Delegate, now: number) {
   d.lastActivityAt = now;
-  if (d.status === "warning") d.status = "running";
+  // A clock-classified warning/failed row that shows real activity is alive
+  // again; only a terminal outcome is sticky.
+  if (d.status === "warning" || d.status === "failed") d.status = "running";
   d.warning = null;
   for (const key of [...d.emitted]) {
     if (key.startsWith("stall:")) d.emitted.delete(key);
@@ -300,7 +322,13 @@ function applyTool(state: ObserverState, d: Delegate, name: string, target: stri
   touch(d, now);
   const running = status === "running" || status === "pending"
     || status === "streaming" || status === "called";
-  d.phase = running ? `${name}${target ? `: ${target}` : ""}` : "thinking";
+  // `session.tool.called` carries no tool name on 2.1.4; the name arrives with
+  // `session.message.content.updated`. Until it does, show the target only and
+  // do not label/count the call (avoids a "tool:" label and double counting).
+  const named = Boolean(name) && name !== "tool" && name !== "?";
+  d.phase = running
+    ? `${named ? name : "tool"}${target ? `: ${target}` : ""}`
+    : "thinking";
   d.toolInFlight = running;
   d.tool = running ? { name, target, id } : null;
   if (running) {
@@ -310,22 +338,23 @@ function applyTool(state: ObserverState, d: Delegate, name: string, target: stri
     // target (tool:target's discriminating half) so a late tool name cannot
     // re-key an already-counted call.
     const counted = Boolean(id) && d.calls.has(id);
-    if (id && !counted) {
-      d.calls.set(id, true);
-      if (d.calls.size > 64) {
-        const oldest = d.calls.keys().next().value;
-        if (oldest !== undefined) d.calls.delete(oldest);
+    if (target && !counted && named) {
+      if (id) {
+        d.calls.set(id, true);
+        if (d.calls.size > 64) {
+          const oldest = d.calls.keys().next().value;
+          if (oldest !== undefined) d.calls.delete(oldest);
+        }
       }
-    }
-    if (target && !counted) {
       if (!d.loop || d.loop.key !== target) d.loop = { key: target, count: 0 };
       d.loop.count += 1;
+      const label = `${name}: ${target}`;
       const first = milestone(state, d, "first-tool", "first-tool",
-        `first tool: ${name}${target ? `: ${target}` : ""}`);
+        `first tool: ${label}`);
       if (first) state.pending.push(first);
       if (d.loop.count >= state.config.loopRepeats) {
         const thrash = milestone(state, d, "thrash", `thrash:${target}`,
-          `thrash: ${name}: ${target} x${d.loop.count}`, { attention: true });
+          `thrash: ${label} x${d.loop.count}`, { attention: true });
         if (thrash) {
           d.warning = `thrash: ${name}: ${target} x${d.loop.count}`;
           if (d.status === "running") d.status = "warning";

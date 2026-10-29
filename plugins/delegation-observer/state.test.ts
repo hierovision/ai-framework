@@ -517,3 +517,51 @@ test("the TUI threshold seam merges env over options over defaults", () => {
   const fromDefaults = createState(tuiConfig({}, {}), now);
   assert.equal(fromDefaults.config.stallSeconds, DEFAULTS.stallSeconds);
 });
+
+test("the TUI config env source carries every TUI-relevant value", () => {
+  const cfg = tuiConfig({}, {
+    DELEGATION_OBSERVER_ENABLED: "false",
+    DELEGATION_OBSERVER_STALL_SECONDS: "7",
+    DELEGATION_OBSERVER_HEALTH_FILE: "/tmp/h.json",
+    DELEGATION_OBSERVER_STATUS_FILE: "/tmp/s.json",
+  });
+  assert.equal(cfg.enabled, false);
+  assert.equal(cfg.stallSeconds, 7);
+  assert.equal(cfg.healthFile, "/tmp/h.json");
+  assert.equal(cfg.statusFile, "/tmp/s.json");
+  // invalid values are ignored, options still win when present
+  const kept = tuiConfig({ options: { delegationObserver: { enabled: true, stallSeconds: 11 } } }, {
+    DELEGATION_OBSERVER_ENABLED: "nonsense",
+    DELEGATION_OBSERVER_STALL_SECONDS: "0",
+  });
+  assert.equal(kept.enabled, true);
+  assert.equal(kept.stallSeconds, 11);
+});
+
+test("a clock-classified failed row returns to running on real activity", () => {
+  const state = fresh();
+  observe(state, child("ses_c", "ses_p"));
+  advance((DEFAULTS.stallSeconds * 2 + 5) * 1000);
+  tick(state, clock);
+  assert.equal(state.delegates.get("ses_c").status, "failed");
+  observe(state, contentTool("ses_c", "t1", "read", "running", { path: "a" }));
+  const d = state.delegates.get("ses_c");
+  assert.equal(d.status, "running");
+  assert.equal(d.warning, null);
+});
+
+test("a name-less tool.called waits for the content update to label the call", () => {
+  const state = fresh();
+  observe(state, child("ses_c", "ses_p"));
+  const called = { type: "session.tool.called", data: {
+    sessionID: "ses_c", id: "call_1", input: { command: "echo LOOP" },
+  } };
+  const r = observe(state, called);
+  assert.equal(r.milestones.filter((m) => m.kind === "first-tool").length, 0);
+  advance(DEFAULTS.milestoneMinIntervalSeconds * 1000 + 1);
+  const labelled = observe(state, contentTool("ses_c", "call_1", "shell",
+    "running", { command: "echo LOOP" }));
+  assert.equal(labelled.milestones.filter((m) => m.kind === "first-tool").length, 1);
+  assert.match(labelled.milestones[0].text, /shell: echo LOOP/);
+  assert.equal(state.delegates.get("ses_c").loop.count, 1);
+});

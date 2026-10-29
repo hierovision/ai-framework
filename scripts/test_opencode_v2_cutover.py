@@ -404,6 +404,10 @@ def test_default_config_source_wires_local_plugin_as_relative_path():
         os.makedirs(observer)
         with open(os.path.join(observer, "server.ts"), "w") as fh:
             fh.write("export default {id: 'delegation-observer'}\n")
+        sentinel = os.path.join(root, "plugins", "delegation-sentinel")
+        os.makedirs(sentinel)
+        with open(os.path.join(sentinel, "tui.tsx"), "w") as fh:
+            fh.write("export default {id: 'delegation-sentinel'}\n")
         home = os.path.join(root, "home")
         os.makedirs(home)
         cutover.REPO = root
@@ -413,10 +417,13 @@ def test_default_config_source_wires_local_plugin_as_relative_path():
         assert cfg["plugins"] == [
             "./plugins/auto-compact-at-threshold",
             "./plugins/delegation-observer",
+            "./plugins/delegation-sentinel",
         ], cfg
         assert all(entry.startswith("./plugins/") for entry in cfg["plugins"]), cfg
         assert os.path.isfile(os.path.join(
             config_root, "plugins", "delegation-observer", "server.ts"))
+        assert os.path.isfile(os.path.join(
+            config_root, "plugins", "delegation-sentinel", "tui.tsx"))
     finally:
         cutover.REPO = old_repo
         shutil.rmtree(root, ignore_errors=True)

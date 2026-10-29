@@ -64,14 +64,22 @@ OpenCode V2 2.1.4 now exposes the missing surfaces (probed 2026-10-29; facts in
    (`session.prompt` with `delivery: "steer"`) and interrupt
    (`session.interrupt`) act on the same session id. Tree abort stays the
    session guard's process-group authority; the TUI never gets kill power.
-8. **Trust + visible degradation.** A title marker is a claim: before the
-   first synthetic message the parent must resolve as a root session
-   (`session.get`, no `parentID`), else the milestone is dropped and the drop
-   is published. Absent/failed plugin, disconnected stream, disabled config,
-   unassociated running *child* sessions (the root is excluded), or a
-   server-side health failure produce a banner naming the
-   watchdog/observer fallback. The system never claims visibility it does not
-   have.
+8. **Root routing + trust.** A delegate's milestone belongs to the ROOT of
+   its parent chain: the server walks up (bounded) and follows a run-vehicle
+   title marker, so depth-2 children reach the real orchestrator. A title
+   marker is still a claim — trust is root-only (an existing root named by a
+   title passes; this is a local-context boundary, not provenance), and an
+   unresolvable chain drops the milestone visibly.
+9. **Independent fallback companion.** A small always-loadable
+   `delegation-sentinel` plugin (no-op server + TUI) renders the fallback line
+   when the observer is absent, failed, disabled, disconnected, or its TUI is
+   not running (presence marker `tui.json`). It reads the observer's plugin
+   record and health record and never renders delegate detail; the observer
+   cannot be relied on to draw its own absence banner.
+10. **TUI config source.** 2.1.4 does not forward plugin options to the TUI
+   part, so `DELEGATION_OBSERVER_ENABLED/STALL_SECONDS/HEALTH_FILE/
+   STATUS_FILE` carry every TUI-relevant value end to end (options win when a
+   host does forward them).
 
 ## What this supersedes (and what it does not)
 
@@ -102,22 +110,26 @@ status-claim ownership rules, and the session guard's kill authority.
 - 2.1.4 does not forward plugin `options` to the TUI part; the interactive
   thresholds accept a documented env seam while the server uses the options.
 
-## Evidence (2026-10-29)
+## Evidence (2026-10-29, final round)
 
-Live drills on an isolated disposable managed service (`service set port 4099`,
+Live drills on isolated disposable managed services (ports 4099–4102;
 isolated `XDG_CONFIG_HOME`/state/cache/tmp + `OPENCODE_DB`, TUI attached with
 `--server`); all captures under `.scratch/rm-069/` (gitignored):
 
 | Drill | What the capture proves | Path |
 |---|---|---|
-| D1 in-session | strip running→completed, two synthetic milestones, parent turn done | `drills/d1-pane.txt` |
-| D2 run-vehicle | title-marker child in the strip, one synthetic, one wake 64 s after DONE | `service-drill/final/d2/*` |
-| D3 controls | focus, steer queued on the same id (`delivery:"steer"`), interrupt | `drills/d3-running-pane.txt` |
-| D4-busy | 40 s tool call stays `running` at a 5 s drill stall threshold | `service-drill/final/busy/*` |
+| D1 in-session | live `running: tool: sleep 25` row + child `parent_id` in the DB | `service-drill/final2/d1/{pane-running.txt,db.txt}` |
+| D2 run-vehicle | attributable `sleep 20` running row, title marker, one synthetic, `WAKE success` 66 s after DONE | `service-drill/final2/d2/*` |
+| D3 controls | steer queued on the same child id; interrupt → same child `idle_outcome=interrupted` | `service-drill/final2/d3/{steer.txt,pane-interrupt.txt,db.txt}` |
+| D4-busy | 40 s tool call stays `running` at a 5 s drill threshold | `service-drill/final/busy/*` |
 | D4-stall | quiet child warns at 5 s, fails at 2× | `service-drill/final/stall-pane.txt` |
 | D4-loop | three identical calls → one `thrash` per child, deduped | `service-drill/final/{loop-pane.txt,loop2/,db.txt}` |
 | D5 needs-input | waiting row + `needs-input` milestone naming the action | `drills/d5-pane.txt` |
-| AC5 | no assistant turn between synthetics and the wake | `service-drill/final/db.txt` |
+| D6 absent | sentinel banner + terminal wake with no observer plugin | `d6/absent/{pane-absent.txt,pane-absent-fallback.txt,fallback/progress.log}` |
+| D6 disabled | observer `! delegates unavailable` + sentinel disabled line (env) | `d6/disabled/pane-disabled.txt` |
+| D6 TUI-failed | host `1 plugin failed` + sentinel `TUI is not running` | `d6/broken/pane-broken.txt` |
+| nested depth-2 | grandchild milestone routed to the root through the vehicle marker | `service-drill/final2/nested/db.txt` |
+| AC5 | no assistant turn between synthetics and the wake | `service-drill/final/db.txt`, `final2/d2/db.txt` |
 | loader/degradation | loader line + initialized; broken plugin fails visibly | `drill-loader/stderr2.log`, `drill-degraded/stderr.log` |
 
 AC6 wording was reconciled by the architect in the approved plan: routine
@@ -131,5 +143,6 @@ condition. The implementation and tests match that wording.
 - `reference/opencode-integration.md` — dated V2 API facts (events, TUI,
   synthetic, plugin entrypoints, options).
 - `plugins/delegation-observer/README.md` — configuration, controls, install.
+- `plugins/delegation-sentinel/` — the always-loadable fallback banner.
 - `docs/roadmap-detail/RM-069.md` — provenance and verification.
 - RM-058 detail (`docs/roadmap-detail/RM-058.md`) — retained contracts.

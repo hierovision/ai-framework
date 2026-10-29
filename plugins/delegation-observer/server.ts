@@ -41,6 +41,7 @@ import {
   disconnect,
   healthPath,
   observe,
+  parseDelegationTitle,
   tick,
 } from "./state.ts";
 
@@ -70,6 +71,7 @@ export function startObserver(ctx: any, options: {
   intervalMs?: number;
   config?: Partial<ObserverConfig>;
   healthFile?: string | null;
+  onHealthWrite?: (record: Record<string, unknown>) => void;
 } = {}) {
   const config = {
     ...DEFAULTS,
@@ -92,15 +94,19 @@ export function startObserver(ctx: any, options: {
 
   const writeHealth = () => {
     if (!healthFile) return;
+    // Write on a meaningful state change only: a hot event loop must not keep
+    // rewriting the health record just to advance a timestamp.
+    const signature = `${state.connection}|${state.degradation ?? ""}`;
+    if (signature === lastHealth) return;
+    lastHealth = signature;
     const record = {
       connection: state.connection,
       degradation: state.degradation,
       updated: Date.now(),
     };
     const text = JSON.stringify(record);
-    if (text === lastHealth) return;
-    lastHealth = text;
     try {
+      options.onHealthWrite?.(record);
       mkdirSync(dirname(healthFile), { recursive: true });
       const tmp = `${healthFile}.tmp`;
       writeFileSync(tmp, text + "\n", "utf8");
@@ -114,9 +120,10 @@ export function startObserver(ctx: any, options: {
 
   // --- trust (review M6) ---------------------------------------------------
   const trust = new Map<string, {
-    trusted: boolean; checkedAt: number; location?: string;
+    trusted: boolean; checkedAt: number; location?: string; rootID?: string;
   }>();
   const warned = new Set<string>();
+  const MAX_TREE_HOPS = 8;
 
   function sameDirectory(a?: string | null, b?: string | null): boolean {
     if (!a || !b) return true; // unknown -> do not suppress
@@ -124,36 +131,52 @@ export function startObserver(ctx: any, options: {
   }
 
   /**
-   * A synthetic message belongs in an orchestrator conversation: a root
-   * session. The parent is also the location key — the service activates the
-   * plugin once per location, so only the instance that owns the parent's
-   * directory may emit (otherwise every location duplicates the milestone).
+   * Resolve the orchestrator for a delegate. A depth-2 child's immediate
+   * parent is a worker (`parentID` set); its milestones belong to the ROOT of
+   * that chain. Walk up (bounded), trust only a root, and remember both the
+   * root and its location. The location is also the emitter key: a service
+   * activates the plugin once per location, so only the owning instance may
+   * emit (otherwise every location duplicates the milestone).
    */
-  async function parentTrust(parentID: string) {
-    if (!parentID) return { trusted: false, location: undefined };
+  async function resolveParent(parentID: string) {
+    if (!parentID) return { trusted: false, rootID: undefined, location: undefined };
     const cached = trust.get(parentID);
     const now = Date.now();
     if (cached && (cached.trusted || now - cached.checkedAt < TRUST_RETRY_MS)) {
       return cached;
     }
-    let trusted = false;
+    let current: string | undefined = parentID;
+    let rootID: string | undefined;
     let location: string | undefined;
-    try {
-      const info = await ctx.session.get({ sessionID: parentID });
-      trusted = Boolean(info) && !info.parentID;
-      location = info?.location?.directory;
-    } catch {
-      trusted = false;
+    for (let hop = 0; hop < MAX_TREE_HOPS && current; hop += 1) {
+      let info: any;
+      try {
+        info = await ctx.session.get({ sessionID: current });
+      } catch {
+        info = null;
+      }
+      if (!info) break;
+      if (info.location?.directory) location = info.location.directory;
+      if (!info.parentID) {
+        // A top-level run-vehicle child has no parentID but names its
+        // orchestrator in the title marker; follow it to the real root.
+        const marker = parseDelegationTitle(info.title ?? "");
+        if (marker?.orchestratorID && marker.orchestratorID !== current) {
+          current = marker.orchestratorID;
+          continue;
+        }
+        rootID = current;
+        break;
+      }
+      current = info.parentID;
     }
-    const entry = { trusted, checkedAt: now, location };
+    const entry = { trusted: Boolean(rootID), checkedAt: now, rootID, location };
     trust.set(parentID, entry);
-    if (!trusted) {
+    if (!entry.trusted) {
       degrade(state, `unverified orchestrator ${parentID}: synthetic milestone dropped`);
       if (!warned.has(parentID)) {
         warned.add(parentID);
-        log("warn", "unverified orchestrator: synthetic milestone dropped", {
-          parentID,
-        });
+        log("warn", "unverified orchestrator: synthetic milestone dropped", { parentID });
       }
     }
     return entry;
@@ -166,7 +189,7 @@ export function startObserver(ctx: any, options: {
     }>;
   }) => {
     for (const m of result.milestones) {
-      const parent = await parentTrust(m.parentID);
+      const parent = await resolveParent(m.parentID);
       if (!parent.trusted) continue;
       if (!sameDirectory(ctx?.location?.directory, parent.location)) continue;
       try {
@@ -174,7 +197,7 @@ export function startObserver(ctx: any, options: {
         // never resume generation (AC5). Without `resume:false` the session
         // starts a turn (observed live 2026-10-29).
         await ctx.session.synthetic({
-          sessionID: m.parentID,
+          sessionID: parent.rootID,
           text: m.text,
           description: m.description,
           delivery: "steer",
@@ -208,6 +231,8 @@ export function startObserver(ctx: any, options: {
     generationSeconds: config.generationSeconds,
     milestoneMinIntervalSeconds: config.milestoneMinIntervalSeconds,
     healthFile: healthFile ?? null,
+    location: ctx?.location?.directory ?? null,
+    pid: process.pid,
   });
   writeHealth();
 

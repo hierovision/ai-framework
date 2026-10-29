@@ -49,7 +49,21 @@ Plugin options live under the plugin entry's options object:
 | `generationSeconds` | `600` | quiet budget inside an open assistant step |
 | `milestoneMinIntervalSeconds` | `30` | routine synthetic-milestone cap per delegate |
 | `healthFile` | `<location>/.scratch/delegation-observer/health.json` | shared degradation record |
-| `DELEGATION_OBSERVER_STALL_SECONDS` (env, TUI) | — | this host does not forward plugin options to the TUI part; the seam keeps the interactive threshold in step |
+| `statusFile` | — | opt-in observer snapshot read by `delegation.status` |
+| `DELEGATION_OBSERVER_ENABLED` (env, TUI) | — | `0/false/no/off` disables the TUI part |
+| `DELEGATION_OBSERVER_STALL_SECONDS` (env, TUI) | — | interactive threshold |
+| `DELEGATION_OBSERVER_HEALTH_FILE` (env, TUI) | — | must match the server's `healthFile` |
+| `DELEGATION_OBSERVER_STATUS_FILE` (env, TUI) | — | fallback snapshot path |
+
+The 2.1.4 host does not forward plugin entry options to the TUI part, so the
+env source is the end-to-end channel for the TUI; options still win where a
+host forwards them. The observer TUI writes a presence marker
+(`<location>/.scratch/delegation-observer/tui.json`) for the sentinel.
+
+**Sentinel companion.** `plugins/delegation-sentinel/` is an always-loadable
+TUI-only fallback: it renders one line when this plugin is absent, failed,
+disabled, disconnected, or its TUI is not running. It never shows delegate
+detail.
 
 The numeric defaults are the **shared supervision contract**
 (`scripts/supervision_contract.json`, generated from `watch_agent.py` /
@@ -143,10 +157,11 @@ live visibility it does not have.
    materializes them locally so the loader and typecheck resolve). The
    `typecheck` script (`tsc -p . --noEmit`) is the type-level proof against
    2.1.4.
-2. Add `{ "package": "./plugins/delegation-observer" }` to the versioned V2
+2. Add `./plugins/delegation-sentinel` alongside it (the fallback banner).
+3. Add `{ "package": "./plugins/delegation-observer" }` to the versioned V2
    config `plugins` array (keep the auto-compaction entry).
-3. Restart the service/TUI on a known port
+4. Restart the service/TUI on a known port
    (`OPENCODE_WAKE_URL=http://127.0.0.1:4096 opencode --port 4096`) so the
    terminal wake and the event stream share one server.
-4. Verify: the plugin loader log line, `GET /api/plugin` shows
+5. Verify: the plugin loader log line, `GET /api/plugin` shows
    `features.tui: true`, and the sidebar strip appears on the next delegation.

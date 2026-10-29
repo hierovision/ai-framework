@@ -207,6 +207,90 @@ test("the owning location emits exactly once", async () => {
   assert.equal(synthetic[0].resume, false);
 });
 
+test("a depth-2 child routes its milestone to the root orchestrator", async () => {
+  const root = "ses_root";
+  const worker = "ses_worker";
+  const { ctx, synthetic } = fakeCtx([childCreated("ses_leaf", worker)], {
+    location: { directory: "/work" },
+    get: async ({ sessionID }) => {
+      if (sessionID === worker) {
+        return { id: worker, parentID: root, location: { directory: "/work" } };
+      }
+      if (sessionID === root) {
+        return { id: root, location: { directory: "/work" } };
+      }
+      return null;
+    },
+  });
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  assert.equal(synthetic.length, 1);
+  assert.equal(synthetic[0].sessionID, root);
+  assert.doesNotMatch(handle.state.degradation ?? "", /unverified/);
+});
+
+test("a nested child under a title-marked vehicle routes to the TUI root", async () => {
+  const root = "ses_root";
+  const vehicle = "ses_vehicle";
+  const { ctx, synthetic } = fakeCtx([childCreated("ses_grandchild", vehicle)], {
+    location: { directory: "/work" },
+    get: async ({ sessionID }) => {
+      if (sessionID === vehicle) {
+        return {
+          id: vehicle, parentID: null,
+          title: `[delegate:${root}] build: vehicle run`,
+          location: { directory: "/work" },
+        };
+      }
+      if (sessionID === root) {
+        return { id: root, location: { directory: "/work" } };
+      }
+      return null;
+    },
+  });
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  assert.equal(synthetic.length, 1);
+  assert.equal(synthetic[0].sessionID, root);
+  assert.doesNotMatch(handle.state.degradation ?? "", /unverified/);
+});
+
+test("an unresolvable parent chain fails closed with a visible reason", async () => {
+  const { ctx, synthetic } = fakeCtx([childCreated("ses_leaf", "ses_missing")], {
+    get: async () => null,
+  });
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  assert.equal(synthetic.length, 0);
+  assert.match(handle.state.degradation, /unverified orchestrator ses_missing/);
+});
+
+test("the health record is written on state changes only", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rm069-health2-"));
+  try {
+    const file = join(dir, "health.json");
+    const writes: Array<Record<string, unknown>> = [];
+    const { ctx } = fakeCtx([
+      childCreated(),
+      // no milestone and no state change: must not rewrite the record
+      { type: "session.usage.updated", data: { sessionID: "ses_child", cost: 1 } },
+      { type: "session.usage.updated", data: { sessionID: "ses_child", cost: 2 } },
+    ]);
+    const handle = startObserver(ctx, {
+      now: clock, intervalMs: 0, healthFile: file,
+      onHealthWrite: (record) => writes.push(record),
+    });
+    await handle.done;
+    // init (connected/null) + stream end (disconnected) only
+    assert.equal(writes.length, 2);
+    assert.equal(writes[0].connection, "connected");
+    assert.equal(writes[1].connection, "disconnected");
+    assert.equal(writes[0].updated, writes[1].updated);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("teardown aborts the event subscription", async () => {
   const { ctx, signal } = fakeCtx([], {});
   const handle = startObserver(ctx, { now: clock, intervalMs: 0 });

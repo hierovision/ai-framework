@@ -374,11 +374,13 @@ turn). A service activates the plugin once per location, so only the instance
 whose location matches the parent session's directory emits — otherwise every
 location duplicates the milestone.
 
-**Trust boundary.** A title marker is a claim, not proof: before the first
-synthetic message the parent must resolve as a root session
-(`session.get`, no `parentID`). An unverified parent keeps its row locally but
-receives no injected message; the drop is logged and published in the health
-record. Marker fields are sanitized (`[A-Za-z0-9_-]` id, `[A-Za-z0-9_.-]`
+**Root routing and trust.** A delegate's milestone belongs to the root of its
+parent chain: the server walks up (bounded), follows a run-vehicle title
+marker, and emits to that root, so a depth-2 child still reaches the real
+orchestrator. A title marker is a claim, not proof: trust is root-only (an
+existing root named by a title passes — a local-context boundary, not
+provenance). An unresolvable chain keeps its row locally but receives no
+injected message; the drop is logged and published in the health record. Marker fields are sanitized (`[A-Za-z0-9_-]` id, `[A-Za-z0-9_.-]`
 agent) and round-trip tested.
 
 **Health channel.** The server part cannot push to the TUI (separate
@@ -386,9 +388,19 @@ processes), so it writes `<location>/.scratch/delegation-observer/health.json`
 on every state change. The TUI reads that record for the degradation banner
 only — never for progress. The observer's `--status-file` snapshot is the
 last-resort surface and is read by the `delegation.status` command. This TUI
-host does not forward a plugin entry's `options` to the TUI part, so the
-interactive thresholds also accept `DELEGATION_OBSERVER_STALL_SECONDS` (the
-server keeps using the plugin options).
+host does not forward a plugin entry's `options` to the TUI part, so the TUI
+reads the documented env source for every value it needs:
+`DELEGATION_OBSERVER_ENABLED`, `DELEGATION_OBSERVER_STALL_SECONDS`,
+`DELEGATION_OBSERVER_HEALTH_FILE`, `DELEGATION_OBSERVER_STATUS_FILE` (options
+win when a host does forward them). The observer TUI also writes a presence
+marker (`<location>/.scratch/delegation-observer/tui.json`, refreshed every
+10 s).
+
+**Absent/failed fallback.** A plugin cannot draw its own absence banner. The
+independent `plugins/delegation-sentinel/` companion (no-op server + TUI)
+renders one fallback line when the observer is absent, failed, disabled,
+disconnected, or its TUI is not running. It never renders delegate detail. The
+durable watchdog + terminal wake remain the fallback in every case.
 
 **Authority boundary.** The TUI's interrupt is
 `POST /api/session/{id}/interrupt` on the same session — never a new session,

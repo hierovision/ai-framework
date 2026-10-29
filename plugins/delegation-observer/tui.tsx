@@ -17,7 +17,8 @@
  *   - ctx.client.session.{prompt,interrupt} and ctx.client.plugin.list
  * The loader resolves this file as <plugin-dir>/tui (binary `Zg` probe).
  */
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { For, Show, createMemo, createSignal } from "solid-js";
 
 import {
@@ -76,6 +77,27 @@ export function createTuiModel(ctx: any) {
   const [pluginStatus, setPluginStatus] = createSignal({ loaded: true, state: "active" });
   const [serverHealth, setServerHealth] = createSignal<string | null>(null);
   const bump = () => setVersion((v) => v + 1);
+
+  // Presence marker for the independent sentinel: when this TUI part fails to
+  // load, no marker exists and the sentinel shows the fallback line.
+  const presenceFile = config.presenceFile
+    ?? (ctx?.location?.directory
+      ? join(ctx.location.directory, ".scratch", "delegation-observer", "tui.json")
+      : null);
+  const writePresence = () => {
+    if (!presenceFile) return;
+    try {
+      mkdirSync(dirname(presenceFile), { recursive: true });
+      const tmp = `${presenceFile}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ pid: process.pid, ts: Date.now() }) + "\n", "utf8");
+      renameSync(tmp, presenceFile);
+    } catch {
+      // presence is advisory; the banner covers absence
+    }
+  };
+  writePresence();
+  const presenceTimer = setInterval(writePresence, 10_000);
+  presenceTimer?.unref?.();
 
   // Shared degradation channel (server -> TUI). Read on events/degradation
   // checks only, never as the progress source, and throttled so a busy stream
@@ -337,6 +359,14 @@ export function createTuiModel(ctx: any) {
       // ignore teardown faults
     }
     clearInterval(timer);
+    clearInterval(presenceTimer);
+    if (presenceFile) {
+      try {
+        unlinkSync(presenceFile);
+      } catch {
+        // already gone
+      }
+    }
     state.connection = "disconnected";
   };
 
@@ -423,7 +453,7 @@ export function createDefinition(Plugin: any) {
           ),
         }),
       ];
-      if (observerOptions(ctx).enabled === false) {
+      if (tuiConfig(ctx).enabled === false) {
         ctx.ui.toast.show({
           message: "delegation-observer disabled — watchdog/observer fallback only",
           variant: "warning",
