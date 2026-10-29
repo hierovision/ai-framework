@@ -102,6 +102,29 @@ status-claim ownership rules, and the session guard's kill authority.
 - 2.1.4 does not forward plugin `options` to the TUI part; the interactive
   thresholds accept a documented env seam while the server uses the options.
 
+## Evidence (2026-10-29)
+
+Live drills on an isolated disposable managed service (`service set port 4099`,
+isolated `XDG_CONFIG_HOME`/state/cache/tmp + `OPENCODE_DB`, TUI attached with
+`--server`); all captures under `.scratch/rm-069/` (gitignored):
+
+| Drill | What the capture proves | Path |
+|---|---|---|
+| D1 in-session | strip running→completed, two synthetic milestones, parent turn done | `drills/d1-pane.txt` |
+| D2 run-vehicle | title-marker child in the strip, one synthetic, one wake 64 s after DONE | `service-drill/final/d2/*` |
+| D3 controls | focus, steer queued on the same id (`delivery:"steer"`), interrupt | `drills/d3-running-pane.txt` |
+| D4-busy | 40 s tool call stays `running` at a 5 s drill stall threshold | `service-drill/final/busy/*` |
+| D4-stall | quiet child warns at 5 s, fails at 2× | `service-drill/final/stall-pane.txt` |
+| D4-loop | three identical calls → one `thrash` per child, deduped | `service-drill/final/{loop-pane.txt,loop2/,db.txt}` |
+| D5 needs-input | waiting row + `needs-input` milestone naming the action | `drills/d5-pane.txt` |
+| AC5 | no assistant turn between synthetics and the wake | `service-drill/final/db.txt` |
+| loader/degradation | loader line + initialized; broken plugin fails visibly | `drill-loader/stderr2.log`, `drill-degraded/stderr.log` |
+
+AC6 wording was reconciled by the architect in the approved plan: routine
+progress is capped at one synthetic message per delegate per 30 s; attention
+states (needs-input, stall, thrash, terminal) emit immediately, once per
+condition. The implementation and tests match that wording.
+
 ## References
 
 - `reference/subagent-supervision.md` §7 — the operational contract.
