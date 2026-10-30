@@ -82,6 +82,8 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 import opencode_v2 as v2  # noqa: E402 - shared V2 adapter
+import heartbeat_io  # noqa: E402 - atomic newline-delimited heartbeat appends
+import scratch_cleanup  # noqa: E402 - bounded per-run scratch cleanup
 
 
 def _load_module(path, name):
@@ -220,21 +222,25 @@ def _open_artifact(path, append):
         raise OSError(f"{path}: cannot open: {exc}") from exc
 
 
-def heartbeat_begin(handle, task, detail, fresh):
-    """Write the dispatcher envelope header + START before launch (AC4)."""
-    if fresh:
-        handle.write(f"# progress: {task}\n")
-    handle.write(f"{now_iso()} START {detail}\n")
-    handle.flush()
+def heartbeat_begin(path, task, detail, fresh):
+    """Write the dispatcher envelope header + START before launch (AC4).
+
+    One O_APPEND write, never a held writer: the observer appends `SURVEY
+    running` while the run is live and its bytes must survive the terminal
+    line (F11).
+    """
+    text = (f"# progress: {task}\n" if fresh else "")
+    text += f"{now_iso()} START {detail}\n"
+    heartbeat_io.append_records(path, text, fresh=fresh)
 
 
-def heartbeat_terminal(handle, outcome, detail):
+def heartbeat_terminal(path, outcome, detail):
     """Append exactly one terminal line: DONE ok on success, else BLOCKED."""
     if outcome == "success":
-        handle.write(f"{now_iso()} DONE ok\n")
+        text = f"{now_iso()} DONE ok\n"
     else:
-        handle.write(f"{now_iso()} BLOCKED {detail or outcome}\n")
-    handle.flush()
+        text = f"{now_iso()} BLOCKED {detail or outcome}\n"
+    heartbeat_io.append_records(path, text)
 
 
 def heartbeat_prompt_block(path):
@@ -656,16 +662,17 @@ def main(argv=None):
     if grant_error:
         print(f"error: {grant_error}", file=sys.stderr)
         return 2
-    tee_out = tee_err = hb = None
+    tee_out = tee_err = None
+    hb_path = a.heartbeat
     try:
         if a.stream_out:
             tee_out = _open_artifact(a.stream_out, append)
         if a.stream_err:
             tee_err = _open_artifact(a.stream_err, append)
-        if a.heartbeat:
-            hb = _open_artifact(a.heartbeat, append)
+        if hb_path:
+            heartbeat_io.check_writable(hb_path, fresh=not append)
     except OSError as exc:
-        for handle in (tee_out, tee_err, hb):
+        for handle in (tee_out, tee_err):
             if handle is not None:
                 handle.close()
         print(f"error: cannot open dispatch artifact: {exc}", file=sys.stderr)
@@ -679,7 +686,7 @@ def main(argv=None):
         worktree_path, branch, wt_err = worktree_setup(
             os.getcwd(), worktree_name, resume=append)
         if wt_err:
-            for handle in (tee_out, tee_err, hb):
+            for handle in (tee_out, tee_err):
                 if handle is not None:
                     handle.close()
             print(f"error: --worktree: {wt_err}", file=sys.stderr)
@@ -691,9 +698,22 @@ def main(argv=None):
     # carries the deny-first rules and links the agent corpus.
     grant_dirs = profile_dirs + list(a.allow_dirs or [])
     child_env = dict(os.environ)
-    dispatch_root = os.path.join(REPO_ROOT, ".scratch", "dispatch-config")
+    dispatch_root = os.environ.get(
+        "DISPATCH_CONFIG_ROOT",
+        os.path.join(REPO_ROOT, ".scratch", "dispatch-config"))
     os.makedirs(dispatch_root, exist_ok=True)
+    # F12: per-run config trees are diagnostic evidence on failure, but the
+    # directory cannot grow without bound. Keep the newest few and drop stale
+    # ones before adding this run.
+    # Reserve one slot for the run about to start, so the post-create count
+    # never exceeds DEFAULT_KEEP.
+    scratch_cleanup.prune_run_configs(
+        dispatch_root, keep=max(0, scratch_cleanup.DEFAULT_KEEP - 1),
+        max_age_seconds=scratch_cleanup.DEFAULT_MAX_AGE)
     config_root = tempfile.mkdtemp(prefix="run-", dir=dispatch_root)
+    # F12b: claim the root before writing it, so a concurrent dispatch's prune
+    # cannot delete this run's tree while it is live.
+    scratch_cleanup.mark_run_active(config_root)
     agents_src = os.path.join(REPO_ROOT, ".opencode", "agents")
     if not os.path.isdir(agents_src):
         agents_src = os.path.join(REPO_ROOT, "agents")
@@ -705,8 +725,8 @@ def main(argv=None):
     child_env["XDG_CONFIG_HOME"] = config_root
     child_env["PWD"] = dispatch_dir or os.getcwd()
 
-    if hb is not None:
-        heartbeat_begin(hb, f"{a.agent} dispatch", a.prompt_file,
+    if hb_path:
+        heartbeat_begin(hb_path, f"{a.agent} dispatch", a.prompt_file,
                         fresh=not append)
         if not append:
             # only a fresh run injects the supervision block; a `--session`
@@ -832,11 +852,8 @@ def main(argv=None):
         # pathological exception message cannot flood the tail-read heartbeat
         detail = f"unexpected dispatch error: {exc}"[:200]
     finally:
-        if hb is not None:
-            try:
-                heartbeat_terminal(hb, outcome, detail)
-            finally:
-                hb.close()
+        if hb_path:
+            heartbeat_terminal(hb_path, outcome, detail)
 
     record = {
         "kind": "agent",
@@ -859,6 +876,13 @@ def main(argv=None):
     except Exception as exc:  # noqa: BLE001 - must not mask the dispatch outcome
         print(f"error: run-log record failed: {exc}", file=sys.stderr)
 
+    # F12: a successful run leaves no generated config behind. A failed run
+    # keeps it as diagnostic evidence; the next dispatch's bounded prune caps
+    # how many of those survive. Tests set DISPATCH_KEEP_CONFIG=1 to inspect
+    # the generated rules after the process exits.
+    if os.environ.get("DISPATCH_KEEP_CONFIG") != "1":
+        scratch_cleanup.clear_run_active(config_root)
+        scratch_cleanup.cleanup_run_config(config_root, outcome)
     print(f"result={out_path}", flush=True)
     if exit_code != 0:
         print(f"{outcome}: {detail}", file=sys.stderr)

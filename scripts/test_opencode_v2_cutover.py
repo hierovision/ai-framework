@@ -23,11 +23,13 @@ SCRIPT = os.path.join(HERE, "opencode_v2_cutover.py")
 sys.path.insert(0, HERE)
 
 import opencode_v2_cutover as cutover  # noqa: E402
+import scratch_cleanup  # noqa: E402
 
 
 def _tmp(prefix):
     base = os.path.join(REPO, ".scratch", "test-tmp")
     os.makedirs(base, exist_ok=True)
+    scratch_cleanup.prune_test_scratch(base)
     return tempfile.mkdtemp(prefix=prefix, dir=base)
 
 
@@ -191,7 +193,9 @@ def test_non_tty_cannot_switch():
             [sys.executable, SCRIPT, "--preflight",
              "--framework", ctx["framework"], "--consumer", ctx["consumer"],
              "--artifact", ctx["artifact"], "--processes-file", ctx["procs"],
-             "--source-db", ctx["source_db"]],
+             "--source-db", ctx["source_db"],
+             # Hermetic: never regenerate the live cutover scratch config.
+             "--config-source", ctx["config"]],
             capture_output=True, text=True)
         assert r2.returncode != 0  # non-TTY preflight is honest
         assert os.readlink(ctx["link"]) == ctx["v1_bin"]
@@ -382,6 +386,28 @@ def test_migration_residual_classification_accepts():
         data = json.load(open(manifest))
         assert data["switched"] is True
     finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_default_config_source_wires_local_plugin_as_relative_path():
+    """N1: the versioned config must say `./plugins/...`; a bare package spec
+    is treated as an npm dependency and fails the real loader."""
+    root = _tmp("cutover-config-src-")
+    old_repo = cutover.REPO
+    try:
+        plugin = os.path.join(root, "plugins", "auto-compact-at-threshold")
+        os.makedirs(plugin)
+        with open(os.path.join(plugin, "index.js"), "w") as fh:
+            fh.write("export default {id: 'auto-compact-at-threshold'}\n")
+        home = os.path.join(root, "home")
+        os.makedirs(home)
+        cutover.REPO = root
+        config_root = cutover.default_config_source(home)
+        with open(os.path.join(config_root, "opencode.jsonc")) as fh:
+            cfg = json.load(fh)
+        assert cfg["plugins"] == ["./plugins/auto-compact-at-threshold"], cfg
+    finally:
+        cutover.REPO = old_repo
         shutil.rmtree(root, ignore_errors=True)
 
 

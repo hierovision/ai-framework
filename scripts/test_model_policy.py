@@ -22,6 +22,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -100,8 +101,12 @@ def _read(rel):
         return fh.read()
 
 
+_FIXTURE_ROOTS = []
+
+
 def _fixture_repo(agents, routing=FIXTURE_ROUTING):
     root = tempfile.mkdtemp(prefix="model-policy-")
+    _FIXTURE_ROOTS.append(root)
     os.makedirs(os.path.join(root, "agents"))
     for name, model in agents.items():
         with open(os.path.join(root, "agents", name + ".md"), "w",
@@ -391,13 +396,18 @@ def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
     failed = 0
-    for test in tests:
-        try:
-            test()
-            print(f"PASS  {test.__name__}")
-        except Exception as exc:  # noqa: BLE001 — every red is reported
-            failed += 1
-            print(f"FAIL  {test.__name__}: {type(exc).__name__}: {exc}")
+    try:
+        for test in tests:
+            try:
+                test()
+                print(f"PASS  {test.__name__}")
+            except Exception as exc:  # noqa: BLE001 — every red is reported
+                failed += 1
+                print(f"FAIL  {test.__name__}: {type(exc).__name__}: {exc}")
+    finally:
+        # F12: fixture repos are per-test workdirs, not retained evidence.
+        for root in _FIXTURE_ROOTS:
+            shutil.rmtree(root, ignore_errors=True)
     return 1 if failed else 0
 
 

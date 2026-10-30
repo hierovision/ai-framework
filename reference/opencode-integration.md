@@ -20,8 +20,9 @@ previous release tag is the code rollback; the C5 backup is the data rollback.
 - There is **no `--dir`**; the working directory is the child process `cwd`
   (and `PWD`). There is **no `--skill`** flag — resolve the skill from the
   installed layout and run from its directory.
-- Log level is `OPENCODE_LOG_LEVEL=ERROR` in the environment. The V1-era CLI
-  log switches are not used by this repo.
+- Log level is `OPENCODE_LOG_LEVEL=ERROR` in the environment. The eval lanes
+  do not pass CLI log switches; post-smoke's loader probe is the one exception
+  (global `--log-level info --print-logs` to capture the plugin startup line).
 - Root `-m` / `--agent` were removed; emit only `run --agent` / `run --model`.
 
 ## Service and typed API
@@ -148,9 +149,22 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
   event-hook return contract is not executed).
 - `plugins/auto-compact-at-threshold/` is the canonical port: startup marker,
   threshold re-arm, compaction call, abort cleanup. The versioned config wires
-  it through `plugins: ["plugins/auto-compact-at-threshold"]` (a directory; V2 skips file paths);
-  `runtime-probe.mjs` emits the ID/source/startup/abort evidence post-smoke
-  reads (not source text).
+  it as a **relative local path**: `plugins: ["./plugins/auto-compact-at-threshold"]`.
+  A bare `"plugins/auto-compact-at-threshold"` is parsed as an npm package
+  spec and fails with `NpmInstallFailedError`; a file path is rejected with
+  "configured plugin path must be a directory" (measured 2026-10-29).
+- 2.1.4's plugin context has **no log domain** (`ctx` carries
+  `app/location/options/agent/.../session/shell`, no `log`/`logger`). The
+  plugin writes its structured startup marker to `process.stderr`; run
+  `opencode run --standalone --print-logs --log-level info` to capture the
+  loader and marker on stderr. (`--print-logs`/`--log-level` exist as global
+  flags; evals still use `OPENCODE_LOG_LEVEL=ERROR` and do not emit them.)
+- `runtime-probe.mjs` proves the module's `setup`/cleanup behavior, but it is
+  not loader proof. `plugin list` does not enumerate local directories, so
+  post-smoke also runs the real CLI with the versioned config and requires
+  both the loader's `loading plugin` line for this directory and the
+  `auto-compact-at-threshold initialized` marker. Three pieces of evidence
+  are required: config wiring, runtime probe, and loader log.
 
 ## Model reasoning control (Go)
 
@@ -173,7 +187,7 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
 - `skills/authoring-skills/scripts/run_behavioral_eval.py` — consumes `cwd`/
   `PWD`, `--standalone`, and per-run `OPENCODE_DB`/XDG isolation.
 
-## Eval startup latency (2026-10-28)
+## Eval startup latency (2026-10-28, extended 2026-10-29)
 
 CI run 40709127604's `validating-ui#1` job killed three attempts at 240 s with
 zero JSON events and empty stderr. The same model/auth/runner produced the full
@@ -184,3 +198,20 @@ provider latency, not an assertion or config defect. The eval now carries
 `timeout: 600` (the existing per-eval manifest policy); assertions are
 unchanged. `BEVAL_STARTUP_LOG=1` records the spawn command, per-run DB, log
 level, and timeout in the CI job log for the next zero-event occurrence.
+
+**2026-10-29 — measured residual, no timeout change.** The isolated
+`ci-132` evidence (`.scratch/ci-132/*/run-2026-10-28.jsonl`) records the
+same spread: `validating-ui#1` completed in 23.5 s and 57.9 s (assertion
+misses), 53.2 s (pass), and 406.7 s (pass); `designing-architecture#1`
+passed in 166.3 s; three 60 s-bounded repetitions recorded zero events
+(`stability-1/2/3`). The per-change job ceiling is **20 minutes
+(1200 s)** and the per-eval stall ceiling is 600 s; the 406.7 s tail sits
+inside both. The variability is startup/provider-side (zero-event stalls
+versus the same model/auth streaming normally), not an assertion or config
+defect. No timeout was raised and no retry-until-green was added.
+
+The runner now measures spawn → first stdout event (`first_event=Nms`) in
+the `BEVAL_STARTUP_LOG=1` line and in a stall's detail (`first event: none`
+for a true zero-event stall). The timeout path still kills the process
+group at the configured ceiling; the instrumentation only records when the
+first JSON event arrived.

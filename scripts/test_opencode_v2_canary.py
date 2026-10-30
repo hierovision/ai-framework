@@ -21,6 +21,8 @@ REPO = os.path.dirname(HERE)
 SCRIPT = os.path.join(HERE, "opencode_v2_canary.py")
 sys.path.insert(0, HERE)
 
+import scratch_cleanup  # noqa: E402
+
 import opencode_v2 as v2  # noqa: E402
 
 FAKE_OPENCODE = r'''#!/usr/bin/env python3
@@ -84,6 +86,7 @@ print("{}")
 def _tmp(prefix):
     base = os.path.join(REPO, ".scratch", "test-tmp")
     os.makedirs(base, exist_ok=True)
+    scratch_cleanup.prune_test_scratch(base)
     return tempfile.mkdtemp(prefix=prefix, dir=base)
 
 

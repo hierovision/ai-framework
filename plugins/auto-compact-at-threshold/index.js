@@ -72,8 +72,17 @@ async function log(ctx, level, message, extra = {}) {
   } catch {
     // Logging must never break the plugin.
   }
-  // A startup marker must be observable even without a logger domain.
-  console.log(JSON.stringify(entry));
+  // V2 2.1.4's plugin context has no log/logger domain (probed 2026-10-29:
+  // app/location/options/agent/event/model/session/... only). Write the
+  // structured record to stderr, which `opencode run --standalone
+  // --print-logs` surfaces as the loader/standalone log stream. A console.log
+  // from the server plugin was not observable there.
+  const line = JSON.stringify(entry) + "\n";
+  if (typeof process !== "undefined" && process.stderr?.write) {
+    process.stderr.write(line);
+  } else {
+    console.log(line.trimEnd());
+  }
 }
 
 function limitsFromModels(models) {
