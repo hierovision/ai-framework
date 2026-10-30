@@ -72,8 +72,9 @@ def _fake_bin(root, version="opencode v2.1.4"):
     """Stub the V2 CLI: --version plus a standalone loader log on `run`.
 
     STUB_LOADER selects the loader evidence shape: pass (default), absent,
-    failed, or wrong. All shapes exit non-zero after the plugin phase because
-    the probe uses an unavailable model; only the captured stderr is asserted.
+    failed, wrong, or untagged (right id, marker without this probe's token).
+    All shapes exit non-zero after the plugin phase because the probe uses an
+    unavailable model; only the captured stderr is asserted.
     """
     d = os.path.join(root, "bin")
     os.makedirs(d, exist_ok=True)
@@ -98,9 +99,13 @@ if [ "$1" = "run" ]; then
       printf '%s\\n' 'timestamp=2026-10-29T00:00:00.000Z level=INFO msg="loading plugin" id=/tmp/not-the-plugin entrypoint=file:///tmp/not-the-plugin/index.js' >&2
       printf '%s\\n' '{{"service":"auto-compact-at-threshold","level":"info","message":"auto-compact-at-threshold initialized","extra":{{"version":"2.1.4"}}}}' >&2
       ;;
-    *)
+    untagged)
       printf '%s\\n' 'timestamp=2026-10-29T00:00:00.000Z level=INFO msg="loading plugin" id='"$cfg"' entrypoint=file://'"$cfg"'/index.js' >&2
       printf '%s\\n' '{{"service":"auto-compact-at-threshold","level":"info","message":"auto-compact-at-threshold initialized","extra":{{"version":"2.1.4"}}}}' >&2
+      ;;
+    *)
+      printf '%s\\n' 'timestamp=2026-10-29T00:00:00.000Z level=INFO msg="loading plugin" id='"$cfg"' entrypoint=file://'"$cfg"'/index.js' >&2
+      printf '%s\\n' '{{"service":"auto-compact-at-threshold","level":"info","message":"auto-compact-at-threshold initialized","extra":{{"version":"2.1.4","probe":"'"$OPENCODE_LOADER_PROBE_TOKEN"'"}}}}' >&2
       ;;
   esac
   exit 1
@@ -207,6 +212,16 @@ def test_loader_marker_for_wrong_plugin_fails():
     assert "plugin: FAIL" in r.stdout, r.stdout
     assert "wrong plugin" in r.stdout.lower() or "did not load" in r.stdout.lower(), \
         r.stdout
+
+
+def test_loader_marker_from_untagged_copy_fails():
+    """N1: the marker must be attributed to this probe. A correctly named
+    loader line plus the static marker text from a different plugin copy
+    (no per-run token) must fail."""
+    r, _ = _plugin_failure("untagged")
+    assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+    assert "plugin: FAIL" in r.stdout, r.stdout
+    assert "not attributed" in r.stdout.lower(), r.stdout
 
 
 def test_bare_plugin_wiring_is_rejected():

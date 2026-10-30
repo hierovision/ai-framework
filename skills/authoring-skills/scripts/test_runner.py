@@ -1019,13 +1019,16 @@ def test_eval_timeout_override_precedence():
 
 def test_capture_process_measures_first_event_ms():
     """Startup-latency instrumentation: the spawn-to-first-stdout-line time is
-    measured without replacing the timeout or buffering the stream."""
+    measured without replacing the timeout or buffering the stream. The upper
+    bound is the run timeout, not a wall-clock guess: a loaded host may take
+    longer than a second to reach the first line without being broken."""
+    timeout = 5
     rc, out, err, timed_out, first_ms = runner._capture_process(
         [sys.executable, "-c",
          "import sys,time; time.sleep(0.25); print('{}'); time.sleep(0.05)"],
-        timeout=5)
+        timeout=timeout)
     assert rc == 0 and not timed_out, (rc, timed_out, err)
-    assert first_ms is not None and 150 <= first_ms < 1000, first_ms
+    assert first_ms is not None and 150 <= first_ms <= timeout * 1000, first_ms
 
 
 def test_capture_process_first_event_ms_is_none_on_zero_event_timeout():

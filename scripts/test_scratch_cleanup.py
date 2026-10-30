@@ -178,8 +178,7 @@ def _dispatch(mode, precreate):
         fh.write("#!/bin/sh\n"
                  "if [ \"$1\" = \"api\" ]; then echo '{\"data\": {}}'; exit 0; fi\n"
                  "echo '{\"type\":\"step_start\",\"sessionID\":\"ses_scratch\"}'\n"
-                 + ("" if mode == "valid" else "")
-                 + "exit 0\n")
+                 "exit 0\n")
     os.chmod(stub, 0o755)
     prompt = os.path.join(td, "prompt.md")
     with open(prompt, "w", encoding="utf-8") as fh:

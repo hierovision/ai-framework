@@ -149,6 +149,34 @@ test("startup marker reaches stderr when the context has no log domain", async (
   );
 });
 
+test("startup marker carries the loader-probe token when the env sets one", async () => {
+  // The post-smoke loader probe passes a per-run token; echoing it in the
+  // record attributes the marker to the plugin copy that probe staged.
+  process.env.OPENCODE_LOADER_PROBE_TOKEN = "lp-token-1";
+  try {
+    const f = fakeCtx({ models: [] });
+    const cleanup = await createDefinition(Plugin).setup(f.ctx);
+    await new Promise((r) => setTimeout(r, 10));
+    cleanup();
+    const startup = f.logs.find((l) => l.message.includes("initialized"));
+    assert.ok(startup, f.logs);
+    assert.equal(startup.extra.probe, "lp-token-1", f.logs);
+  } finally {
+    delete process.env.OPENCODE_LOADER_PROBE_TOKEN;
+  }
+});
+
+test("startup marker omits the probe token outside a probe run", async () => {
+  delete process.env.OPENCODE_LOADER_PROBE_TOKEN;
+  const f = fakeCtx({ models: [] });
+  const cleanup = await createDefinition(Plugin).setup(f.ctx);
+  await new Promise((r) => setTimeout(r, 10));
+  cleanup();
+  const startup = f.logs.find((l) => l.message.includes("initialized"));
+  assert.ok(startup, f.logs);
+  assert.ok(!("probe" in startup.extra), f.logs);
+});
+
 test("cleanup aborts the subscription", async () => {
   const f = fakeCtx({ models: [] });
   let signalRef = null;

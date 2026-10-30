@@ -140,6 +140,12 @@ export function createDefinition(Plugin) {
       await log(ctx, "info", "auto-compact-at-threshold initialized", {
         version: "2.1.4",
         threshold,
+        // The post-smoke loader probe sets a per-run token; echoing it lets
+        // the check attribute this record to the plugin copy it staged, not
+        // to any other copy that also emits the static marker text.
+        ...(process.env.OPENCODE_LOADER_PROBE_TOKEN
+          ? { probe: process.env.OPENCODE_LOADER_PROBE_TOKEN }
+          : {}),
       });
 
       async function handle(event) {
