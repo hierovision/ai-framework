@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createState, observe, tick } from "./state.ts";
+import { associateSessionInfo, createState, observe, tick } from "./state.ts";
 import {
   associationGap,
   createControls,
@@ -247,8 +247,8 @@ test("degradation banner names the reason and the fallback", () => {
 
 test("the orchestrator/root is never counted as an unassociated child", () => {
   const sessions = [
-    { id: "ses_root", parentID: undefined, title: "owner session" },
-    { id: "ses_child", parentID: "ses_root", title: "worker" },
+    { id: "ses_root", parentID: undefined, title: "owner session", status: "busy" },
+    { id: "ses_child", parentID: "ses_root", title: "worker", status: "running" },
   ];
   assert.deepEqual(associationGap(sessions, [
     { sessionID: "ses_child", status: "running", terminal: null },
@@ -257,15 +257,74 @@ test("the orchestrator/root is never counted as an unassociated child", () => {
   // a busy root alone is not a gap
   assert.deepEqual(associationGap([sessions[0]], []),
     { runningChildren: 0, associatedActive: 0, unassociated: 0 });
+  // an unknown status is not liveness (live defect, 2026-10-30): a store of
+  // historical children must not read as "N running, N unassociated"
+  assert.deepEqual(associationGap([
+    { id: "ses_child", parentID: "ses_root", title: "worker" },
+    { id: "ses_child2", parentID: "ses_root", title: "worker 2", status: "idle" },
+  ], []), { runningChildren: 0, associatedActive: 0, unassociated: 0 });
   // a run-vehicle child is recognised by its marker
   assert.equal(isChildSession({
     id: "ses_v", title: "[delegate:ses_root] reviewer: review",
   }), true);
   assert.deepEqual(associationGap([
     sessions[1],
-    { id: "ses_v", title: "[delegate:ses_root] reviewer: review" },
+    { id: "ses_v", title: "[delegate:ses_root] reviewer: review", status: "running" },
   ], [{ sessionID: "ses_child", status: "running", terminal: null }]),
   { runningChildren: 2, associatedActive: 1, unassociated: 1 });
+});
+
+test("two delegates with different last events never share a quiet value", () => {
+  clock = 1_000_000;
+  const state = createState({}, now);
+  associateSessionInfo(state, {
+    id: "ses_a", parentID: "ses_p", title: "a",
+    time: { created: clock - 3_600_000, updated: clock - 600_000 },
+  });
+  associateSessionInfo(state, {
+    id: "ses_b", parentID: "ses_p", title: "b",
+    time: { created: clock - 3_600_000, updated: clock - 60_000 },
+  });
+  clock += 5_000;
+  const a = projectDelegate(state.delegates.get("ses_a"), clock);
+  const b = projectDelegate(state.delegates.get("ses_b"), clock);
+  assert.notEqual(a.quiet, b.quiet, "quiet is per session, not per observer boot");
+  assert.equal(a.quietMs, 605_000);
+  assert.equal(b.quietMs, 65_000);
+});
+
+test("historical rows collapse to one line and never claim to be running", () => {
+  clock = 1_000_000;
+  const state = createState({}, now);
+  for (const [id, hours] of [["ses_h1", 20], ["ses_h2", 19], ["ses_h3", 18]]) {
+    associateSessionInfo(state, {
+      id, parentID: "ses_p", title: id, agent: "implementer",
+      time: { created: clock - hours * 3_600_000, updated: clock - hours * 3_600_000 + 60_000 },
+    });
+  }
+  // a genuinely live child still renders in full
+  observe(state, {
+    type: "session.created",
+    data: { sessionID: "ses_now", parentID: "ses_p", title: "current", agent: "implementer" },
+  });
+  // a child that is terminal in the store but was never observed here is
+  // history too: it must not sit in the strip as a fresh completion
+  associateSessionInfo(state, {
+    id: "ses_done", parentID: "ses_p", title: "ses_done", agent: "implementer",
+    time: { created: clock - 3_600_000, updated: clock - 50_000 },
+    idleOutcome: "succeeded",
+  });
+  const rows = visibleRows(state, clock);
+  assert.equal(rows.length, 5, "the panel keeps every row");
+  assert.equal(rows.filter((r) => r.stale).length, 4);
+  assert.ok(rows.filter((r) => r.stale).every((r) => r.status !== "running"),
+    "a discovered row is never rendered as running");
+  const lines = sidebarLines(rows, 8);
+  assert.equal(lines.length, 2, "one live line plus one collapsed stale line");
+  assert.match(lines[0], /implementer/);
+  assert.match(lines[0], /running: starting/);
+  assert.equal(lines[1], "4 stale delegates hidden");
+  assert.equal(footerStatus(rows), "delegates 1 · 1 running");
 });
 
 test("the fallback status snapshot is parsed only when it is real", () => {

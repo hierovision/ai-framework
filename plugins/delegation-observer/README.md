@@ -48,6 +48,7 @@ Plugin options live under the plugin entry's options object:
 | `loopRepeats` | `3` | identical tool targets (one count per call id) that flag thrash |
 | `generationSeconds` | `600` | quiet budget inside an open assistant step |
 | `milestoneMinIntervalSeconds` | `30` | routine synthetic-milestone cap per delegate |
+| `staleGraceSeconds` | `600` | age after which a discovered-only session collapses as stale |
 | `healthFile` | `<location>/.scratch/delegation-observer/health.json` | shared degradation record |
 | `statusFile` | — | opt-in observer snapshot read by `delegation.status` |
 | `DELEGATION_OBSERVER_ENABLED` (env, TUI) | — | `0/false/no/off` disables the TUI part |
@@ -69,6 +70,24 @@ The numeric defaults are the **shared supervision contract**
 (`scripts/supervision_contract.json`, generated from `watch_agent.py` /
 `observe_completion.py`); `state.test.ts` fails if the TypeScript side drifts.
 The status panel prints the effective values.
+
+## Liveness is evidence, not discovery
+
+`session.list()` returns every child session the store has ever seen, so
+association is **discovery only**. A row is `running` only when the host's live
+active map says so or the session produced an event in this observer process;
+everything else is `unknown`. Quiet comes from the session's real last event
+(`time.updated`) and is never fabricated from the observer's own boot clock, so
+two delegates with different last events never share a quiet value.
+
+A discovered row that is terminal in the store, archived, or older than
+`staleGraceSeconds` is **stale**: it never reads `running`, never emits a
+synthetic milestone, and the strip collapses all of them into one
+`N stale delegates hidden` line. The same holds for the clock classifier — a
+row with no observed event has no observation clock, so it is never classified
+stalled. The first real event promotes the row and the documented
+stall/thrash/needs-input semantics take over from there. Current-session
+completions (`session.execution.*`) stay visible as `completed`/`failed`.
 
 ## Milestones
 

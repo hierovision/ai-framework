@@ -12,6 +12,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { PLUGIN_ID, createDefinition, startObserver } from "./server.ts";
+import { tick } from "./state.ts";
 
 const Plugin = { define: (d) => d };
 const clock = () => 1_000_000;
@@ -303,6 +304,23 @@ test("teardown aborts the event subscription", async () => {
   assert.equal(signal().aborted, false);
   await handle.stop();
   assert.equal(signal().aborted, true);
+});
+
+test("a historical bootstrap emits no synthetic stalls and never reads running", async () => {
+  const { ctx, synthetic } = fakeCtx([], {
+    list: [{
+      id: "ses_old", parentID: "ses_parent", title: "historical", agent: "planner",
+      time: { created: 1_000, updated: 2_000 }, idleOutcome: "succeeded",
+    }],
+  });
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  const d = handle.state.delegates.get("ses_old");
+  assert.ok(d);
+  assert.notEqual(d.status, "running");
+  assert.equal(d.lastActivityAt, 2_000, "the store's last event, not the boot clock");
+  assert.equal(tick(handle.state, 999_999_000).milestones.length, 0);
+  assert.equal(synthetic.length, 0);
 });
 
 test("disable-by-config leaves the stream silent", async () => {

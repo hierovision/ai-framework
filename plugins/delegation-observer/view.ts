@@ -18,11 +18,13 @@ export interface DelegateRow {
   task: string;
   status: Status;
   phase: string;
-  startedAt: number;
-  elapsedMs: number;
-  quietMs: number;
+  startedAt: number | null;
+  /** Null when the session's real timestamps are unknown: never fabricated. */
+  elapsedMs: number | null;
+  quietMs: number | null;
   elapsed: string;
   quiet: string;
+  stale: boolean;
   tokensIn: number;
   tokensOut: number;
   cost: number;
@@ -31,12 +33,22 @@ export interface DelegateRow {
   terminal: string | null;
 }
 
-const STATUS_ORDER: Record<Status, number> = { waiting: 0, warning: 1, failed: 2, running: 3, completed: 4 };
-const FOOTER_ORDER: Record<Status, number> = { running: 0, waiting: 1, warning: 2, failed: 3, completed: 4 };
+const UNKNOWN_DURATION = "—";
+
+const STATUS_ORDER: Record<Status, number> = {
+  waiting: 0, warning: 1, failed: 2, running: 3, unknown: 4, completed: 5,
+};
+const FOOTER_ORDER: Record<Status, number> = {
+  running: 0, waiting: 1, warning: 2, failed: 3, unknown: 4, completed: 5,
+};
 
 export function projectDelegate(delegate: Delegate, now: number = Date.now()): DelegateRow {
-  const elapsedMs = Math.max(0, now - delegate.startedAt);
-  const quietMs = Math.max(0, now - delegate.lastActivityAt);
+  // No timestamp is not "zero elapsed": an unknown clock renders as unknown
+  // instead of claiming a running time the observer never observed.
+  const elapsedMs = delegate.startedAt === null
+    ? null : Math.max(0, now - delegate.startedAt);
+  const quietMs = delegate.lastActivityAt === null
+    ? null : Math.max(0, now - delegate.lastActivityAt);
   return {
     sessionID: delegate.sessionID,
     parentID: delegate.orchestratorID,
@@ -48,8 +60,9 @@ export function projectDelegate(delegate: Delegate, now: number = Date.now()): D
     startedAt: delegate.startedAt,
     elapsedMs,
     quietMs,
-    elapsed: formatDuration(elapsedMs),
-    quiet: formatDuration(quietMs),
+    elapsed: elapsedMs === null ? UNKNOWN_DURATION : formatDuration(elapsedMs),
+    quiet: quietMs === null ? UNKNOWN_DURATION : formatDuration(quietMs),
+    stale: delegate.stale,
     tokensIn: delegate.tokens.input,
     tokensOut: delegate.tokens.output,
     cost: delegate.cost,
@@ -61,20 +74,30 @@ export function projectDelegate(delegate: Delegate, now: number = Date.now()): D
   };
 }
 
+/**
+ * Every row, live first. Stale rows are still returned so the panel can list
+ * them, but `sidebarLines` collapses them to a single count: a store full of
+ * finished children is not a wall of running delegates.
+ */
 export function visibleRows(state: ObserverState, now: number = Date.now()): DelegateRow[] {
   const rows = [...state.delegates.values()].map((d) => projectDelegate(d, now));
   rows.sort((a, b) => {
+    if (a.stale !== b.stale) return a.stale ? 1 : -1;
     const attention = statusRank(a) - statusRank(b);
     if (attention !== 0) return attention;
-    const newest = b.startedAt - a.startedAt;
+    const newest = (b.startedAt ?? 0) - (a.startedAt ?? 0);
     if (newest !== 0) return newest;
     return a.sessionID.localeCompare(b.sessionID);
   });
   return rows;
 }
 
+export function staleCount(rows: DelegateRow[]): number {
+  return (rows ?? []).filter((row) => row.stale).length;
+}
+
 function statusRank(row: DelegateRow): number {
-  return STATUS_ORDER[row.status] ?? 5;
+  return STATUS_ORDER[row.status] ?? 6;
 }
 
 export function formatDuration(ms: number): string {
@@ -86,23 +109,33 @@ export function formatDuration(ms: number): string {
 }
 
 export function footerStatus(rows: DelegateRow[]): string {
-  if (!rows.length) return "";
+  const live = (rows ?? []).filter((row) => !row.stale);
+  const stale = staleCount(rows);
+  if (!live.length) return stale ? `${stale} stale delegates hidden` : "";
   const counts = new Map<Status, number>();
-  for (const row of rows) counts.set(row.status, (counts.get(row.status) ?? 0) + 1);
+  for (const row of live) counts.set(row.status, (counts.get(row.status) ?? 0) + 1);
   const parts = [...counts.entries()]
     .sort((a, b) => (FOOTER_ORDER[a[0]] ?? 5) - (FOOTER_ORDER[b[0]] ?? 5))
     .map(([status, count]) => `${count} ${status}`);
-  return `delegates ${rows.length} · ${parts.join(" · ")}`;
+  return `delegates ${live.length} · ${parts.join(" · ")}`;
 }
 
-/** One compact line per delegate, clipped so the sidebar never reflows. */
+/**
+ * One compact line per live delegate, clipped so the sidebar never reflows,
+ * plus at most one collapsed line for the historical rows. A stale row is
+ * never rendered as running.
+ */
 export function sidebarLines(rows: DelegateRow[], max: number = 8): string[] {
-  return rows.slice(0, max).map((row) => {
+  const live = (rows ?? []).filter((row) => !row.stale);
+  const stale = staleCount(rows);
+  const lines = live.slice(0, max).map((row) => {
     const mark = row.status === "waiting" || row.status === "warning" || row.status === "failed" ? "!" : "·";
     const detail = row.needsInput ?? row.phase;
     const line = `${mark} ${row.agent} ${row.status}: ${detail} · ${row.elapsed} · q${row.quiet}`;
     return line.length <= 64 ? line : `${line.slice(0, 61)}...`;
   });
+  if (stale > 0) lines.push(`${stale} stale delegates hidden`);
+  return lines;
 }
 
 // --- association gap (degradation, AC11) -----------------------------------
@@ -125,14 +158,20 @@ export function isChildSession(session: SessionLike): boolean {
 /**
  * Running children with no delegate row. The orchestrator/root is excluded:
  * a busy owner session is normal, not a visibility gap (review M2).
+ *
+ * Only an explicit `running`/`busy` status counts. An unknown status is not
+ * liveness (live defect, 2026-10-30): counting `undefined` as running turned a
+ * store of historical children into a permanent "N running, N unassociated"
+ * alarm.
  */
 export function associationGap(sessions: SessionLike[], rows: DelegateRow[]) {
   const children = (sessions ?? []).filter(isChildSession);
   const childIDs = new Set(children.map((s) => s.id ?? s.sessionID));
   const runningChildren = children.filter((s) =>
-    s.status === "running" || s.status === "busy" || s.status === undefined).length;
+    s.status === "running" || s.status === "busy").length;
   const associatedActive = (rows ?? []).filter(
-    (r) => childIDs.has(r.sessionID) && !r.terminal && r.status !== "completed",
+    (r) => childIDs.has(r.sessionID) && !r.terminal && !r.stale
+      && r.status !== "completed" && r.status !== "unknown",
   ).length;
   return {
     runningChildren,

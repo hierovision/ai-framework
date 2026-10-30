@@ -325,7 +325,7 @@ is non-blocking and observable:
   not the orchestrator's vehicle;
 - a live status surface shows agent, task, elapsed/quiet time, current
   tool/phase, tokens/cost and one of `running | waiting | warning | failed |
-  completed`;
+  completed | unknown`;
 - progress, needs-input and terminal state arrive from the **event stream**;
 - owner controls: focus/open, steer (same session id), interrupt (typed
   request on the same session id);
@@ -347,6 +347,20 @@ grant-driven private servers keep the durable observer contract.
 `session.execution.succeeded/failed/interrupted`. The TUI never reads
 heartbeat files. Quiet/stall evaluation is a local clock over those event
 timestamps (5 s), not a poll of any file.
+
+**Discovery is not liveness (2026-10-30).** `session.list()` returns every
+child the store has ever seen, so bootstrapping is discovery only: a row is
+`running` only when the host's live active map says so or the session emitted
+an event in this observer process; otherwise it is `unknown`. Quiet is the
+session's real last event (`time.updated`), never the observer's boot clock —
+so two delegates with different last events never share a quiet value, and an
+unknown clock renders as `—` instead of a fabricated duration. A discovered
+row that is terminal in the store, archived, or older than
+`staleGraceSeconds` (default 600 s) is stale: it never reads `running`, emits
+no synthetic milestone, is never clock-classified, and collapses into one
+`N stale delegates hidden` line. Universal discovery is retained for
+genuinely live delegates: the first real event (or a live-map entry) promotes
+the row to the full watchdog semantics. See ADR-0015 (2026-10-30 amendment).
 
 **Milestones (synthetic, no model turn).** start, first tool, needs-input,
 denied, stall, thrash, retry, resume, terminal. Routine milestones are capped

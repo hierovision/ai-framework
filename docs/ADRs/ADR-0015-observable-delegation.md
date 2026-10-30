@@ -151,3 +151,45 @@ condition. The implementation and tests match that wording.
 - `plugins/delegation-sentinel/` — the always-loadable fallback banner.
 - `docs/roadmap-detail/RM-069.md` — provenance and verification.
 - RM-058 detail (`docs/roadmap-detail/RM-058.md`) — retained contracts.
+
+## Amendment (2026-10-30) — discovery is not liveness
+
+Post-apply defect on `main` (d13d504): the TUI strip listed historical child
+sessions as `running: starting`, then flipped them all to
+`stalled: quiet 245s`. Two causes, both in the implementation of Decision 3
+and 4, not in the decision itself:
+
+- `associateSessionInfo` accepted every `session.list()` entry with a
+  `parent_id` or a `[delegate:…]` title and seeded
+  `lastActivityAt = state.now()`, so quiet measured time since the *observer
+  booted*; every bootstrapped row therefore carried an identical value.
+- Nothing distinguished a session this process had evidence for from one the
+  store merely remembered. `session.list()` returns every child the store has
+  ever seen (274 in this repo's project, 272 idle for more than 10 minutes),
+  so association alone produced a wall of false `running` rows and, later,
+  false stall milestones.
+
+Amends Decision 3 ("universal association") and Decision 4 ("progress is
+event-driven"):
+
+1. **Association is discovery; liveness needs evidence.** A row is `running`
+   only when the host's live active map (`session.status`) says so or the
+   session produced an event in this observer process. Everything else is
+   `unknown` — a first-class status, not a soft `running`.
+2. **Quiet comes from the session, never from the observer.** `lastActivityAt`
+   is the store's real last event (`time.updated`) where available and `null`
+   otherwise; a `null` clock renders as unknown instead of claiming elapsed
+   time. Two delegates with different last events therefore never share a
+   quiet value by construction.
+3. **History is collapsed, not reported.** A discovered row that is terminal
+   in the store, archived, or older than `staleGraceSeconds` (default 600 s) is
+   stale: never `running`, never a synthetic milestone, collapsed into one
+   `N stale delegates hidden` line. A row with no observed event is also never
+   clock-classified — the store's timestamp is not this process's observation
+   clock. Current-session completions stay visible.
+4. **Universal discovery is retained** for genuinely live delegates: the first
+   real event, or a live active-map entry, promotes the row and the documented
+   stall/thrash/needs-input semantics apply unchanged from there. `thrash`
+   clearing on `touch` (a known limit above) also clears `unknown`.
+
+Evidence: `docs/roadmap-detail/RM-069.md` → *The 2026-10-30 stale-row defect*.

@@ -248,6 +248,10 @@ export function startObserver(ctx: any, options: {
           title: info.title,
           agent: info.agent,
           time: info.time,
+          idleOutcome: info.idleOutcome ?? info.idle_outcome ?? null,
+          // A list entry that already reports live status is real evidence;
+          // everything else is discovery only (live defect, 2026-10-30).
+          active: info.status === "running" || info.status === "busy" ? true : undefined,
         });
       }
     } catch (error) {

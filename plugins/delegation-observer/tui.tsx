@@ -25,6 +25,7 @@ import {
   associateSessionInfo,
   createState,
   healthPath,
+  markActive,
   observe,
   parseHealthRecord,
   tick,
@@ -118,8 +119,35 @@ export function createTuiModel(ctx: any) {
     }
   };
 
-  // Bootstrap: children that already exist when the TUI starts.
+  // Bootstrap: children that already exist when the TUI starts. `session.list`
+  // returns every child the store has ever seen, so this is DISCOVERY, not
+  // liveness: the live status map below decides which rows are running.
+  const liveSessions = () => {
+    try {
+      return ctx.data.session.list().map((s: any) => ({
+        ...s,
+        status: ctx.data.session.status(s.id),
+      }));
+    } catch {
+      return [];
+    }
+  };
+
+  const liveKind = (status: any) => {
+    const kind = typeof status === "string" ? status : status?.type;
+    return kind === "busy" || kind === "running";
+  };
+
+  /** Refresh the live active map — the only evidence a discovered row may use. */
+  const refreshActive = () => {
+    for (const session of liveSessions()) {
+      if (!session?.id) continue;
+      markActive(state, session.id, liveKind(session.status));
+    }
+  };
+
   const bootstrap = () => {
+    refreshActive(); // fill the map first: association consults it
     try {
       for (const info of ctx.data.session.list()) {
         associateSessionInfo(state, {
@@ -128,11 +156,13 @@ export function createTuiModel(ctx: any) {
           title: info.title,
           agent: info.agent,
           time: info.time,
+          idleOutcome: info.idleOutcome ?? info.idle_outcome ?? null,
         });
       }
     } catch {
       // A failed bootstrap is not fatal: events still associate new children.
     }
+    refreshActive(); // a session the map knows but the list missed
   };
 
   const alertFor = (milestone: any) => {
@@ -173,6 +203,7 @@ export function createTuiModel(ctx: any) {
 
   bootstrap();
   const timer = setInterval(() => {
+    refreshActive();
     apply(tick(state));
     refreshServerHealth();
     bump();
@@ -195,16 +226,7 @@ export function createTuiModel(ctx: any) {
   const banner = createMemo(() => {
     version();
     const status = pluginStatus();
-    let sessions: any[] = [];
-    try {
-      sessions = ctx.data.session.list().map((s: any) => ({
-        ...s,
-        status: ctx.data.session.status(s.id),
-      }));
-    } catch {
-      sessions = [];
-    }
-    const gap = associationGap(sessions, rows());
+    const gap = associationGap(liveSessions(), rows());
     const stale = state.lastEventAt !== null
       && rows().some((r) => r.status === "running")
       && Date.now() - state.lastEventAt > state.config.stallSeconds * 2000;
@@ -400,14 +422,16 @@ function FooterCount(props: any) {
 }
 
 function DelegatePanel(props: any) {
+  const live = () => props.rows().filter((row: any) => !row.stale);
+  const stale = () => props.rows().length - live().length;
   return (
     <box flexDirection="column" padding={1}>
       <text>Delegates — event stream</text>
       <Show when={props.banner()}>
         <text>! {props.banner()}</text>
       </Show>
-      <For each={props.rows()}>
-        {(row) => (
+      <For each={live()}>
+        {(row: any) => (
           <box flexDirection="column">
             <text>
               {row.agent} {row.sessionID} [{row.status}] {row.phase}
@@ -421,6 +445,9 @@ function DelegatePanel(props: any) {
           </box>
         )}
       </For>
+      <Show when={stale() > 0}>
+        <text>{stale()} stale delegates hidden</text>
+      </Show>
       <text>
         thresholds: stall {props.state.config.stallSeconds}s · call{" "}
         {props.state.config.callSeconds}s · loop {props.state.config.loopRepeats}x

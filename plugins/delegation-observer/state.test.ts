@@ -20,6 +20,7 @@ import {
   createState,
   delegationTitle,
   healthPath,
+  markActive,
   observe,
   parseDelegationTitle,
   parseHealthRecord,
@@ -566,6 +567,128 @@ test("a clock-classified failed row returns to running on real activity", () => 
   const d = state.delegates.get("ses_c");
   assert.equal(d.status, "running");
   assert.equal(d.warning, null);
+});
+
+// --- liveness from evidence, not discovery (live defect, 2026-10-30) ------
+//
+// The TUI bootstraps from `session.list()`, which returns every child session
+// the store has ever seen. Association alone is not evidence of life: a row is
+// running only when the live active map says so or the session produced an
+// event in this process. Quiet comes from the session's real last event, never
+// from the observer's own boot clock.
+
+test("a discovered session with no events is never running", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_old", parentID: "ses_parent", title: "historical task",
+    agent: "implementer",
+    time: { created: clock - 20 * 3_600_000, updated: clock - 19 * 3_600_000 },
+  });
+  const d = state.delegates.get("ses_old");
+  assert.ok(d);
+  assert.notEqual(d.status, "running");
+  assert.equal(d.lastActivityAt, clock - 19 * 3_600_000,
+    "quiet is the session's last event, not observer boot");
+  assert.equal(d.stale, true);
+  const res = tick(state, clock);
+  assert.equal(res.milestones.length, 0, "a stale row never emits a milestone");
+  assert.notEqual(d.status, "running");
+});
+
+test("only the live active map can make a discovered session running", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_idle", parentID: "ses_parent", title: "idle child",
+    active: false, time: { created: clock - 3_600_000, updated: clock - 30_000 },
+  });
+  assert.notEqual(state.delegates.get("ses_idle").status, "running",
+    "discovery alone is not liveness");
+
+  associateSessionInfo(state, {
+    id: "ses_live", parentID: "ses_parent", title: "live child",
+    active: true, time: { created: clock - 3_600_000, updated: clock - 30_000 },
+  });
+  const live = state.delegates.get("ses_live");
+  assert.equal(live.status, "running");
+  assert.equal(live.stale, false);
+  assert.equal(live.lastActivityAt, clock - 30_000);
+});
+
+test("the host live map is what promotes and demotes a discovered row", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_live", parentID: "ses_parent", title: "live child",
+    time: { created: clock - 3_600_000, updated: clock - 30_000 },
+  });
+  assert.notEqual(state.delegates.get("ses_live").status, "running");
+  markActive(state, "ses_live", true);
+  const d = state.delegates.get("ses_live");
+  assert.equal(d.status, "running");
+  assert.equal(d.stale, false);
+  markActive(state, "ses_live", false);
+  assert.equal(d.status, "unknown", "losing the live map is not a stall claim");
+});
+
+test("the stale grace window is configurable and defaults to ten minutes", () => {
+  assert.equal(DEFAULTS.staleGraceSeconds, 600);
+  const recent = fresh();
+  associateSessionInfo(recent, {
+    id: "ses_recent", parentID: "ses_parent", title: "just started",
+    time: { created: clock - 300_000, updated: clock - 120_000 },
+  });
+  const d = recent.delegates.get("ses_recent");
+  assert.equal(d.status, "unknown");
+  assert.equal(d.stale, false, "a child younger than the grace window stays visible");
+
+  const tight = createState({ staleGraceSeconds: 60 }, now);
+  associateSessionInfo(tight, {
+    id: "ses_recent", parentID: "ses_parent", title: "just started",
+    time: { created: clock - 300_000, updated: clock - 120_000 },
+  });
+  assert.equal(tight.delegates.get("ses_recent").stale, true);
+});
+
+test("an active-map row is never stall-classified without an observed event", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_live", parentID: "ses_parent", title: "live child",
+    active: true, time: { created: clock - 3_600_000, updated: clock - 30_000 },
+  });
+  advance((DEFAULTS.stallSeconds * 2 + 5) * 1000);
+  const quietTick = tick(state, clock);
+  assert.equal(quietTick.milestones.length, 0,
+    "the store's last event is not this process's observation clock");
+  const d = state.delegates.get("ses_live");
+  assert.equal(d.status, "running");
+  assert.equal(d.warning, null);
+  // once it really produces events, the documented watchdog semantics apply
+  observe(state, contentTool("ses_live", "t1", "read", "completed", { path: "a" }));
+  advance((DEFAULTS.stallSeconds + 1) * 1000);
+  const warned = tick(state, clock);
+  assert.equal(warned.milestones.filter((m) => m.kind === "stall").length, 1);
+  assert.equal(d.status, "warning");
+});
+
+test("a session terminal in the store never re-enters running", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_done", parentID: "ses_parent", title: "finished task",
+    time: { created: clock - 72 * 3_600_000, updated: clock - 70 * 3_600_000 },
+    idleOutcome: "succeeded",
+  });
+  const d = state.delegates.get("ses_done");
+  assert.equal(d.status, "completed");
+  assert.equal(d.terminal?.outcome, "completed");
+  assert.equal(tick(state, clock).milestones.length, 0);
+  // a replayed busy/step event never revives a terminal row
+  observe(state, event("session.status", {
+    sessionID: "ses_done", type: "busy", status: { type: "busy" },
+  }));
+  observe(state, event("session.step.started", {
+    sessionID: "ses_done", assistantMessageID: "m1",
+  }));
+  assert.equal(d.status, "completed");
+  assert.equal(d.lastActivityAt, clock - 70 * 3_600_000);
 });
 
 test("a name-less tool.called waits for the content update to label the call", () => {

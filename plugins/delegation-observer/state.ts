@@ -29,6 +29,12 @@ export interface ObserverConfig {
   milestoneMinIntervalSeconds: number;
   milestoneDescription: string;
   titleMaxLength: number;
+  /**
+   * How old a *discovered* (bootstrap-only) session may be before it is
+   * collapsed as stale. `session.list()` returns every child the store has
+   * ever seen; without this window the strip lists months of finished work.
+   */
+  staleGraceSeconds: number;
 }
 
 /** Mirrors scripts/supervision_contract.json (asserted by state.test.ts). */
@@ -41,13 +47,22 @@ export const DEFAULTS: ObserverConfig = {
   milestoneMinIntervalSeconds: 30,
   milestoneDescription: "delegation-observer milestone",
   titleMaxLength: 160,
+  staleGraceSeconds: 600,
 };
 
 export const TITLE_PREFIX = "[delegate:";
 const TITLE_RE = /^\[delegate:([A-Za-z0-9_-]+)\]\s+([A-Za-z0-9_.-]+):\s*(.*)$/;
 
-export type DelegateStatus = "running" | "waiting" | "warning" | "failed" | "completed";
+/**
+ * `unknown` is a first-class answer: a session we merely discovered is not
+ * evidence of life (live defect, 2026-10-30). The next real event promotes it
+ * to `running`.
+ */
+export type DelegateStatus = "running" | "waiting" | "warning" | "failed"
+  | "completed" | "unknown";
 export type Association = "parent" | "title";
+/** `observed` = this process saw an event for it; `discovered` = listed only. */
+export type Provenance = "observed" | "discovered";
 
 export interface Delegate {
   sessionID: string;
@@ -57,8 +72,14 @@ export interface Delegate {
   task: string;
   status: DelegateStatus;
   phase: string;
-  startedAt: number;
-  lastActivityAt: number;
+  /** The session's created time when the store exposes it; never faked. */
+  startedAt: number | null;
+  /** The session's real last event; null when unavailable — never `now`. */
+  lastActivityAt: number | null;
+  provenance: Provenance;
+  /** Discovered, unproven and older than `staleGraceSeconds`. */
+  stale: boolean;
+  archived: boolean;
   busy: boolean;
   openStep: boolean;
   toolInFlight: boolean;
@@ -78,6 +99,12 @@ export interface ObserverState {
   config: ObserverConfig;
   now: () => number;
   delegates: Map<string, Delegate>;
+  /**
+   * The host's live active map (session id -> busy right now). Filled by
+   * `session.list()`/`session.status()` on every refresh; it is the only
+   * evidence that makes a discovered-only session `running`.
+   */
+  active: Map<string, boolean>;
   connection: "connected" | "disconnected" | "unavailable";
   degradation: string | null;
   lastEventAt: number | null;
@@ -114,7 +141,17 @@ export interface SessionInfoLike {
   parent_id?: string | null;
   title?: string | null;
   agent?: string | null;
-  time?: { created?: number } | null;
+  /** V2 exposes `created`, `updated`, `compacting`, `archived` (client types). */
+  time?: {
+    created?: number | null;
+    updated?: number | null;
+    archived?: number | null;
+  } | null;
+  /** Live status from the host's active map, when it is already known. */
+  active?: boolean;
+  /** The store's terminal outcome (`idle_outcome`), when the host exposes it. */
+  idleOutcome?: string | null;
+  idle_outcome?: string | null;
 }
 
 // --- title marker contract -------------------------------------------------
@@ -201,6 +238,7 @@ export function createState(overrides: Partial<ObserverConfig> = {},
     config: { ...DEFAULTS, ...overrides },
     now,
     delegates: new Map<string, Delegate>(),
+    active: new Map<string, boolean>(),
     connection: "connected",
     degradation: null,
     lastEventAt: null,
@@ -208,7 +246,71 @@ export function createState(overrides: Partial<ObserverConfig> = {},
   };
 }
 
-function associate(state: ObserverState, sessionID: string, info: SessionInfoLike) {
+/** The store's terminal outcome, normalized; null when absent or unknown. */
+function terminalOutcome(info: SessionInfoLike): "completed" | "failed" | null {
+  const raw = info.idleOutcome ?? info.idle_outcome ?? null;
+  if (!raw) return null;
+  const value = String(raw).trim().toLowerCase();
+  if (!value) return null;
+  if (["succeeded", "success", "completed", "complete", "done"].includes(value)) {
+    return "completed";
+  }
+  if (["failed", "error", "interrupted", "cancelled", "canceled", "aborted"].includes(value)) {
+    return "failed";
+  }
+  return null;
+}
+
+function isActive(state: ObserverState, sessionID: string): boolean {
+  return state.active.get(sessionID) === true;
+}
+
+/**
+ * Staleness is a property of *evidence*, never of discovery:
+ * - an observed session is live state, so the clock classifier owns it;
+ * - a live active-map entry is real liveness;
+ * - a session that is terminal in the store but was never observed here is
+ *   history, not current work — collapse it;
+ * - the store's archive flag is final;
+ * - otherwise the session is stale once its real last event (or, failing
+ *   that, its created time) is older than the grace window. No timestamp at
+ *   all means no evidence at all: stale immediately.
+ */
+export function isStale(state: ObserverState, d: Delegate,
+  now: number = state.now()): boolean {
+  if (d.provenance === "observed") return false;
+  if (d.terminal) return true;
+  if (isActive(state, d.sessionID)) return false;
+  if (d.archived) return true;
+  const at = d.lastActivityAt ?? d.startedAt;
+  if (at === null) return true;
+  return now - at >= state.config.staleGraceSeconds * 1000;
+}
+
+/**
+ * Record the host's live active-map answer for a session. A discovered row
+ * only becomes `running` here; an observed row keeps its event-driven state.
+ */
+export function markActive(state: ObserverState, sessionID: string, active: boolean) {
+  if (!sessionID) return null;
+  const live = Boolean(active);
+  state.active.set(sessionID, live);
+  const d = state.delegates.get(sessionID);
+  if (!d || d.terminal || d.provenance === "observed") return d ?? null;
+  if (live) {
+    d.status = "running";
+    d.phase = "active";
+    d.stale = false;
+  } else if (d.status === "running") {
+    d.status = "unknown";
+    d.phase = "no events observed";
+    d.stale = isStale(state, d);
+  }
+  return d;
+}
+
+function associate(state: ObserverState, sessionID: string, info: SessionInfoLike,
+  source: Provenance) {
   if (!sessionID) return null;
   let delegate = state.delegates.get(sessionID);
   if (delegate) {
@@ -218,6 +320,12 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
   const parentID = info.parentID ?? info.parent_id ?? null;
   const marker = parseDelegationTitle(info.title ?? "");
   if (!parentID && !marker) return null;
+  const created = info.time?.created ?? null;
+  const updated = info.time?.updated ?? null;
+  const archived = (info.time?.archived ?? null) !== null;
+  const outcome = terminalOutcome(info);
+  const live = state.active.get(sessionID) ?? Boolean(info.active);
+  const now = state.now();
   delegate = {
     sessionID,
     orchestratorID: parentID || marker?.orchestratorID || "",
@@ -226,8 +334,11 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
     task: marker?.task || (info.title ?? "").trim() || "delegated task",
     status: "running",
     phase: "starting",
-    startedAt: info.time?.created ?? state.now(),
-    lastActivityAt: state.now(),
+    startedAt: source === "observed" ? (created ?? now) : created,
+    lastActivityAt: source === "observed" ? now : updated,
+    provenance: source,
+    stale: false,
+    archived,
     busy: false,
     openStep: false,
     toolInFlight: false,
@@ -242,15 +353,42 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
     lastRoutineMilestoneAt: null,
     emitted: new Set(),
   };
+  if (source === "discovered") {
+    // Discovery is not liveness. Rank the evidence we actually have.
+    if (live) {
+      delegate.status = "running";
+      delegate.phase = "active";
+    } else if (outcome) {
+      delegate.terminal = { outcome, detail: "store outcome", at: updated ?? created ?? 0 };
+      delegate.status = outcome;
+      delegate.phase = outcome;
+      // A row already terminal in the store must never emit a synthetic
+      // start or terminal milestone: the orchestrator saw it live.
+      delegate.emitted.add("start");
+      delegate.emitted.add("terminal");
+    } else {
+      delegate.status = "unknown";
+      delegate.phase = "no events observed";
+      // Bootstrap never emits a start milestone, so no synthetic claim either.
+      delegate.emitted.add("start");
+    }
+  }
   state.delegates.set(sessionID, delegate);
+  delegate.stale = isStale(state, delegate, now);
   return delegate;
 }
 
-/** Bootstrap association from `ctx.session.list()` / `data.session.list()`. */
+/**
+ * Bootstrap association from `ctx.session.list()` / `data.session.list()`.
+ *
+ * Everything here is *discovery*: `session.list()` returns every child the
+ * store has ever seen, so the row starts as `unknown` unless the live active
+ * map or a store outcome says otherwise.
+ */
 export function associateSessionInfo(state: ObserverState, info: SessionInfoLike | null | undefined) {
   const sessionID = info?.id ?? info?.sessionID;
   if (!sessionID || !info) return null;
-  return associate(state, sessionID, info);
+  return associate(state, sessionID, info, "discovered");
 }
 
 // --- milestone helpers -----------------------------------------------------
@@ -305,9 +443,12 @@ function alert(m: Milestone): Alert {
 
 function touch(d: Delegate, now: number) {
   d.lastActivityAt = now;
+  d.stale = false;
   // A clock-classified warning/failed row that shows real activity is alive
   // again; only a terminal outcome is sticky.
-  if (d.status === "warning" || d.status === "failed") d.status = "running";
+  if (d.status === "warning" || d.status === "failed" || d.status === "unknown") {
+    d.status = "running";
+  }
   d.warning = null;
   for (const key of [...d.emitted]) {
     if (key.startsWith("stall:")) d.emitted.delete(key);
@@ -392,7 +533,7 @@ export function observe(state: ObserverState, event: any): ObserveResult {
       parentID: data.parentID,
       title: data.title,
       agent: data.agent,
-    });
+    }, "observed");
     if (d) {
       const m = milestone(state, d, "start", "start",
         `${label(d)} started: ${d.task}`);
@@ -401,7 +542,7 @@ export function observe(state: ObserverState, event: any): ObserveResult {
   } else if (type === "session.renamed") {
     const d = associate(state, sessionID, {
       parentID: null, title: data.title, agent: data.agent,
-    });
+    }, "observed");
     if (d && d.via === "title" && data.title) {
       const marker = parseDelegationTitle(data.title);
       if (marker?.task) d.task = marker.task;
@@ -412,6 +553,17 @@ export function observe(state: ObserverState, event: any): ObserveResult {
   if (!d || d.terminal) {
     state.pending.length = 0;
     return out;
+  }
+
+  // Any event is the strongest evidence there is: a discovered row is live
+  // from here on and the clock classifier (stall/thrash/needs-input) owns it.
+  if (d.provenance === "discovered") {
+    d.provenance = "observed";
+    d.stale = false;
+    if (d.status === "unknown") {
+      d.status = "running";
+      d.phase = "active";
+    }
   }
 
   switch (type) {
@@ -573,7 +725,15 @@ export function observe(state: ObserverState, event: any): ObserveResult {
 export function tick(state: ObserverState, now: number = state.now()): ObserveResult {
   const out: ObserveResult = { milestones: [], alerts: [] };
   for (const d of state.delegates.values()) {
-    if (d.terminal) continue;
+    // Staleness is re-evaluated on the clock: a row discovered five minutes
+    // ago is not stale yet, and crosses the grace window without any event.
+    d.stale = isStale(state, d, now);
+    if (d.terminal || d.stale) continue;
+    // Discovery is not liveness (live defect, 2026-10-30): a bootstrapped row
+    // has no observation clock of its own, so it is never classified and never
+    // emits a synthetic stall. The first real event promotes it.
+    if (d.provenance === "discovered") continue;
+    if (d.lastActivityAt === null) continue;
     if (d.needsInput) {
       if (d.status !== "waiting") d.status = "waiting";
       continue;
