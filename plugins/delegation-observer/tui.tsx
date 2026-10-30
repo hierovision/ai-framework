@@ -36,7 +36,9 @@ import {
   createControls,
   degradationBanner,
   footerStatus,
+  readLiveMap,
   readStatusSnapshot,
+  selectableRows,
   sidebarLines,
   visibleRows,
 } from "./view.ts";
@@ -77,6 +79,7 @@ export function createTuiModel(ctx: any) {
   const [version, setVersion] = createSignal(0);
   const [pluginStatus, setPluginStatus] = createSignal({ loaded: true, state: "active" });
   const [serverHealth, setServerHealth] = createSignal<string | null>(null);
+  const [liveMap, setLiveMap] = createSignal<"ok" | "unavailable">("ok");
   const bump = () => setVersion((v) => v + 1);
 
   // Presence marker for the independent sentinel: when this TUI part fails to
@@ -121,48 +124,45 @@ export function createTuiModel(ctx: any) {
 
   // Bootstrap: children that already exist when the TUI starts. `session.list`
   // returns every child the store has ever seen, so this is DISCOVERY, not
-  // liveness: the live status map below decides which rows are running.
-  const liveSessions = () => {
-    try {
-      return ctx.data.session.list().map((s: any) => ({
-        ...s,
-        status: ctx.data.session.status(s.id),
-      }));
-    } catch {
-      return [];
-    }
-  };
+  // liveness: the live status map decides which rows are running.
+  const sessionList = () => ctx.data.session.list();
+  const sessionStatus = (sessionID: string) => ctx.data.session.status(sessionID);
 
-  const liveKind = (status: any) => {
-    const kind = typeof status === "string" ? status : status?.type;
-    return kind === "busy" || kind === "running";
-  };
-
-  /** Refresh the live active map — the only evidence a discovered row may use. */
+  /**
+   * Refresh the live active map — the only evidence a discovered row may use.
+   * Returns false when the host could not answer, which the banner reports
+   * instead of letting every discovered row silently age into "stale".
+   */
   const refreshActive = () => {
-    for (const session of liveSessions()) {
-      if (!session?.id) continue;
-      markActive(state, session.id, liveKind(session.status));
+    const map = readLiveMap(sessionList, sessionStatus);
+    setLiveMap(map.available ? "ok" : "unavailable");
+    for (const entry of map.entries) {
+      markActive(state, entry.sessionID, entry.live);
     }
+    return map.available;
   };
 
   const bootstrap = () => {
     refreshActive(); // fill the map first: association consults it
+    let sessions: any[] = [];
     try {
-      for (const info of ctx.data.session.list()) {
-        associateSessionInfo(state, {
-          id: info.id,
-          parentID: info.parentID,
-          title: info.title,
-          agent: info.agent,
-          time: info.time,
-          idleOutcome: info.idleOutcome ?? info.idle_outcome ?? null,
-        });
-      }
+      sessions = sessionList();
     } catch {
-      // A failed bootstrap is not fatal: events still associate new children.
+      // A failed list is reported through the live-map banner; events still
+      // associate new children.
+      sessions = [];
     }
-    refreshActive(); // a session the map knows but the list missed
+    for (const info of sessions) {
+      associateSessionInfo(state, {
+        id: info.id,
+        parentID: info.parentID,
+        title: info.title,
+        agent: info.agent,
+        time: info.time,
+        outcome: info.outcome,
+        active: info.active,
+      });
+    }
   };
 
   const alertFor = (milestone: any) => {
@@ -226,7 +226,7 @@ export function createTuiModel(ctx: any) {
   const banner = createMemo(() => {
     version();
     const status = pluginStatus();
-    const gap = associationGap(liveSessions(), rows());
+    const gap = associationGap(sessionRows(), rows());
     const stale = state.lastEventAt !== null
       && rows().some((r) => r.status === "running")
       && Date.now() - state.lastEventAt > state.config.stallSeconds * 2000;
@@ -238,11 +238,24 @@ export function createTuiModel(ctx: any) {
       serverHealth: serverHealth(),
       runningChildren: gap.runningChildren,
       associatedActive: gap.associatedActive,
+      liveMap: liveMap(),
     });
   });
 
+  /** Sessions with their live status, for the association-gap count only. */
+  const sessionRows = () => {
+    const map = readLiveMap(sessionList, sessionStatus);
+    if (!map.available) return [];
+    const live = new Map(map.entries.map((entry) => [entry.sessionID, entry.live]));
+    return map.sessions.map((session) => ({
+      ...session,
+      status: live.get(session.id ?? session.sessionID ?? "") ? "running" : "idle",
+    }));
+  };
+
   async function pickDelegate() {
-    const list = rows();
+    // Stale rows are collapsed history: they are not selectable targets.
+    const list = selectableRows(rows());
     if (!list.length) {
       ctx.ui.toast.show({ message: "no delegates observed", variant: "info" });
       return null;

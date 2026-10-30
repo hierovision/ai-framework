@@ -15,8 +15,11 @@ import {
   degradationBanner,
   footerStatus,
   isChildSession,
+  isLiveStatus,
   projectDelegate,
+  readLiveMap,
   readStatusSnapshot,
+  selectableRows,
   sidebarLines,
   visibleRows,
 } from "./view.ts";
@@ -312,7 +315,7 @@ test("historical rows collapse to one line and never claim to be running", () =>
   associateSessionInfo(state, {
     id: "ses_done", parentID: "ses_p", title: "ses_done", agent: "implementer",
     time: { created: clock - 3_600_000, updated: clock - 50_000 },
-    idleOutcome: "succeeded",
+    outcome: "succeeded",
   });
   const rows = visibleRows(state, clock);
   assert.equal(rows.length, 5, "the panel keeps every row");
@@ -342,4 +345,105 @@ test("the fallback status snapshot is parsed only when it is real", () => {
   assert.equal(readStatusSnapshot("not json"), null);
   assert.equal(readStatusSnapshot(""), null);
   assert.equal(readStatusSnapshot(JSON.stringify({ outcome: "" })), null);
+});
+
+// --- the live status map (liveness source) and its failure mode -----------
+
+test("the live map reads the 2.1.4 status contract and never throws", () => {
+  // `ctx.data.session.status` is "idle" | "running" on 2.1.4.
+  assert.equal(isLiveStatus("running"), true);
+  assert.equal(isLiveStatus("idle"), false);
+  // object-shaped status is accepted as defence, anything else is not live
+  assert.equal(isLiveStatus({ type: "running" }), true);
+  assert.equal(isLiveStatus({ type: "idle" }), false);
+  assert.equal(isLiveStatus(undefined), false);
+  assert.equal(isLiveStatus(null), false);
+
+  const sessions = [
+    { id: "ses_live" },
+    { id: "ses_idle" },
+    { sessionID: "ses_alias" },
+    { id: "" },
+  ];
+  const statuses: Record<string, string> = {
+    ses_live: "running", ses_idle: "idle", ses_alias: "running",
+  };
+  const map = readLiveMap(() => sessions, (id) => statuses[id] ?? "idle");
+  assert.equal(map.available, true);
+  assert.deepEqual(map.entries, [
+    { sessionID: "ses_live", live: true },
+    { sessionID: "ses_idle", live: false },
+    { sessionID: "ses_alias", live: true },
+  ]);
+  assert.equal(map.sessions.length, 4);
+
+  // a throwing list or status is an unavailable map, not an empty one
+  assert.deepEqual(readLiveMap(() => { throw new Error("no data"); }, () => "running"),
+    { available: false, entries: [], sessions: [] });
+  assert.deepEqual(readLiveMap(() => sessions, () => { throw new Error("no status"); }),
+    { available: false, entries: [], sessions: [] });
+  assert.deepEqual(readLiveMap(() => null, () => "running"),
+    { available: false, entries: [], sessions: [] });
+});
+
+test("an unavailable live map degrades visibly instead of hiding rows", () => {
+  const banner = degradationBanner({ pluginLoaded: true, liveMap: "unavailable" });
+  assert.match(banner, /cannot read the live session status map/);
+  assert.match(banner, /hidden as stale/);
+  assert.match(banner, /watchdog\/observer fallback/);
+  assert.equal(degradationBanner({ pluginLoaded: true, liveMap: "ok" }), null);
+});
+
+test("stale rows are not selectable and not actionable", async () => {
+  clock = 1_000_000;
+  const state = createState({}, now);
+  observe(state, {
+    type: "session.created",
+    data: { sessionID: "ses_now", parentID: "ses_p", title: "current", agent: "implementer" },
+  });
+  associateSessionInfo(state, {
+    id: "ses_old", parentID: "ses_p", title: "history", agent: "implementer",
+    time: { created: clock - 20 * 3_600_000, updated: clock - 19 * 3_600_000 },
+  });
+  const rows = visibleRows(state, clock);
+  assert.deepEqual(selectableRows(rows).map((r) => r.sessionID), ["ses_now"]);
+
+  const stale = rows.find((r) => r.sessionID === "ses_old");
+  const calls = [];
+  const byId = Object.fromEntries(createControls(stale, {
+    client: {
+      session: {
+        prompt: async (input) => calls.push(["prompt", input]),
+        interrupt: async (input) => calls.push(["interrupt", input]),
+      },
+    },
+  }).map((c) => [c.id, c]));
+  assert.equal(byId.steer.enabled, false);
+  assert.equal(byId.interrupt.enabled, false);
+  assert.match(byId.steer.reason, /collapsed history/);
+  const steer = await byId.steer.run("try again");
+  assert.equal(steer.ok, false);
+  assert.equal(steer.reason, "stale");
+  const interrupt = await byId.interrupt.run();
+  assert.equal(interrupt.ok, false);
+  assert.equal(interrupt.reason, "stale");
+  assert.equal(calls.length, 0, "no client call for collapsed history");
+  assert.equal(byId.focus.enabled, true, "viewing history stays possible");
+});
+
+test("an all-stale set reports the collapsed count in the footer", () => {
+  clock = 1_000_000;
+  const state = createState({}, now);
+  for (const [id, hours] of [["ses_h1", 20], ["ses_h2", 19]]) {
+    associateSessionInfo(state, {
+      id, parentID: "ses_p", title: id,
+      time: { created: clock - hours * 3_600_000, updated: clock - hours * 3_600_000 },
+    });
+  }
+  const rows = visibleRows(state, clock);
+  assert.equal(rows.length, 2);
+  assert.equal(footerStatus(rows), "2 stale delegates hidden");
+  assert.deepEqual(sidebarLines(rows, 8), ["2 stale delegates hidden"]);
+  assert.deepEqual(selectableRows(rows), []);
+  assert.equal(footerStatus([]), "");
 });

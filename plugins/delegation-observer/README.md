@@ -48,11 +48,12 @@ Plugin options live under the plugin entry's options object:
 | `loopRepeats` | `3` | identical tool targets (one count per call id) that flag thrash |
 | `generationSeconds` | `600` | quiet budget inside an open assistant step |
 | `milestoneMinIntervalSeconds` | `30` | routine synthetic-milestone cap per delegate |
-| `staleGraceSeconds` | `600` | age after which a discovered-only session collapses as stale |
+| `staleGraceSeconds` | `600` | history window: a discovered row older than this collapses as stale |
 | `healthFile` | `<location>/.scratch/delegation-observer/health.json` | shared degradation record |
 | `statusFile` | — | opt-in observer snapshot read by `delegation.status` |
 | `DELEGATION_OBSERVER_ENABLED` (env, TUI) | — | `0/false/no/off` disables the TUI part |
 | `DELEGATION_OBSERVER_STALL_SECONDS` (env, TUI) | — | interactive threshold |
+| `DELEGATION_OBSERVER_STALE_GRACE_SECONDS` (env, TUI) | — | history window (positive seconds) |
 | `DELEGATION_OBSERVER_HEALTH_FILE` (env, TUI) | — | must match the server's `healthFile` |
 | `DELEGATION_OBSERVER_STATUS_FILE` (env, TUI) | — | fallback snapshot path |
 
@@ -66,9 +67,12 @@ TUI-only fallback: it renders one line when this plugin is absent, failed,
 disabled, disconnected, or its TUI is not running. It never shows delegate
 detail.
 
-The numeric defaults are the **shared supervision contract**
-(`scripts/supervision_contract.json`, generated from `watch_agent.py` /
+The **watchdog thresholds** (`stallSeconds`, `callSeconds`, `loopRepeats`,
+`generationSeconds`, `milestoneMinIntervalSeconds`) are the shared supervision
+contract (`scripts/supervision_contract.json`, generated from `watch_agent.py` /
 `observe_completion.py`); `state.test.ts` fails if the TypeScript side drifts.
+`staleGraceSeconds` is **not** part of that contract: it is an observer-owned
+display window with no Python owner, so it lives here and in the plugin only.
 The status panel prints the effective values.
 
 ## Liveness is evidence, not discovery
@@ -80,14 +84,27 @@ everything else is `unknown`. Quiet comes from the session's real last event
 (`time.updated`) and is never fabricated from the observer's own boot clock, so
 two delegates with different last events never share a quiet value.
 
-A discovered row that is terminal in the store, archived, or older than
-`staleGraceSeconds` is **stale**: it never reads `running`, never emits a
-synthetic milestone, and the strip collapses all of them into one
-`N stale delegates hidden` line. The same holds for the clock classifier — a
-row with no observed event has no observation clock, so it is never classified
-stalled. The first real event promotes the row and the documented
-stall/thrash/needs-input semantics take over from there. Current-session
-completions (`session.execution.*`) stay visible as `completed`/`failed`.
+**Terminal and archived are final.** The store outcome is the real
+`SessionInfo.outcome` field (`succeeded`/`failed`/`interrupted`); such a row
+reads `completed`/`failed`, never `running`, emits no synthetic start/terminal
+milestone, and keeps that outcome across a live-map demotion. `time.archived`
+and the `session.archived` event hide a row for good — the live map and later
+events cannot revive it; `session.unarchived` is the only way back. A
+completion you watched happen (`session.execution.*`) stays visible; one that
+only exists in the store is history.
+
+A row that is archived, terminal in the store but unobserved here, or
+(discovered) older than `staleGraceSeconds` is **stale**: it never reads
+`running`, never emits a synthetic milestone, is never clock-classified, is
+excluded from the focus/steer/interrupt picker, and collapses into one
+`N stale delegates hidden` line. The first real event promotes a discovered
+row *and* resets the observation clock to that event's observation time, so an
+old store timestamp can never be read as quiet time; from there the documented
+stall/thrash/needs-input semantics take over.
+
+If the host cannot answer `session.list()`/`session.status()`, the live map is
+unavailable and the banner says so (discovered delegates may be hidden) — that
+state is never presented as healthy.
 
 ## Milestones
 
@@ -143,14 +160,31 @@ when:
 - the plugin is not loaded, or the server record is `failed`;
 - the event stream is disconnected/unavailable;
 - the observer is disabled by configuration;
+- the live session status map (`session.list()`/`session.status()`) cannot be
+  read — discovered delegates then have no liveness source and may be hidden
+  as stale;
 - running **child** sessions exist with no delegate association (the
-  orchestrator/root is excluded);
+  orchestrator/root is excluded; only an explicit `running`/`busy` counts);
 - the server part reports synthetic-delivery or stream failure through the
   shared health record (`<location>/.scratch/delegation-observer/health.json`).
 
 In every case the durable watchdog/observer — heartbeat, `watch_agent.py`,
 `observe_completion.py` wake — remains authoritative. The plugin never claims
 live visibility it does not have.
+
+## Tests
+
+```
+node --test state.test.ts tui.test.ts server.test.ts   # 87 tests
+node ../delegation-sentinel/sentinel.test.ts           # 5 tests
+tsc -p . --noEmit
+node mutation-check.mjs                                # 11 break/restore proofs
+```
+
+`mutation-check.mjs` is the checked-in evidence behind every liveness guard:
+it removes one guard at a time, requires the named test to fail, restores the
+file byte-for-byte, and fails if a mutation survives or the tree is dirty. It
+runs in CI with the offline suites.
 
 ## V2 API dependencies (verified against 2.1.4, 2026-10-29)
 

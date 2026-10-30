@@ -248,10 +248,11 @@ export function startObserver(ctx: any, options: {
           title: info.title,
           agent: info.agent,
           time: info.time,
-          idleOutcome: info.idleOutcome ?? info.idle_outcome ?? null,
-          // A list entry that already reports live status is real evidence;
-          // everything else is discovery only (live defect, 2026-10-30).
-          active: info.status === "running" || info.status === "busy" ? true : undefined,
+          // `SessionInfo.outcome` is the real 2.1.4 field. The server has no
+          // live status map (`SessionDomain` exposes no `active`), so every
+          // listed row here is discovery and needs a store outcome or an
+          // in-process event to say anything stronger than `unknown`.
+          outcome: info.outcome,
         });
       }
     } catch (error) {

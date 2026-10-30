@@ -79,7 +79,13 @@ export interface Delegate {
   provenance: Provenance;
   /** Discovered, unproven and older than `staleGraceSeconds`. */
   stale: boolean;
+  /** `time.archived` is final: an archived session is never live again. */
   archived: boolean;
+  /**
+   * The store's terminal outcome, retained independently of `terminal` so a
+   * demotion restores it instead of falling back to `unknown`.
+   */
+  storeOutcome: "completed" | "failed" | null;
   busy: boolean;
   openStep: boolean;
   toolInFlight: boolean;
@@ -141,7 +147,16 @@ export interface SessionInfoLike {
   parent_id?: string | null;
   title?: string | null;
   agent?: string | null;
-  /** V2 exposes `created`, `updated`, `compacting`, `archived` (client types). */
+  /**
+   * The store's terminal outcome. `SessionInfo.outcome` is the real 2.1.4
+   * field (`"succeeded" | "failed" | "interrupted"`, client types
+   * `promise/generated/types.d.ts`); the snake/camel aliases are accepted as
+   * defence so a host that mirrors DB columns still works.
+   */
+  outcome?: string | null;
+  idleOutcome?: string | null;
+  idle_outcome?: string | null;
+  /** `SessionInfo.time`: `created`, `updated`, `idle`, `viewed`, `archived`. */
   time?: {
     created?: number | null;
     updated?: number | null;
@@ -149,9 +164,6 @@ export interface SessionInfoLike {
   } | null;
   /** Live status from the host's active map, when it is already known. */
   active?: boolean;
-  /** The store's terminal outcome (`idle_outcome`), when the host exposes it. */
-  idleOutcome?: string | null;
-  idle_outcome?: string | null;
 }
 
 // --- title marker contract -------------------------------------------------
@@ -195,10 +207,11 @@ export function delegationTitle({ orchestratorID, agent, task }: {
  * 2.1.4 (probed 2026-10-29: the server saw `stallSeconds: 5`, the TUI did
  * not). The documented env source carries every TUI-relevant value end to end:
  *
- *   DELEGATION_OBSERVER_ENABLED             1|0 / true|false (default: options)
- *   DELEGATION_OBSERVER_STALL_SECONDS       positive number
- *   DELEGATION_OBSERVER_HEALTH_FILE         path
- *   DELEGATION_OBSERVER_STATUS_FILE         path
+ *   DELEGATION_OBSERVER_ENABLED                 1|0 / true|false (default: options)
+ *   DELEGATION_OBSERVER_STALL_SECONDS           positive number
+ *   DELEGATION_OBSERVER_STALE_GRACE_SECONDS     positive number (history window)
+ *   DELEGATION_OBSERVER_HEALTH_FILE             path
+ *   DELEGATION_OBSERVER_STATUS_FILE             path
  *
  * Precedence is per key: a value the host forwarded in `options` wins; the env
  * fills only what the host dropped. Numeric/boolean parsing is total (invalid
@@ -213,10 +226,12 @@ export function tuiConfig(ctx: any, env: Record<string, string | undefined> = pr
     const value = parse(String(raw));
     if (value !== undefined) merged[key] = value;
   };
-  take("stallSeconds", env?.DELEGATION_OBSERVER_STALL_SECONDS, (raw) => {
+  const positive = (raw: string) => {
     const value = Number(raw);
     return Number.isFinite(value) && value > 0 ? value : undefined;
-  });
+  };
+  take("stallSeconds", env?.DELEGATION_OBSERVER_STALL_SECONDS, positive);
+  take("staleGraceSeconds", env?.DELEGATION_OBSERVER_STALE_GRACE_SECONDS, positive);
   take("enabled", env?.DELEGATION_OBSERVER_ENABLED, (raw) => {
     const value = raw.trim().toLowerCase();
     if (["0", "false", "no", "off"].includes(value)) return false;
@@ -248,7 +263,10 @@ export function createState(overrides: Partial<ObserverConfig> = {},
 
 /** The store's terminal outcome, normalized; null when absent or unknown. */
 function terminalOutcome(info: SessionInfoLike): "completed" | "failed" | null {
-  const raw = info.idleOutcome ?? info.idle_outcome ?? null;
+  return normalizeOutcome(info.outcome ?? info.idleOutcome ?? info.idle_outcome ?? null);
+}
+
+export function normalizeOutcome(raw: unknown): "completed" | "failed" | null {
   if (!raw) return null;
   const value = String(raw).trim().toLowerCase();
   if (!value) return null;
@@ -266,44 +284,68 @@ function isActive(state: ObserverState, sessionID: string): boolean {
 }
 
 /**
- * Staleness is a property of *evidence*, never of discovery:
+ * Staleness is a property of *evidence*, never of discovery. Order matters:
+ * - `archived` is final, for observed and live rows too (the store removed it
+ *   from the working set);
+ * - a session terminal in the store but never observed here is history;
  * - an observed session is live state, so the clock classifier owns it;
  * - a live active-map entry is real liveness;
- * - a session that is terminal in the store but was never observed here is
- *   history, not current work — collapse it;
- * - the store's archive flag is final;
  * - otherwise the session is stale once its real last event (or, failing
  *   that, its created time) is older than the grace window. No timestamp at
  *   all means no evidence at all: stale immediately.
  */
 export function isStale(state: ObserverState, d: Delegate,
   now: number = state.now()): boolean {
-  if (d.provenance === "observed") return false;
-  if (d.terminal) return true;
-  if (isActive(state, d.sessionID)) return false;
   if (d.archived) return true;
+  if (d.terminal) return d.provenance !== "observed";
+  if (d.provenance === "observed") return false;
+  if (isActive(state, d.sessionID)) return false;
   const at = d.lastActivityAt ?? d.startedAt;
   if (at === null) return true;
   return now - at >= state.config.staleGraceSeconds * 1000;
 }
 
+/** Apply a store outcome as terminal, once. Never emits a milestone. */
+function applyStoreOutcome(d: Delegate, outcome: "completed" | "failed",
+  at: number | null) {
+  if (d.terminal) return;
+  d.storeOutcome = outcome;
+  d.terminal = { outcome, detail: "store outcome", at: at ?? 0 };
+  d.status = outcome;
+  d.phase = outcome;
+  d.needsInput = null;
+  d.toolInFlight = false;
+  d.busy = false;
+  // History must never emit a synthetic start or terminal milestone: the
+  // orchestrator already saw this session end.
+  d.emitted.add("start");
+  d.emitted.add("terminal");
+}
+
 /**
  * Record the host's live active-map answer for a session. A discovered row
  * only becomes `running` here; an observed row keeps its event-driven state.
+ * Archived and store-terminal rows are final: neither a map entry nor a
+ * demotion may revive them.
  */
 export function markActive(state: ObserverState, sessionID: string, active: boolean) {
   if (!sessionID) return null;
   const live = Boolean(active);
   state.active.set(sessionID, live);
   const d = state.delegates.get(sessionID);
-  if (!d || d.terminal || d.provenance === "observed") return d ?? null;
+  if (!d || d.archived || d.terminal || d.provenance === "observed") return d ?? null;
   if (live) {
     d.status = "running";
     d.phase = "active";
     d.stale = false;
   } else if (d.status === "running") {
-    d.status = "unknown";
-    d.phase = "no events observed";
+    // Demotion restores the store outcome when one is known, instead of
+    // silently degrading a finished session to `unknown`.
+    if (d.storeOutcome) applyStoreOutcome(d, d.storeOutcome, d.lastActivityAt);
+    else {
+      d.status = "unknown";
+      d.phase = "no events observed";
+    }
     d.stale = isStale(state, d);
   }
   return d;
@@ -312,20 +354,25 @@ export function markActive(state: ObserverState, sessionID: string, active: bool
 function associate(state: ObserverState, sessionID: string, info: SessionInfoLike,
   source: Provenance) {
   if (!sessionID) return null;
+  const created = info.time?.created ?? null;
+  const updated = info.time?.updated ?? null;
+  const archived = (info.time?.archived ?? null) !== null;
+  const outcome = terminalOutcome(info);
+  const now = state.now();
   let delegate = state.delegates.get(sessionID);
   if (delegate) {
+    // A later list refresh may carry evidence the first sight did not: absorb
+    // it without ever reviving anything.
     if (!delegate.agent && info.agent) delegate.agent = info.agent;
+    if (archived) delegate.archived = true;
+    if (outcome) applyStoreOutcome(delegate, outcome, updated ?? created);
+    delegate.stale = isStale(state, delegate, now);
     return delegate;
   }
   const parentID = info.parentID ?? info.parent_id ?? null;
   const marker = parseDelegationTitle(info.title ?? "");
   if (!parentID && !marker) return null;
-  const created = info.time?.created ?? null;
-  const updated = info.time?.updated ?? null;
-  const archived = (info.time?.archived ?? null) !== null;
-  const outcome = terminalOutcome(info);
   const live = state.active.get(sessionID) ?? Boolean(info.active);
-  const now = state.now();
   delegate = {
     sessionID,
     orchestratorID: parentID || marker?.orchestratorID || "",
@@ -339,6 +386,7 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
     provenance: source,
     stale: false,
     archived,
+    storeOutcome: null,
     busy: false,
     openStep: false,
     toolInFlight: false,
@@ -354,18 +402,19 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
     emitted: new Set(),
   };
   if (source === "discovered") {
-    // Discovery is not liveness. Rank the evidence we actually have.
-    if (live) {
+    // Discovery is not liveness. Rank the evidence we actually have: the
+    // store's terminal outcome is final and outranks the live map (a finished
+    // session is not running again just because the map says busy), and an
+    // archived session is never live at all.
+    if (outcome) {
+      applyStoreOutcome(delegate, outcome, updated ?? created);
+    } else if (archived) {
+      delegate.status = "unknown";
+      delegate.phase = "archived";
+      delegate.emitted.add("start");
+    } else if (live) {
       delegate.status = "running";
       delegate.phase = "active";
-    } else if (outcome) {
-      delegate.terminal = { outcome, detail: "store outcome", at: updated ?? created ?? 0 };
-      delegate.status = outcome;
-      delegate.phase = outcome;
-      // A row already terminal in the store must never emit a synthetic
-      // start or terminal milestone: the orchestrator saw it live.
-      delegate.emitted.add("start");
-      delegate.emitted.add("terminal");
     } else {
       delegate.status = "unknown";
       delegate.phase = "no events observed";
@@ -445,7 +494,7 @@ function touch(d: Delegate, now: number) {
   d.lastActivityAt = now;
   d.stale = false;
   // A clock-classified warning/failed row that shows real activity is alive
-  // again; only a terminal outcome is sticky.
+  // again; only a terminal outcome or an archive is sticky.
   if (d.status === "warning" || d.status === "failed" || d.status === "unknown") {
     d.status = "running";
   }
@@ -550,16 +599,41 @@ export function observe(state: ObserverState, event: any): ObserveResult {
   }
 
   const d = sessionID ? state.delegates.get(sessionID) : null;
+  if (d && type === "session.archived") {
+    // Archive is final for every row, observed, live or terminal: the store
+    // removed the session from the working set, so it is history from here on.
+    d.archived = true;
+    d.needsInput = null;
+    d.toolInFlight = false;
+    d.busy = false;
+    d.stale = true;
+    state.pending.length = 0;
+    return out;
+  }
+  if (d && type === "session.unarchived") {
+    d.archived = false;
+    d.stale = isStale(state, d, now);
+    state.pending.length = 0;
+    return out;
+  }
   if (!d || d.terminal) {
+    state.pending.length = 0;
+    return out;
+  }
+  if (d.archived) {
+    // An archived session never becomes live again and never emits.
     state.pending.length = 0;
     return out;
   }
 
   // Any event is the strongest evidence there is: a discovered row is live
   // from here on and the clock classifier (stall/thrash/needs-input) owns it.
+  // `touch` is what makes that true: it refreshes the observation clock to
+  // NOW, so a 19 h-old store timestamp can never be read as quiet time and
+  // the next tick cannot emit a false stall/dead milestone (fix F2).
   if (d.provenance === "discovered") {
     d.provenance = "observed";
-    d.stale = false;
+    touch(d, now);
     if (d.status === "unknown") {
       d.status = "running";
       d.phase = "active";

@@ -173,23 +173,43 @@ Amends Decision 3 ("universal association") and Decision 4 ("progress is
 event-driven"):
 
 1. **Association is discovery; liveness needs evidence.** A row is `running`
-   only when the host's live active map (`session.status`) says so or the
-   session produced an event in this observer process. Everything else is
-   `unknown` — a first-class status, not a soft `running`.
-2. **Quiet comes from the session, never from the observer.** `lastActivityAt`
-   is the store's real last event (`time.updated`) where available and `null`
-   otherwise; a `null` clock renders as unknown instead of claiming elapsed
-   time. Two delegates with different last events therefore never share a
-   quiet value by construction.
-3. **History is collapsed, not reported.** A discovered row that is terminal
-   in the store, archived, or older than `staleGraceSeconds` (default 600 s) is
-   stale: never `running`, never a synthetic milestone, collapsed into one
-   `N stale delegates hidden` line. A row with no observed event is also never
-   clock-classified — the store's timestamp is not this process's observation
-   clock. Current-session completions stay visible.
-4. **Universal discovery is retained** for genuinely live delegates: the first
-   real event, or a live active-map entry, promotes the row and the documented
-   stall/thrash/needs-input semantics apply unchanged from there. `thrash`
-   clearing on `touch` (a known limit above) also clears `unknown`.
+   only when the host's live active map (`ctx.data.session.status`, `"idle" |
+   "running"` on 2.1.4) says so or the session produced an event in this
+   observer process. Everything else is `unknown` — a first-class status, not
+   a soft `running`. When the live map cannot be read at all, the TUI says so
+   in the banner instead of letting every discovered row age silently into
+   "hidden".
+2. **Quiet comes from the session, never from the observer.** A discovered
+   row's `lastActivityAt` is the store's real last event (`SessionInfo.time.
+   updated`) where available and `null` otherwise; a `null` clock renders as
+   `—` instead of claiming elapsed time. Two delegates with different last
+   events therefore never share a quiet value by construction.
+3. **The store outcome is terminal and outranks the live map.** The field is
+   `SessionInfo.outcome` (`"succeeded" | "failed" | "interrupted"`), not a
+   DB-column alias. A row carrying an outcome renders `completed`/`failed`,
+   never `running`, emits no synthetic start/terminal milestone, and keeps the
+   outcome across a map demotion. Completions observed live
+   (`session.execution.*`) stay visible as `completed`; a completion that
+   exists only in the store is history.
+4. **Archived is final, for every row.** `time.archived` (bootstrap) and
+   `session.archived` (live) hide the row; `markActive` and event promotion
+   cannot revive it, and `session.unarchived` is the only way back. Archive
+   outranks the live map and observed provenance.
+5. **History is collapsed, not reported.** A row that is archived, terminal in
+   the store without being observed here, or (discovered) older than
+   `staleGraceSeconds` is stale: never `running`, never a synthetic
+   milestone, never clock-classified, collapsed into one
+   `N stale delegates hidden` line and excluded from the focus/steer/
+   interrupt picker. `staleGraceSeconds` is an observer-owned display window
+   (default 600 s) reached through the TUI env seam
+   (`DELEGATION_OBSERVER_STALE_GRACE_SECONDS`); it is **not** part of
+   `scripts/supervision_contract.json`, whose values are generated from the
+   Python watchdog owners and carry no display window.
+6. **Universal discovery is retained** for genuinely live delegates: a live
+   active-map entry promotes the row, and the first real event promotes it
+   *and refreshes the observation clock to the event/observation time*, so the
+   next tick cannot read a 19 h-old store timestamp as quiet time. From there
+   the documented stall/thrash/needs-input semantics apply unchanged, and
+   `touch` clearing a warning also clears `unknown`.
 
 Evidence: `docs/roadmap-detail/RM-069.md` → *The 2026-10-30 stale-row defect*.

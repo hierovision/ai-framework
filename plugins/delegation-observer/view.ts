@@ -96,6 +96,14 @@ export function staleCount(rows: DelegateRow[]): number {
   return (rows ?? []).filter((row) => row.stale).length;
 }
 
+/**
+ * The rows an owner may act on. Stale rows are collapsed history: they are
+ * not selection targets for focus/steer/interrupt.
+ */
+export function selectableRows(rows: DelegateRow[]): DelegateRow[] {
+  return (rows ?? []).filter((row) => !row.stale);
+}
+
 function statusRank(row: DelegateRow): number {
   return STATUS_ORDER[row.status] ?? 6;
 }
@@ -136,6 +144,66 @@ export function sidebarLines(rows: DelegateRow[], max: number = 8): string[] {
   });
   if (stale > 0) lines.push(`${stale} stale delegates hidden`);
   return lines;
+}
+
+// --- live status map (the only liveness source for discovered rows) --------
+
+export interface LiveEntry {
+  sessionID: string;
+  live: boolean;
+}
+
+export interface LiveMap {
+  /** False when the host could not answer: every row is then unproven. */
+  available: boolean;
+  entries: LiveEntry[];
+  /** The sessions the map was read from, for association-gap accounting. */
+  sessions: Array<{
+    id?: string;
+    sessionID?: string;
+    parentID?: string | null;
+    title?: string | null;
+  }>;
+}
+
+/**
+ * `ctx.data.session.status(id)` is `"idle" | "running"` on 2.1.4. A status
+ * object with a `type` is accepted as defence; anything else is not liveness.
+ */
+export function isLiveStatus(raw: unknown): boolean {
+  const kind = typeof raw === "string" ? raw : (raw as any)?.type;
+  return kind === "running" || kind === "busy";
+}
+
+/**
+ * Read the host's live active map without ever throwing. `available: false`
+ * is a real answer: the observer has no liveness source, which the banner must
+ * say out loud instead of silently hiding every discovered row as stale.
+ */
+export function readLiveMap(
+  list: () => Array<{ id?: string; sessionID?: string }> | null | undefined,
+  status: (sessionID: string) => unknown,
+): LiveMap {
+  let sessions: Array<{ id?: string; sessionID?: string }> | null | undefined;
+  try {
+    sessions = list();
+  } catch {
+    return { available: false, entries: [], sessions: [] };
+  }
+  if (!Array.isArray(sessions)) return { available: false, entries: [], sessions: [] };
+  const entries: LiveEntry[] = [];
+  for (const session of sessions) {
+    const sessionID = session?.id ?? session?.sessionID;
+    if (!sessionID) continue;
+    let raw: unknown;
+    try {
+      raw = status(sessionID);
+    } catch {
+      return { available: false, entries: [], sessions: [] };
+    }
+    entries.push({ sessionID, live: isLiveStatus(raw) });
+  }
+  return { available: true, entries, sessions };
 }
 
 // --- association gap (degradation, AC11) -----------------------------------
@@ -220,10 +288,13 @@ export function readStatusSnapshot(text: string | null | undefined): StatusSnaps
  * interrupt or steer instead of being told to wait for nothing.
  */
 export function createControls(
-  row: Pick<DelegateRow, "sessionID" | "status" | "terminal">,
+  row: Pick<DelegateRow, "sessionID" | "status" | "terminal"> & { stale?: boolean },
   { client, ui }: { client?: any; ui?: any } = {},
 ) {
   const terminal = Boolean(row.terminal);
+  const stale = Boolean(row.stale);
+  const blocked = terminal ? "delegate is terminal"
+    : stale ? "delegate is collapsed history" : undefined;
   return [
     {
       id: "focus",
@@ -241,12 +312,13 @@ export function createControls(
     {
       id: "steer",
       title: "Steer delegate",
-      enabled: !terminal,
-      reason: terminal ? "delegate is terminal" : undefined,
+      enabled: !terminal && !stale,
+      reason: blocked,
       run: async (text?: string) => {
         const prompt = String(text ?? "").trim();
         if (!prompt) return { ok: false, reason: "empty-prompt" };
         if (terminal) return { ok: false, reason: "terminal" };
+        if (stale) return { ok: false, reason: "stale" };
         if (!client?.session?.prompt) return { ok: false, reason: "no-client" };
         await client.session.prompt({
           sessionID: row.sessionID,
@@ -259,10 +331,11 @@ export function createControls(
     {
       id: "interrupt",
       title: "Interrupt delegate",
-      enabled: !terminal,
-      reason: terminal ? "delegate is terminal" : undefined,
+      enabled: !terminal && !stale,
+      reason: blocked,
       run: async () => {
         if (terminal) return { ok: false, reason: "terminal" };
+        if (stale) return { ok: false, reason: "stale" };
         if (!client?.session?.interrupt) return { ok: false, reason: "no-client" };
         const result = await client.session.interrupt({ sessionID: row.sessionID });
         return {
@@ -288,6 +361,7 @@ export function degradationBanner({
   serverHealth = null,
   runningChildren = 0,
   associatedActive = 0,
+  liveMap = "ok",
 }: {
   pluginLoaded?: boolean;
   pluginState?: string;
@@ -296,6 +370,7 @@ export function degradationBanner({
   serverHealth?: string | null;
   runningChildren?: number;
   associatedActive?: number;
+  liveMap?: "ok" | "unavailable";
 } = {}): string | null {
   if (!pluginLoaded) {
     return "delegation-observer not loaded — no live delegate view; the watchdog/observer fallback (heartbeat, wake) is authoritative.";
@@ -308,6 +383,9 @@ export function degradationBanner({
   }
   if (serverHealth) {
     return `delegation-observer server degraded: ${serverHealth} — milestones may be missing; the watchdog/observer fallback is authoritative.`;
+  }
+  if (liveMap === "unavailable") {
+    return "delegation-observer cannot read the live session status map — discovered delegates have no liveness source and may be hidden as stale; the watchdog/observer fallback is authoritative.";
   }
   if (connection === "disconnected") {
     return "delegation-observer event stream disconnected — showing last known state only; the watchdog/observer fallback is authoritative.";
