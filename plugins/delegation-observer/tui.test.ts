@@ -1,0 +1,286 @@
+/**
+ * Pure projection / command tests for the delegation TUI (RM-069 AC4, AC9,
+ * AC11). JSX rendering is exercised by the live drill, not a synthetic DOM
+ * harness: everything decision-bearing is pure and asserted here.
+ *
+ * Run: node --test plugins/delegation-observer/tui.test.ts
+ */
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { createState, observe, tick } from "./state.ts";
+import {
+  associationGap,
+  createControls,
+  degradationBanner,
+  footerStatus,
+  isChildSession,
+  projectDelegate,
+  readStatusSnapshot,
+  sidebarLines,
+  visibleRows,
+} from "./view.ts";
+
+let clock = 1_000_000;
+const now = () => clock;
+
+function seeded() {
+  clock = 1_000_000;
+  const state = createState({}, now);
+  observe(state, {
+    type: "session.created",
+    data: {
+      sessionID: "ses_child", parentID: "ses_parent",
+      title: "RM-069 drill", agent: "implementer",
+    },
+  });
+  observe(state, {
+    type: "session.message.content.updated",
+    data: {
+      sessionID: "ses_child", messageID: "m1",
+      content: [{
+        type: "tool", id: "t1", name: "shell",
+        state: { status: "running", input: { command: "pytest -q" } },
+      }],
+    },
+  });
+  observe(state, {
+    type: "session.usage.updated",
+    data: {
+      sessionID: "ses_child", cost: 0.42,
+      tokens: { input: 1200, output: 300 },
+    },
+  });
+  return state;
+}
+
+test("a delegate row carries every decision-grade field", () => {
+  const state = seeded();
+  clock += 12_500;
+  const row = projectDelegate(state.delegates.get("ses_child"), clock);
+  assert.equal(row.sessionID, "ses_child");
+  assert.equal(row.agent, "implementer");
+  assert.equal(row.task, "RM-069 drill");
+  assert.equal(row.status, "running");
+  assert.equal(row.phase, "shell: pytest -q");
+  assert.equal(row.elapsedMs, 12_500);
+  assert.equal(row.quietMs, 12_500);
+  assert.equal(row.tokensIn, 1200);
+  assert.equal(row.tokensOut, 300);
+  assert.equal(row.cost, 0.42);
+  assert.equal(row.warning, null);
+  assert.equal(row.parentID, "ses_parent");
+  assert.equal(row.via, "parent");
+});
+
+test("status transitions surface in the projection", () => {
+  const state = seeded();
+  observe(state, {
+    type: "permission.asked",
+    data: { sessionID: "ses_child", action: "read", resources: ["x"] },
+  });
+  let row = projectDelegate(state.delegates.get("ses_child"), clock);
+  assert.equal(row.status, "waiting");
+  assert.match(row.needsInput, /read/);
+
+  clock += 500_000;
+  tick(state, clock);
+  row = projectDelegate(state.delegates.get("ses_child"), clock);
+  assert.equal(row.status, "waiting"); // needs-input outranks stall: no false stall
+  assert.match(row.needsInput, /read/);
+
+  observe(state, {
+    type: "session.execution.succeeded",
+    data: { sessionID: "ses_child" },
+  });
+  row = projectDelegate(state.delegates.get("ses_child"), clock);
+  assert.equal(row.status, "completed");
+  assert.equal(row.terminal, "completed");
+});
+
+test("rows are ordered attention-first, then newest", () => {
+  const state = seeded();
+  clock += 1_000;
+  observe(state, {
+    type: "session.created",
+    data: { sessionID: "ses_b", parentID: "ses_parent", title: "b", agent: "planner" },
+  });
+  // no attention state: newest first
+  let rows = visibleRows(state, clock);
+  assert.deepEqual(rows.map((r) => r.sessionID), ["ses_b", "ses_child"]);
+  observe(state, {
+    type: "permission.asked",
+    data: { sessionID: "ses_child", action: "read", resources: ["x"] },
+  });
+  rows = visibleRows(state, clock);
+  assert.deepEqual(rows.map((r) => r.sessionID), ["ses_child", "ses_b"]);
+});
+
+test("footer and sidebar summaries are compact and countable", () => {
+  const state = seeded();
+  observe(state, {
+    type: "session.created",
+    data: { sessionID: "ses_b", parentID: "ses_parent", title: "b", agent: "planner" },
+  });
+  observe(state, {
+    type: "permission.asked",
+    data: { sessionID: "ses_b", action: "read", resources: ["x"] },
+  });
+  const rows = visibleRows(state, clock);
+  assert.equal(footerStatus(rows), "delegates 2 · 1 running · 1 waiting");
+  const lines = sidebarLines(rows, 6);
+  assert.match(lines[0], /planner/);
+  assert.match(lines[0], /waiting/);
+  assert.match(lines[1], /implementer/);
+  assert.ok(lines.every((l) => l.length <= 64));
+});
+
+test("footer is empty when nothing is delegated", () => {
+  const state = createState({}, now);
+  assert.equal(footerStatus(visibleRows(state, clock)), "");
+  assert.deepEqual(sidebarLines([], 4), []);
+});
+
+test("controls stay available while a row is waiting or merely quiet", () => {
+  const state = seeded();
+  observe(state, {
+    type: "permission.asked",
+    data: { sessionID: "ses_child", action: "read", resources: ["x"] },
+  });
+  let byId = Object.fromEntries(createControls(state.delegates.get("ses_child"), {})
+    .map((c) => [c.id, c]));
+  assert.equal(byId.interrupt.enabled, true, "a waiting child can be interrupted");
+  assert.equal(byId.steer.enabled, true, "a waiting child can still be steered");
+
+  // clock-classified failure is not a terminal state: controls remain
+  const dead = createState({}, now);
+  observe(dead, {
+    type: "session.created",
+    data: { sessionID: "ses_d", parentID: "ses_parent", title: "d", agent: "x" },
+  });
+  clock += 1_000_000;
+  tick(dead, clock);
+  assert.equal(dead.delegates.get("ses_d").status, "failed");
+  byId = Object.fromEntries(createControls(dead.delegates.get("ses_d"), {})
+    .map((c) => [c.id, c]));
+  assert.equal(byId.interrupt.enabled, true, "dead-but-not-terminal stays actionable");
+
+  observe(state, {
+    type: "session.execution.succeeded",
+    data: { sessionID: "ses_child" },
+  });
+  const done = Object.fromEntries(createControls(state.delegates.get("ses_child"), {})
+    .map((c) => [c.id, c]));
+  assert.equal(done.steer.enabled, false);
+  assert.match(done.steer.reason, /terminal/);
+  assert.equal(done.interrupt.enabled, false);
+});
+
+test("control calls are the exact typed client calls", async () => {
+  const calls = [];
+  const client = {
+    session: {
+      prompt: async (input) => { calls.push(["prompt", input]); },
+      interrupt: async (input) => { calls.push(["interrupt", input]); },
+    },
+  };
+  const ui = { tabs: { focus: (sid) => { calls.push(["focus", sid]); return true; } } };
+  const controls = createControls({ sessionID: "ses_child", status: "running", terminal: null }, { client, ui });
+  const byId = Object.fromEntries(controls.map((c) => [c.id, c]));
+  await byId.focus.run();
+  await byId.steer.run("try the other fixture");
+  await byId.interrupt.run();
+  assert.deepEqual(calls, [
+    ["focus", "ses_child"],
+    ["prompt", { sessionID: "ses_child", text: "try the other fixture", delivery: "steer" }],
+    ["interrupt", { sessionID: "ses_child" }],
+  ]);
+});
+
+test("steer refuses an empty prompt without calling the client", async () => {
+  const calls = [];
+  const controls = createControls({ sessionID: "s", status: "running", terminal: null }, {
+    client: {
+      session: {
+        prompt: async (input) => calls.push(input),
+        interrupt: async () => {},
+      },
+    },
+    ui: { tabs: { focus: () => true } },
+  });
+  const steer = controls.find((c) => c.id === "steer");
+  const result = await steer.run("   ");
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "empty-prompt");
+  assert.equal(calls.length, 0);
+});
+
+test("degradation banner names the reason and the fallback", () => {
+  assert.match(
+    degradationBanner({ pluginLoaded: false }),
+    /not loaded.*watchdog/,
+  );
+  assert.match(
+    degradationBanner({ pluginLoaded: true, pluginState: "failed: boom" }),
+    /load failed.*boom.*watchdog/,
+  );
+  assert.match(
+    degradationBanner({ pluginLoaded: true, connection: "disconnected" }),
+    /disconnected.*last known.*watchdog/,
+  );
+  assert.match(
+    degradationBanner({ pluginLoaded: true, disabled: true }),
+    /disabled.*watchdog/,
+  );
+  assert.match(
+    degradationBanner({ pluginLoaded: true, serverHealth: "synthetic failed: nope" }),
+    /server.*synthetic failed.*watchdog/,
+  );
+  assert.match(
+    degradationBanner({ pluginLoaded: true, runningChildren: 2, associatedActive: 0 }),
+    /2 running child.*no delegate association.*watchdog/,
+  );
+  assert.equal(degradationBanner({
+    pluginLoaded: true, runningChildren: 1, associatedActive: 1,
+  }), null);
+});
+
+test("the orchestrator/root is never counted as an unassociated child", () => {
+  const sessions = [
+    { id: "ses_root", parentID: undefined, title: "owner session" },
+    { id: "ses_child", parentID: "ses_root", title: "worker" },
+  ];
+  assert.deepEqual(associationGap(sessions, [
+    { sessionID: "ses_child", status: "running", terminal: null },
+    { sessionID: "ses_root", status: "running", terminal: null },
+  ]), { runningChildren: 1, associatedActive: 1, unassociated: 0 });
+  // a busy root alone is not a gap
+  assert.deepEqual(associationGap([sessions[0]], []),
+    { runningChildren: 0, associatedActive: 0, unassociated: 0 });
+  // a run-vehicle child is recognised by its marker
+  assert.equal(isChildSession({
+    id: "ses_v", title: "[delegate:ses_root] reviewer: review",
+  }), true);
+  assert.deepEqual(associationGap([
+    sessions[1],
+    { id: "ses_v", title: "[delegate:ses_root] reviewer: review" },
+  ], [{ sessionID: "ses_child", status: "running", terminal: null }]),
+  { runningChildren: 2, associatedActive: 1, unassociated: 1 });
+});
+
+test("the fallback status snapshot is parsed only when it is real", () => {
+  const parsed = readStatusSnapshot(JSON.stringify({
+    ts: "2026-10-29T20:00:00Z",
+    agent: "architect",
+    child: "ses_c",
+    outcome: "success",
+    terminal: true,
+    heartbeat: "/tmp/x.log",
+  }));
+  assert.equal(parsed.agent, "architect");
+  assert.equal(parsed.outcome, "success");
+  assert.equal(parsed.terminal, true);
+  assert.equal(readStatusSnapshot("not json"), null);
+  assert.equal(readStatusSnapshot(""), null);
+  assert.equal(readStatusSnapshot(JSON.stringify({ outcome: "" })), null);
+});

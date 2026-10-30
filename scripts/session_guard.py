@@ -538,6 +538,34 @@ def run_abort(args, hits, root_id, root_pid):
     return 2
 
 
+def interrupt_session(session_id, server=None):
+    """Owner-initiated typed interrupt — the TUI control plane's exact call.
+
+    Authority (RM-069): this asks the session's own server to stop generation
+    on the SAME session id. It is deliberately NOT the guard's kill authority:
+    tree abort remains `--wrap` (the guard owns the root) or `--kill-root
+    --root-pid` (explicit). Returns (exit_code, line).
+    """
+    status, payload = v2.session_interrupt(session_id, server=server)
+    if status is None:
+        return 4, f"interrupt {session_id} unreachable (no server/DB target)"
+    data = payload.get("data") if isinstance(payload, dict) and \
+        isinstance(payload.get("data"), dict) else payload
+    interrupted = data.get("interrupted") if isinstance(data, dict) else None
+    if status in (200, 201, 202, 204):
+        return 0, (f"interrupt {session_id} accepted status={status} "
+                   f"interrupted={interrupted}")
+    return 2, f"interrupt {session_id} refused status={status}"
+
+
+CONTROL = {
+    "tui.interrupt": ("POST /api/session/{id}/interrupt — owner-initiated on "
+                      "the same session; never a new session, never a kill"),
+    "guard.kill": ("process-group SIGTERM->SIGKILL via --wrap / --kill-root "
+                   "--root-pid — guard-only, unchanged"),
+}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Session-tree failure-pattern guard (fail fast).")
@@ -545,6 +573,12 @@ def main(argv=None):
     sel.add_argument("--root", help="root session id of the supervised tree")
     sel.add_argument("--parent", help="alias of --root")
     sel.add_argument("--cwd", help="pick the newest root session in this dir")
+    ap.add_argument("--interrupt", metavar="SESSION-ID", default=None,
+                    help="owner-initiated typed interrupt of one session "
+                         "(the TUI control plane's call); no kill authority")
+    ap.add_argument("--server", metavar="URL",
+                    help="authenticated server for --interrupt (default: "
+                         "OPENCODE_WAKE_URL / service discovery)")
     ap.add_argument("--db", help="opencode.db path (default: OPENCODE_DB_PATH"
                                 " or the live DB)")
     ap.add_argument("--once", action="store_true", help="single scan and exit")
@@ -580,6 +614,10 @@ def main(argv=None):
         if wrap_cmd[:1] == ["--"]:
             wrap_cmd = wrap_cmd[1:]
     a = ap.parse_args(argv)
+    if a.interrupt:
+        code, line = interrupt_session(a.interrupt, a.server)
+        print(line, flush=True)
+        return code
     if a.contract and a.contract not in _validator().CONTRACTS:
         print(f"error: unknown contract: {a.contract} (known: "
               f"{', '.join(sorted(_validator().CONTRACTS))})", file=sys.stderr)

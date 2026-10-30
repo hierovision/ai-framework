@@ -36,7 +36,7 @@ logs/
 # === OS / tooling noise ===
 .DS_Store
 *.log
-node_modules/
+node_modules
 dist/
 __pycache__/
 *.pyc

@@ -161,8 +161,12 @@ backend or internal-logic item gets the explicit skip instead: record
 and proceed. The explicit negative is the closure signal; do not invent
 UI to review.
 
-For a user-facing item, invoke `council-ux` through the V2 `subagent` tool (`agent: council-ux`)
-**before drafting**, so concerns land in the plan, not in revisions:
+For a user-facing item, delegate to `council-ux` through the V2 `subagent`
+tool (`agent: council-ux`) **before drafting**, so concerns land in the plan,
+not in revisions. Delegation is a background handle
+(`reference/subagent-supervision.md` §7): the consult appears in the
+delegation-observer strip, and its milestone/terminal delivery is part of the
+contract — no foreground wait, no manual polling.
 
 - **Brief**: the goal, the draft acceptance criteria, the Included /
   Excluded scope, and the Step 4 codebase context — the components and
@@ -183,7 +187,8 @@ outcome is **recorded** in the plan History. The nested free-tier consult path
 can return an empty result with no visible error (`agents/council.md` →
 Nested-session constraint documents the recovery; read it when reachable). Do not read an empty result as "no
 concerns". Attempt the fallback **once**, with no external read required:
-run the UX lens as a general subagent with the lens brief inline, and
+run the UX lens as a general background subagent with the lens brief inline
+(handle + observer strip per `reference/subagent-supervision.md` §7), and
 record which fallback form ran. If it also returns empty or cannot run,
 record an explicit `UX consult skipped — <reason>`, carry the consult as
 a residual for the runtime validation handoff (`validating-ui`), and

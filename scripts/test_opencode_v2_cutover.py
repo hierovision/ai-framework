@@ -390,8 +390,9 @@ def test_migration_residual_classification_accepts():
 
 
 def test_default_config_source_wires_local_plugin_as_relative_path():
-    """N1: the versioned config must say `./plugins/...`; a bare package spec
-    is treated as an npm dependency and fails the real loader."""
+    """N1/RM-069: the versioned config must say `./plugins/...`; a bare
+    package spec is treated as an npm dependency and fails the real loader.
+    Both reviewed plugins are wired, and the observer corpus is copied."""
     root = _tmp("cutover-config-src-")
     old_repo = cutover.REPO
     try:
@@ -399,13 +400,30 @@ def test_default_config_source_wires_local_plugin_as_relative_path():
         os.makedirs(plugin)
         with open(os.path.join(plugin, "index.js"), "w") as fh:
             fh.write("export default {id: 'auto-compact-at-threshold'}\n")
+        observer = os.path.join(root, "plugins", "delegation-observer")
+        os.makedirs(observer)
+        with open(os.path.join(observer, "server.ts"), "w") as fh:
+            fh.write("export default {id: 'delegation-observer'}\n")
+        sentinel = os.path.join(root, "plugins", "delegation-sentinel")
+        os.makedirs(sentinel)
+        with open(os.path.join(sentinel, "tui.tsx"), "w") as fh:
+            fh.write("export default {id: 'delegation-sentinel'}\n")
         home = os.path.join(root, "home")
         os.makedirs(home)
         cutover.REPO = root
         config_root = cutover.default_config_source(home)
         with open(os.path.join(config_root, "opencode.jsonc")) as fh:
             cfg = json.load(fh)
-        assert cfg["plugins"] == ["./plugins/auto-compact-at-threshold"], cfg
+        assert cfg["plugins"] == [
+            "./plugins/auto-compact-at-threshold",
+            "./plugins/delegation-observer",
+            "./plugins/delegation-sentinel",
+        ], cfg
+        assert all(entry.startswith("./plugins/") for entry in cfg["plugins"]), cfg
+        assert os.path.isfile(os.path.join(
+            config_root, "plugins", "delegation-observer", "server.ts"))
+        assert os.path.isfile(os.path.join(
+            config_root, "plugins", "delegation-sentinel", "tui.tsx"))
     finally:
         cutover.REPO = old_repo
         shutil.rmtree(root, ignore_errors=True)

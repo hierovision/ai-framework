@@ -243,6 +243,17 @@ def heartbeat_terminal(path, outcome, detail):
     heartbeat_io.append_records(path, text)
 
 
+def _write_session_file(path, session_id):
+    """Atomically publish the detached child's session id (handle metadata)."""
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(f"session_id={session_id}\n")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
 def heartbeat_prompt_block(path):
     """The canonical injected block: names the file, cites the protocol (AC5).
 
@@ -345,6 +356,26 @@ def expand_dirs(dirs):
 def _slug(text):
     slug = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
     return slug[:40] or "dispatch"
+
+
+def default_task_label(prompt_file, heartbeat_path):
+    """A short task label for the delegation title marker (RM-069).
+
+    Heartbeat header first (the dispatcher writes `# progress: <task>`), then
+    the prompt-file stem. Titles are presentation, never identity.
+    """
+    if heartbeat_path and os.path.isfile(heartbeat_path):
+        try:
+            with open(heartbeat_path, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith("# progress:"):
+                        task = line.split(":", 1)[1].strip()
+                        if task:
+                            return task
+        except OSError:
+            pass
+    stem = os.path.splitext(os.path.basename(prompt_file or ""))[0]
+    return stem or "delegated task"
 
 
 def default_worktree_name(prompt_file, heartbeat_path):
@@ -571,6 +602,22 @@ def main(argv=None):
     ap.add_argument("--wake-agent", dest="wake_agent", default=None, metavar="NAME",
                     help="Agent the orchestrator session runs as (required with "
                          "--wake-to: opencode does not inherit the session's agent).")
+    ap.add_argument("--delegation-to", dest="delegation_to", default=None,
+                    metavar="SESSION-ID",
+                    help="Orchestrator session id for the observer's association "
+                         "marker (default: --wake-to). Sets "
+                         "`[delegate:<id>] <agent>: <task>` as the run title.")
+    ap.add_argument("--task-label", dest="task_label", default=None, metavar="TEXT",
+                    help="Short task description in the delegation title "
+                         "(default: heartbeat task, else the prompt filename).")
+    ap.add_argument("--detach", action="store_true",
+                    help="Return a background handle immediately: the run "
+                         "continues in its own session and writes the heartbeat, "
+                         "stream files, run log, result and <heartbeat>.session "
+                         "(requires --heartbeat). This is the orchestrator's "
+                         "non-blocking vehicle.")
+    ap.add_argument("--detach-child", dest="detach_child", action="store_true",
+                    help=argparse.SUPPRESS)
     ap.add_argument("--stream-out", dest="stream_out", default=None, metavar="FILE",
                     help="Tee the stdout JSON event stream live (fresh truncates, "
                          "--session resume appends).")
@@ -593,6 +640,44 @@ def main(argv=None):
     if not prompt.strip():
         print("error: --prompt-file is empty", file=sys.stderr)
         return 2
+
+    if a.detach and not a.heartbeat:
+        print("error: --detach requires --heartbeat (an unobservable detach is "
+              "not a handle)", file=sys.stderr)
+        return 2
+    if a.detach:
+        # Background handle (RM-069 AC2): re-exec this dispatcher in its own
+        # session, return immediately, and name every durable surface the
+        # orchestrator can supervise (heartbeat, log, session file).
+        try:
+            heartbeat_io.check_writable(a.heartbeat, fresh=not a.session)
+        except OSError as exc:
+            print(f"error: --detach heartbeat is not writable: {exc}",
+                  file=sys.stderr)
+            return 2
+        log_path = a.heartbeat + ".dispatch.log"
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
+            log_handle = open(log_path, "a", encoding="utf-8")
+        except OSError as exc:
+            print(f"error: --detach log is not writable: {exc}", file=sys.stderr)
+            return 2
+        child_argv = [arg for arg in (sys.argv[1:] if argv is None else list(argv))
+                      if arg != "--detach"] + ["--detach-child"]
+        try:
+            child = subprocess.Popen(
+                [sys.executable, os.path.realpath(__file__), *child_argv],
+                stdin=subprocess.DEVNULL, stdout=log_handle,
+                stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
+        except OSError as exc:
+            log_handle.close()
+            print(f"error: cannot detach the dispatch: {exc}", file=sys.stderr)
+            return 2
+        print(f"detached pid={child.pid}", flush=True)
+        print(f"log={log_path}", flush=True)
+        print(f"heartbeat={a.heartbeat}", flush=True)
+        print(f"session_file={a.heartbeat}.session", flush=True)
+        return 0
 
     markers = None
     if a.markers:
@@ -628,6 +713,10 @@ def main(argv=None):
     if worktree_name is None and profile.get("worktree"):
         worktree_name = default_worktree_name(a.prompt_file, a.heartbeat)
 
+    if a.detach and a.detach_child:
+        print("error: --detach and --detach-child are mutually exclusive",
+              file=sys.stderr)
+        return 2
     if a.wake_to and not a.heartbeat:
         print("error: --wake-to requires --heartbeat", file=sys.stderr)
         return 2
@@ -639,6 +728,16 @@ def main(argv=None):
     # The attach URL travels with the dispatch contract; the worker context
     # inherits OPENCODE_WAKE_URL from the TUI launch (no state file exists).
     wake_url = a.wake_url or os.environ.get("OPENCODE_WAKE_URL") or None
+
+    # Delegation association marker (RM-069): a run-vehicle child is mapped to
+    # its orchestrator by its title, so the observer needs no second registry
+    # and writes nothing to the session store. `--wake-to` already names the
+    # orchestrator, so it is the default source.
+    delegation_to = a.delegation_to or a.wake_to
+    delegation = None
+    if delegation_to:
+        label = a.task_label or default_task_label(a.prompt_file, a.heartbeat)
+        delegation = v2.delegation_title(delegation_to, a.agent, label)
 
     # Preflight: a `--session` resume must name a real session; an unknown
     # id exits 2 with no opencode launch (never creates a ghost session).
@@ -737,12 +836,24 @@ def main(argv=None):
     # (live 2026-10-28: `opencode --standalone run` exits 1 "Unrecognized
     # flag"; the consumer runner is the same shape).
     opencode_argv = ["opencode", "run"]
-    if a.server:
-        opencode_argv += ["--server", a.server]
+    # Interactive local dispatch joins the shared V2 service when one is
+    # running, so the TUI's event stream owns the child (RM-069 association).
+    # A private server (--standalone, or the implicit one used for grants) is
+    # unchanged: those children remain covered by the durable observer.
+    server_url = a.server
+    if not server_url and delegation_to and not (a.standalone or grant_dirs):
+        # Only an explicitly orchestrated dispatch joins the shared service
+        # (the TUI's event stream owns that child). A headless dispatch keeps
+        # its previous behavior — no implicit service attachment.
+        server_url = v2.service_url()
+    if server_url:
+        opencode_argv += ["--server", server_url]
     elif a.standalone or grant_dirs:
         opencode_argv += ["--standalone"]
     opencode_argv += ["--agent", a.agent, "--format", "json",
                       "--model", binding]
+    if delegation:
+        opencode_argv += ["--title", delegation]
     if a.session:
         opencode_argv += ["--session", a.session]
     opencode_argv.append(prompt)
@@ -750,10 +861,14 @@ def main(argv=None):
     print(f"dispatch: agent={a.agent} binding={binding or '?'} "
           f"timeout={timeout}s profile={profile_name} "
           f"allow_dirs={len(grant_dirs)}", flush=True)
+    if delegation:
+        print(f"delegation={delegation}", flush=True)
     if worktree_path:
         print(f"worktree={worktree_path} branch={branch}", flush=True)
 
     def on_session(sid):
+        if a.detach_child and a.heartbeat:
+            _write_session_file(a.heartbeat + ".session", sid)
         # spawn the completion-observer once the child session id is known (D2)
         if a.wake_to:
             spawn_observer(a, sid, dispatch_dir, out_path,

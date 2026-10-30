@@ -643,6 +643,52 @@ def test_ac9_no_liveness_vocabulary_and_awaiting():
     assert obs.classify(hb, None, 5000.0, 480, False)[0] == "aborted"
 
 
+def test_status_hook_snapshot_keeps_one_terminal_wake():
+    """RM-069 AC10/AC11: the opt-in status snapshot is a read-only fallback
+    surface — it adds no prompt, and the terminal wake stays exactly once."""
+    obs = _load_observe()
+    td = tempfile.mkdtemp(prefix="observe-status-")
+    try:
+        bin_dir = _stub_bin(td)
+        hb = os.path.join(td, "progress.log")
+        _write_hb(hb, [
+            "# progress: architect dispatch",
+            "2026-10-15T12:00:00Z START p.md",
+            "2026-10-15T12:00:05Z STEP 1/1 recon",
+            "2026-10-15T12:01:00Z DONE ok",
+        ])
+        dbp = os.path.join(td, "opencode.db")
+        _make_db(dbp, [("ses_orch", IDLE, 1000)])
+        inv = os.path.join(td, "inv.jsonl")
+        status = os.path.join(td, "status.json")
+        cfg = _cfg(obs, hb, result=os.path.join(td, "result.md"),
+                   logs=os.path.join(td, "logs"),
+                   status_file=status)
+        with _env({"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
+                   "OPENCODE_DB_PATH": dbp, "WAKE_STUB_OUT": inv,
+                   "OPENCODE_WAKE_URL": None, "OPENCODE_V2_API_VIA_CLI": "1",
+                   "OPENCODE_V2_NO_SERVICE": "1"}):
+            rc = obs.run(cfg, sleep=lambda s: None)
+        assert rc == 0, rc
+        snapshot = json.load(open(status, encoding="utf-8"))
+        assert snapshot["outcome"] == "success", snapshot
+        assert snapshot["terminal"] is True, snapshot
+        assert snapshot["agent"] == "architect", snapshot
+        assert snapshot["thresholds"]["stall_seconds"] == 240, snapshot
+        assert snapshot["thresholds"]["liveness_seconds"] == 480, snapshot
+        # one wake prompt, unchanged by the snapshot
+        invs = _invs(inv)
+        assert [i[1:3] for i in invs] == [
+            ["GET", "/api/session/ses_orch"],
+            ["POST", "/api/session/ses_orch/agent"],
+            ["POST", "/api/session/ses_orch/prompt"],
+        ], invs
+        lines = _hb_lines(hb)
+        assert len([l for l in lines if " WAKE " in l]) == 1, lines
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

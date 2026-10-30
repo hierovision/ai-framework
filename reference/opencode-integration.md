@@ -153,18 +153,89 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
   A bare `"plugins/auto-compact-at-threshold"` is parsed as an npm package
   spec and fails with `NpmInstallFailedError`; a file path is rejected with
   "configured plugin path must be a directory" (measured 2026-10-29).
+- **Options shape (probed 2026-10-29):** a string entry carries no options; an
+  object entry `{ "package": "./plugins/<dir>", "options": { … } }` is
+  accepted, and the loader forwards `options` to `setup(ctx)` as
+  `ctx.options` **for the server part only** — the TUI part receives `{}` on
+  2.1.4. A TUI value that must match the server needs an env/file source.
+- **Plugin discovery (probed 2026-10-29):** the loader also scans the config
+  root's `plugins/*` directories and loads a directory even when it is not
+  listed in the `plugins` array. To make a plugin genuinely absent, remove its
+  directory. A directory needs a resolvable `server` entrypoint even for a
+  TUI-only companion (`{server: undefined}` is skipped); `tui` alone is not a
+  loadable plugin. `features.tui` is set from the `<dir>/tui` entrypoint.
 - 2.1.4's plugin context has **no log domain** (`ctx` carries
   `app/location/options/agent/.../session/shell`, no `log`/`logger`). The
   plugin writes its structured startup marker to `process.stderr`; run
   `opencode run --standalone --print-logs --log-level info` to capture the
   loader and marker on stderr. (`--print-logs`/`--log-level` exist as global
   flags; evals still use `OPENCODE_LOG_LEVEL=ERROR` and do not emit them.)
+- **Plugin entrypoints (probed 2026-10-29, binary `Zg`).** A plugin directory
+  resolves its parts as `<dir>/server` and `<dir>/tui` (and `<dir>/rpc`) via
+  module resolution — no package `exports` map is consulted. A `tui` entry
+  sets `features.tui: true` on the plugin record; the TUI host imports it.
+  `GET /api/plugin` (`opencode api GET /api/plugin`) returns
+  `{id, source, features, state}` with `state.status` `active` or `failed`
+  (with `error`) — the honest source for a degradation banner.
+- **TUI plugin context (same probe).** `@opencode/plugin@2.1.4`'s `./tui`
+  export defines `Plugin.define({id, setup})` with `ctx.data.listen/on`,
+  `ctx.data.session.{list,status,permission,form}`, `ctx.ui.slot`
+  (`sidebar.content`, `home.footer.status`, `session.panel`, …),
+  `ctx.ui.toast/attention/keymap/dialog/tabs/panel/router`,
+  `ctx.client` (typed `session.prompt/interrupt`, `plugin.list`) and
+  `ctx.storage`. JSX intrinsics are `box`/`text`/`span`/… from
+  `@opentui/solid` (peer; `jsxImportSource` in the plugin `tsconfig.json`).
+- **Server event stream + synthetic messages.** `ctx.event.subscribe()`
+  yields `OpenCodeEvent` (`{id, created, type, data}`); the vocabulary used by
+  the delegation observer is `session.created/renamed/status/step.*/tool.*/
+  message.content.updated/usage.updated/execution.*`, `permission.asked/
+  replied`, `form.created/replied/cancelled`. `ctx.session.synthetic({sessionID,
+  text, description, metadata})` appends a synthetic message **without a model
+  turn** (client counterpart: `POST /api/session/{id}/synthetic`).
 - `runtime-probe.mjs` proves the module's `setup`/cleanup behavior, but it is
   not loader proof. `plugin list` does not enumerate local directories, so
   post-smoke also runs the real CLI with the versioned config and requires
   both the loader's `loading plugin` line for this directory and the
   `auto-compact-at-threshold initialized` marker. Three pieces of evidence
   are required: config wiring, runtime probe, and loader log.
+- **TUI context correction (probed 2026-10-29, live TUI).** The keymap is
+  `ctx.keymap`, not `ctx.ui.keymap` (the latter is undefined and fails the TUI
+  part at setup). A plugin command registered with `palette: true` / `slash`
+  still does **not** appear in this build's ctrl+p palette or slash completion
+  (both returned "No matching commands"), while `keymap.shortcuts(id)` resolves
+  a declared `bind` — so bindings are the working control surface in 2.1.4.
+  There is **no `--port` flag** on the TUI (`Unrecognized flag: --port`), so a
+  standalone TUI exposes no server URL.
+- **Event shapes that matter (generated 2.1.4 types).**
+  `form.created.data = {form: FormInfo1}` (session id nested at
+  `data.form.sessionID`); `permission.replied.data.reply` is
+  `once|always|reject` (a rejection is a denial, not a resume);
+  `session.step.ended.data` carries `finish`, `cost`, `tokens`;
+  `session.tool.called.data` has **no tool name** (name/target come from
+  `session.message.content.updated`).
+- **Managed service probe (2026-10-29, extended).** `opencode service set port
+  <n>` + `service start` works under an isolated `XDG_CONFIG_HOME` (writes
+  `service.json` there; `OPENCODE_PASSWORD` is required by clients). A plugin
+  wired in that config root loads in the service: `GET /api/plugin?directory=
+  <work>` returns it with `features: {server: true, tui: true}` and
+  `state: active`. The list is **location-scoped**: without the directory the
+  same call returns `{"data": []}` for the service's own location, so a TUI
+  must pass its location (`client.plugin.list({location:{directory}})`) or it
+  falsely reads "not loaded". The service also activates a plugin **once per
+  location** (work, home, repo), so a per-location side effect (a synthetic
+  milestone) must be guarded by the instance's own location.
+- **Synthetic messages (2026-10-29).** `session.synthetic` accepts
+  `delivery: "steer"|"queue"` and `resume?: boolean`. With default
+  `resume` a synthetic started a model turn; `{delivery:"steer",
+  resume:false}` queues it for the next turn without generating. TUI plugin
+  `options` are not forwarded to the TUI part by the 2.1.4 host (the server
+  part receives them); use an explicit env seam if both parts need a value.
+- **Delegation association marker (RM-069, 2026-10-29).** A run-vehicle child
+  is identified by its session **title**
+  `[delegate:<orchestrator-session-id>] <agent>: <task>`, set with `run
+  --title` and read from `session.created.title` / `session.renamed.title` /
+  `SessionInfo.title`. In-session Task children need no marker (`parentID`).
+  This avoids a second registry and any write to the session store.
 
 ## Model reasoning control (Go)
 
