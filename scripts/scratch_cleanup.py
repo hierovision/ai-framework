@@ -9,11 +9,12 @@ Two surfaces accumulate without a lifecycle:
 * `.scratch/test-tmp/*` — hermetic-test workdirs and logs, including the
   behavioral-eval fixtures. A killed/failed test leaves its directory behind.
 
-The policy is count + age bounded: never delete the newest `keep` entries and
-never delete anything younger than `max_age_seconds`. A concurrent dispatch is
-inviolable: entries inside the run grace window, or whose owner marker names a
-live process, are skipped (F12b). Cleanup is best-effort and never raises into
-the caller's main path.
+The policy is count + age bounded: an entry is stale when it falls outside the
+newest `keep` entries (`index >= keep`) **or** is older than
+`max_age_seconds`; only entries that satisfy neither bound survive. A
+concurrent dispatch is inviolable: entries inside the run grace window, or
+whose owner marker names a live process, are skipped (F12b). Cleanup is
+best-effort and never raises into the caller's main path.
 """
 import os
 import shutil

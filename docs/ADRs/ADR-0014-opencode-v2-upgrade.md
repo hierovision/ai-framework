@@ -9,10 +9,19 @@ accepted 2026-10-27
 The library's OpenCode-facing surfaces were built on `opencode-ai@1.19.4`:
 V1 `--dir`/`--attach`/`--log-level` flags, `session`/`message`/`part` tables,
 `permission` maps with `bash`/`write`/`task` keys, and V1 plugin exports. V2
-`@opencode/cli@2.1.4` removes those surfaces: the working directory is
+`@opencode/cli@2.1.4` removes those surfaces (except `--log-level`, see the
+dated note below): the working directory is
 `cwd`, wakes are typed API calls, the store is `session_v2` +
 `session_message`, permissions are ordered `{action, resource, effect}` rules,
 and plugins are `Plugin.define` + `setup(ctx)`.
+
+**2026-10-30 correction — log flags.** V2 accepts the global `--log-level` and
+`--print-logs` flags; they are not among the removed surfaces, and the
+post-smoke loader probe uses both to capture the plugin startup line on
+stderr. The repository still bans them in `.github/workflows/eval-*`, where
+evals pass `OPENCODE_LOG_LEVEL=ERROR`, so the ban is repo policy, not a V2
+constraint. The Context paragraph above, which lists `--log-level` as
+removed, is superseded to that extent.
 
 V1 and V2 cannot coexist under one `opencode` command, so this is a cutover,
 not a compatibility layer. The session DB auto-migration is one-way; the
