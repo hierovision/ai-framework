@@ -38,7 +38,8 @@ def test_prune_keeps_newest_and_caps_count():
             os.makedirs(path)
             _age(path, 100 - i)  # run-7 is newest
             dirs.append(path)
-        removed = cleanup.prune_run_configs(root, keep=3, max_age_seconds=10**9)
+        removed = cleanup.prune_run_configs(root, keep=3, max_age_seconds=10**9,
+                                            grace_seconds=0)
         remaining = sorted(os.listdir(root))
         assert remaining == ["run-5", "run-6", "run-7"], remaining
         assert len(removed) == 5, removed
@@ -55,10 +56,79 @@ def test_prune_removes_old_entries_even_below_count_cap():
         os.makedirs(new)
         _age(old, 8 * 86400)
         removed = cleanup.prune_run_configs(
-            root, keep=10, max_age_seconds=7 * 86400)
+            root, keep=10, max_age_seconds=7 * 86400, grace_seconds=0)
         assert os.path.isdir(new), os.listdir(root)
         assert not os.path.exists(old), os.listdir(root)
         assert removed == [old], removed
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prune_preserves_a_live_concurrent_run():
+    """A long-running dispatch whose config root is older than the run grace
+    window must survive a peer's prune: newer failed runs landed after it
+    started, so the count cap would otherwise delete it mid-run."""
+    root = _tmp("scratch-active-")
+    try:
+        active = os.path.join(root, "run-active")
+        os.makedirs(active)
+        with open(os.path.join(active, cleanup.ACTIVE_MARKER), "w",
+                  encoding="utf-8") as fh:
+            fh.write(str(os.getpid()))
+        # started three days ago: outside the grace window and at the bottom
+        # of the mtime order now that newer failed runs exist
+        _age(active, 3 * 86400)
+        for i in range(6):
+            path = os.path.join(root, f"run-new-{i}")
+            os.makedirs(path)
+            _age(path, 2 * 86400 + i)  # stale, but newer than the active run
+        removed = cleanup.prune_run_configs(
+            root, keep=2, max_age_seconds=10**9)
+        assert os.path.isdir(active), os.listdir(root)
+        assert active not in removed, removed
+        remaining = sorted(os.listdir(root))
+        assert remaining == ["run-active", "run-new-0", "run-new-1"], remaining
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prune_keeps_roots_inside_the_run_grace_window():
+    """A config root created moments ago cannot be pruned even though it is
+    already outside the age cap: that is the mkdtemp-before-marker window."""
+    root = _tmp("scratch-grace-")
+    try:
+        hot = os.path.join(root, "run-hot")
+        os.makedirs(hot)  # mtime = now
+        for i in range(4):
+            path = os.path.join(root, f"run-old-{i}")
+            os.makedirs(path)
+            _age(path, 2 * 86400 + i)
+        removed = cleanup.prune_run_configs(
+            root, keep=10, max_age_seconds=0)
+        assert os.path.isdir(hot), os.listdir(root)
+        assert hot not in removed, removed
+        assert sorted(os.listdir(root)) == ["run-hot"], os.listdir(root)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prune_reclaims_a_dead_owner_marker():
+    """A crashed dispatch leaves its marker behind; a dead pid must not pin the
+    evidence directory forever."""
+    root = _tmp("scratch-deadlock-")
+    try:
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait(timeout=30)
+        stale = os.path.join(root, "run-crashed")
+        os.makedirs(stale)
+        with open(os.path.join(stale, cleanup.ACTIVE_MARKER), "w",
+                  encoding="utf-8") as fh:
+            fh.write(str(dead.pid))
+        _age(stale, 2 * 86400)  # age the dir after the marker write
+        removed = cleanup.prune_run_configs(
+            root, keep=0, max_age_seconds=10**9)
+        assert removed == [stale], removed
+        assert not os.path.exists(stale), os.listdir(root)
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -74,6 +144,26 @@ def test_cleanup_run_config_removes_success_and_keeps_failure():
         cleanup.cleanup_run_config(bad, "failure")
         assert not os.path.exists(ok), os.listdir(root)
         assert os.path.isdir(bad), os.listdir(root)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prune_test_scratch_count_caps_fresh_workdirs():
+    """`.scratch/test-tmp` is generated debris with its own count cap, not a
+    concurrent run root: the run grace window must not exempt 25 fresh workdirs
+    from the TEST_KEEP prune."""
+    root = _tmp("scratch-testtmp-")
+    try:
+        for i in range(25):
+            path = os.path.join(root, f"work-{i}")
+            os.makedirs(path)
+            _age(path, 100 - i)  # work-24 is newest
+        removed = cleanup.prune_test_scratch(base=root, keep=cleanup.TEST_KEEP)
+        remaining = sorted(os.listdir(root))
+        assert len(remaining) == cleanup.TEST_KEEP, remaining
+        assert len(removed) == 25 - cleanup.TEST_KEEP, removed
+        assert remaining == sorted(f"work-{i}" for i in range(5, 25)), \
+            remaining
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -98,7 +188,8 @@ def _dispatch(mode, precreate):
     os.makedirs(cfg_root)
     for i in range(precreate):
         os.makedirs(os.path.join(cfg_root, f"run-old-{i}"))
-        _age(os.path.join(cfg_root, f"run-old-{i}"), 60 - i)
+        # older than the run grace window, younger than the age cap
+        _age(os.path.join(cfg_root, f"run-old-{i}"), 7200 + (precreate - i))
     env = dict(os.environ)
     env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
     env["DISPATCH_CONFIG_ROOT"] = cfg_root

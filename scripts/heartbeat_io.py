@@ -39,14 +39,20 @@ def append_records(path, text, fresh=False):
     return data
 
 
-def check_writable(path):
+def check_writable(path, fresh=False):
     """Preflight: create the parent and prove the path is append-writable.
 
-    Opens and closes without writing so a dispatch can exit 2 before launching
-    opencode (AC6) without clobbering an existing heartbeat.
+    Opens and closes without writing a record, so a dispatch can exit 2 before
+    launching opencode (AC6). ``fresh`` truncates: a fresh run owns the file
+    from preflight onward, so a later pre-begin failure (e.g. `--worktree`
+    refusing a parent off main) cannot leave a prior run's records behind. A
+    resume keeps the file (its history is the run's history).
     """
     parent = os.path.dirname(os.path.abspath(path))
     if parent:
         os.makedirs(parent, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+    if fresh:
+        flags |= os.O_TRUNC
+    fd = os.open(path, flags, 0o644)
     os.close(fd)

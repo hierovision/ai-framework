@@ -575,6 +575,56 @@ def test_heartbeat_envelope_success():
         shutil.rmtree(work, ignore_errors=True)
 
 
+def test_fresh_heartbeat_truncated_on_prebegin_failure():
+    """A fresh run that fails before heartbeat_begin must not leave the prior
+    run's records in place: the preflight owns the file it creates, so a
+    `--worktree` refusal (parent off main) cannot look like this run started."""
+    repo = tempfile.mkdtemp(prefix="dispatch-hb-prebegin-")
+    work = tempfile.mkdtemp(prefix="dispatch-hb-records-")
+    try:
+        _init_repo(repo)
+        _git(repo, "checkout", "-b", "off-main")
+        hb = os.path.join(work, "progress.log")
+        with open(hb, "w", encoding="utf-8") as fh:
+            fh.write("# progress: previous run\n"
+                     "2026-10-28T00:00:00Z START previous\n"
+                     "2026-10-28T00:10:00Z DONE ok\n")
+        r = _run("valid", extra=["--heartbeat", hb, "--worktree", "t1"],
+                 cwd=repo)
+        assert r.rc == 2, (r.rc, r.stdout, r.stderr)
+        assert "not on main" in r.stderr, r.stderr
+        stale = [l for l in _lines(_read(hb))
+                 if "previous" in l or "DONE ok" in l]
+        assert not stale, \
+            f"stale records survived a pre-begin failure: {_read(hb)!r}"
+    finally:
+        shutil.rmtree(repo, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_resume_heartbeat_keeps_records_on_prebegin_failure():
+    """A `--session` resume owns the append, not the file: a pre-begin refusal
+    must not wipe the records the previous run wrote."""
+    repo = tempfile.mkdtemp(prefix="dispatch-hb-resume-")
+    work = tempfile.mkdtemp(prefix="dispatch-hb-records-")
+    try:
+        _init_repo(repo)
+        hb = os.path.join(work, "progress.log")
+        prior = ("# progress: previous run\n"
+                 "2026-10-28T00:00:00Z START previous\n"
+                 "2026-10-28T00:10:00Z DONE ok\n")
+        with open(hb, "w", encoding="utf-8") as fh:
+            fh.write(prior)
+        r = _run("valid", extra=["--heartbeat", hb, "--worktree", "nope",
+                                 "--session", "ses_stub_valid"], cwd=repo)
+        assert r.rc == 2, (r.rc, r.stdout, r.stderr)
+        assert "not found" in r.stderr, r.stderr
+        assert _read(hb) == prior, _read(hb)
+    finally:
+        shutil.rmtree(repo, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def test_concurrent_append_keeps_complete_heartbeat_records():
     """F11: the observer's append cannot be clobbered by a held dispatcher
     writer. Every record stays complete and newline-delimited (no `unning`)."""

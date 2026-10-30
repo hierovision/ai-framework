@@ -650,7 +650,7 @@ def main(argv=None):
         # session, return immediately, and name every durable surface the
         # orchestrator can supervise (heartbeat, log, session file).
         try:
-            heartbeat_io.check_writable(a.heartbeat)
+            heartbeat_io.check_writable(a.heartbeat, fresh=not a.session)
         except OSError as exc:
             print(f"error: --detach heartbeat is not writable: {exc}",
                   file=sys.stderr)
@@ -769,7 +769,7 @@ def main(argv=None):
         if a.stream_err:
             tee_err = _open_artifact(a.stream_err, append)
         if hb_path:
-            heartbeat_io.check_writable(hb_path)
+            heartbeat_io.check_writable(hb_path, fresh=not append)
     except OSError as exc:
         for handle in (tee_out, tee_err):
             if handle is not None:
@@ -810,6 +810,9 @@ def main(argv=None):
         dispatch_root, keep=max(0, scratch_cleanup.DEFAULT_KEEP - 1),
         max_age_seconds=scratch_cleanup.DEFAULT_MAX_AGE)
     config_root = tempfile.mkdtemp(prefix="run-", dir=dispatch_root)
+    # F12b: claim the root before writing it, so a concurrent dispatch's prune
+    # cannot delete this run's tree while it is live.
+    scratch_cleanup.mark_run_active(config_root)
     agents_src = os.path.join(REPO_ROOT, ".opencode", "agents")
     if not os.path.isdir(agents_src):
         agents_src = os.path.join(REPO_ROOT, "agents")
@@ -993,6 +996,7 @@ def main(argv=None):
     # how many of those survive. Tests set DISPATCH_KEEP_CONFIG=1 to inspect
     # the generated rules after the process exits.
     if os.environ.get("DISPATCH_KEEP_CONFIG") != "1":
+        scratch_cleanup.clear_run_active(config_root)
         scratch_cleanup.cleanup_run_config(config_root, outcome)
     print(f"result={out_path}", flush=True)
     if exit_code != 0:
