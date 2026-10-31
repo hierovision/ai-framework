@@ -106,8 +106,12 @@ old store timestamp can never be read as quiet time; from there the documented
 stall/thrash/needs-input semantics take over.
 
 If the host cannot answer `session.list()`/`session.status()`, the live map is
-unavailable and the banner says so (discovered delegates may be hidden) — that
-state is never presented as healthy.
+unavailable: the banner says so and every discovered row is demoted to
+`unknown` (stale if its last event is past the grace window) — a last-known
+`running` is never carried forward. The same reconciliation denies any id that
+disappears from an otherwise available map. Observed rows are untouched; their
+own event clock owns them. Recovery re-promotes a discovered row as soon as the
+map answers again.
 
 ## Milestones
 
@@ -194,20 +198,24 @@ JSX), so it is **live-drill-only**. It supplies three render callbacks
 (`strip`, `footer`, `panel`) to `createDefinition`; the registration, the slot
 names/order, the render invocation and the disposer chain are all asserted in
 `model.test.ts` with stub views, and the callback bodies are exercised by the
-documented live drill. No behavior lives in `tui.tsx`.
+documented live drill. No model or liveness behavior lives in `tui.tsx`; it
+only decides presentation (heading, stale-collapse line, footer banner text,
+threshold display).
 
-The projections in `model.ts` are plain functions that read the `version`
-signal, not `createMemo`: solid's server build (what `node --test` imports)
-freezes a memo at construction, which would hide every post-construction
-update from the tests.
+The projections in `model.ts` are built by `projection(version, compute)`:
+a plain `version()` read (not `createMemo`), because solid's server build —
+what `node --test` imports — freezes a memo at construction and would hide
+every post-construction update. The read is what makes the client re-render,
+and `model.test.ts` asserts it directly (a reactive effect cannot run under the
+server build).
 
 ## Tests
 
 ```
-node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 107 tests
+node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 112 tests
 node ../delegation-sentinel/sentinel.test.ts           # 5 tests
 tsc -p . --noEmit
-node mutation-check.mjs                                # 23 break/restore proofs
+node mutation-check.mjs                                # 26 break/restore proofs
 ```
 
 `mutation-check.mjs` is the checked-in evidence behind every liveness guard:

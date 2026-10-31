@@ -176,9 +176,11 @@ event-driven"):
    only when the host's live active map (`ctx.data.session.status`, `"idle" |
    "running"` on 2.1.4) says so or the session produced an event in this
    observer process. Everything else is `unknown` — a first-class status, not
-   a soft `running`. When the live map cannot be read at all, the TUI says so
-   in the banner instead of letting every discovered row age silently into
-   "hidden".
+   a soft `running`. The active map is *reconciled*, not accumulated: when
+   the live map cannot be read at all, every discovered row is demoted to
+   `unknown` and the banner says why; an id that disappears from an available
+   map is denied the same way. A last-known `running` is never carried
+   forward. Observed rows are untouched.
 2. **Quiet comes from the session, never from the observer.** A discovered
    row's `lastActivityAt` is the store's real last event (`SessionInfo.time.
    updated`) where available and `null` otherwise; a `null` clock renders as

@@ -320,6 +320,34 @@ function applyStoreOutcome(d: Delegate, outcome: "completed" | "failed",
 }
 
 /**
+ * Reconcile the live active map with a fresh snapshot.
+ *
+ * `null` means the host could not answer: nothing is live. Every id the
+ * observer has ever recorded is then denied, so a discovered row cannot keep
+ * claiming `running` from a last-known value after the liveness source is
+ * gone. On an available snapshot, ids absent from it are denied too (a session
+ * that left the map is no longer live), which is what makes a row demote
+ * without waiting for a full list refresh. Observed rows are untouched: their
+ * own event clock owns them.
+ *
+ * Returns true when the map membership changed (the caller re-renders).
+ */
+export function reconcileActive(
+  state: ObserverState,
+  snapshot: Iterable<string> | null,
+): boolean {
+  const live = snapshot === null ? new Set<string>() : new Set(snapshot);
+  let changed = false;
+  for (const sessionID of new Set([...state.active.keys(), ...live])) {
+    const next = live.has(sessionID);
+    if (state.active.get(sessionID) === next) continue;
+    markActive(state, sessionID, next);
+    changed = true;
+  }
+  return changed;
+}
+
+/**
  * Record the host's live active-map answer for a session. A discovered row
  * only becomes `running` here; an observed row keeps its event-driven state.
  * Archived and store-terminal rows are final: neither a map entry nor a

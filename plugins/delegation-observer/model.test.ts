@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { createDefinition, createTuiModel, readPluginStatus } from "./model.ts";
+import { createDefinition, createTuiModel, projection, readPluginStatus } from "./model.ts";
 
 const OLD = Date.now() - 20 * 3_600_000;
 
@@ -497,6 +497,146 @@ test("one interval tick refreshes the live map and the rows", (t) => {
     assert.equal(row.status, "running", "the timer refreshed the live map");
     assert.equal(row.stale, false);
     assert.equal(row.phase, "active");
+  } finally {
+    model.dispose();
+    t.mock.timers.reset();
+  }
+});
+
+test("every projection reads the version signal so a bump re-renders", (t) => {
+  // The render dependency is a plain signal read, so a node test cannot use a
+  // reactive effect here (solid's server build makes createEffect a no-op).
+  // The helper is asserted directly instead of the property being assumed.
+  let reads = 0;
+  let value = 0;
+  const version = () => {
+    reads += 1;
+    return value;
+  };
+  const project = projection(version, () => value);
+  assert.equal(reads, 0, "the projection is lazy, not eager");
+  assert.equal(project(), 0);
+  assert.equal(reads, 1, "each render reads the version signal exactly once");
+  value = 1;
+  assert.equal(project(), 1);
+  assert.equal(reads, 2);
+
+  // and the real model's projections are built from it: a tick bumps the
+  // version, and the next row/banner read reflects the tick's work.
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now: OLD + 20 * 3_600_000 });
+  let live = false;
+  const { ctx } = mockHost({
+    sessions: [child("ses_v")],
+    status: () => (live ? "running" : "idle"),
+  });
+  const model = createTuiModel(ctx);
+  try {
+    const before = model.version();
+    assert.equal(model.rows()[0]?.status, "unknown");
+    live = true;
+    t.mock.timers.tick(5_000);
+    assert.ok(model.version() > before, "the tick bumps the render version");
+    assert.equal(model.rows()[0]?.status, "running");
+  } finally {
+    model.dispose();
+    t.mock.timers.reset();
+  }
+});
+
+test("losing the live map demotes a running row, and recovery restores it (F18)", (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now: OLD + 20 * 3_600_000 });
+  let mode: "healthy" | "throwing" = "healthy";
+  const { ctx } = mockHost({
+    sessions: [child("ses_x")],
+    status: () => {
+      if (mode === "throwing") throw new Error("status rpc closed");
+      return "running";
+    },
+  });
+  const model = createTuiModel(ctx);
+  try {
+    // healthy map: the discovered row is live
+    assert.equal(model.liveRows()[0]?.status, "running");
+    assert.equal(model.liveRows()[0]?.stale, false);
+    assert.equal(model.banner(), null);
+
+    // the liveness source disappears: the row must stop claiming running
+    mode = "throwing";
+    t.mock.timers.tick(5_000);
+    const lost = model.liveRows()[0];
+    assert.equal(lost.status, "unknown", "no liveness source: no running claim");
+    assert.equal(lost.stale, true, "and it is history, not current work");
+    assert.match(model.banner() ?? "",
+      /cannot read the live session status map/, "the banner says why");
+
+    // recovery: the map answers again and the row is live once more
+    mode = "healthy";
+    t.mock.timers.tick(5_000);
+    const back = model.liveRows()[0];
+    assert.equal(back.status, "running", "recovery re-promotes the discovered row");
+    assert.equal(back.stale, false);
+    assert.equal(model.banner(), null);
+  } finally {
+    model.dispose();
+    t.mock.timers.reset();
+  }
+});
+
+test("a session that leaves an available map stops being running (F18)", (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now: OLD + 20 * 3_600_000 });
+  let sessions = [child("ses_x"), child("ses_y")];
+  const { ctx } = mockHost({
+    list: () => sessions,
+    status: () => "running",
+  });
+  const model = createTuiModel(ctx);
+  try {
+    assert.deepEqual(model.liveRows().map((r) => [r.sessionID, r.status]), [
+      ["ses_x", "running"],
+      ["ses_y", "running"],
+    ]);
+
+    // the host list no longer carries ses_y: it is not live, even though the
+    // status map would still answer for the id
+    sessions = [child("ses_x")];
+    t.mock.timers.tick(5_000);
+    const rows = model.liveRows();
+    assert.deepEqual(rows.map((r) => [r.sessionID, r.status]), [
+      ["ses_x", "running"],
+      ["ses_y", "unknown"],
+    ]);
+    assert.equal(rows.find((r) => r.sessionID === "ses_y")?.stale, true);
+  } finally {
+    model.dispose();
+    t.mock.timers.reset();
+  }
+});
+
+test("demotion of a recently-active row is unknown, not fabricated stale", (t) => {
+  // Denial must not invent a stale verdict either: a row whose last event is
+  // inside the grace window is `unknown` and still visible.
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now: OLD + 20 * 3_600_000 });
+  let mode: "healthy" | "throwing" = "healthy";
+  const recent = OLD + 20 * 3_600_000 - 60_000;
+  const { ctx } = mockHost({
+    sessions: [{
+      id: "ses_recent", parentID: "ses_parent", title: "recent", agent: "implementer",
+      time: { created: recent, updated: recent },
+    }],
+    status: () => {
+      if (mode === "throwing") throw new Error("no map");
+      return "running";
+    },
+  });
+  const model = createTuiModel(ctx);
+  try {
+    assert.equal(model.liveRows()[0]?.status, "running");
+    mode = "throwing";
+    t.mock.timers.tick(5_000);
+    const row = model.liveRows()[0];
+    assert.equal(row.status, "unknown");
+    assert.equal(row.stale, false, "inside the grace window: visible, not hidden");
+    assert.match(model.banner() ?? "", /cannot read the live session status map/);
   } finally {
     model.dispose();
     t.mock.timers.reset();

@@ -24,6 +24,7 @@ import {
   observe,
   parseDelegationTitle,
   parseHealthRecord,
+  reconcileActive,
   tick,
   tuiConfig,
 } from "./state.ts";
@@ -879,6 +880,40 @@ test("an archived session is stale even when the live map calls it running", () 
   observe(state, contentTool("ses_arch", "t1", "read", "completed", { path: "a" }));
   assert.equal(d.stale, true, "events cannot revive an archived row");
   assert.equal(tick(state, clock).milestones.length, 0);
+});
+
+test("reconcileActive denies absent ids and leaves observed rows alone", () => {
+  const state = fresh();
+  markActive(state, "ses_live", true);
+  associateSessionInfo(state, {
+    id: "ses_live", parentID: "ses_parent", title: "live",
+    time: { created: clock - 120_000, updated: clock - 60_000 },
+  });
+  const discovered = state.delegates.get("ses_live");
+  assert.equal(discovered.status, "running");
+
+  // an observed row keeps its event clock even if the map drops it
+  observe(state, child("ses_seen", "ses_parent"));
+  markActive(state, "ses_seen", true);
+  const observed = state.delegates.get("ses_seen");
+  assert.equal(observed.provenance, "observed");
+
+  // unavailable snapshot: everything denied, discovered row demoted
+  assert.equal(reconcileActive(state, null), true);
+  assert.equal(state.active.get("ses_live"), false);
+  assert.equal(discovered.status, "unknown");
+  assert.equal(observed.status, "running", "observed rows keep their own clock");
+  assert.equal(state.active.get("ses_seen"), false);
+
+  // a second reconcile with the same snapshot is a no-op
+  assert.equal(reconcileActive(state, null), false);
+
+  // available snapshot: ids present are live, ids absent are denied
+  assert.equal(reconcileActive(state, ["ses_live"]), true);
+  assert.equal(discovered.status, "running");
+  assert.equal(reconcileActive(state, ["ses_live"]), false);
+  assert.equal(reconcileActive(state, []), true);
+  assert.equal(discovered.status, "unknown");
 });
 
 test("an archived row never emits a start milestone on a replayed create", () => {

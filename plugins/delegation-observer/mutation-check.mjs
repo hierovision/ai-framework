@@ -171,11 +171,9 @@ const MUTATIONS = [
     why: "refreshActive must publish live-map availability to the banner",
     file: "model.ts",
     from:
-      "    if (availability !== liveMap()) {\n"
-      + "      setLiveMap(availability);\n"
-      + "      bump();\n"
-      + "    }\n",
-    to: "",
+      "    const availabilityChanged = availability !== liveMap();\n"
+      + "    if (availabilityChanged) setLiveMap(availability);\n",
+    to: "    const availabilityChanged = false;\n",
     expect: "a throwing status map is a banner, not a crash",
   },
   {
@@ -231,6 +229,33 @@ const MUTATIONS = [
     from: "    const warning = liveBanner();\n    if (!warning) {\n",
     to: "    const warning = liveBanner();\n    if (false) {\n",
     expect: "a healthy observer reports healthy from the status command",
+  },
+  {
+    id: "map-loss-keeps-running",
+    why: "an unavailable live map must demote discovered rows, not keep them running",
+    file: "model.ts",
+    from: "    const membershipChanged = reconcileActive(state, live);\n",
+    to: "    const membershipChanged = false;\n",
+    expect: "losing the live map demotes a running row, and recovery restores it (F18)",
+  },
+  {
+    id: "absent-session-not-denied",
+    why: "an id missing from an available map must be denied",
+    file: "state.ts",
+    from: "  for (const sessionID of new Set([...state.active.keys(), ...live])) {\n",
+    to: "  for (const sessionID of live) {\n",
+    // proven end-to-end at the model layer (the tick -> row demotion path)
+    test: "model.test.ts",
+    expect: "a session that leaves an available map stops being running (F18)",
+  },
+  {
+    id: "drop-version-read",
+    why: "projections must read the version signal so a bump re-renders",
+    file: "model.ts",
+    from: "    version();\n    return compute();\n",
+    to: "    return compute();\n",
+    test: "model.test.ts",
+    expect: "every projection reads the version signal so a bump re-renders",
   },
   {
     id: "definition-slot-missing",

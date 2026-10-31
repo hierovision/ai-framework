@@ -29,8 +29,8 @@ import {
   associateSessionInfo,
   createState,
   healthPath,
-  markActive,
   observe,
+  reconcileActive,
   parseHealthRecord,
   tick,
   tuiConfig,
@@ -72,6 +72,23 @@ export async function readPluginStatus(client: any, directory?: string) {
   } catch (error) {
     return { loaded: false, state: "unknown", tui: false, error: String(error) };
   }
+}
+
+/**
+ * A render-time projection: read the `version` signal, then compute.
+ *
+ * Solid tracks a signal only while it is read inside a render, so the read is
+ * what makes the client re-render after a bump; because it is a plain read
+ * rather than a `createMemo`, `node --test` (which imports solid's server
+ * build, where `createEffect` is a no-op) sees fresh values instead of one
+ * frozen at construction. Exported so the dependency itself is asserted in
+ * `model.test.ts` rather than reasoned about.
+ */
+export function projection<T>(version: () => number, compute: () => T): () => T {
+  return () => {
+    version();
+    return compute();
+  };
 }
 
 /**
@@ -157,13 +174,17 @@ export function createTuiModel(ctx: any) {
   const refreshActive = () => {
     const map = readLiveMap(rawSessionList, sessionStatus);
     const availability = map.available ? "ok" : "unavailable";
-    if (availability !== liveMap()) {
-      setLiveMap(availability);
-      bump();
-    }
-    for (const entry of map.entries) {
-      markActive(state, entry.sessionID, entry.live);
-    }
+    const availabilityChanged = availability !== liveMap();
+    if (availabilityChanged) setLiveMap(availability);
+    // Reconcile, do not just add: an unavailable map means nothing is live,
+    // and an id missing from an available map is no longer live. Without this
+    // a discovered row keeps claiming `running` from a last-known value while
+    // the banner says there is no liveness source (review F18).
+    const live = map.available
+      ? map.entries.filter((entry) => entry.live).map((entry) => entry.sessionID)
+      : null;
+    const membershipChanged = reconcileActive(state, live);
+    if (availabilityChanged || membershipChanged) bump();
     return map.available;
   };
 
@@ -237,9 +258,10 @@ export function createTuiModel(ctx: any) {
 
   // --- projections ---------------------------------------------------------
   //
-  // The `live*` functions are the single implementation; the memos only add
-  // the reactive version dependency for the client renderer. Tests read the
-  // functions (fresh on every call), the view reads the memos.
+  // The `live*` functions are the single implementation. `projection` adds the
+  // reactive dependency: reading `version()` during a render is what makes the
+  // client re-render on a bump, and it is a plain read (not a memo), so
+  // `node --test` sees fresh values instead of a value frozen at construction.
 
   const liveRows = () => visibleRows(state, Date.now());
 
@@ -273,20 +295,8 @@ export function createTuiModel(ctx: any) {
     });
   };
 
-  // Plain functions that read the `version` signal first: in the client that
-  // registers the reactive dependency (Solid tracks signal reads made during a
-  // render), and under `node --test`'s server build they recompute instead of
-  // freezing at construction. A `createMemo` here would hide every
-  // post-construction update from the tests (review F17 item 4).
-  const rows = () => {
-    version();
-    return liveRows();
-  };
-
-  const banner = () => {
-    version();
-    return liveBanner();
-  };
+  const rows = projection(version, liveRows);
+  const banner = projection(version, liveBanner);
 
   // --- owner actions ------------------------------------------------------
 
