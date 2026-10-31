@@ -12,12 +12,16 @@
  * stall window. The numeric thresholds come from
  * `scripts/supervision_contract.json`; `state.test.ts` fails if they drift.
  *
- * Milestone policy (AC6 + AC7):
+ * Milestone policy (AC6 + AC7, RM-070):
  * - routine (start, first-tool, resume): at most one per delegate per
  *   `milestoneMinIntervalSeconds`;
  * - attention (needs-input, stall, thrash): fire once per distinct condition,
- *   immediately — a waiting owner is never made to sit out a cooldown;
- * - terminal: exactly once per delegate, always.
+ *   immediately — a waiting owner is never made to sit out a cooldown; a
+ *   thrash/stall/needs-input/denied milestone also carries `wake: true` and
+ *   starts exactly one parent turn, bounded by `maxAttentionWakes` per child
+ *   per process (`attentionWake` disables the exception);
+ * - terminal: exactly once per delegate, always, and never a wake from this
+ *   process (the Python completion observer owns the terminal wake).
  */
 
 export interface ObserverConfig {
@@ -35,6 +39,13 @@ export interface ObserverConfig {
    * ever seen; without this window the strip lists months of finished work.
    */
   staleGraceSeconds: number;
+  /**
+   * RM-070: an attention condition starts exactly one parent turn while it is
+   * happening. Routine progress and terminal stay non-prompting.
+   */
+  attentionWake: boolean;
+  /** RM-070: attention wakes per child per observer process (default 3). */
+  maxAttentionWakes: number;
 }
 
 /** Mirrors scripts/supervision_contract.json (asserted by state.test.ts). */
@@ -48,6 +59,8 @@ export const DEFAULTS: ObserverConfig = {
   milestoneDescription: "delegation-observer milestone",
   titleMaxLength: 160,
   staleGraceSeconds: 600,
+  attentionWake: true,
+  maxAttentionWakes: 3,
 };
 
 export const TITLE_PREFIX = "[delegate:";
@@ -89,6 +102,8 @@ export interface Delegate {
   toolInFlight: boolean;
   tool: { name: string; target: string; id: string } | null;
   calls: Map<string, true>;
+  /** Call id -> tool name from `session.tool.input.started` (2.1.4 headless). */
+  toolNames: Map<string, string>;
   loop: { key: string; count: number } | null;
   needsInput: { kind: "permission" | "form"; detail: string; since: number } | null;
   warning: string | null;
@@ -96,6 +111,8 @@ export interface Delegate {
   cost: number;
   terminal: { outcome: "completed" | "failed"; detail: string | null; at: number } | null;
   lastRoutineMilestoneAt: number | null;
+  /** RM-070: attention turns already started for this child (per process). */
+  attentionWakes: number;
   emitted: Set<string>;
 }
 
@@ -123,6 +140,12 @@ export interface Milestone {
   text: string;
   description: string;
   attention: boolean;
+  /**
+   * RM-070: this milestone starts (or, when false, does not start) a parent
+   * turn. Only thrash/stall/needs-input/denied can be true, and only while
+   * `attentionWake` is on and the per-child budget has room.
+   */
+  wake: boolean;
 }
 
 export interface Alert {
@@ -208,6 +231,8 @@ export function delegationTitle({ orchestratorID, agent, task }: {
  *   DELEGATION_OBSERVER_ENABLED                 1|0 / true|false (default: options)
  *   DELEGATION_OBSERVER_STALL_SECONDS           positive number
  *   DELEGATION_OBSERVER_STALE_GRACE_SECONDS     positive number (history window)
+ *   DELEGATION_OBSERVER_ATTENTION_WAKE          1|0 / true|false (RM-070)
+ *   DELEGATION_OBSERVER_MAX_ATTENTION_WAKES     positive integer (RM-070)
  *   DELEGATION_OBSERVER_HEALTH_FILE             path
  *   DELEGATION_OBSERVER_STATUS_FILE             path
  *
@@ -215,32 +240,53 @@ export function delegationTitle({ orchestratorID, agent, task }: {
  * fills only what the host dropped. Numeric/boolean parsing is total (invalid
  * values are ignored).
  */
-export function tuiConfig(ctx: any, env: Record<string, string | undefined> = process.env) {
-  const options = ctx?.options?.delegationObserver ?? {};
-  const merged: any = { ...options };
-  const take = (key: string, raw: unknown, parse: (value: string) => unknown) => {
-    if (options[key] !== undefined) return; // forwarded option wins
+export function envConfig(
+  env: Record<string, string | undefined> = process.env,
+): Partial<ObserverConfig> {
+  const out: Partial<ObserverConfig> = {};
+  const take = (key: keyof ObserverConfig, raw: unknown,
+    parse: (value: string) => unknown) => {
     if (raw === undefined || raw === "") return;
     const value = parse(String(raw));
-    if (value !== undefined) merged[key] = value;
+    if (value !== undefined) (out as Record<string, unknown>)[key] = value;
   };
   const positive = (raw: string) => {
     const value = Number(raw);
     return Number.isFinite(value) && value > 0 ? value : undefined;
   };
-  take("stallSeconds", env?.DELEGATION_OBSERVER_STALL_SECONDS, positive);
-  take("staleGraceSeconds", env?.DELEGATION_OBSERVER_STALE_GRACE_SECONDS, positive);
-  take("enabled", env?.DELEGATION_OBSERVER_ENABLED, (raw) => {
+  const positiveInteger = (raw: string) => {
+    const value = Number(raw);
+    return Number.isInteger(value) && value > 0 ? value : undefined;
+  };
+  const boolean = (raw: string) => {
     const value = raw.trim().toLowerCase();
     if (["0", "false", "no", "off"].includes(value)) return false;
     if (["1", "true", "yes", "on"].includes(value)) return true;
     return undefined;
-  });
+  };
+  take("stallSeconds", env?.DELEGATION_OBSERVER_STALL_SECONDS, positive);
+  take("staleGraceSeconds", env?.DELEGATION_OBSERVER_STALE_GRACE_SECONDS, positive);
+  take("attentionWake", env?.DELEGATION_OBSERVER_ATTENTION_WAKE, boolean);
+  take("maxAttentionWakes", env?.DELEGATION_OBSERVER_MAX_ATTENTION_WAKES,
+    positiveInteger);
+  take("enabled", env?.DELEGATION_OBSERVER_ENABLED, boolean);
+  return out;
+}
+
+export function tuiConfig(ctx: any, env: Record<string, string | undefined> = process.env) {
+  const options = ctx?.options?.delegationObserver ?? {};
+  const merged: any = { ...options };
+  for (const [key, value] of Object.entries(envConfig(env))) {
+    if (options[key] === undefined) merged[key] = value; // forwarded option wins
+  }
   for (const [key, envKey] of [
     ["healthFile", "DELEGATION_OBSERVER_HEALTH_FILE"],
     ["statusFile", "DELEGATION_OBSERVER_STATUS_FILE"],
   ] as const) {
-    take(key, env?.[envKey], (raw) => (raw.trim() ? raw.trim() : undefined));
+    if (options[key] !== undefined) continue;
+    const raw = env?.[envKey];
+    if (raw === undefined || raw === "") continue;
+    merged[key] = raw.trim() ? raw.trim() : undefined;
   }
   return merged;
 }
@@ -429,6 +475,7 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
     toolInFlight: false,
     tool: null,
     calls: new Map(),
+    toolNames: new Map(),
     loop: null,
     needsInput: null,
     warning: null,
@@ -436,6 +483,7 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
     cost: 0,
     terminal: null,
     lastRoutineMilestoneAt: null,
+    attentionWakes: 0,
     emitted: new Set(),
   };
   if (source === "discovered") {
@@ -483,13 +531,36 @@ function label(d: Delegate) {
   return `${d.agent} ${d.sessionID}`;
 }
 
+/** The conditions that start a parent turn (RM-070 AC1). */
+const WAKE_KINDS: ReadonlySet<Milestone["kind"]> = new Set([
+  "thrash", "stall", "needs-input", "denied",
+]);
+
+function taskLabel(d: Delegate) {
+  const flat = String(d.task ?? "").replace(/\s+/g, " ").trim();
+  if (!flat) return "delegated task";
+  return flat.length > 120 ? `${flat.slice(0, 117).trimEnd()}...` : flat;
+}
+
+/**
+ * Attention text is also the wake prompt: it names the child, condition and
+ * task, grants steering, and never claims the child stopped — the parent may
+ * find it working and must check the state first (RM-070 AC6).
+ */
+function attentionText(d: Delegate, condition: string, detail: string) {
+  const body = detail ? `: ${detail}` : "";
+  return `${label(d)} ${condition}${body}. Task: ${taskLabel(d)}. `
+    + "The parent may steer or interrupt the child; check its current state first.";
+}
+
 function milestone(
   state: ObserverState,
   d: Delegate,
   kind: Milestone["kind"],
   key: string,
   text: string,
-  { attention = false, terminal = false }: { attention?: boolean; terminal?: boolean } = {},
+  { attention = false, terminal = false, wake = true }:
+    { attention?: boolean; terminal?: boolean; wake?: boolean } = {},
 ) {
   if (d.emitted.has(key)) return null;
   const now = state.now();
@@ -502,6 +573,10 @@ function milestone(
     d.lastRoutineMilestoneAt = now;
   }
   d.emitted.add(key);
+  const wakeNow = attention && wake && WAKE_KINDS.has(kind)
+    && state.config.attentionWake
+    && d.attentionWakes < state.config.maxAttentionWakes;
+  if (wakeNow) d.attentionWakes += 1;
   return {
     sessionID: d.sessionID,
     parentID: d.orchestratorID,
@@ -509,6 +584,7 @@ function milestone(
     text,
     description: state.config.milestoneDescription,
     attention,
+    wake: wakeNow,
   };
 }
 
@@ -546,7 +622,7 @@ function touch(d: Delegate, now: number) {
 function toolTarget(name: string, input: unknown) {
   const inp = (input && typeof input === "object" ? input : {}) as Record<string, any>;
   const value = inp.command ?? inp.path ?? inp.filePath ?? inp.pattern
-    ?? inp.agent ?? inp.description ?? "";
+    ?? inp.agent ?? inp.description ?? inp.code ?? "";
   return String(value).split("\n")[0].slice(0, 80);
 }
 
@@ -588,7 +664,8 @@ function applyTool(state: ObserverState, d: Delegate, name: string, target: stri
       if (first) state.pending.push(first);
       if (d.loop.count >= state.config.loopRepeats) {
         const thrash = milestone(state, d, "thrash", `thrash:${target}`,
-          `thrash: ${label} x${d.loop.count}`, { attention: true });
+          attentionText(d, "thrash", `${name}: ${target} x${d.loop.count}`),
+          { attention: true });
         if (thrash) {
           d.warning = `thrash: ${name}: ${target} x${d.loop.count}`;
           if (d.status === "running") d.status = "warning";
@@ -693,7 +770,7 @@ export function observe(state: ObserverState, event: any): ObserveResult {
       d.status = "waiting";
       d.phase = "waiting for permission";
       const m = milestone(state, d, "needs-input", `needs:permission:${detail}`,
-        `${label(d)} needs input: ${detail}`, { attention: true });
+        attentionText(d, "needs input", detail), { attention: true });
       if (m) out.milestones.push(m);
       break;
     }
@@ -703,7 +780,7 @@ export function observe(state: ObserverState, event: any): ObserveResult {
       d.status = "waiting";
       d.phase = "waiting for form";
       const m = milestone(state, d, "needs-input", `needs:form:${detail}`,
-        `${label(d)} needs input: form ${detail}`, { attention: true });
+        attentionText(d, "needs input", `form ${detail}`), { attention: true });
       if (m) out.milestones.push(m);
       break;
     }
@@ -721,7 +798,7 @@ export function observe(state: ObserverState, event: any): ObserveResult {
         d.status = "warning";
         d.phase = "permission denied";
         const m = milestone(state, d, "denied", `denied:${pending.detail}`,
-          `${label(d)} permission DENIED: ${pending.detail}`, { attention: true });
+          attentionText(d, "permission denied", pending.detail), { attention: true });
         if (m) out.milestones.push(m);
         break;
       }
@@ -785,10 +862,41 @@ export function observe(state: ObserverState, event: any): ObserveResult {
       d.status = "warning";
       break;
     }
+    case "session.tool.input.started": {
+      // The headless 2.1.4 server names the call here and streams the input
+      // separately; `session.tool.called` carries no name and content updates
+      // are absent. Remember the name for the matching input.ended.
+      const id = String(data.id ?? "");
+      const name = String(data.name ?? data.tool ?? "tool");
+      if (id) {
+        d.toolNames.set(id, name);
+        if (d.toolNames.size > 64) {
+          const oldest = d.toolNames.keys().next().value;
+          if (oldest !== undefined) d.toolNames.delete(oldest);
+        }
+      }
+      break;
+    }
+    case "session.tool.input.ended": {
+      const id = String(data.id ?? "");
+      const name = d.toolNames.get(id) ?? "tool";
+      d.toolNames.delete(id);
+      let input: unknown = {};
+      try {
+        input = JSON.parse(String(data.text ?? "{}"));
+      } catch {
+        input = {};
+      }
+      applyTool(state, d, name, toolTarget(name, input), id, "running");
+      break;
+    }
     case "session.tool.called": {
+      const id = String(data.id ?? "");
+      // Already labelled/counted from the input events: a name-less called
+      // event must not overwrite the real tool label.
+      if (id && d.calls.has(id)) break;
       const name = data.name ?? data.tool ?? data.metadata?.tool ?? "tool";
-      applyTool(state, d, name, toolTarget(name, data.input), String(data.id ?? ""),
-        "running");
+      applyTool(state, d, name, toolTarget(name, data.input), id, "running");
       break;
     }
     case "session.tool.success":
@@ -870,7 +978,8 @@ export function tick(state: ObserverState, now: number = state.now()): ObserveRe
     d.warning = `${dead ? "dead" : "quiet"} ${Math.round(quiet)}s (${what})`;
     d.status = dead ? "failed" : "warning";
     const m = milestone(state, d, "stall", `stall:${d.tool?.id ?? d.phase}`,
-      `${label(d)} ${dead ? "dead" : "stalled"}: ${d.warning}`, { attention: true });
+      attentionText(d, "stall", `quiet ${Math.round(quiet)}s (${what})`),
+      { attention: true });
     if (m) out.milestones.push(m);
   }
   out.alerts.push(...out.milestones.map(alert));

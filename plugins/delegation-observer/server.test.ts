@@ -19,13 +19,14 @@ const clock = () => 1_000_000;
 
 function fakeCtx(events, {
   list = [], failSubscribe = false, syntheticFails = false, get, location,
+  options = {},
 } = {}) {
   const synthetic = [];
   const prompts = [];
   const logs = [];
   let signal = null;
   const ctx = {
-    options: {},
+    options,
     location: location ?? undefined,
     session: {
       list: async () => ({ data: list, cursor: {} }),
@@ -88,7 +89,9 @@ test("terminal completion emits exactly one synthetic milestone", async () => {
   const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.equal(synthetic.filter((s) => /completed/.test(s.text)).length, 1);
-  assert.equal(prompts.length, 0); // never starts a model turn
+  assert.equal(synthetic.filter((s) => /completed/.test(s.text))[0].resume,
+    false, "the terminal wake is the Python observer's prompt");
+  assert.equal(prompts.length, 0);
 });
 
 test("a child that cannot be associated produces no synthetic traffic", async () => {
@@ -376,4 +379,119 @@ test("disable-by-config leaves the stream silent", async () => {
   });
   await handle.done;
   assert.equal(synthetic.length, 0);
+});
+
+// --- attention wakes (RM-070 AC1-AC7) --------------------------------------
+
+const asked = (action = "read", resource = "x") => ({
+  type: "permission.asked",
+  data: { sessionID: "ses_child", action, resources: [resource] },
+});
+
+const replied = () => ({
+  type: "permission.replied",
+  data: { sessionID: "ses_child", requestID: "p1", reply: "once" },
+});
+
+test("an attention milestone wakes the parent exactly once; routine stays quiet", async () => {
+  const { ctx, synthetic } = fakeCtx([
+    childCreated(),
+    asked("read", "a"),
+    asked("read", "a"),
+  ], {
+    get: async ({ sessionID }) => ({ id: sessionID }),
+  });
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  assert.equal(synthetic.length, 2, "start + one needs-input, no duplicate");
+  assert.deepEqual(synthetic.map((s) => ({ resume: s.resume, delivery: s.delivery })),
+    [{ resume: false, delivery: "steer" }, { resume: true, delivery: "steer" }]);
+  assert.equal(synthetic[1].metadata.wake, true);
+  assert.equal(synthetic[0].metadata.wake, false);
+});
+
+test("over the wake cap the milestone is context only and the drop is logged with a count", async () => {
+  const { ctx, synthetic } = fakeCtx([
+    childCreated(),
+    asked("read", "a"),
+    replied(),
+    asked("read", "b"),
+    replied(),
+    asked("read", "c"),
+  ], {
+    get: async ({ sessionID }) => ({ id: sessionID }),
+  });
+  const handle = startObserver(ctx, {
+    now: clock, intervalMs: 0, config: { maxAttentionWakes: 1 },
+  });
+  await handle.done;
+  const needs = synthetic.filter((s) => /needs input/.test(s.text));
+  assert.equal(needs.length, 3);
+  assert.deepEqual(needs.map((s) => s.resume), [true, false, false]);
+  assert.ok(needs.slice(1).every((s) => s.delivery === "steer"));
+  assert.equal(needs[0].metadata.wake, true);
+  assert.equal(needs[1].metadata.wake, false);
+
+  const drops = handle.lastLog().split("\n")
+    .filter((line) => line.includes("attention wake dropped"));
+  assert.equal(drops.length, 2, "every over-cap attention milestone is logged");
+  const parsed = JSON.parse(drops[0]);
+  assert.equal(parsed.extra.reason, "cap");
+  assert.equal(parsed.extra.attentionWakes, 1);
+  assert.equal(parsed.extra.maxAttentionWakes, 1);
+});
+
+test("attentionWake disabled keeps resume false and logs the reason", async () => {
+  const { ctx, synthetic } = fakeCtx([childCreated(), asked()], {
+    get: async ({ sessionID }) => ({ id: sessionID }),
+  });
+  const handle = startObserver(ctx, {
+    now: clock, intervalMs: 0, config: { attentionWake: false },
+  });
+  await handle.done;
+  const needs = synthetic.find((s) => /needs input/.test(s.text));
+  assert.ok(needs);
+  assert.equal(needs.resume, false);
+  assert.equal(needs.metadata.wake, false);
+  const drop = handle.lastLog().split("\n")
+    .find((line) => line.includes("attention wake dropped"));
+  assert.ok(drop, "the disabled wake is logged, not silent");
+  assert.equal(JSON.parse(drop).extra.reason, "disabled");
+});
+
+test("attention wake config accepts env, and explicit options win", async () => {
+  const env = {
+    DELEGATION_OBSERVER_ATTENTION_WAKE: "0",
+    DELEGATION_OBSERVER_MAX_ATTENTION_WAKES: "1",
+  };
+  const fromEnv = startObserver(fakeCtx([]).ctx, {
+    now: clock, intervalMs: 0, env,
+  });
+  await fromEnv.done;
+  assert.equal(fromEnv.config.attentionWake, false);
+  assert.equal(fromEnv.config.maxAttentionWakes, 1);
+
+  const fromPluginOptions = startObserver(fakeCtx([], {
+    options: { delegationObserver: { attentionWake: true, maxAttentionWakes: 2 } },
+  }).ctx, { now: clock, intervalMs: 0, env });
+  await fromPluginOptions.done;
+  assert.equal(fromPluginOptions.config.attentionWake, true, "plugin options win over env");
+  assert.equal(fromPluginOptions.config.maxAttentionWakes, 2);
+
+  const fromCallOptions = startObserver(fakeCtx([], {
+    options: { delegationObserver: { maxAttentionWakes: 2 } },
+  }).ctx, { now: clock, intervalMs: 0, env, config: { maxAttentionWakes: 3 } });
+  await fromCallOptions.done;
+  assert.equal(fromCallOptions.config.maxAttentionWakes, 3,
+    "explicit call options win over forwarded options and env");
+});
+
+test("an untrusted parent receives no attention wake", async () => {
+  const { ctx, synthetic } = fakeCtx([childCreated(), asked()], {
+    get: async ({ sessionID }) => ({ id: sessionID, parentID: "ses_other" }),
+  });
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  assert.equal(synthetic.length, 0);
+  assert.match(handle.state.degradation, /unverified orchestrator ses_parent/);
 });
