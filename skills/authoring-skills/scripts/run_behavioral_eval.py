@@ -1205,12 +1205,12 @@ def _startup_log(message):
 
 
 def _capture_process(argv, cwd=None, env=None, timeout=240):
-    """Run a child while measuring spawn -> first stdout event.
+    """Run a child while measuring spawn -> first non-empty stdout line.
 
     Streaming readers drain stdout/stderr concurrently (no pipe deadlock), so
-    the first JSON event's arrival time is decision-grade evidence for the
-    startup-latency class. The timeout semantics are unchanged: on expiry the
-    whole process group is killed and `timed_out=True` is returned.
+    the first non-empty stdout line's arrival time is decision-grade evidence
+    for the startup-latency class. The timeout semantics are unchanged: on
+    expiry the whole process group is killed and `timed_out=True` is returned.
 
     Returns (rc, stdout, stderr, timed_out, first_event_ms).
     """
@@ -1337,8 +1337,8 @@ def invoke_opencode(e, model=None, turn=None):
                 f"total={total_ms}ms; killed the process group")
             return EvalResult(
                 raw=(f"eval stall: subprocess timed out after {stall_timeout}s "
-                     f"with no completion (first event: {seen}; transient; "
-                     "subprocess group killed)"),
+                     f"with no completion (first stdout line: {seen}; "
+                     "transient; subprocess group killed)"),
                 stderr=_redact(err or "")[:4096],
                 first_event_ms=first_ms)
         _startup_log(

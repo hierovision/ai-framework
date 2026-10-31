@@ -27,6 +27,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import uuid
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
@@ -42,6 +43,7 @@ EXPECTED_CONSUMER_AGENTS = 10
 PLUGIN_REL = "./plugins/auto-compact-at-threshold"
 PLUGIN_BARE = "plugins/auto-compact-at-threshold"
 LOADER_MARKER = "auto-compact-at-threshold initialized"
+LOADER_TOKEN_ENV = "OPENCODE_LOADER_PROBE_TOKEN"
 LOADER_LOG = os.path.join(REPO, ".scratch", "opencode-v2", "plugin-loader.log")
 LOADER_TIMEOUT = 45
 
@@ -144,11 +146,13 @@ def loader_evidence(root, binary, plugin_dir):
     standalone CLI with the versioned config and captures `--print-logs`
     stderr. An unavailable model makes the run exit quickly after the plugin
     phase; the evidence is the loader line naming this plugin plus the
-    plugin's own stderr startup marker.
+    plugin's own stderr startup marker, attributed to this probe by a per-run
+    token so another plugin copy cannot supply the record.
     """
     probe_root = os.path.join(REPO, ".scratch", "opencode-v2")
     os.makedirs(probe_root, exist_ok=True)
     probe_dir = tempfile.mkdtemp(prefix="loader-probe-", dir=probe_root)
+    token = uuid.uuid4().hex
     env = dict(os.environ)
     env.update({
         "XDG_CONFIG_HOME": root,
@@ -158,6 +162,7 @@ def loader_evidence(root, binary, plugin_dir):
         "TMPDIR": os.path.join(probe_dir, "tmp"),
         "OPENCODE_DB": os.path.join(probe_dir, "probe.db"),
         "OPENCODE_LOG_LEVEL": "info",
+        LOADER_TOKEN_ENV: token,
     })
     env.pop("OPENCODE_CONFIG_CONTENT", None)
     for key in ("XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "TMPDIR"):
@@ -199,7 +204,8 @@ def loader_evidence(root, binary, plugin_dir):
                 and "auto-compact-at-threshold" in line]
     markers = [line for line in lines
                if LOADER_MARKER in line
-               and "auto-compact-at-threshold" in line]
+               and "auto-compact-at-threshold" in line
+               and token in line]
     if failures:
         return False, f"loader failed to load the versioned plugin: {failures[0][:240]}"
     if not loaded:
@@ -207,10 +213,11 @@ def loader_evidence(root, binary, plugin_dir):
         return False, (f"loader did not load the versioned plugin "
                        f"{expected}{suffix}; log={LOADER_LOG}")
     if not markers:
-        return False, (f"startup marker missing from the loader log for "
-                       f"{expected}; log={LOADER_LOG}")
+        return False, (f"startup marker missing or not attributed to this "
+                       f"probe (token {token[:8]}…) for {expected}; "
+                       f"log={LOADER_LOG}")
     return True, (f"loader id={expected} marker={LOADER_MARKER} "
-                  f"log={LOADER_LOG}")
+                  f"token={token[:8]}… log={LOADER_LOG}")
 
 
 def check_plugin(manifest=None, framework=None, config_root=None,

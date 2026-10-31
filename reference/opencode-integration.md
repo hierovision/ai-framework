@@ -196,8 +196,11 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
   not loader proof. `plugin list` does not enumerate local directories, so
   post-smoke also runs the real CLI with the versioned config and requires
   both the loader's `loading plugin` line for this directory and the
-  `auto-compact-at-threshold initialized` marker. Three pieces of evidence
-  are required: config wiring, runtime probe, and loader log.
+  `auto-compact-at-threshold initialized` marker. The marker must also carry
+  the per-run token the probe passes as `OPENCODE_LOADER_PROBE_TOKEN` (the
+  plugin echoes it as `extra.probe`), so a different plugin copy emitting the
+  same static text cannot satisfy the check. Three pieces of evidence are
+  required: config wiring, runtime probe, and loader log.
 - **TUI context correction (probed 2026-10-29, live TUI).** The keymap is
   `ctx.keymap`, not `ctx.ui.keymap` (the latter is undefined and fails the TUI
   part at setup). A plugin command registered with `palette: true` / `slash`
@@ -281,8 +284,8 @@ inside both. The variability is startup/provider-side (zero-event stalls
 versus the same model/auth streaming normally), not an assertion or config
 defect. No timeout was raised and no retry-until-green was added.
 
-The runner now measures spawn → first stdout event (`first_event=Nms`) in
-the `BEVAL_STARTUP_LOG=1` line and in a stall's detail (`first event: none`
-for a true zero-event stall). The timeout path still kills the process
-group at the configured ceiling; the instrumentation only records when the
-first JSON event arrived.
+The runner now measures spawn → first non-empty stdout line
+(`first_event=Nms`) in the `BEVAL_STARTUP_LOG=1` line and in a stall's
+detail (`first stdout line: none` for a true zero-event stall). The
+timeout path still kills the process group at the configured ceiling; the
+instrumentation only records when the first stdout line arrived.
