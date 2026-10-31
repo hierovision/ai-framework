@@ -337,12 +337,23 @@ export function reconcileActive(
   snapshot: Iterable<string> | null,
 ): boolean {
   const live = snapshot === null ? new Set<string>() : new Set(snapshot);
+  // Every id the observer knows about: the active-map keys, the new snapshot,
+  // and every discovered delegate — a row can be promoted from
+  // `associateSessionInfo({ active: true })` without an active-map entry, and
+  // it must still be denied when the map drops it (review F21).
+  const known = new Set<string>([...state.active.keys(), ...live]);
+  for (const d of state.delegates.values()) {
+    if (d.provenance === "discovered") known.add(d.sessionID);
+  }
   let changed = false;
-  for (const sessionID of new Set([...state.active.keys(), ...live])) {
+  for (const sessionID of known) {
     const next = live.has(sessionID);
-    if (state.active.get(sessionID) === next) continue;
+    const before = state.active.get(sessionID);
+    const delegate = state.delegates.get(sessionID);
+    const wasRunning = delegate?.status === "running";
     markActive(state, sessionID, next);
-    changed = true;
+    const demoted = wasRunning && delegate?.status !== "running";
+    if (before !== next || demoted) changed = true;
   }
   return changed;
 }
@@ -392,7 +403,14 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
   const parentID = info.parentID ?? info.parent_id ?? null;
   const marker = parseDelegationTitle(info.title ?? "");
   if (!parentID && !marker) return null;
-  const live = state.active.get(sessionID) ?? Boolean(info.active);
+  const knownActive = state.active.get(sessionID);
+  const live = knownActive ?? Boolean(info.active);
+  // Record the promotion so the map and the row agree: reconciliation denies
+  // exactly the ids the map holds, so an `info.active` promotion must leave a
+  // trace (review F21).
+  if (knownActive === undefined && info.active !== undefined) {
+    state.active.set(sessionID, Boolean(info.active));
+  }
   delegate = {
     sessionID,
     orchestratorID: parentID || marker?.orchestratorID || "",

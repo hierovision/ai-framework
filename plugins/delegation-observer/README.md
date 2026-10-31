@@ -212,10 +212,10 @@ server build).
 ## Tests
 
 ```
-node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 112 tests
+node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 114 tests
 node ../delegation-sentinel/sentinel.test.ts           # 5 tests
 tsc -p . --noEmit
-node mutation-check.mjs                                # 26 break/restore proofs
+node mutation-check.mjs                                # 28 break/restore proofs
 ```
 
 `mutation-check.mjs` is the checked-in evidence behind every liveness guard:

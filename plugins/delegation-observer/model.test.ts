@@ -114,7 +114,7 @@ const child = (id = "ses_live", parentID = "ses_parent") => ({
 
 test("the model constructs over a healthy host and bootstraps liveness", () => {
   // Regression for the F9 blocker: createTuiModel must not throw. The banner
-  // memo reads liveSessionRows(), which used to be declared below it.
+  // projection reads liveSessionRows(), which used to be declared below it.
   const { ctx, calls } = mockHost({
     sessions: [child("ses_live"), child("ses_old")],
     status: (id) => (id === "ses_live" ? "running" : "idle"),
@@ -134,7 +134,7 @@ test("the model constructs over a healthy host and bootstraps liveness", () => {
     assert.equal(live?.stale, false);
     assert.equal(old?.status, "unknown");
     assert.equal(old?.stale, true);
-    // the view's memo layer is evaluated here (solid memos are eager)
+    // the view's projection is evaluated here, in the real init path
     assert.equal(model.banner(), null, "healthy host: the rendered banner is empty");
     assert.equal(model.state.delegates.size, 2);
     assert.equal(typeof model.rows, "function");

@@ -160,7 +160,7 @@ const MUTATIONS = [
   },
   {
     id: "model-tdz-missing-binding",
-    why: "the model's eager memos must only read initialized bindings (F9)",
+    why: "the projections must only close over initialized bindings (F9)",
     file: "model.ts",
     from: "  const liveSessionRows = () => {",
     to: "  const liveSessionRowsLater = () => {",
@@ -242,11 +242,34 @@ const MUTATIONS = [
     id: "absent-session-not-denied",
     why: "an id missing from an available map must be denied",
     file: "state.ts",
-    from: "  for (const sessionID of new Set([...state.active.keys(), ...live])) {\n",
+    from: "  for (const sessionID of known) {\n",
     to: "  for (const sessionID of live) {\n",
     // proven end-to-end at the model layer (the tick -> row demotion path)
     test: "model.test.ts",
     expect: "a session that leaves an available map stops being running (F18)",
+  },
+  {
+    id: "reconcile-ignores-discovered",
+    why: "every discovered row must be reconciled, not only active-map keys (F21)",
+    file: "state.ts",
+    from:
+      "  const known = new Set<string>([...state.active.keys(), ...live]);\n"
+      + "  for (const d of state.delegates.values()) {\n"
+      + "    if (d.provenance === \"discovered\") known.add(d.sessionID);\n"
+      + "  }\n",
+    to: "  const known = new Set<string>(live);\n",
+    expect: "reconcileActive denies a row promoted by info.active, however it was promoted",
+  },
+  {
+    id: "associate-active-unrecorded",
+    why: "an info.active promotion must leave a map entry to be denied later (F21)",
+    file: "state.ts",
+    from:
+      "  if (knownActive === undefined && info.active !== undefined) {\n"
+      + "    state.active.set(sessionID, Boolean(info.active));\n"
+      + "  }\n",
+    to: "",
+    expect: "reconcileActive denies a row promoted by info.active, however it was promoted",
   },
   {
     id: "drop-version-read",

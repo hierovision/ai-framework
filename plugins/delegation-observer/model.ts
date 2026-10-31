@@ -15,11 +15,12 @@
  *     ctx.ui.dialog.{select,prompt}, ctx.ui.tabs.focus, ctx.ui.panel.open
  *   - ctx.client.session.{prompt,interrupt} and ctx.client.plugin.list
  *
- * Declaration order matters: solid's `createMemo` evaluates its callback
- * synchronously, so every binding a memo reads must already be initialized.
- * That is not a style preference — a `const` declared below the memo is in its
- * temporal dead zone and throws `ReferenceError` at model construction, which
- * is how the TUI part fails to load (review F9).
+ * Declaration order matters: the projections are plain functions built by
+ * `projection(version, compute)`, so a binding they close over must be
+ * initialized before the first render call. A `const` declared after its use
+ * is in its temporal dead zone and throws `ReferenceError` — the way the TUI
+ * part fails to load (review F9). The construction tests call `rows()` and
+ * `banner()` for exactly that reason.
  */
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

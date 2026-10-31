@@ -916,6 +916,66 @@ test("reconcileActive denies absent ids and leaves observed rows alone", () => {
   assert.equal(discovered.status, "unknown");
 });
 
+test("reconcileActive denies a row promoted by info.active, however it was promoted", () => {
+  // F21: `associateSessionInfo({ active: true })` promotes a discovered row
+  // without an explicit markActive call. Both an unavailable snapshot and an
+  // available snapshot that omits the id must demote it.
+  const unavailable = fresh();
+  associateSessionInfo(unavailable, {
+    id: "ses_info", parentID: "ses_parent", title: "info.active",
+    active: true,
+    time: { created: clock - 120_000, updated: clock - 60_000 },
+  });
+  const d1 = unavailable.delegates.get("ses_info");
+  assert.equal(d1.status, "running");
+  assert.equal(d1.provenance, "discovered");
+  assert.equal(unavailable.active.get("ses_info"), true, "the promotion is recorded");
+
+  assert.equal(reconcileActive(unavailable, null), true);
+  assert.equal(d1.status, "unknown", "null snapshot demotes an info.active row");
+  assert.equal(d1.stale, false, "recent: unknown, not fabricated stale");
+
+  const omitting = fresh();
+  associateSessionInfo(omitting, {
+    id: "ses_info", parentID: "ses_parent", title: "info.active",
+    active: true,
+    time: { created: clock - 120_000, updated: clock - 60_000 },
+  });
+  const d2 = omitting.delegates.get("ses_info");
+  assert.equal(d2.status, "running");
+  assert.equal(reconcileActive(omitting, ["ses_other"]), true);
+  assert.equal(d2.status, "unknown", "an omitting available snapshot demotes it too");
+
+  const included = fresh();
+  associateSessionInfo(included, {
+    id: "ses_info", parentID: "ses_parent", title: "info.active",
+    active: true,
+    time: { created: clock - 120_000, updated: clock - 60_000 },
+  });
+  const d3 = included.delegates.get("ses_info");
+  assert.equal(reconcileActive(included, ["ses_info"]), false, "already live: no change");
+  assert.equal(d3.status, "running");
+  assert.equal(reconcileActive(included, []), true);
+  assert.equal(d3.status, "unknown");
+  assert.equal(reconcileActive(included, ["ses_info"]), true, "recovery re-promotes");
+  assert.equal(d3.status, "running");
+});
+
+test("reconcileActive leaves observed rows and their clocks alone", () => {
+  const state = fresh();
+  observe(state, child("ses_seen", "ses_parent"));
+  const seen = state.delegates.get("ses_seen");
+  assert.equal(seen.provenance, "observed");
+  const observedAt = seen.lastActivityAt;
+  advance(1_000);
+  reconcileActive(state, null);
+  assert.equal(seen.status, "running", "an event-driven row is never demoted by the map");
+  assert.equal(seen.stale, false);
+  assert.equal(state.active.get("ses_seen"), undefined,
+    "an event-driven row never had a map entry to deny");
+  assert.equal(seen.lastActivityAt, observedAt, "its own observation clock is untouched");
+});
+
 test("an archived row never emits a start milestone on a replayed create", () => {
   // Reviewer repro: discovered-live row (so `associate` did not pre-mark
   // `start`) -> archive -> replayed session.created must emit nothing.
