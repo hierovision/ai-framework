@@ -67,6 +67,14 @@ env source is the end-to-end channel for the TUI; options still win where a
 host forwards them. The observer TUI writes a presence marker
 (`<location>/.scratch/delegation-observer/tui.json`) for the sentinel.
 
+The **server** part reads only the two RM-070 attention env keys
+(`DELEGATION_OBSERVER_ATTENTION_WAKE`,
+`DELEGATION_OBSERVER_MAX_ATTENTION_WAKES`). `DELEGATION_OBSERVER_ENABLED`,
+`DELEGATION_OBSERVER_STALL_SECONDS`, `DELEGATION_OBSERVER_STALE_GRACE_SECONDS`,
+`DELEGATION_OBSERVER_HEALTH_FILE` and `DELEGATION_OBSERVER_STATUS_FILE` remain
+the TUI channel: the server's thresholds and enabled flag are not
+env-overridable (ADR-0015 Decision 10; the shared supervision contract).
+
 **Sentinel companion.** `plugins/delegation-sentinel/` is an always-loadable
 TUI-only fallback: it renders one line when this plugin is absent, failed,
 disabled, disconnected, or its TUI is not running. It never shows delegate
@@ -233,10 +241,10 @@ server build).
 ## Tests
 
 ```
-node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 127 tests
+node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 131 tests
 node ../delegation-sentinel/sentinel.test.ts           # 5 tests
 tsc -p . --noEmit
-node mutation-check.mjs                                # 43 break/restore proofs
+node mutation-check.mjs                                # 47 break/restore proofs
 ```
 
 `mutation-check.mjs` is the checked-in evidence behind every liveness guard:
