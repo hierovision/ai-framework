@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { createDefinition, createTuiModel } from "./model.ts";
+import { createDefinition, createTuiModel, readPluginStatus } from "./model.ts";
 
 const OLD = Date.now() - 20 * 3_600_000;
 
@@ -86,7 +86,13 @@ function mockHost({
       plugin: {
         list: async () => plugin === "missing"
           ? []
-          : [{ id: "delegation-observer", state: { status: plugin }, features: { tui: true } }],
+          : [{
+            id: "delegation-observer",
+            state: plugin === "failed"
+              ? { status: "failed", error: "boom" }
+              : { status: "active" },
+            features: { tui: true },
+          }],
       },
       session: { prompt: async () => ({}), interrupt: async () => ({ interrupted: true }) },
     },
@@ -302,6 +308,119 @@ test("the history path reports an empty history instead of opening a dialog", as
   }
 });
 
+test("readPluginStatus reads active, failed, missing and error answers", async () => {
+  const active = await readPluginStatus({
+    plugin: { list: async () => [{
+      id: "delegation-observer",
+      state: { status: "active" },
+      features: { tui: true },
+    }] },
+  }, "/work");
+  assert.deepEqual(active, { loaded: true, state: "active", tui: true });
+
+  const failed = await readPluginStatus({
+    plugin: { list: async () => [{
+      id: "delegation-observer",
+      state: { status: "failed", error: "boom" },
+      features: { tui: false },
+    }] },
+  });
+  assert.deepEqual(failed, { loaded: true, state: "failed: boom", tui: false });
+
+  // failed without a recorded error is still a load failure
+  const failedAnon = await readPluginStatus({
+    plugin: { list: async () => [{ id: "delegation-observer", state: { status: "failed" } }] },
+  });
+  assert.equal(failedAnon.state, "failed: unknown error");
+
+  const missing = await readPluginStatus({
+    plugin: { list: async () => [{ id: "other-plugin", state: { status: "active" } }] },
+  });
+  assert.deepEqual(missing, { loaded: false, state: "missing", tui: false });
+
+  // the client envelope ({ data: [...] }) is accepted too
+  const enveloped = await readPluginStatus({
+    plugin: { list: async () => ({ data: [{ id: "delegation-observer", state: { status: "active" } }] }) },
+  });
+  assert.equal(enveloped.loaded, true);
+
+  // an unreachable list is "unknown", not "healthy"
+  const broken = await readPluginStatus({
+    plugin: { list: async () => { throw new Error("rpc closed"); } },
+  });
+  assert.equal(broken.loaded, false);
+  assert.equal(broken.state, "unknown");
+  assert.match(broken.error ?? "", /rpc closed/);
+});
+
+test("the location is passed to the plugin query when known", async () => {
+  const seen: any[] = [];
+  const client = {
+    plugin: { list: async (input: any) => { seen.push(input); return []; } },
+  };
+  await readPluginStatus(client, "/work/dir");
+  await readPluginStatus(client);
+  assert.deepEqual(seen, [{ location: { directory: "/work/dir" } }, {}]);
+});
+
+test("a healthy observer reports healthy from the status command", async () => {
+  const { ctx, calls } = mockHost({ plugin: "active" });
+  const model = createTuiModel(ctx);
+  try {
+    assert.equal(model.banner(), null, "an active plugin with no other reason is healthy");
+    await command(calls, "delegation.status").run();
+    assert.equal(calls.toasts.length, 1, "exactly one status answer");
+    assert.equal(calls.toasts[0].message, "delegation observer healthy");
+    assert.equal(calls.toasts[0].variant, "info");
+  } finally {
+    model.dispose();
+  }
+});
+
+test("a missing plugin degrades the status command with the banner reason", async () => {
+  const { ctx, calls } = mockHost({ plugin: "missing" });
+  const model = createTuiModel(ctx);
+  try {
+    await command(calls, "delegation.status").run();
+    assert.equal(calls.toasts.length, 1);
+    assert.equal(calls.toasts[0].title, "delegation degraded");
+    assert.match(calls.toasts[0].message, /not loaded/);
+    assert.equal(calls.toasts[0].variant, "warning");
+    assert.match(model.banner() ?? "", /not loaded/,
+      "the rendered banner names the same reason");
+  } finally {
+    model.dispose();
+  }
+});
+
+test("a failed plugin degrades the status command with the load error", async () => {
+  const { ctx, calls } = mockHost({ plugin: "failed" });
+  const model = createTuiModel(ctx);
+  try {
+    await command(calls, "delegation.status").run();
+    assert.equal(calls.toasts.length, 1);
+    assert.equal(calls.toasts[0].title, "delegation degraded");
+    assert.match(calls.toasts[0].message, /load failed: boom/);
+    assert.match(model.banner() ?? "", /load failed: boom/);
+  } finally {
+    model.dispose();
+  }
+});
+
+test("an unreachable plugin record degrades the status command", async () => {
+  const { ctx, calls } = mockHost({});
+  ctx.client.plugin.list = async () => { throw new Error("rpc closed"); };
+  const model = createTuiModel(ctx);
+  try {
+    await command(calls, "delegation.status").run();
+    assert.equal(calls.toasts[0].title, "delegation degraded");
+    assert.match(calls.toasts[0].message, /not loaded/,
+      "an unknown record must never read as healthy");
+  } finally {
+    model.dispose();
+  }
+});
+
 test("the shared health record reaches the banner and the status command", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "rm069-health-"));
   const file = join(dir, "health.json");
@@ -348,6 +467,8 @@ test("the shared health record reaches the banner and the status command", async
       t.mock.timers.tick(1_100); // past the 1 s throttle
       await command(live.calls, "delegation.status").run();
       assert.match(live.calls.toasts.at(-1)?.message ?? "", /event stream ended/);
+      assert.match(model.banner() ?? "", /event stream ended/,
+        "the rendered banner follows the rewritten health record");
     } finally {
       model.dispose();
       t.mock.timers.reset();
@@ -417,8 +538,9 @@ test("a disabled observer still registers and says so once", async () => {
   const dispose = await definition.setup(ctx);
   try {
     assert.equal(calls.slots.length, 3, "the strip still renders the disabled banner");
-    assert.match(calls.toasts.at(-1)?.message ?? "", /disabled/);
-    assert.equal(calls.toasts.at(-1)?.variant, "warning");
+    assert.equal(calls.toasts.length, 1, "the disabled notice is emitted exactly once");
+    assert.match(calls.toasts[0].message, /disabled/);
+    assert.equal(calls.toasts[0].variant, "warning");
   } finally {
     dispose();
   }

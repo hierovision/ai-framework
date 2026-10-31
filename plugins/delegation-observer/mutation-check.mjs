@@ -170,7 +170,11 @@ const MUTATIONS = [
     id: "model-live-map-not-reported",
     why: "refreshActive must publish live-map availability to the banner",
     file: "model.ts",
-    from: '    setLiveMap(map.available ? "ok" : "unavailable");\n',
+    from:
+      "    if (availability !== liveMap()) {\n"
+      + "      setLiveMap(availability);\n"
+      + "      bump();\n"
+      + "    }\n",
     to: "",
     expect: "a throwing status map is a banner, not a crash",
   },
@@ -178,8 +182,8 @@ const MUTATIONS = [
     id: "health-record-ignored",
     why: "the shared health record must reach the banner and the status command",
     file: "model.ts",
-    from: "      setServerHealth(record?.degradation ?? null);\n",
-    to: "      setServerHealth(null);\n",
+    from: "      const next = record?.degradation ?? null;\n",
+    to: "      const next = null;\n",
     expect: "the shared health record reaches the banner and the status command",
   },
   {
@@ -203,6 +207,30 @@ const MUTATIONS = [
     // the element-filter contract is asserted by the model suite
     test: "model.test.ts",
     expect: "malformed array elements are dropped, not dereferenced",
+  },
+  {
+    id: "plugin-status-missing",
+    why: "an absent plugin record must degrade, never read as loaded",
+    file: "model.ts",
+    from: '    if (!entry) return { loaded: false, state: "missing", tui: false };\n',
+    to: '    if (!entry) return { loaded: true, state: "active", tui: true };\n',
+    expect: "a missing plugin degrades the status command with the banner reason",
+  },
+  {
+    id: "plugin-status-failed",
+    why: "a failed plugin record must surface its load error",
+    file: "model.ts",
+    from: '    const state = entry.state?.status === "failed"\n',
+    to: '    const state = entry.state?.status === "never"\n',
+    expect: "a failed plugin degrades the status command with the load error",
+  },
+  {
+    id: "status-ignores-healthy-branch",
+    why: "a healthy observer must report healthy, not degraded",
+    file: "model.ts",
+    from: "    const warning = liveBanner();\n    if (!warning) {\n",
+    to: "    const warning = liveBanner();\n    if (false) {\n",
+    expect: "a healthy observer reports healthy from the status command",
   },
   {
     id: "definition-slot-missing",

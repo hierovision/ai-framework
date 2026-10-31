@@ -184,19 +184,30 @@ live visibility it does not have.
 
 `model.ts` owns every read, timer, command, decision **and** the plugin/slot
 registration (`createDefinition(Plugin, views)`), and is exercised by
-`model.test.ts` against a mock host — including the shared health record, one
-fake-timer interval tick and the registered slot disposers. `tui.tsx` supplies
-JSX render callbacks only. Solid's `createMemo` evaluates eagerly, so a binding
-declared below a memo is a startup `ReferenceError`; the model test constructs
-`createTuiModel` for exactly that reason.
+`model.test.ts` against a mock host — including the plugin record (active /
+failed / missing / unreachable), the shared health record with its 1 s throttle,
+one fake-timer interval tick, the status command's healthy and degraded
+answers, and the registered slot disposers.
+
+**Documented boundary:** `tui.tsx` cannot be imported by `node --test` (it is
+JSX), so it is **live-drill-only**. It supplies three render callbacks
+(`strip`, `footer`, `panel`) to `createDefinition`; the registration, the slot
+names/order, the render invocation and the disposer chain are all asserted in
+`model.test.ts` with stub views, and the callback bodies are exercised by the
+documented live drill. No behavior lives in `tui.tsx`.
+
+The projections in `model.ts` are plain functions that read the `version`
+signal, not `createMemo`: solid's server build (what `node --test` imports)
+freezes a memo at construction, which would hide every post-construction
+update from the tests.
 
 ## Tests
 
 ```
-node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 101 tests
+node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 107 tests
 node ../delegation-sentinel/sentinel.test.ts           # 5 tests
 tsc -p . --noEmit
-node mutation-check.mjs                                # 20 break/restore proofs
+node mutation-check.mjs                                # 23 break/restore proofs
 ```
 
 `mutation-check.mjs` is the checked-in evidence behind every liveness guard:

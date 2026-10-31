@@ -23,7 +23,7 @@
  */
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { createMemo, createSignal } from "solid-js";
+import { createSignal } from "solid-js";
 
 import {
   associateSessionInfo,
@@ -122,7 +122,11 @@ export function createTuiModel(ctx: any) {
     lastHealthRead = now;
     try {
       const record = parseHealthRecord(readFileSync(healthFile, "utf8"));
-      setServerHealth(record?.degradation ?? null);
+      const next = record?.degradation ?? null;
+      if (next !== serverHealth()) {
+        setServerHealth(next);
+        bump();
+      }
     } catch {
       // Absent health file is not degradation by itself.
     }
@@ -152,7 +156,11 @@ export function createTuiModel(ctx: any) {
    */
   const refreshActive = () => {
     const map = readLiveMap(rawSessionList, sessionStatus);
-    setLiveMap(map.available ? "ok" : "unavailable");
+    const availability = map.available ? "ok" : "unavailable";
+    if (availability !== liveMap()) {
+      setLiveMap(availability);
+      bump();
+    }
     for (const entry of map.entries) {
       markActive(state, entry.sessionID, entry.live);
     }
@@ -265,17 +273,20 @@ export function createTuiModel(ctx: any) {
     });
   };
 
-  // Eager by contract: solid's createMemo evaluates here, so every binding
-  // read above must already be initialized (review F9).
-  const rows = createMemo(() => {
+  // Plain functions that read the `version` signal first: in the client that
+  // registers the reactive dependency (Solid tracks signal reads made during a
+  // render), and under `node --test`'s server build they recompute instead of
+  // freezing at construction. A `createMemo` here would hide every
+  // post-construction update from the tests (review F17 item 4).
+  const rows = () => {
     version();
     return liveRows();
-  });
+  };
 
-  const banner = createMemo(() => {
+  const banner = () => {
     version();
     return liveBanner();
-  });
+  };
 
   // --- owner actions ------------------------------------------------------
 
