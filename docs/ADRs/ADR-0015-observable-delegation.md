@@ -220,3 +220,45 @@ event-driven"):
    `touch` clearing a warning also clears `unknown`.
 
 Evidence: `docs/roadmap-detail/RM-069.md` → *The 2026-10-30 stale-row defect*.
+
+## Amendment (2026-10-31) — attention wakes the parent once (RM-070)
+
+Decision 5 sent every milestone with `resume:false` and kept the terminal wake
+as the only prompt. The owner's 2026-10-31 challenge found the gap: a
+`thrash`, `stall`, `needs-input` or `denied` milestone reached the parent's
+inbox while the parent was idle, so the condition could burn work or deadlock
+before the parent's next turn. This amendment narrows Decision 5 only. The
+rest of ADR-0015 stands.
+
+1. **Attention exception.** `thrash`, `stall`, `needs-input` and `denied`
+   start exactly one parent turn per condition (same child, same kind, same
+   target). Re-delivery of the same condition starts no second turn.
+   `start`, `first-tool`, `resume`, `retry` and `terminal` remain
+   `resume:false`; the RM-058 terminal wake remains the only terminal prompt.
+2. **Bounded and visible.** `maxAttentionWakes` (default 3) caps attention
+   turns per child per observer process. Beyond the cap the milestone is still
+   queued as context (`resume:false`) and the drop is logged with its count
+   (`attention wake dropped`, reason `cap` or `disabled`). `attentionWake`
+   (default true) disables the exception entirely.
+3. **Same gates, no new authority.** A wake uses the existing trusted-root and
+   same-directory gate. An untrusted or unresolvable parent receives no wake
+   and records the existing degradation. The plugin never auto-interrupts or
+   cancels a child — the parent decides.
+4. **Honest text.** A wake names the child, the condition and the task, says
+   the parent may steer or interrupt, and never claims the child stopped. The
+   parent is told to check the child's current state first.
+5. **Configurable.** Options `attentionWake` / `maxAttentionWakes` and env
+   `DELEGATION_OBSERVER_ATTENTION_WAKE` /
+   `DELEGATION_OBSERVER_MAX_ATTENTION_WAKES`; a forwarded option wins over env,
+   env wins over the shared default. The server part reads only these two keys
+   from env — `ENABLED`, `STALL_SECONDS`, `STALE_GRACE_SECONDS`,
+   `HEALTH_FILE` and `STATUS_FILE` remain the TUI channel (Decision 10), so the
+   thresholds and the server's enabled flag are not server-env-overridable.
+6. **Host vocabulary.** On the headless 2.1.4 server the tool name arrives in
+   `session.tool.input.started` and the parsed input in
+   `session.tool.input.ended`; `session.tool.called` carries no name and
+   `session.message.content.updated` was not emitted. The reducer consumes the
+   input events as well, so thrash detection works on the real host stream.
+
+Evidence: `docs/roadmap-detail/RM-070.md` (unit, mutation and isolated live
+drill).

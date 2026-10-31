@@ -12,20 +12,26 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { PLUGIN_ID, createDefinition, startObserver } from "./server.ts";
-import { observe, tick } from "./state.ts";
+import { DEFAULTS, observe, tick } from "./state.ts";
 
 const Plugin = { define: (d) => d };
 const clock = () => 1_000_000;
 
+/** Server tests are hermetic: production reads process.env, tests never do. */
+function startTestObserver(ctx: any, options: Parameters<typeof startObserver>[1] = {}) {
+  return startObserver(ctx, { env: {}, ...options });
+}
+
 function fakeCtx(events, {
   list = [], failSubscribe = false, syntheticFails = false, get, location,
+  options = {},
 } = {}) {
   const synthetic = [];
   const prompts = [];
   const logs = [];
   let signal = null;
   const ctx = {
-    options: {},
+    options,
     location: location ?? undefined,
     session: {
       list: async () => ({ data: list, cursor: {} }),
@@ -71,7 +77,7 @@ test("association and milestones go to the orchestrator, never the child", async
       data: { sessionID: "ses_child", action: "read", resources: ["x"] },
     },
   ]);
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.ok(synthetic.length >= 2);
   assert.ok(synthetic.every((s) => s.sessionID === "ses_parent"));
@@ -85,10 +91,12 @@ test("terminal completion emits exactly one synthetic milestone", async () => {
     { type: "session.execution.succeeded", data: { sessionID: "ses_child" } },
     { type: "session.execution.succeeded", data: { sessionID: "ses_child" } },
   ]);
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.equal(synthetic.filter((s) => /completed/.test(s.text)).length, 1);
-  assert.equal(prompts.length, 0); // never starts a model turn
+  assert.equal(synthetic.filter((s) => /completed/.test(s.text))[0].resume,
+    false, "the terminal wake is the Python observer's prompt");
+  assert.equal(prompts.length, 0);
 });
 
 test("a child that cannot be associated produces no synthetic traffic", async () => {
@@ -98,7 +106,7 @@ test("a child that cannot be associated produces no synthetic traffic", async ()
       data: { sessionID: "ses_orphan", parentID: null, title: "plain", agent: "x" },
     },
   ]);
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.equal(synthetic.length, 0);
 });
@@ -107,7 +115,7 @@ test("bootstrap association covers children that predate the observer", async ()
   const { ctx, synthetic } = fakeCtx([], {
     list: [{ id: "ses_child", parentID: "ses_parent", title: "pre-existing", agent: "planner" }],
   });
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.ok(handle.state.delegates.has("ses_child"));
   assert.equal(synthetic.length, 0); // no start milestone for a pre-existing child
@@ -115,7 +123,7 @@ test("bootstrap association covers children that predate the observer", async ()
 
 test("a failing event stream is recorded, not thrown", async () => {
   const { ctx } = fakeCtx([], { failSubscribe: true });
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.equal(handle.state.connection, "disconnected");
   assert.match(handle.state.degradation, /stream closed/);
@@ -130,7 +138,7 @@ test("a rejected synthetic message degrades visibly but does not stop observatio
       data: { sessionID: "ses_child", action: "read", resources: ["x"] },
     },
   ], { syntheticFails: true });
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.match(handle.state.degradation, /synthetic/);
   const failures = handle.lastLog()
@@ -143,7 +151,7 @@ test("an unverified orchestrator never receives a synthetic milestone", async ()
   const { ctx, synthetic } = fakeCtx([childCreated()], {
     get: async ({ sessionID }) => ({ id: sessionID, parentID: "ses_other" }),
   });
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.equal(synthetic.length, 0);
   assert.match(handle.state.degradation, /unverified orchestrator ses_parent/);
@@ -154,7 +162,7 @@ test("a session lookup failure fails closed with a visible reason", async () => 
   const { ctx, synthetic } = fakeCtx([childCreated()], {
     get: async () => { throw new Error("not found"); },
   });
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.equal(synthetic.length, 0);
   assert.match(handle.state.degradation, /unverified orchestrator/);
@@ -165,7 +173,7 @@ test("degradation is published in the shared health record", async () => {
   try {
     const file = join(dir, "health.json");
     const { ctx } = fakeCtx([], { failSubscribe: true });
-    const handle = startObserver(ctx, {
+    const handle = startTestObserver(ctx, {
       now: clock, intervalMs: 0, healthFile: file,
     });
     await handle.done;
@@ -187,7 +195,7 @@ test("only the instance owning the parent location emits", async () => {
       id: sessionID, location: { directory: "/other" },
     }),
   });
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.equal(synthetic.length, 0);
   assert.doesNotMatch(handle.state.degradation ?? "", /unverified/);
@@ -200,7 +208,7 @@ test("the owning location emits exactly once", async () => {
       id: sessionID, location: { directory: "/work" },
     }),
   });
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.equal(synthetic.length, 1);
   assert.equal(synthetic[0].sessionID, "ses_parent");
@@ -223,7 +231,7 @@ test("a depth-2 child routes its milestone to the root orchestrator", async () =
       return null;
     },
   });
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.equal(synthetic.length, 1);
   assert.equal(synthetic[0].sessionID, root);
@@ -249,7 +257,7 @@ test("a nested child under a title-marked vehicle routes to the TUI root", async
       return null;
     },
   });
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.equal(synthetic.length, 1);
   assert.equal(synthetic[0].sessionID, root);
@@ -260,7 +268,7 @@ test("an unresolvable parent chain fails closed with a visible reason", async ()
   const { ctx, synthetic } = fakeCtx([childCreated("ses_leaf", "ses_missing")], {
     get: async () => null,
   });
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.equal(synthetic.length, 0);
   assert.match(handle.state.degradation, /unverified orchestrator ses_missing/);
@@ -277,7 +285,7 @@ test("the health record is written on state changes only", async () => {
       { type: "session.usage.updated", data: { sessionID: "ses_child", cost: 1 } },
       { type: "session.usage.updated", data: { sessionID: "ses_child", cost: 2 } },
     ]);
-    const handle = startObserver(ctx, {
+    const handle = startTestObserver(ctx, {
       now: clock, intervalMs: 0, healthFile: file,
       onHealthWrite: (record) => writes.push(record),
     });
@@ -298,7 +306,7 @@ test("the health record is written on state changes only", async () => {
 
 test("teardown aborts the event subscription", async () => {
   const { ctx, signal } = fakeCtx([], {});
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   assert.ok(signal(), "subscribe received a signal");
   assert.equal(signal().aborted, false);
@@ -313,7 +321,7 @@ test("a historical bootstrap emits no synthetic stalls and never reads running",
       time: { created: 1_000, updated: 2_000 }, outcome: "succeeded",
     }],
   });
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   const d = handle.state.delegates.get("ses_old");
   assert.ok(d);
@@ -336,7 +344,7 @@ test("a discovered row promoted by a non-touch event never stalls on the server 
       time: { created: 1_000, updated: 2_000 },
     }],
   });
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   const d = handle.state.delegates.get("ses_old");
   assert.equal(d.provenance, "observed");
@@ -354,7 +362,7 @@ test("a store-terminal child emits nothing on a tick or a replayed create", asyn
       time: { created: 999_000, updated: 999_900 }, outcome: "succeeded",
     }],
   });
-  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
   await handle.done;
   const d = handle.state.delegates.get("ses_done");
   assert.equal(d.status, "completed");
@@ -371,9 +379,170 @@ test("a store-terminal child emits nothing on a tick or a replayed create", asyn
 
 test("disable-by-config leaves the stream silent", async () => {
   const { ctx, synthetic } = fakeCtx([childCreated()]);
-  const handle = startObserver(ctx, {
+  const handle = startTestObserver(ctx, {
     now: clock, intervalMs: 0, config: { enabled: false },
   });
   await handle.done;
   assert.equal(synthetic.length, 0);
+});
+
+// --- attention wakes (RM-070 AC1-AC7) --------------------------------------
+
+const asked = (action = "read", resource = "x") => ({
+  type: "permission.asked",
+  data: { sessionID: "ses_child", action, resources: [resource] },
+});
+
+const replied = () => ({
+  type: "permission.replied",
+  data: { sessionID: "ses_child", requestID: "p1", reply: "once" },
+});
+
+test("an attention milestone wakes the parent exactly once; routine stays quiet", async () => {
+  const { ctx, synthetic } = fakeCtx([
+    childCreated(),
+    asked("read", "a"),
+    asked("read", "a"),
+  ], {
+    get: async ({ sessionID }) => ({ id: sessionID }),
+  });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  assert.equal(synthetic.length, 2, "start + one needs-input, no duplicate");
+  assert.deepEqual(synthetic.map((s) => ({ resume: s.resume, delivery: s.delivery })),
+    [{ resume: false, delivery: "steer" }, { resume: true, delivery: "steer" }]);
+  assert.equal(synthetic[1].metadata.wake, true);
+  assert.equal(synthetic[0].metadata.wake, false);
+});
+
+test("over the wake cap the milestone is context only and the drop is logged with a count", async () => {
+  const { ctx, synthetic } = fakeCtx([
+    childCreated(),
+    asked("read", "a"),
+    replied(),
+    asked("read", "b"),
+    replied(),
+    asked("read", "c"),
+  ], {
+    get: async ({ sessionID }) => ({ id: sessionID }),
+  });
+  const handle = startTestObserver(ctx, {
+    now: clock, intervalMs: 0, config: { maxAttentionWakes: 1 },
+  });
+  await handle.done;
+  const needs = synthetic.filter((s) => /needs input/.test(s.text));
+  assert.equal(needs.length, 3);
+  assert.deepEqual(needs.map((s) => s.resume), [true, false, false]);
+  assert.ok(needs.slice(1).every((s) => s.delivery === "steer"));
+  assert.equal(needs[0].metadata.wake, true);
+  assert.equal(needs[1].metadata.wake, false);
+
+  const drops = handle.lastLog().split("\n")
+    .filter((line) => line.includes("attention wake dropped"));
+  assert.equal(drops.length, 2, "every over-cap attention milestone is logged");
+  const parsed = JSON.parse(drops[0]);
+  assert.equal(parsed.extra.reason, "cap");
+  assert.equal(parsed.extra.attentionWakes, 1);
+  assert.equal(parsed.extra.maxAttentionWakes, 1);
+});
+
+test("attentionWake disabled keeps resume false and logs the reason", async () => {
+  const { ctx, synthetic } = fakeCtx([childCreated(), asked()], {
+    get: async ({ sessionID }) => ({ id: sessionID }),
+  });
+  const handle = startTestObserver(ctx, {
+    now: clock, intervalMs: 0, config: { attentionWake: false },
+  });
+  await handle.done;
+  const needs = synthetic.find((s) => /needs input/.test(s.text));
+  assert.ok(needs);
+  assert.equal(needs.resume, false);
+  assert.equal(needs.metadata.wake, false);
+  const drop = handle.lastLog().split("\n")
+    .find((line) => line.includes("attention wake dropped"));
+  assert.ok(drop, "the disabled wake is logged, not silent");
+  assert.equal(JSON.parse(drop).extra.reason, "disabled");
+});
+
+test("attention wake config accepts env, and explicit options win", async () => {
+  const env = {
+    DELEGATION_OBSERVER_ATTENTION_WAKE: "0",
+    DELEGATION_OBSERVER_MAX_ATTENTION_WAKES: "1",
+  };
+  const fromEnv = startTestObserver(fakeCtx([]).ctx, {
+    now: clock, intervalMs: 0, env,
+  });
+  await fromEnv.done;
+  assert.equal(fromEnv.config.attentionWake, false);
+  assert.equal(fromEnv.config.maxAttentionWakes, 1);
+
+  const fromPluginOptions = startTestObserver(fakeCtx([], {
+    options: { delegationObserver: { attentionWake: true, maxAttentionWakes: 2 } },
+  }).ctx, { now: clock, intervalMs: 0, env });
+  await fromPluginOptions.done;
+  assert.equal(fromPluginOptions.config.attentionWake, true, "plugin options win over env");
+  assert.equal(fromPluginOptions.config.maxAttentionWakes, 2);
+
+  const fromCallOptions = startTestObserver(fakeCtx([], {
+    options: { delegationObserver: { maxAttentionWakes: 2 } },
+  }).ctx, { now: clock, intervalMs: 0, env, config: { maxAttentionWakes: 3 } });
+  await fromCallOptions.done;
+  assert.equal(fromCallOptions.config.maxAttentionWakes, 3,
+    "explicit call options win over forwarded options and env");
+});
+
+test("the server env seam never overrides enabled or thresholds", async () => {
+  const { ctx, synthetic } = fakeCtx([childCreated(), asked("read", "env")], {
+    get: async ({ sessionID }) => ({ id: sessionID }),
+  });
+  const handle = startTestObserver(ctx, {
+    env: {
+      DELEGATION_OBSERVER_ENABLED: "0",
+      DELEGATION_OBSERVER_STALL_SECONDS: "1",
+      DELEGATION_OBSERVER_STALE_GRACE_SECONDS: "1",
+    },
+  });
+  await handle.done;
+  assert.equal(handle.config.enabled, true, "ENABLED stays TUI-only");
+  assert.equal(handle.config.stallSeconds, DEFAULTS.stallSeconds,
+    "the stall window is not server-env-overridable");
+  assert.equal(handle.config.staleGraceSeconds, DEFAULTS.staleGraceSeconds,
+    "the stale grace is not server-env-overridable");
+  const needs = synthetic.find((s) => /needs input/.test(s.text));
+  assert.ok(needs, "the server part still runs");
+  assert.equal(needs.resume, true, "the attention key still wakes by default");
+});
+
+test("retry is strip-only and never logs a dropped wake", async () => {
+  const { ctx, synthetic } = fakeCtx([
+    childCreated(),
+    {
+      type: "session.status",
+      data: {
+        sessionID: "ses_child", type: "retry",
+        status: { type: "retry", attempt: 1 },
+      },
+    },
+  ], {
+    get: async ({ sessionID }) => ({ id: sessionID }),
+  });
+  const handle = startTestObserver(ctx);
+  await handle.done;
+  const retry = synthetic.find((s) => s.metadata.kind === "retry");
+  assert.ok(retry);
+  assert.equal(retry.resume, false);
+  assert.equal(retry.metadata.attention, true);
+  assert.equal(retry.metadata.wake, false);
+  assert.doesNotMatch(handle.lastLog(), /attention wake dropped/,
+    "retry is not wake-eligible, so it is not a dropped wake");
+});
+
+test("an untrusted parent receives no attention wake", async () => {
+  const { ctx, synthetic } = fakeCtx([childCreated(), asked()], {
+    get: async ({ sessionID }) => ({ id: sessionID, parentID: "ses_other" }),
+  });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  assert.equal(synthetic.length, 0);
+  assert.match(handle.state.degradation, /unverified orchestrator ses_parent/);
 });
