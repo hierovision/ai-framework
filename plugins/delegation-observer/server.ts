@@ -36,13 +36,15 @@ import { dirname } from "node:path";
 
 import {
   DEFAULTS,
+  type Milestone,
   type ObserverConfig,
   associateSessionInfo,
+  attentionEnvConfig,
   createState,
   degrade,
   disconnect,
-  envConfig,
   healthPath,
+  isWakeKind,
   observe,
   parseDelegationTitle,
   tick,
@@ -79,7 +81,7 @@ export function startObserver(ctx: any, options: {
 } = {}) {
   const config = {
     ...DEFAULTS,
-    ...envConfig(options.env ?? process.env),
+    ...attentionEnvConfig(options.env ?? process.env),
     ...(ctx?.options?.delegationObserver ?? {}),
     ...(options.config ?? {}),
   };
@@ -189,7 +191,7 @@ export function startObserver(ctx: any, options: {
 
   const emit = async (result: {
     milestones: Array<{
-      parentID: string; sessionID: string; kind: string;
+      parentID: string; sessionID: string; kind: Milestone["kind"];
       text: string; description: string;
       attention?: boolean; wake?: boolean;
     }>;
@@ -198,7 +200,7 @@ export function startObserver(ctx: any, options: {
       const parent = await resolveParent(m.parentID);
       if (!parent.trusted) continue;
       if (!sameDirectory(ctx?.location?.directory, parent.location)) continue;
-      if (m.attention && !m.wake) {
+      if (isWakeKind(m.kind) && !m.wake) {
         const delegate = state.delegates.get(m.sessionID);
         log("info", "attention wake dropped", {
           sessionID: m.sessionID,

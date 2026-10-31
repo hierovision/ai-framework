@@ -17,9 +17,11 @@ import {
   DEFAULTS,
   TITLE_PREFIX,
   associateSessionInfo,
+  attentionEnvConfig,
   createState,
   delegationTitle,
   healthPath,
+  isWakeKind,
   markActive,
   observe,
   parseDelegationTitle,
@@ -1384,6 +1386,64 @@ test("tool input events label and count calls when content updates are absent", 
     sessionID: "ses_c", id: "call_code", text: JSON.stringify({ code: "return 1 + 1;" }),
   }));
   assert.equal(code.delegates.get("ses_c").tool.target, "return 1 + 1;");
+});
+
+test("the server attention env seam excludes TUI-only keys", () => {
+  const parsed = attentionEnvConfig({
+    DELEGATION_OBSERVER_ENABLED: "0",
+    DELEGATION_OBSERVER_STALL_SECONDS: "1",
+    DELEGATION_OBSERVER_STALE_GRACE_SECONDS: "1",
+    DELEGATION_OBSERVER_ATTENTION_WAKE: "0",
+    DELEGATION_OBSERVER_MAX_ATTENTION_WAKES: "2",
+  });
+  assert.deepEqual(parsed, { attentionWake: false, maxAttentionWakes: 2 });
+  assert.deepEqual(attentionEnvConfig({}), {});
+  assert.equal(isWakeKind("denied"), true);
+  assert.equal(isWakeKind("retry"), false);
+  assert.equal(isWakeKind("terminal"), false);
+  assert.equal(isWakeKind("start"), false);
+});
+
+test("one headless call seen through input events and a name-less tool.called counts once", () => {
+  // Live order: input.started -> input.ended -> tool.called (no name), same
+  // id. The call must be labelled and counted exactly once.
+  const state = fresh();
+  observe(state, child("ses_c", "ses_p", "overlap drill"));
+  advance(DEFAULTS.milestoneMinIntervalSeconds * 1000 + 1);
+  const call = (id) => {
+    observe(state, event("session.tool.input.started", {
+      sessionID: "ses_c", id, name: "shell",
+    }));
+    const ended = observe(state, event("session.tool.input.ended", {
+      sessionID: "ses_c", id, text: JSON.stringify({ command: "echo LOOP" }),
+    }));
+    const called = observe(state, event("session.tool.called", {
+      sessionID: "ses_c", id, input: { command: "echo LOOP" },
+    }));
+    return { ended, called };
+  };
+
+  const first = call("call_overlap_1");
+  const d = state.delegates.get("ses_c");
+  assert.equal(d.loop.count, 1, "one call, one count");
+  assert.equal(d.phase, "shell: echo LOOP", "the input-event label survives called");
+  assert.equal(first.ended.milestones.filter((m) => m.kind === "first-tool")
+    .length, 1);
+  assert.equal(first.called.milestones.length, 0, "called adds no second count");
+
+  // The guard is name-less-only: a late named called may refine the label,
+  // but the call-id guard still prevents a second count.
+  observe(state, event("session.tool.called", {
+    sessionID: "ses_c", id: "call_overlap_1", name: "read",
+    input: { command: "echo LOOP" },
+  }));
+  assert.equal(d.loop.count, 1);
+  assert.equal(d.phase, "read: echo LOOP");
+
+  call("call_overlap_2");
+  call("call_overlap_3");
+  assert.equal(d.loop.count, 3, "each full sequence counts exactly once");
+  assert.equal(d.emitted.has("thrash:echo LOOP"), true, "thrash fires at x3 only");
 });
 
 test("a name-less tool.called waits for the content update to label the call", () => {

@@ -15,11 +15,12 @@
  * Milestone policy (AC6 + AC7, RM-070):
  * - routine (start, first-tool, resume): at most one per delegate per
  *   `milestoneMinIntervalSeconds`;
- * - attention (needs-input, stall, thrash): fire once per distinct condition,
- *   immediately — a waiting owner is never made to sit out a cooldown; a
- *   thrash/stall/needs-input/denied milestone also carries `wake: true` and
- *   starts exactly one parent turn, bounded by `maxAttentionWakes` per child
- *   per process (`attentionWake` disables the exception);
+ * - attention (needs-input, denied, stall, thrash): fire once per distinct
+ *   condition, immediately — a waiting owner is never made to sit out a
+ *   cooldown; a thrash/stall/needs-input/denied milestone also carries
+ *   `wake: true` and starts exactly one parent turn, bounded by
+ *   `maxAttentionWakes` per child per process (`attentionWake` disables the
+ *   exception);
  * - terminal: exactly once per delegate, always, and never a wake from this
  *   process (the Python completion observer owns the terminal wake).
  */
@@ -270,6 +271,24 @@ export function envConfig(
   take("maxAttentionWakes", env?.DELEGATION_OBSERVER_MAX_ATTENTION_WAKES,
     positiveInteger);
   take("enabled", env?.DELEGATION_OBSERVER_ENABLED, boolean);
+  return out;
+}
+
+/**
+ * The server part reads only the RM-070 attention keys from env. ADR-0015
+ * Decision 10 keeps `enabled`, the stall window and the stale grace TUI-only,
+ * and the threshold contract is not server-env-overridable (the plan's "no
+ * change to thresholds" boundary). Options still win over these values.
+ */
+export function attentionEnvConfig(
+  env: Record<string, string | undefined> = process.env,
+): Partial<ObserverConfig> {
+  const parsed = envConfig(env);
+  const out: Partial<ObserverConfig> = {};
+  if (parsed.attentionWake !== undefined) out.attentionWake = parsed.attentionWake;
+  if (parsed.maxAttentionWakes !== undefined) {
+    out.maxAttentionWakes = parsed.maxAttentionWakes;
+  }
   return out;
 }
 
@@ -532,9 +551,13 @@ function label(d: Delegate) {
 }
 
 /** The conditions that start a parent turn (RM-070 AC1). */
-const WAKE_KINDS: ReadonlySet<Milestone["kind"]> = new Set([
+export const WAKE_KINDS: ReadonlySet<Milestone["kind"]> = new Set([
   "thrash", "stall", "needs-input", "denied",
 ]);
+
+export function isWakeKind(kind: Milestone["kind"]): boolean {
+  return WAKE_KINDS.has(kind);
+}
 
 function taskLabel(d: Delegate) {
   const flat = String(d.task ?? "").replace(/\s+/g, " ").trim();
@@ -633,8 +656,10 @@ function applyTool(state: ObserverState, d: Delegate, name: string, target: stri
   const running = status === "running" || status === "pending"
     || status === "streaming" || status === "called";
   // `session.tool.called` carries no tool name on 2.1.4; the name arrives with
-  // `session.message.content.updated`. Until it does, show the target only and
-  // do not label/count the call (avoids a "tool:" label and double counting).
+  // `session.tool.input.started` (headless) or
+  // `session.message.content.updated` (TUI-attached). Until it does, show the
+  // target only and do not label/count the call (avoids a "tool:" label and
+  // double counting).
   const named = Boolean(name) && name !== "tool" && name !== "?";
   d.phase = running
     ? `${named ? name : "tool"}${target ? `: ${target}` : ""}`
@@ -892,11 +917,14 @@ export function observe(state: ObserverState, event: any): ObserveResult {
     }
     case "session.tool.called": {
       const id = String(data.id ?? "");
-      // Already labelled/counted from the input events: a name-less called
-      // event must not overwrite the real tool label.
-      if (id && d.calls.has(id)) break;
-      const name = data.name ?? data.tool ?? data.metadata?.tool ?? "tool";
-      applyTool(state, d, name, toolTarget(name, data.input), id, "running");
+      const name = data.name ?? data.tool ?? data.metadata?.tool;
+      // A name-less re-delivery of an already-labelled call must not overwrite
+      // the real tool label (the input events already named it). A named
+      // called event may still refine that label; `applyTool`'s call-id guard
+      // prevents a second count either way.
+      if (id && !name && d.calls.has(id)) break;
+      applyTool(state, d, name ?? "tool", toolTarget(name ?? "tool", data.input),
+        id, "running");
       break;
     }
     case "session.tool.success":

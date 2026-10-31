@@ -440,7 +440,11 @@ host does not forward a plugin entry's `options` to the TUI part, so the TUI
 reads the documented env source for every value it needs:
 `DELEGATION_OBSERVER_ENABLED`, `DELEGATION_OBSERVER_STALL_SECONDS`,
 `DELEGATION_OBSERVER_HEALTH_FILE`, `DELEGATION_OBSERVER_STATUS_FILE` (options
-win when a host does forward them). The observer TUI also writes a presence
+win when a host does forward them). The server part reads only
+`DELEGATION_OBSERVER_ATTENTION_WAKE` and
+`DELEGATION_OBSERVER_MAX_ATTENTION_WAKES` from env; the other keys stay
+TUI-only, so thresholds and `enabled` are not server-env-overridable. The
+observer TUI also writes a presence
 marker (`<location>/.scratch/delegation-observer/tui.json`, refreshed every
 10 s).
 

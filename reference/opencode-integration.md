@@ -214,8 +214,9 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
   `data.form.sessionID`); `permission.replied.data.reply` is
   `once|always|reject` (a rejection is a denial, not a resume);
   `session.step.ended.data` carries `finish`, `cost`, `tokens`;
-  `session.tool.called.data` has **no tool name** (name/target come from
-  `session.message.content.updated`).
+  `session.tool.called.data` has **no tool name** in the TUI-attached stream
+  (name/target come from `session.message.content.updated`); the headless
+  stream uses the `session.tool.input.*` pair below instead.
 - **Headless tool events (probed 2026-10-31, RM-070 drill).** On a raw
   `opencode serve` with no TUI attached, the server emitted
   `session.tool.input.started` (`{sessionID, assistantMessageID, id, name}`),

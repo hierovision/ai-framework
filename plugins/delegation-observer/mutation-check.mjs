@@ -366,8 +366,8 @@ const MUTATIONS = [
     id: "silent-wake-drop",
     why: "an over-cap attention milestone is logged with its count",
     file: "server.ts",
-    from: "      if (m.attention && !m.wake) {",
-    to: "      if (false) {",
+    from: 'if (isWakeKind(m.kind) && !m.wake) {',
+    to: "if (false) {",
     expect: "over the wake cap the milestone is context only and the drop is logged with a count",
   },
   {
@@ -380,9 +380,9 @@ const MUTATIONS = [
   },
   {
     id: "server-ignores-attention-env",
-    why: "the server config accepts the same env seam as the TUI",
+    why: "the server config accepts the same attention env seam as the TUI",
     file: "server.ts",
-    from: "    ...envConfig(options.env ?? process.env),",
+    from: "    ...attentionEnvConfig(options.env ?? process.env),",
     to: "    ...{},",
     expect: "attention wake config accepts env, and explicit options win",
   },
@@ -409,6 +409,43 @@ const MUTATIONS = [
     from: '?? inp.agent ?? inp.description ?? inp.code ?? "";',
     to: '?? inp.agent ?? inp.description ?? "";',
     expect: "tool input events label and count calls when content updates are absent",
+  },
+  {
+    id: "server-env-not-narrowed",
+    why: "the server env seam carries only the two attention keys (no thresholds/enabled)",
+    file: "state.ts",
+    from:
+      "  if (parsed.attentionWake !== undefined) out.attentionWake = parsed.attentionWake;\n"
+      + "  if (parsed.maxAttentionWakes !== undefined) {\n"
+      + "    out.maxAttentionWakes = parsed.maxAttentionWakes;\n"
+      + "  }\n"
+      + "  return out;\n",
+    to: "  return parsed;\n",
+    expect: "the server attention env seam excludes TUI-only keys",
+  },
+  {
+    id: "retry-drop-log",
+    why: "retry is attention for the strip but not wake-eligible",
+    file: "server.ts",
+    from: 'if (isWakeKind(m.kind) && !m.wake) {',
+    to: "if (m.attention && !m.wake) {",
+    expect: "retry is strip-only and never logs a dropped wake",
+  },
+  {
+    id: "name-less-called-overwrites",
+    why: "a name-less called re-delivery must not overwrite the input label",
+    file: "state.ts",
+    from: "      if (id && !name && d.calls.has(id)) break;",
+    to: "      if (false) break;",
+    expect: "one headless call seen through input events and a name-less tool.called counts once",
+  },
+  {
+    id: "called-always-skipped",
+    why: "only a name-less re-delivery is skipped; a named called may refine the label",
+    file: "state.ts",
+    from: "      if (id && !name && d.calls.has(id)) break;",
+    to: "      if (id && d.calls.has(id)) break;",
+    expect: "one headless call seen through input events and a name-less tool.called counts once",
   },
 ];
 

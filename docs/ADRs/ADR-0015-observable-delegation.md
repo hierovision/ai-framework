@@ -250,7 +250,10 @@ rest of ADR-0015 stands.
 5. **Configurable.** Options `attentionWake` / `maxAttentionWakes` and env
    `DELEGATION_OBSERVER_ATTENTION_WAKE` /
    `DELEGATION_OBSERVER_MAX_ATTENTION_WAKES`; a forwarded option wins over env,
-   env wins over the shared default.
+   env wins over the shared default. The server part reads only these two keys
+   from env — `ENABLED`, `STALL_SECONDS`, `STALE_GRACE_SECONDS`,
+   `HEALTH_FILE` and `STATUS_FILE` remain the TUI channel (Decision 10), so the
+   thresholds and the server's enabled flag are not server-env-overridable.
 6. **Host vocabulary.** On the headless 2.1.4 server the tool name arrives in
    `session.tool.input.started` and the parsed input in
    `session.tool.input.ended`; `session.tool.called` carries no name and
