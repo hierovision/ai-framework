@@ -97,9 +97,9 @@ jobs:
           python3 scripts/test_supervision_contract.py
           python3 scripts/test_v2_surface_contract.py
           node --test plugins/auto-compact-at-threshold/test.mjs
-          # `model.ts` imports `solid-js` (a runtime peer). The host provides
-          # it at runtime; CI must install it for the model test to resolve.
-          npm install --no-save --no-package-lock --prefix plugins/delegation-observer solid-js@1.9.12
+          # `model.ts` imports `solid-js` (a runtime peer). The committed
+          # package-lock pins the exact peer tree; install it for the test.
+          npm ci --prefix plugins/delegation-observer --no-audit --no-fund
           node --test plugins/delegation-observer/state.test.ts plugins/delegation-observer/tui.test.ts plugins/delegation-observer/server.test.ts plugins/delegation-observer/model.test.ts plugins/delegation-sentinel/sentinel.test.ts
           # Break/restore proofs: every liveness guard in the delegation
           # observer must turn its named test red when removed (PR #136 review
