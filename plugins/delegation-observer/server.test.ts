@@ -12,7 +12,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { PLUGIN_ID, createDefinition, startObserver } from "./server.ts";
-import { tick } from "./state.ts";
+import { observe, tick } from "./state.ts";
 
 const Plugin = { define: (d) => d };
 const clock = () => 1_000_000;
@@ -347,7 +347,7 @@ test("a discovered row promoted by a non-touch event never stalls on the server 
   assert.equal(d.status, "running");
 });
 
-test("a recent store-terminal child is not revived by a replayed create", async () => {
+test("a store-terminal child emits nothing on a tick or a replayed create", async () => {
   const { ctx, synthetic } = fakeCtx([], {
     list: [{
       id: "ses_done", parentID: "ses_parent", title: "finished", agent: "planner",
@@ -358,9 +358,15 @@ test("a recent store-terminal child is not revived by a replayed create", async 
   await handle.done;
   const d = handle.state.delegates.get("ses_done");
   assert.equal(d.status, "completed");
+  const replayed = observe(handle.state, {
+    type: "session.created",
+    data: { sessionID: "ses_done", parentID: "ses_parent", title: "finished" },
+  });
+  assert.deepEqual(replayed.milestones, [], "a replayed create emits no start");
   const replay = tick(handle.state, clock());
   assert.equal(replay.milestones.length, 0);
   assert.equal(synthetic.length, 0);
+  assert.equal(d.status, "completed");
 });
 
 test("disable-by-config leaves the stream silent", async () => {

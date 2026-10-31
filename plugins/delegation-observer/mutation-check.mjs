@@ -24,7 +24,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const TESTS = ["state.test.ts", "tui.test.ts", "server.test.ts"].map((f) => join(HERE, f));
+const TESTS = ["state.test.ts", "tui.test.ts", "server.test.ts", "model.test.ts"]
+  .map((f) => join(HERE, f));
 
 const MUTATIONS = [
   {
@@ -129,11 +130,56 @@ const MUTATIONS = [
     to: '  if (false) {\n',
     expect: "an unavailable live map degrades visibly instead of hiding rows",
   },
+  {
+    id: "live-map-revives-terminal",
+    why: "a store-terminal row must not be revived by the live map",
+    file: "state.ts",
+    from: "  if (!d || d.archived || d.terminal || d.provenance === \"observed\") return d ?? null;\n",
+    to: "  if (!d || d.archived || d.provenance === \"observed\") return d ?? null;\n",
+    expect: "the store outcome outranks the live map and cannot be demoted",
+  },
+  {
+    id: "archived-replay-emits-start",
+    why: "archive handling must run before the create/rename milestones",
+    file: "state.ts",
+    from:
+      "  let d = sessionID ? state.delegates.get(sessionID) ?? null : null;\n"
+      + "  if (d && type === \"session.archived\") {",
+    to:
+      "  let d: any = null;\n"
+      + "  if (d && type === \"session.archived\") {",
+    expect: "an archived row never emits a start milestone on a replayed create",
+  },
+  {
+    id: "non-array-list-crashes",
+    why: "a null/non-array session list must degrade, never throw (F10)",
+    file: "model.ts",
+    from: "      const listed = rawSessionList();\n      return Array.isArray(listed) ? listed : [];",
+    to: "      const listed = rawSessionList();\n      return listed as any[];",
+    expect: "a null, undefined or non-array session list is normalized",
+  },
+  {
+    id: "model-tdz-missing-binding",
+    why: "the model's eager memos must only read initialized bindings (F9)",
+    file: "model.ts",
+    from: "  const liveSessionRows = () => {",
+    to: "  const liveSessionRowsLater = () => {",
+    expect: "the model constructs over a healthy host and bootstraps liveness",
+  },
+  {
+    id: "model-live-map-not-reported",
+    why: "refreshActive must publish live-map availability to the banner",
+    file: "model.ts",
+    from: '    setLiveMap(map.available ? "ok" : "unavailable");\n',
+    to: "",
+    expect: "a throwing status map is a banner, not a crash",
+  },
 ];
 
 const TEST_FOR = {
   "state.ts": "state.test.ts",
   "view.ts": "tui.test.ts",
+  "model.ts": "model.test.ts",
   "tui.tsx": "tui.test.ts",
   "server.ts": "server.test.ts",
 };

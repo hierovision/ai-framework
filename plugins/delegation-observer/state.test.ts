@@ -735,13 +735,12 @@ test("a store-terminal row is completed at bootstrap from the real outcome field
   const d = state.delegates.get("ses_done");
   assert.equal(d.status, "completed");
   assert.equal(d.terminal?.outcome, "completed");
-  assert.equal(d.storeOutcome, "completed");
   assert.equal(d.stale, true, "history, even when recent");
   assert.equal(d.lastActivityAt, clock - 60_000);
   assert.equal(tick(state, clock).milestones.length, 0);
 });
 
-test("the store outcome outranks the live map and survives demotion", () => {
+test("the store outcome outranks the live map and cannot be demoted", () => {
   const state = fresh();
   // A finished session the map still calls running: the outcome wins.
   associateSessionInfo(state, {
@@ -753,9 +752,14 @@ test("the store outcome outranks the live map and survives demotion", () => {
   const d = state.delegates.get("ses_race");
   assert.equal(d.status, "failed");
   assert.equal(d.terminal?.outcome, "failed");
+  // the live map saying "running" cannot resurrect it...
+  markActive(state, "ses_race", true);
+  assert.equal(d.status, "failed", "the map cannot revive a store-terminal row");
+  // ...and a demotion cannot erase the outcome (the terminal guard owns it)
   markActive(state, "ses_race", false);
-  assert.equal(d.status, "failed", "demotion must not erase the store outcome");
+  assert.equal(d.status, "failed");
   assert.equal(d.terminal?.outcome, "failed");
+  assert.equal(d.stale, true);
 
   // A row first seen live, whose outcome arrives on a later list refresh.
   associateSessionInfo(state, {
@@ -770,9 +774,11 @@ test("the store outcome outranks the live map and survives demotion", () => {
     time: { created: clock - 120_000, updated: clock - 30_000 },
     outcome: "interrupted",
   });
+  assert.equal(late.status, "failed", "a later list refresh terminalizes the row");
+  markActive(state, "ses_late", true);
   assert.equal(late.status, "failed");
   markActive(state, "ses_late", false);
-  assert.equal(late.status, "failed", "the late outcome is preserved on demotion");
+  assert.equal(late.status, "failed", "the late outcome survives both map answers");
 });
 
 test("a recent completed child is never revived by later events", () => {
@@ -873,6 +879,33 @@ test("an archived session is stale even when the live map calls it running", () 
   observe(state, contentTool("ses_arch", "t1", "read", "completed", { path: "a" }));
   assert.equal(d.stale, true, "events cannot revive an archived row");
   assert.equal(tick(state, clock).milestones.length, 0);
+});
+
+test("an archived row never emits a start milestone on a replayed create", () => {
+  // Reviewer repro: discovered-live row (so `associate` did not pre-mark
+  // `start`) -> archive -> replayed session.created must emit nothing.
+  const state = fresh();
+  markActive(state, "ses_arch", true);
+  associateSessionInfo(state, {
+    id: "ses_arch", parentID: "ses_parent", title: "archived child",
+    time: { created: clock - 120_000, updated: clock - 60_000 },
+  });
+  const d = state.delegates.get("ses_arch");
+  assert.equal(d.status, "running");
+  assert.equal(d.emitted.has("start"), false, "the live branch did not pre-mark start");
+  advance(1_000);
+  observe(state, event("session.archived", { sessionID: "ses_arch" }));
+  assert.equal(d.archived, true);
+  advance(1_000);
+  const replay = observe(state, event("session.created", {
+    sessionID: "ses_arch", parentID: "ses_parent", title: "archived child",
+  }));
+  assert.deepEqual(replay.milestones, [], "no synthetic start for archived history");
+  const renamed = observe(state, event("session.renamed", {
+    sessionID: "ses_arch", title: "renamed child",
+  }));
+  assert.deepEqual(renamed.milestones, []);
+  assert.equal(d.archived, true, "the replay does not un-archive the row");
 });
 
 test("archive after start hides an observed row, unarchive restores it", () => {

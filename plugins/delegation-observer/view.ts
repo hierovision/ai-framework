@@ -181,16 +181,19 @@ export function isLiveStatus(raw: unknown): boolean {
  * say out loud instead of silently hiding every discovered row as stale.
  */
 export function readLiveMap(
-  list: () => Array<{ id?: string; sessionID?: string }> | null | undefined,
+  list: () => unknown,
   status: (sessionID: string) => unknown,
 ): LiveMap {
-  let sessions: Array<{ id?: string; sessionID?: string }> | null | undefined;
+  let listed: unknown;
   try {
-    sessions = list();
+    listed = list();
   } catch {
     return { available: false, entries: [], sessions: [] };
   }
-  if (!Array.isArray(sessions)) return { available: false, entries: [], sessions: [] };
+  // A host that answers null/undefined/a non-array has not answered: that is
+  // unavailability, not "no sessions".
+  if (!Array.isArray(listed)) return { available: false, entries: [], sessions: [] };
+  const sessions = listed as LiveMap["sessions"];
   const entries: LiveEntry[] = [];
   for (const session of sessions) {
     const sessionID = session?.id ?? session?.sessionID;
@@ -283,9 +286,10 @@ export function readStatusSnapshot(text: string | null | undefined): StatusSnaps
  * Control descriptors. `enabled` is decision logic (tested); `run` performs
  * the exact typed call and is only invoked from the TUI keymap/commands.
  *
- * Only a *terminal* outcome disables controls. A clock-classified `failed`
- * (dead but no terminal event) and `waiting` remain actionable: the owner can
- * interrupt or steer instead of being told to wait for nothing.
+ * A *terminal* outcome or collapsed history (stale) disables steer/interrupt;
+ * `focus` stays available so history can be inspected. A clock-classified
+ * `failed` (dead but no terminal event) and `waiting` remain actionable: the
+ * owner can interrupt or steer instead of being told to wait for nothing.
  */
 export function createControls(
   row: Pick<DelegateRow, "sessionID" | "status" | "terminal"> & { stale?: boolean },

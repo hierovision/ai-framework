@@ -11,5 +11,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["state.ts", "view.ts", "server.ts", "tui.tsx"]
+  "include": ["state.ts", "view.ts", "model.ts", "server.ts", "tui.tsx"]
 }

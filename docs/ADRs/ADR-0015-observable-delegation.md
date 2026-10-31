@@ -193,14 +193,19 @@ event-driven"):
    exists only in the store is history.
 4. **Archived is final, for every row.** `time.archived` (bootstrap) and
    `session.archived` (live) hide the row; `markActive` and event promotion
-   cannot revive it, and `session.unarchived` is the only way back. Archive
-   outranks the live map and observed provenance.
+   cannot revive it. Archive outranks the live map and observed provenance.
+   `session.unarchived` is the only way back *from archived* — it does not
+   make a row live again by itself: a row that is also terminal in the store
+   stays collapsed history (stale) after unarchiving, because the store
+   outcome is independent evidence. "Back in the strip" requires a live map
+   entry or a real event, and never applies to a store-terminal row.
 5. **History is collapsed, not reported.** A row that is archived, terminal in
    the store without being observed here, or (discovered) older than
    `staleGraceSeconds` is stale: never `running`, never a synthetic
    milestone, never clock-classified, collapsed into one
    `N stale delegates hidden` line and excluded from the focus/steer/
-   interrupt picker. `staleGraceSeconds` is an observer-owned display window
+   interrupt picker. `delegation.history` (alt+g) is the explicit read-only
+   path to focus one. `staleGraceSeconds` is an observer-owned display window
    (default 600 s) reached through the TUI env seam
    (`DELEGATION_OBSERVER_STALE_GRACE_SECONDS`); it is **not** part of
    `scripts/supervision_contract.json`, whose values are generated from the

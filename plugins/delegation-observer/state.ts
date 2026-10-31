@@ -77,15 +77,13 @@ export interface Delegate {
   /** The session's real last event; null when unavailable — never `now`. */
   lastActivityAt: number | null;
   provenance: Provenance;
-  /** Discovered, unproven and older than `staleGraceSeconds`. */
+  /**
+   * Collapsed history, not current work: archived, terminal in the store but
+   * not observed here, or discovered and past the grace window.
+   */
   stale: boolean;
   /** `time.archived` is final: an archived session is never live again. */
   archived: boolean;
-  /**
-   * The store's terminal outcome, retained independently of `terminal` so a
-   * demotion restores it instead of falling back to `unknown`.
-   */
-  storeOutcome: "completed" | "failed" | null;
   busy: boolean;
   openStep: boolean;
   toolInFlight: boolean;
@@ -309,7 +307,6 @@ export function isStale(state: ObserverState, d: Delegate,
 function applyStoreOutcome(d: Delegate, outcome: "completed" | "failed",
   at: number | null) {
   if (d.terminal) return;
-  d.storeOutcome = outcome;
   d.terminal = { outcome, detail: "store outcome", at: at ?? 0 };
   d.status = outcome;
   d.phase = outcome;
@@ -339,13 +336,8 @@ export function markActive(state: ObserverState, sessionID: string, active: bool
     d.phase = "active";
     d.stale = false;
   } else if (d.status === "running") {
-    // Demotion restores the store outcome when one is known, instead of
-    // silently degrading a finished session to `unknown`.
-    if (d.storeOutcome) applyStoreOutcome(d, d.storeOutcome, d.lastActivityAt);
-    else {
-      d.status = "unknown";
-      d.phase = "no events observed";
-    }
+    d.status = "unknown";
+    d.phase = "no events observed";
     d.stale = isStale(state, d);
   }
   return d;
@@ -386,7 +378,6 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
     provenance: source,
     stale: false,
     archived,
-    storeOutcome: null,
     busy: false,
     openStep: false,
     toolInFlight: false,
@@ -577,28 +568,10 @@ export function observe(state: ObserverState, event: any): ObserveResult {
   const now = state.now();
   state.lastEventAt = now;
 
-  if (type === "session.created") {
-    const d = associate(state, sessionID, {
-      parentID: data.parentID,
-      title: data.title,
-      agent: data.agent,
-    }, "observed");
-    if (d) {
-      const m = milestone(state, d, "start", "start",
-        `${label(d)} started: ${d.task}`);
-      if (m) out.milestones.push(m);
-    }
-  } else if (type === "session.renamed") {
-    const d = associate(state, sessionID, {
-      parentID: null, title: data.title, agent: data.agent,
-    }, "observed");
-    if (d && d.via === "title" && data.title) {
-      const marker = parseDelegationTitle(data.title);
-      if (marker?.task) d.task = marker.task;
-    }
-  }
-
-  const d = sessionID ? state.delegates.get(sessionID) : null;
+  // Archive lifecycle is resolved BEFORE any association or milestone: an
+  // archived row never emits, and a replayed `session.created` for it must not
+  // produce a synthetic start (review F11).
+  let d = sessionID ? state.delegates.get(sessionID) ?? null : null;
   if (d && type === "session.archived") {
     // Archive is final for every row, observed, live or terminal: the store
     // removed the session from the working set, so it is history from here on.
@@ -616,12 +589,39 @@ export function observe(state: ObserverState, event: any): ObserveResult {
     state.pending.length = 0;
     return out;
   }
+  if (d?.archived) {
+    // An archived session never becomes live again and never emits.
+    state.pending.length = 0;
+    return out;
+  }
+
+  if (type === "session.created") {
+    const created = associate(state, sessionID, {
+      parentID: data.parentID,
+      title: data.title,
+      agent: data.agent,
+    }, "observed");
+    if (created && !created.archived) {
+      const m = milestone(state, created, "start", "start",
+        `${label(created)} started: ${created.task}`);
+      if (m) out.milestones.push(m);
+    }
+  } else if (type === "session.renamed") {
+    const renamed = associate(state, sessionID, {
+      parentID: null, title: data.title, agent: data.agent,
+    }, "observed");
+    if (renamed && !renamed.archived && renamed.via === "title" && data.title) {
+      const marker = parseDelegationTitle(data.title);
+      if (marker?.task) renamed.task = marker.task;
+    }
+  }
+
+  d = sessionID ? state.delegates.get(sessionID) ?? null : null;
   if (!d || d.terminal) {
     state.pending.length = 0;
     return out;
   }
   if (d.archived) {
-    // An archived session never becomes live again and never emits.
     state.pending.length = 0;
     return out;
   }

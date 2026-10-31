@@ -360,13 +360,14 @@ clock renders as `—` instead of a fabricated duration.
 **Terminal, archived and history.** `SessionInfo.outcome` (the real field:
 `"succeeded" | "failed" | "interrupted"`) is terminal and outranks the live
 map: such a row reads `completed`/`failed`, emits no synthetic start/terminal
-milestone, and keeps its outcome across a map demotion. `time.archived` and
+milestone, and cannot be revived or demoted by the live map. `time.archived` and
 `session.archived` hide a row for good — the map and later events cannot
 revive it, only `session.unarchived` can. A row that is archived, terminal in
 the store without being observed here, or (discovered) older than
 `staleGraceSeconds` is stale: never `running`, never clock-classified, and
 collapsed into one `N stale delegates hidden` line that is not selectable in
-the focus/steer/interrupt picker.
+the focus/steer/interrupt picker; `delegation.history` (alt+g) focuses one
+read-only.
 
 **First event on a discovered row.** A live-map entry promotes the row; the
 first real event promotes it *and* resets the observation clock to that

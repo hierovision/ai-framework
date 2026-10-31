@@ -73,7 +73,8 @@ contract (`scripts/supervision_contract.json`, generated from `watch_agent.py` /
 `observe_completion.py`); `state.test.ts` fails if the TypeScript side drifts.
 `staleGraceSeconds` is **not** part of that contract: it is an observer-owned
 display window with no Python owner, so it lives here and in the plugin only.
-The status panel prints the effective values.
+The status panel prints the effective stall/call/loop/generation thresholds
+and the effective stale grace.
 
 ## Liveness is evidence, not discovery
 
@@ -87,11 +88,13 @@ two delegates with different last events never share a quiet value.
 **Terminal and archived are final.** The store outcome is the real
 `SessionInfo.outcome` field (`succeeded`/`failed`/`interrupted`); such a row
 reads `completed`/`failed`, never `running`, emits no synthetic start/terminal
-milestone, and keeps that outcome across a live-map demotion. `time.archived`
-and the `session.archived` event hide a row for good — the live map and later
-events cannot revive it; `session.unarchived` is the only way back. A
-completion you watched happen (`session.execution.*`) stays visible; one that
-only exists in the store is history.
+milestone, and keeps that outcome even when the live map says running.
+`time.archived` and the `session.archived` event hide a row for good — the
+live map and later events cannot revive it; `session.unarchived` is the only
+way back from archived, but it does not by itself return a store-terminal row
+to the live strip (that row stays collapsed history). A completion you watched
+happen (`session.execution.*`) stays visible; one that only exists in the
+store is history.
 
 A row that is archived, terminal in the store but unobserved here, or
 (discovered) older than `staleGraceSeconds` is **stale**: it never reads
@@ -137,10 +140,15 @@ is unchanged and remains the only progress-path prompt.
 | `delegation.focus` | `ui.tabs.focus(sessionID)` (falls back to navigation) |
 | `delegation.steer` | `client.session.prompt({sessionID, text, delivery: "steer"})` |
 | `delegation.interrupt` | `client.session.interrupt({sessionID})` |
+| `delegation.history` | pick a collapsed (stale) row and `ui.tabs.focus` it — read-only |
 | `delegation.panel` | `ui.panel.open("delegates")` |
 
+Collapsed history is not a live target: steer/interrupt are disabled for stale
+rows and the live picker excludes them. `delegation.history` is the explicit
+path to inspect one (focus only).
+
 Bindings in this 2.1.4 TUI: `alt+d` focus, `alt+s` steer, `alt+x` interrupt,
-`alt+p` panel, `alt+h` health. Palette/slash entries are declared but this
+`alt+g` history, `alt+p` panel, `alt+h` health. Palette/slash entries are declared but this
 build does not surface plugin commands there (probed 2026-10-29); bindings are
 the working surface.
 
@@ -172,19 +180,28 @@ In every case the durable watchdog/observer — heartbeat, `watch_agent.py`,
 `observe_completion.py` wake — remains authoritative. The plugin never claims
 live visibility it does not have.
 
+## Structure
+
+`model.ts` owns every read, timer, command and decision and is exercised by
+`model.test.ts` against a mock host; `tui.tsx` is a thin view (JSX components +
+slot registration). Solid's `createMemo` evaluates eagerly, so a binding
+declared below a memo is a startup `ReferenceError` — the model test constructs
+`createTuiModel` for exactly that reason.
+
 ## Tests
 
 ```
-node --test state.test.ts tui.test.ts server.test.ts   # 87 tests
+node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 97 tests
 node ../delegation-sentinel/sentinel.test.ts           # 5 tests
 tsc -p . --noEmit
-node mutation-check.mjs                                # 11 break/restore proofs
+node mutation-check.mjs                                # 16 break/restore proofs
 ```
 
 `mutation-check.mjs` is the checked-in evidence behind every liveness guard:
-it removes one guard at a time, requires the named test to fail, restores the
-file byte-for-byte, and fails if a mutation survives or the tree is dirty. It
-runs in CI with the offline suites.
+it removes one guard at a time, requires the named test to fail, restores that
+file byte-for-byte (and byte-compares the restore), and fails if a mutation
+survives, fails for the wrong test, or a restored file differs from its
+original. It runs in CI with the offline suites.
 
 ## V2 API dependencies (verified against 2.1.4, 2026-10-29)
 
