@@ -471,3 +471,55 @@ export function createTuiModel(ctx: any) {
 }
 
 export type TuiModel = ReturnType<typeof createTuiModel>;
+
+/** Render callbacks supplied by the JSX view (`tui.tsx`). */
+export interface TuiViews {
+  strip: (model: TuiModel) => unknown;
+  footer: (model: TuiModel) => unknown;
+  panel: (model: TuiModel, input: any) => unknown;
+}
+
+/**
+ * The V2 plugin definition. Registration lives here, not in the JSX view, so
+ * `node --test` can prove the slot wiring, the disabled toast and the
+ * disposer chain (`model.test.ts`); `tui.tsx` only supplies the render
+ * callbacks.
+ */
+export function createDefinition(Plugin: any, views: TuiViews) {
+  return {
+    id: PLUGIN_ID,
+    async setup(ctx: any) {
+      const model = createTuiModel(ctx);
+      const disposers = [
+        ctx.ui.slot({
+          append: "sidebar.content",
+          render: () => views.strip(model),
+        }),
+        ctx.ui.slot({
+          append: "home.footer.status",
+          render: () => views.footer(model),
+        }),
+        ctx.ui.slot({
+          append: "session.panel",
+          render: (input: any) => views.panel(model, input),
+        }),
+      ];
+      if (tuiConfig(ctx).enabled === false) {
+        ctx.ui.toast.show({
+          message: "delegation-observer disabled — watchdog/observer fallback only",
+          variant: "warning",
+        });
+      }
+      return () => {
+        model.dispose();
+        for (const dispose of disposers) {
+          try {
+            dispose?.();
+          } catch {
+            // Slot teardown must not throw out of the plugin cleanup.
+          }
+        }
+      };
+    },
+  };
+}

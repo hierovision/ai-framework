@@ -182,19 +182,21 @@ live visibility it does not have.
 
 ## Structure
 
-`model.ts` owns every read, timer, command and decision and is exercised by
-`model.test.ts` against a mock host; `tui.tsx` is a thin view (JSX components +
-slot registration). Solid's `createMemo` evaluates eagerly, so a binding
-declared below a memo is a startup `ReferenceError` — the model test constructs
+`model.ts` owns every read, timer, command, decision **and** the plugin/slot
+registration (`createDefinition(Plugin, views)`), and is exercised by
+`model.test.ts` against a mock host — including the shared health record, one
+fake-timer interval tick and the registered slot disposers. `tui.tsx` supplies
+JSX render callbacks only. Solid's `createMemo` evaluates eagerly, so a binding
+declared below a memo is a startup `ReferenceError`; the model test constructs
 `createTuiModel` for exactly that reason.
 
 ## Tests
 
 ```
-node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 97 tests
+node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 101 tests
 node ../delegation-sentinel/sentinel.test.ts           # 5 tests
 tsc -p . --noEmit
-node mutation-check.mjs                                # 16 break/restore proofs
+node mutation-check.mjs                                # 20 break/restore proofs
 ```
 
 `mutation-check.mjs` is the checked-in evidence behind every liveness guard:

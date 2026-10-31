@@ -174,6 +174,44 @@ const MUTATIONS = [
     to: "",
     expect: "a throwing status map is a banner, not a crash",
   },
+  {
+    id: "health-record-ignored",
+    why: "the shared health record must reach the banner and the status command",
+    file: "model.ts",
+    from: "      setServerHealth(record?.degradation ?? null);\n",
+    to: "      setServerHealth(null);\n",
+    expect: "the shared health record reaches the banner and the status command",
+  },
+  {
+    id: "timer-skips-refresh",
+    why: "the interval must refresh the live map (the only liveness source)",
+    file: "model.ts",
+    from: "  const timer = setInterval(() => {\n    refreshActive();\n",
+    to: "  const timer = setInterval(() => {\n",
+    expect: "one interval tick refreshes the live map and the rows",
+  },
+  {
+    id: "live-map-null-elements",
+    why: "malformed array elements must be dropped, not dereferenced",
+    file: "view.ts",
+    from:
+      "  const sessions = (listed as unknown[]).filter(\n"
+      + "    (session): session is LiveMap[\"sessions\"][number] =>\n"
+      + "      Boolean(session) && typeof session === \"object\",\n"
+      + "  );\n",
+    to: "  const sessions = listed as LiveMap[\"sessions\"];\n",
+    // the element-filter contract is asserted by the model suite
+    test: "model.test.ts",
+    expect: "malformed array elements are dropped, not dereferenced",
+  },
+  {
+    id: "definition-slot-missing",
+    why: "the TUI registration must claim the documented slots",
+    file: "model.ts",
+    from: '          append: "home.footer.status",',
+    to: '          append: "sidebar.content",',
+    expect: "createDefinition registers the documented slots and disposes them",
+  },
 ];
 
 const TEST_FOR = {
@@ -236,7 +274,7 @@ function main() {
     writeFileSync(file, original.replace(mutation.from, mutation.to), "utf8");
     let result;
     try {
-      const testFile = TEST_FOR[mutation.file];
+      const testFile = mutation.test ?? TEST_FOR[mutation.file];
       if (!testFile) {
         failures.push(`${mutation.id}: no test file mapped for ${mutation.file}`);
         continue;

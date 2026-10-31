@@ -193,10 +193,15 @@ export function readLiveMap(
   // A host that answers null/undefined/a non-array has not answered: that is
   // unavailability, not "no sessions".
   if (!Array.isArray(listed)) return { available: false, entries: [], sessions: [] };
-  const sessions = listed as LiveMap["sessions"];
+  // Malformed elements are dropped, not propagated: a sparse/partial array
+  // must not reach a consumer that dereferences `session.id` (review F15).
+  const sessions = (listed as unknown[]).filter(
+    (session): session is LiveMap["sessions"][number] =>
+      Boolean(session) && typeof session === "object",
+  );
   const entries: LiveEntry[] = [];
   for (const session of sessions) {
-    const sessionID = session?.id ?? session?.sessionID;
+    const sessionID = session.id ?? session.sessionID;
     if (!sessionID) continue;
     let raw: unknown;
     try {
