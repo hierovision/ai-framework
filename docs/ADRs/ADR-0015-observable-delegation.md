@@ -151,3 +151,72 @@ condition. The implementation and tests match that wording.
 - `plugins/delegation-sentinel/` — the always-loadable fallback banner.
 - `docs/roadmap-detail/RM-069.md` — provenance and verification.
 - RM-058 detail (`docs/roadmap-detail/RM-058.md`) — retained contracts.
+
+## Amendment (2026-10-30) — discovery is not liveness
+
+Post-apply defect on `main` (d13d504): the TUI strip listed historical child
+sessions as `running: starting`, then flipped them all to
+`stalled: quiet 245s`. Two causes, both in the implementation of Decision 3
+and 4, not in the decision itself:
+
+- `associateSessionInfo` accepted every `session.list()` entry with a
+  `parent_id` or a `[delegate:…]` title and seeded
+  `lastActivityAt = state.now()`, so quiet measured time since the *observer
+  booted*; every bootstrapped row therefore carried an identical value.
+- Nothing distinguished a session this process had evidence for from one the
+  store merely remembered. `session.list()` returns every child the store has
+  ever seen (274 in this repo's project, 272 idle for more than 10 minutes),
+  so association alone produced a wall of false `running` rows and, later,
+  false stall milestones.
+
+Amends Decision 3 ("universal association") and Decision 4 ("progress is
+event-driven"):
+
+1. **Association is discovery; liveness needs evidence.** A row is `running`
+   only when the host's live active map (`ctx.data.session.status`, `"idle" |
+   "running"` on 2.1.4) says so or the session produced an event in this
+   observer process. Everything else is `unknown` — a first-class status, not
+   a soft `running`. The active map is *reconciled*, not accumulated: when
+   the live map cannot be read at all, every discovered row is demoted to
+   `unknown` and the banner says why; an id that disappears from an available
+   map is denied the same way. A last-known `running` is never carried
+   forward. Observed rows are untouched.
+2. **Quiet comes from the session, never from the observer.** A discovered
+   row's `lastActivityAt` is the store's real last event (`SessionInfo.time.
+   updated`) where available and `null` otherwise; a `null` clock renders as
+   `—` instead of claiming elapsed time. Two delegates with different last
+   events therefore never share a quiet value by construction.
+3. **The store outcome is terminal and outranks the live map.** The field is
+   `SessionInfo.outcome` (`"succeeded" | "failed" | "interrupted"`), not a
+   DB-column alias. A row carrying an outcome renders `completed`/`failed`,
+   never `running`, emits no synthetic start/terminal milestone, and keeps the
+   outcome across a map demotion. Completions observed live
+   (`session.execution.*`) stay visible as `completed`; a completion that
+   exists only in the store is history.
+4. **Archived is final, for every row.** `time.archived` (bootstrap) and
+   `session.archived` (live) hide the row; `markActive` and event promotion
+   cannot revive it. Archive outranks the live map and observed provenance.
+   `session.unarchived` is the only way back *from archived* — it does not
+   make a row live again by itself: a row that is also terminal in the store
+   stays collapsed history (stale) after unarchiving, because the store
+   outcome is independent evidence. "Back in the strip" requires a live map
+   entry or a real event, and never applies to a store-terminal row.
+5. **History is collapsed, not reported.** A row that is archived, terminal in
+   the store without being observed here, or (discovered) older than
+   `staleGraceSeconds` is stale: never `running`, never a synthetic
+   milestone, never clock-classified, collapsed into one
+   `N stale delegates hidden` line and excluded from the focus/steer/
+   interrupt picker. `delegation.history` (alt+g) is the explicit read-only
+   path to focus one. `staleGraceSeconds` is an observer-owned display window
+   (default 600 s) reached through the TUI env seam
+   (`DELEGATION_OBSERVER_STALE_GRACE_SECONDS`); it is **not** part of
+   `scripts/supervision_contract.json`, whose values are generated from the
+   Python watchdog owners and carry no display window.
+6. **Universal discovery is retained** for genuinely live delegates: a live
+   active-map entry promotes the row, and the first real event promotes it
+   *and refreshes the observation clock to the event/observation time*, so the
+   next tick cannot read a 19 h-old store timestamp as quiet time. From there
+   the documented stall/thrash/needs-input semantics apply unchanged, and
+   `touch` clearing a warning also clears `unknown`.
+
+Evidence: `docs/roadmap-detail/RM-069.md` → *The 2026-10-30 stale-row defect*.

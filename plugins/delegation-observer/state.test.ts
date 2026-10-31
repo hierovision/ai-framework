@@ -20,9 +20,11 @@ import {
   createState,
   delegationTitle,
   healthPath,
+  markActive,
   observe,
   parseDelegationTitle,
   parseHealthRecord,
+  reconcileActive,
   tick,
   tuiConfig,
 } from "./state.ts";
@@ -522,38 +524,49 @@ test("the TUI config env source carries every TUI-relevant value", () => {
   const cfg = tuiConfig({}, {
     DELEGATION_OBSERVER_ENABLED: "false",
     DELEGATION_OBSERVER_STALL_SECONDS: "7",
+    DELEGATION_OBSERVER_STALE_GRACE_SECONDS: "90",
     DELEGATION_OBSERVER_HEALTH_FILE: "/tmp/h.json",
     DELEGATION_OBSERVER_STATUS_FILE: "/tmp/s.json",
   });
   assert.equal(cfg.enabled, false);
   assert.equal(cfg.stallSeconds, 7);
+  assert.equal(cfg.staleGraceSeconds, 90);
   assert.equal(cfg.healthFile, "/tmp/h.json");
   assert.equal(cfg.statusFile, "/tmp/s.json");
   // per-key precedence: a forwarded option wins; the env only fills gaps
   const kept = tuiConfig({
     options: {
       delegationObserver: {
-        enabled: true, stallSeconds: 11,
+        enabled: true, stallSeconds: 11, staleGraceSeconds: 45,
         healthFile: "/opt/h.json", statusFile: "/opt/s.json",
       },
     },
   }, {
     DELEGATION_OBSERVER_ENABLED: "0",
     DELEGATION_OBSERVER_STALL_SECONDS: "5",
+    DELEGATION_OBSERVER_STALE_GRACE_SECONDS: "90",
     DELEGATION_OBSERVER_HEALTH_FILE: "/tmp/h.json",
     DELEGATION_OBSERVER_STATUS_FILE: "/tmp/s.json",
   });
   assert.equal(kept.enabled, true, "options win over env");
   assert.equal(kept.stallSeconds, 11);
+  assert.equal(kept.staleGraceSeconds, 45, "options win over env for the grace window too");
   assert.equal(kept.healthFile, "/opt/h.json");
   assert.equal(kept.statusFile, "/opt/s.json");
   // invalid env values are ignored and gaps stay unfilled
   const invalid = tuiConfig({}, {
     DELEGATION_OBSERVER_ENABLED: "nonsense",
     DELEGATION_OBSERVER_STALL_SECONDS: "0",
+    DELEGATION_OBSERVER_STALE_GRACE_SECONDS: "-5",
   });
   assert.equal(invalid.enabled, undefined);
   assert.equal(invalid.stallSeconds, undefined);
+  assert.equal(invalid.staleGraceSeconds, undefined);
+  // the TUI state built from that source actually uses the value
+  const state = createState(tuiConfig({}, {
+    DELEGATION_OBSERVER_STALE_GRACE_SECONDS: "90",
+  }), now);
+  assert.equal(state.config.staleGraceSeconds, 90);
 });
 
 test("a clock-classified failed row returns to running on real activity", () => {
@@ -566,6 +579,504 @@ test("a clock-classified failed row returns to running on real activity", () => 
   const d = state.delegates.get("ses_c");
   assert.equal(d.status, "running");
   assert.equal(d.warning, null);
+});
+
+// --- liveness from evidence, not discovery (live defect, 2026-10-30) ------
+//
+// The TUI bootstraps from `session.list()`, which returns every child session
+// the store has ever seen. Association alone is not evidence of life: a row is
+// running only when the live active map says so or the session produced an
+// event in this process. Quiet comes from the session's real last event, never
+// from the observer's own boot clock.
+
+test("a discovered session with no events is never running", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_old", parentID: "ses_parent", title: "historical task",
+    agent: "implementer",
+    time: { created: clock - 20 * 3_600_000, updated: clock - 19 * 3_600_000 },
+  });
+  const d = state.delegates.get("ses_old");
+  assert.ok(d);
+  assert.notEqual(d.status, "running");
+  assert.equal(d.lastActivityAt, clock - 19 * 3_600_000,
+    "quiet is the session's last event, not observer boot");
+  assert.equal(d.stale, true);
+  const res = tick(state, clock);
+  assert.equal(res.milestones.length, 0, "a stale row never emits a milestone");
+  assert.notEqual(d.status, "running");
+});
+
+test("only the live active map can make a discovered session running", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_idle", parentID: "ses_parent", title: "idle child",
+    active: false, time: { created: clock - 3_600_000, updated: clock - 30_000 },
+  });
+  assert.notEqual(state.delegates.get("ses_idle").status, "running",
+    "discovery alone is not liveness");
+
+  associateSessionInfo(state, {
+    id: "ses_live", parentID: "ses_parent", title: "live child",
+    active: true, time: { created: clock - 3_600_000, updated: clock - 30_000 },
+  });
+  const live = state.delegates.get("ses_live");
+  assert.equal(live.status, "running");
+  assert.equal(live.stale, false);
+  assert.equal(live.lastActivityAt, clock - 30_000);
+});
+
+test("the host live map is what promotes and demotes a discovered row", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_live", parentID: "ses_parent", title: "live child",
+    time: { created: clock - 3_600_000, updated: clock - 30_000 },
+  });
+  assert.notEqual(state.delegates.get("ses_live").status, "running");
+  markActive(state, "ses_live", true);
+  const d = state.delegates.get("ses_live");
+  assert.equal(d.status, "running");
+  assert.equal(d.stale, false);
+  markActive(state, "ses_live", false);
+  assert.equal(d.status, "unknown", "losing the live map is not a stall claim");
+});
+
+test("the stale grace window is configurable and defaults to ten minutes", () => {
+  assert.equal(DEFAULTS.staleGraceSeconds, 600);
+  const recent = fresh();
+  associateSessionInfo(recent, {
+    id: "ses_recent", parentID: "ses_parent", title: "just started",
+    time: { created: clock - 300_000, updated: clock - 120_000 },
+  });
+  const d = recent.delegates.get("ses_recent");
+  assert.equal(d.status, "unknown");
+  assert.equal(d.stale, false, "a child younger than the grace window stays visible");
+
+  const tight = createState({ staleGraceSeconds: 60 }, now);
+  associateSessionInfo(tight, {
+    id: "ses_recent", parentID: "ses_parent", title: "just started",
+    time: { created: clock - 300_000, updated: clock - 120_000 },
+  });
+  assert.equal(tight.delegates.get("ses_recent").stale, true);
+});
+
+test("an active-map row is never stall-classified without an observed event", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_live", parentID: "ses_parent", title: "live child",
+    active: true, time: { created: clock - 3_600_000, updated: clock - 30_000 },
+  });
+  advance((DEFAULTS.stallSeconds * 2 + 5) * 1000);
+  const quietTick = tick(state, clock);
+  assert.equal(quietTick.milestones.length, 0,
+    "the store's last event is not this process's observation clock");
+  const d = state.delegates.get("ses_live");
+  assert.equal(d.status, "running");
+  assert.equal(d.warning, null);
+  // once it really produces events, the documented watchdog semantics apply
+  observe(state, contentTool("ses_live", "t1", "read", "completed", { path: "a" }));
+  advance((DEFAULTS.stallSeconds + 1) * 1000);
+  const warned = tick(state, clock);
+  assert.equal(warned.milestones.filter((m) => m.kind === "stall").length, 1);
+  assert.equal(d.status, "warning");
+});
+
+test("the live map read before association makes a live child running", () => {
+  // This is the TUI bootstrap order: refreshActive() fills the map, then the
+  // discovery list is associated, so a live-but-old child renders running on
+  // its first paint instead of unknown until the next timer tick.
+  const state = fresh();
+  markActive(state, "ses_live", true);
+  associateSessionInfo(state, {
+    id: "ses_live", parentID: "ses_parent", title: "live child",
+    time: { created: clock - 20 * 3_600_000, updated: clock - 19 * 3_600_000 },
+  });
+  const d = state.delegates.get("ses_live");
+  assert.equal(d.status, "running");
+  assert.equal(d.stale, false);
+  assert.equal(d.provenance, "discovered");
+});
+
+test("a session terminal in the store never re-enters running", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_done", parentID: "ses_parent", title: "finished task",
+    time: { created: clock - 72 * 3_600_000, updated: clock - 70 * 3_600_000 },
+    outcome: "succeeded",
+  });
+  const d = state.delegates.get("ses_done");
+  assert.equal(d.status, "completed");
+  assert.equal(d.terminal?.outcome, "completed");
+  assert.equal(tick(state, clock).milestones.length, 0);
+  // a replayed busy/step event never revives a terminal row
+  observe(state, event("session.status", {
+    sessionID: "ses_done", type: "busy", status: { type: "busy" },
+  }));
+  observe(state, event("session.step.started", {
+    sessionID: "ses_done", assistantMessageID: "m1",
+  }));
+  assert.equal(d.status, "completed");
+  assert.equal(d.lastActivityAt, clock - 70 * 3_600_000);
+});
+
+// --- the real host contract: `outcome`, not a DB-column alias --------------
+//
+// 2.1.4 `SessionInfo.outcome` is `"succeeded" | "failed" | "interrupted"`
+// (`@opencode/client` promise/generated/types.d.ts). Bootstrap must read that
+// field; the alias normalisation is defence only.
+
+test("a store-terminal row is completed at bootstrap from the real outcome field", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_done", parentID: "ses_parent", title: "recent completion",
+    // recent: inside the grace window, so only the outcome can classify it
+    time: { created: clock - 120_000, updated: clock - 60_000 },
+    outcome: "succeeded",
+  });
+  const d = state.delegates.get("ses_done");
+  assert.equal(d.status, "completed");
+  assert.equal(d.terminal?.outcome, "completed");
+  assert.equal(d.stale, true, "history, even when recent");
+  assert.equal(d.lastActivityAt, clock - 60_000);
+  assert.equal(tick(state, clock).milestones.length, 0);
+});
+
+test("the store outcome outranks the live map and cannot be demoted", () => {
+  const state = fresh();
+  // A finished session the map still calls running: the outcome wins.
+  associateSessionInfo(state, {
+    id: "ses_race", parentID: "ses_parent", title: "finished but busy",
+    active: true,
+    time: { created: clock - 120_000, updated: clock - 60_000 },
+    outcome: "failed",
+  });
+  const d = state.delegates.get("ses_race");
+  assert.equal(d.status, "failed");
+  assert.equal(d.terminal?.outcome, "failed");
+  // the live map saying "running" cannot resurrect it...
+  markActive(state, "ses_race", true);
+  assert.equal(d.status, "failed", "the map cannot revive a store-terminal row");
+  // ...and a demotion cannot erase the outcome (the terminal guard owns it)
+  markActive(state, "ses_race", false);
+  assert.equal(d.status, "failed");
+  assert.equal(d.terminal?.outcome, "failed");
+  assert.equal(d.stale, true);
+
+  // A row first seen live, whose outcome arrives on a later list refresh.
+  associateSessionInfo(state, {
+    id: "ses_late", parentID: "ses_parent", title: "outcome arrives late",
+    active: true,
+    time: { created: clock - 120_000, updated: clock - 30_000 },
+  });
+  const late = state.delegates.get("ses_late");
+  assert.equal(late.status, "running");
+  associateSessionInfo(state, {
+    id: "ses_late", parentID: "ses_parent", title: "outcome arrives late",
+    time: { created: clock - 120_000, updated: clock - 30_000 },
+    outcome: "interrupted",
+  });
+  assert.equal(late.status, "failed", "a later list refresh terminalizes the row");
+  markActive(state, "ses_late", true);
+  assert.equal(late.status, "failed");
+  markActive(state, "ses_late", false);
+  assert.equal(late.status, "failed", "the late outcome survives both map answers");
+});
+
+test("a recent completed child is never revived by later events", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_recent", parentID: "ses_parent", title: "just finished",
+    time: { created: clock - 120_000, updated: clock - 30_000 },
+    outcome: "succeeded",
+  });
+  const d = state.delegates.get("ses_recent");
+  const result = observe(state, event("session.status", {
+    sessionID: "ses_recent", type: "busy", status: { type: "busy" },
+  }));
+  assert.equal(result.milestones.length, 0);
+  const usage = observe(state, event("session.usage.updated", {
+    sessionID: "ses_recent", cost: 0.1, tokens: { input: 1, output: 1 },
+  }));
+  assert.equal(usage.milestones.length, 0);
+  assert.equal(d.status, "completed");
+  assert.equal(d.stale, true);
+});
+
+test("the first real event refreshes the observation clock (F2)", () => {
+  // Every first event that does not itself touch must still reset the clock:
+  // a 19 h-old store timestamp is not this process's quiet time.
+  const firsts = [
+    ["session.created", (sid) => event("session.created", { sessionID: sid, title: "x" })],
+    ["session.renamed", (sid) => event("session.renamed", { sessionID: sid, title: "renamed" })],
+    ["session.usage.updated", (sid) => event("session.usage.updated", {
+      sessionID: sid, cost: 0.01, tokens: { input: 1, output: 1 },
+    })],
+    ["text-only content", (sid) => event("session.message.content.updated", {
+      sessionID: sid, messageID: "m1",
+      content: [{ type: "text", text: "working" }],
+    })],
+    ["reply without pending input", (sid) => event("permission.replied", {
+      sessionID: sid, requestID: "p1", reply: "once",
+    })],
+  ];
+  for (const [label, make] of firsts) {
+    const state = fresh();
+    associateSessionInfo(state, {
+      id: "ses_old", parentID: "ses_parent", title: "historical",
+      time: { created: clock - 20 * 3_600_000, updated: clock - 19 * 3_600_000 },
+    });
+    advance(1_000);
+    observe(state, make("ses_old"));
+    const d = state.delegates.get("ses_old");
+    assert.equal(d.provenance, "observed", label);
+    assert.equal(d.lastActivityAt, clock, `${label}: the clock is the observation time`);
+    assert.equal(d.stale, false, label);
+    // no false stall/dead immediately after promotion
+    advance(5_000);
+    const res = tick(state, clock);
+    assert.equal(res.milestones.length, 0, `${label}: no stall right after promotion`);
+    assert.notEqual(d.status, "failed", label);
+    // the real window still applies afterwards
+    advance((DEFAULTS.stallSeconds + 1) * 1000);
+    const warned = tick(state, clock);
+    assert.equal(warned.milestones.filter((m) => m.kind === "stall").length, 1, label);
+  }
+});
+
+test("a 19 h-old discovered row plus one usage event never stalls or dies", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_old", parentID: "ses_parent", title: "historical",
+    time: { created: clock - 20 * 3_600_000, updated: clock - 19 * 3_600_000 },
+  });
+  assert.equal(state.delegates.get("ses_old").stale, true);
+  advance(2_000);
+  observe(state, event("session.usage.updated", {
+    sessionID: "ses_old", cost: 0.2, tokens: { input: 5, output: 2 },
+  }));
+  const res = tick(state, clock);
+  assert.equal(res.milestones.length, 0);
+  assert.equal(state.delegates.get("ses_old").status, "running");
+  assert.equal(state.delegates.get("ses_old").warning, null);
+});
+
+// --- archived is final -----------------------------------------------------
+
+test("an archived session is stale even when the live map calls it running", () => {
+  const state = fresh();
+  // the host's live map really does say running for this id
+  markActive(state, "ses_arch", true);
+  associateSessionInfo(state, {
+    id: "ses_arch", parentID: "ses_parent", title: "archived child",
+    active: true,
+    time: { created: clock - 120_000, updated: clock - 60_000, archived: clock - 30_000 },
+  });
+  const d = state.delegates.get("ses_arch");
+  assert.equal(d.archived, true);
+  assert.equal(d.stale, true, "archived outranks live");
+  markActive(state, "ses_arch", true);
+  assert.equal(d.stale, true, "the map cannot revive an archived row");
+  assert.notEqual(d.status, "running");
+  observe(state, contentTool("ses_arch", "t1", "read", "completed", { path: "a" }));
+  assert.equal(d.stale, true, "events cannot revive an archived row");
+  assert.equal(tick(state, clock).milestones.length, 0);
+});
+
+test("reconcileActive denies absent ids and leaves observed rows alone", () => {
+  const state = fresh();
+  markActive(state, "ses_live", true);
+  associateSessionInfo(state, {
+    id: "ses_live", parentID: "ses_parent", title: "live",
+    time: { created: clock - 120_000, updated: clock - 60_000 },
+  });
+  const discovered = state.delegates.get("ses_live");
+  assert.equal(discovered.status, "running");
+
+  // an observed row keeps its event clock even if the map drops it
+  observe(state, child("ses_seen", "ses_parent"));
+  markActive(state, "ses_seen", true);
+  const observed = state.delegates.get("ses_seen");
+  assert.equal(observed.provenance, "observed");
+
+  // unavailable snapshot: everything denied, discovered row demoted
+  assert.equal(reconcileActive(state, null), true);
+  assert.equal(state.active.get("ses_live"), false);
+  assert.equal(discovered.status, "unknown");
+  assert.equal(observed.status, "running", "observed rows keep their own clock");
+  assert.equal(state.active.get("ses_seen"), false);
+
+  // a second reconcile with the same snapshot is a no-op
+  assert.equal(reconcileActive(state, null), false);
+
+  // available snapshot: ids present are live, ids absent are denied
+  assert.equal(reconcileActive(state, ["ses_live"]), true);
+  assert.equal(discovered.status, "running");
+  assert.equal(reconcileActive(state, ["ses_live"]), false);
+  assert.equal(reconcileActive(state, []), true);
+  assert.equal(discovered.status, "unknown");
+});
+
+test("reconcileActive denies a row promoted by info.active, however it was promoted", () => {
+  // F21: `associateSessionInfo({ active: true })` promotes a discovered row
+  // without an explicit markActive call. Both an unavailable snapshot and an
+  // available snapshot that omits the id must demote it.
+  const unavailable = fresh();
+  associateSessionInfo(unavailable, {
+    id: "ses_info", parentID: "ses_parent", title: "info.active",
+    active: true,
+    time: { created: clock - 120_000, updated: clock - 60_000 },
+  });
+  const d1 = unavailable.delegates.get("ses_info");
+  assert.equal(d1.status, "running");
+  assert.equal(d1.provenance, "discovered");
+  assert.equal(unavailable.active.get("ses_info"), true, "the promotion is recorded");
+
+  assert.equal(reconcileActive(unavailable, null), true);
+  assert.equal(d1.status, "unknown", "null snapshot demotes an info.active row");
+  assert.equal(d1.stale, false, "recent: unknown, not fabricated stale");
+
+  const omitting = fresh();
+  associateSessionInfo(omitting, {
+    id: "ses_info", parentID: "ses_parent", title: "info.active",
+    active: true,
+    time: { created: clock - 120_000, updated: clock - 60_000 },
+  });
+  const d2 = omitting.delegates.get("ses_info");
+  assert.equal(d2.status, "running");
+  assert.equal(reconcileActive(omitting, ["ses_other"]), true);
+  assert.equal(d2.status, "unknown", "an omitting available snapshot demotes it too");
+
+  const included = fresh();
+  associateSessionInfo(included, {
+    id: "ses_info", parentID: "ses_parent", title: "info.active",
+    active: true,
+    time: { created: clock - 120_000, updated: clock - 60_000 },
+  });
+  const d3 = included.delegates.get("ses_info");
+  assert.equal(reconcileActive(included, ["ses_info"]), false, "already live: no change");
+  assert.equal(d3.status, "running");
+  assert.equal(reconcileActive(included, []), true);
+  assert.equal(d3.status, "unknown");
+  assert.equal(reconcileActive(included, ["ses_info"]), true, "recovery re-promotes");
+  assert.equal(d3.status, "running");
+});
+
+test("reconcileActive leaves observed rows and their clocks alone", () => {
+  const state = fresh();
+  observe(state, child("ses_seen", "ses_parent"));
+  const seen = state.delegates.get("ses_seen");
+  assert.equal(seen.provenance, "observed");
+  const observedAt = seen.lastActivityAt;
+  advance(1_000);
+  reconcileActive(state, null);
+  assert.equal(seen.status, "running", "an event-driven row is never demoted by the map");
+  assert.equal(seen.stale, false);
+  assert.equal(state.active.get("ses_seen"), undefined,
+    "an event-driven row never had a map entry to deny");
+  assert.equal(seen.lastActivityAt, observedAt, "its own observation clock is untouched");
+});
+
+test("an archived row never emits a start milestone on a replayed create", () => {
+  // Reviewer repro: discovered-live row (so `associate` did not pre-mark
+  // `start`) -> archive -> replayed session.created must emit nothing.
+  const state = fresh();
+  markActive(state, "ses_arch", true);
+  associateSessionInfo(state, {
+    id: "ses_arch", parentID: "ses_parent", title: "archived child",
+    time: { created: clock - 120_000, updated: clock - 60_000 },
+  });
+  const d = state.delegates.get("ses_arch");
+  assert.equal(d.status, "running");
+  assert.equal(d.emitted.has("start"), false, "the live branch did not pre-mark start");
+  advance(1_000);
+  observe(state, event("session.archived", { sessionID: "ses_arch" }));
+  assert.equal(d.archived, true);
+  advance(1_000);
+  const replay = observe(state, event("session.created", {
+    sessionID: "ses_arch", parentID: "ses_parent", title: "archived child",
+  }));
+  assert.deepEqual(replay.milestones, [], "no synthetic start for archived history");
+  const renamed = observe(state, event("session.renamed", {
+    sessionID: "ses_arch", title: "renamed child",
+  }));
+  assert.deepEqual(renamed.milestones, []);
+  assert.equal(d.archived, true, "the replay does not un-archive the row");
+});
+
+test("archive after start hides an observed row, unarchive restores it", () => {
+  const state = fresh();
+  observe(state, child("ses_c", "ses_p"));
+  const d = state.delegates.get("ses_c");
+  assert.equal(d.stale, false);
+  advance(1_000);
+  observe(state, event("session.archived", { sessionID: "ses_c" }));
+  assert.equal(d.archived, true);
+  assert.equal(d.stale, true);
+  // the clock refresh must not resurrect the archive on the next tick
+  advance(5_000);
+  tick(state, clock);
+  assert.equal(d.stale, true, "archived outranks observed provenance");
+  advance(1_000);
+  const archivedEvent = observe(state, contentTool("ses_c", "t1", "read", "running", { path: "a" }));
+  assert.equal(archivedEvent.milestones.length, 0, "an archived row emits nothing");
+  assert.equal(d.status, "running"); // status untouched, but the row is hidden
+  advance(1_000);
+  observe(state, event("session.unarchived", { sessionID: "ses_c" }));
+  assert.equal(d.archived, false);
+  assert.equal(d.stale, false);
+});
+
+// --- timestamps: absent, created-only, clock skew --------------------------
+
+test("missing and skewed timestamps never fabricate a live clock", () => {
+  const state = fresh();
+  // no time at all: no evidence -> stale immediately, quiet unknown
+  associateSessionInfo(state, { id: "ses_none", parentID: "ses_parent", title: "no time" });
+  const none = state.delegates.get("ses_none");
+  assert.equal(none.lastActivityAt, null);
+  assert.equal(none.startedAt, null);
+  assert.equal(none.stale, true);
+  assert.equal(tick(state, clock).milestones.length, 0);
+
+  // created only: inside the grace window it stays visible as unknown
+  associateSessionInfo(state, {
+    id: "ses_created", parentID: "ses_parent", title: "created only",
+    time: { created: clock - 60_000 },
+  });
+  const created = state.delegates.get("ses_created");
+  assert.equal(created.stale, false);
+  assert.equal(created.status, "unknown");
+  assert.equal(created.lastActivityAt, null);
+
+  // a future timestamp is not negative quiet and is not stale
+  associateSessionInfo(state, {
+    id: "ses_future", parentID: "ses_parent", title: "clock skew",
+    time: { created: clock + 60_000, updated: clock + 30_000 },
+  });
+  const future = state.delegates.get("ses_future");
+  assert.equal(future.stale, false);
+  assert.equal(tick(state, clock).milestones.length, 0);
+});
+
+test("a replayed create never emits start or terminal for store-terminal history", () => {
+  const state = fresh();
+  associateSessionInfo(state, {
+    id: "ses_done", parentID: "ses_parent", title: "finished",
+    time: { created: clock - 120_000, updated: clock - 60_000 },
+    outcome: "succeeded",
+  });
+  const d = state.delegates.get("ses_done");
+  assert.equal(d.emitted.has("start"), true);
+  assert.equal(d.emitted.has("terminal"), true);
+  const created = observe(state, event("session.created", {
+    sessionID: "ses_done", parentID: "ses_parent", title: "finished",
+  }));
+  assert.equal(created.milestones.length, 0);
+  const terminal = observe(state, event("session.execution.succeeded", {
+    sessionID: "ses_done",
+  }));
+  assert.equal(terminal.milestones.length, 0);
+  assert.equal(d.status, "completed");
 });
 
 test("a name-less tool.called waits for the content update to label the call", () => {

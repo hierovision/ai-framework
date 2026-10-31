@@ -325,7 +325,7 @@ is non-blocking and observable:
   not the orchestrator's vehicle;
 - a live status surface shows agent, task, elapsed/quiet time, current
   tool/phase, tokens/cost and one of `running | waiting | warning | failed |
-  completed`;
+  completed | unknown`;
 - progress, needs-input and terminal state arrive from the **event stream**;
 - owner controls: focus/open, steer (same session id), interrupt (typed
   request on the same session id);
@@ -347,6 +347,40 @@ grant-driven private servers keep the durable observer contract.
 `session.execution.succeeded/failed/interrupted`. The TUI never reads
 heartbeat files. Quiet/stall evaluation is a local clock over those event
 timestamps (5 s), not a poll of any file.
+
+**Discovery is not liveness (2026-10-30).** `session.list()` returns every
+child the store has ever seen, so bootstrapping is discovery only: a row is
+`running` only when the host's live active map (`ctx.data.session.status`,
+`"idle" | "running"` on 2.1.4) says so or the session emitted an event in this
+observer process; otherwise it is `unknown`. Quiet is the session's real last
+event (`SessionInfo.time.updated`), never the observer's boot clock — so two
+delegates with different last events never share a quiet value, and an unknown
+clock renders as `—` instead of a fabricated duration.
+
+**Terminal, archived and history.** `SessionInfo.outcome` (the real field:
+`"succeeded" | "failed" | "interrupted"`) is terminal and outranks the live
+map: such a row reads `completed`/`failed`, emits no synthetic start/terminal
+milestone, and cannot be revived or demoted by the live map. `time.archived` and
+`session.archived` hide a row for good — the map and later events cannot
+revive it, only `session.unarchived` can. A row that is archived, terminal in
+the store without being observed here, or (discovered) older than
+`staleGraceSeconds` is stale: never `running`, never clock-classified, and
+collapsed into one `N stale delegates hidden` line that is not selectable in
+the focus/steer/interrupt picker; `delegation.history` (alt+g) focuses one
+read-only.
+
+**First event on a discovered row.** A live-map entry promotes the row; the
+first real event promotes it *and* resets the observation clock to that
+event's observation time, so the next tick cannot read a 19 h-old store
+timestamp as quiet time and emit a false stall/dead milestone. From there the
+documented stall/thrash/needs-input semantics apply unchanged.
+
+**Live map unavailable.** If the host cannot answer `session.list()` or
+`session.status()`, the TUI shows a banner saying discovered delegates have no
+liveness source and may be hidden — it never presents that state as healthy.
+`staleGraceSeconds` (default 600 s) is an observer-owned display window carried
+through `DELEGATION_OBSERVER_STALE_GRACE_SECONDS`; it is not part of the shared
+supervision contract. See ADR-0015 (2026-10-30 amendment).
 
 **Milestones (synthetic, no model turn).** start, first tool, needs-input,
 denied, stall, thrash, retry, resume, terminal. Routine milestones are capped

@@ -12,6 +12,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { PLUGIN_ID, createDefinition, startObserver } from "./server.ts";
+import { observe, tick } from "./state.ts";
 
 const Plugin = { define: (d) => d };
 const clock = () => 1_000_000;
@@ -303,6 +304,69 @@ test("teardown aborts the event subscription", async () => {
   assert.equal(signal().aborted, false);
   await handle.stop();
   assert.equal(signal().aborted, true);
+});
+
+test("a historical bootstrap emits no synthetic stalls and never reads running", async () => {
+  const { ctx, synthetic } = fakeCtx([], {
+    list: [{
+      id: "ses_old", parentID: "ses_parent", title: "historical", agent: "planner",
+      time: { created: 1_000, updated: 2_000 }, outcome: "succeeded",
+    }],
+  });
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  const d = handle.state.delegates.get("ses_old");
+  assert.ok(d);
+  assert.equal(d.status, "completed", "the real SessionInfo.outcome is read");
+  assert.equal(d.terminal?.outcome, "completed");
+  assert.equal(d.stale, true);
+  assert.equal(d.lastActivityAt, 2_000, "the store's last event, not the boot clock");
+  assert.equal(tick(handle.state, 999_999_000).milestones.length, 0);
+  assert.equal(synthetic.length, 0);
+});
+
+test("a discovered row promoted by a non-touch event never stalls on the server path", async () => {
+  // 19 h-old list entry, no outcome: the first event must refresh the clock,
+  // otherwise the next tick classifies it dead and injects a synthetic stall.
+  const { ctx, synthetic } = fakeCtx([
+    { type: "session.usage.updated", data: { sessionID: "ses_old", cost: 0.1 } },
+  ], {
+    list: [{
+      id: "ses_old", parentID: "ses_parent", title: "historical", agent: "planner",
+      time: { created: 1_000, updated: 2_000 },
+    }],
+  });
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  const d = handle.state.delegates.get("ses_old");
+  assert.equal(d.provenance, "observed");
+  assert.equal(d.lastActivityAt, clock(), "the observation time, not the store timestamp");
+  const flushed = tick(handle.state, clock());
+  assert.equal(flushed.milestones.length, 0);
+  assert.equal(synthetic.length, 0);
+  assert.equal(d.status, "running");
+});
+
+test("a store-terminal child emits nothing on a tick or a replayed create", async () => {
+  const { ctx, synthetic } = fakeCtx([], {
+    list: [{
+      id: "ses_done", parentID: "ses_parent", title: "finished", agent: "planner",
+      time: { created: 999_000, updated: 999_900 }, outcome: "succeeded",
+    }],
+  });
+  const handle = startObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  const d = handle.state.delegates.get("ses_done");
+  assert.equal(d.status, "completed");
+  const replayed = observe(handle.state, {
+    type: "session.created",
+    data: { sessionID: "ses_done", parentID: "ses_parent", title: "finished" },
+  });
+  assert.deepEqual(replayed.milestones, [], "a replayed create emits no start");
+  const replay = tick(handle.state, clock());
+  assert.equal(replay.milestones.length, 0);
+  assert.equal(synthetic.length, 0);
+  assert.equal(d.status, "completed");
 });
 
 test("disable-by-config leaves the stream silent", async () => {

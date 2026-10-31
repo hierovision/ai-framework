@@ -5,7 +5,7 @@
   "type": "module",
   "description": "V2 delegation observer: event-driven delegate status, synthetic parent milestones, owner controls",
   "scripts": {
-    "test": "node --test state.test.ts tui.test.ts server.test.ts",
+    "test": "node --test state.test.ts tui.test.ts server.test.ts model.test.ts",
     "typecheck": "tsc -p . --noEmit"
   },
   "peerDependencies": {
