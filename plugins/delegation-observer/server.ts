@@ -5,8 +5,10 @@
  * session with its orchestrator (parent_id or the run-vehicle title marker;
  * no side registry), reduces the stream with the shared pure reducer, and
  * appends rate-limited SYNTHETIC messages to the orchestrator session at
- * meaningful transitions. Synthetic messages add no model turn — the only
- * progress-path prompt remains the RM-058 terminal wake.
+ * meaningful transitions. Routine and terminal milestones add no model turn;
+ * an attention condition (thrash/stall/needs-input/denied) starts exactly one
+ * parent turn, bounded per child (RM-070), so the owner can act while it is
+ * happening. The RM-058 terminal wake remains the only terminal prompt.
  *
  * Trust boundary (review M6): a title marker is a claim, not proof. Before the
  * first synthetic message to a parent, the parent is looked up and must be a
@@ -39,6 +41,7 @@ import {
   createState,
   degrade,
   disconnect,
+  envConfig,
   healthPath,
   observe,
   parseDelegationTitle,
@@ -71,10 +74,12 @@ export function startObserver(ctx: any, options: {
   intervalMs?: number;
   config?: Partial<ObserverConfig>;
   healthFile?: string | null;
+  env?: Record<string, string | undefined>;
   onHealthWrite?: (record: Record<string, unknown>) => void;
 } = {}) {
   const config = {
     ...DEFAULTS,
+    ...envConfig(options.env ?? process.env),
     ...(ctx?.options?.delegationObserver ?? {}),
     ...(options.config ?? {}),
   };
@@ -186,24 +191,39 @@ export function startObserver(ctx: any, options: {
     milestones: Array<{
       parentID: string; sessionID: string; kind: string;
       text: string; description: string;
+      attention?: boolean; wake?: boolean;
     }>;
   }) => {
     for (const m of result.milestones) {
       const parent = await resolveParent(m.parentID);
       if (!parent.trusted) continue;
       if (!sameDirectory(ctx?.location?.directory, parent.location)) continue;
+      if (m.attention && !m.wake) {
+        const delegate = state.delegates.get(m.sessionID);
+        log("info", "attention wake dropped", {
+          sessionID: m.sessionID,
+          kind: m.kind,
+          reason: config.attentionWake ? "cap" : "disabled",
+          attentionWakes: delegate?.attentionWakes ?? 0,
+          maxAttentionWakes: config.maxAttentionWakes,
+        });
+      }
       try {
-        // A milestone is context, not work: deliver it as a steer message and
-        // never resume generation (AC5). Without `resume:false` the session
-        // starts a turn (observed live 2026-10-29).
+        // Routine/terminal milestones are context, not work: deliver them as a
+        // steer message and never resume generation (RM-069 AC5). An attention
+        // milestone marked `wake` is the one exception (RM-070): it starts
+        // exactly one parent turn while the condition is happening, bounded by
+        // the reducer's per-child budget. Without `resume:false` every
+        // milestone started a turn (observed live 2026-10-29).
         await ctx.session.synthetic({
           sessionID: parent.rootID,
           text: m.text,
           description: m.description,
           delivery: "steer",
-          resume: false,
+          resume: Boolean(m.wake),
           metadata: {
             delegate: m.sessionID, kind: m.kind,
+            attention: Boolean(m.attention), wake: Boolean(m.wake),
             observer: process.pid, location: ctx?.location?.directory ?? null,
           },
         });
@@ -230,6 +250,8 @@ export function startObserver(ctx: any, options: {
     loopRepeats: config.loopRepeats,
     generationSeconds: config.generationSeconds,
     milestoneMinIntervalSeconds: config.milestoneMinIntervalSeconds,
+    attentionWake: config.attentionWake,
+    maxAttentionWakes: config.maxAttentionWakes,
     healthFile: healthFile ?? null,
     location: ctx?.location?.directory ?? null,
     pid: process.pid,
