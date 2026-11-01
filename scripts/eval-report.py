@@ -55,6 +55,12 @@ RM002_CANARY_RUN = "35108912831"
 FALLBACK_EVIDENCE_PREFIX = "lane-degradation-evidence: "
 FALLBACK_SWITCH_PREFIX = "lane-switch: "
 FALLBACK_CEILING_PREFIX = "lane-fallback-ceiling: "
+# The trigger classes the runner names in `window_classes` and writes into the
+# switch record's evidence list (`run_behavioral_eval._note_provider_death`).
+# They are class labels, never eval keys: the cover parser must drop them in
+# every path so a class can never inflate a run's degraded share.
+LANE_CLASS_NAMES = ("ProviderModelNotFoundError", "lane stall",
+                    "dead-session UnknownError")
 
 # AC11 quota model (pass 4; documented in reference/per-change-eval-sla.md).
 # Measured ~100s per fresh-agent eval (PR #23, run 35392700424) supersedes
@@ -325,12 +331,18 @@ def _evidence_keys_from_detail(detail):
       `evidence: k1, k2`                     legacy, keys only
       `evidence: <class>, <class> (k1, k2)`  current writer
                                              (`_write_switch_record`)
-    Only the parenthesised key list is evidence: a CLASS is not an eval key.
-    Splitting the whole tail on commas counted every class as a key, so a
-    mixed-class switch `ProviderModelNotFoundError, lane stall (s#1, s#2)`
-    read as 3 keys over 2 evals — 50% cover where the true share is 33.3% —
-    and falsely crossed the routing-review threshold (2026-11-01). Each eval
-    key is counted once, which is the runner's own per-attempt accounting.
+    Only the key list is evidence: a CLASS is not an eval key. Splitting the
+    whole tail on commas counted every class as a key, so a mixed-class switch
+    `ProviderModelNotFoundError, lane stall (s#1, s#2)` read as 3 keys over 2
+    evals — 50% cover where the true share is 33.3% — and falsely crossed the
+    routing-review threshold (2026-11-01).
+
+    The switch `detail` is capped at `DETAIL_MAX` (512), so a mass-degradation
+    run (dozens of long eval keys) truncates the list and may cut the closing
+    `)`: parse everything after the LAST `(` whether or not the closing paren
+    survived, and drop any token that is a known class name in every path
+    (2026-11-01). `lane_status` prefers the `eval` key on the evidence records
+    themselves; this parser is the legacy fallback.
     """
     text = detail or ""
     marker = "; evidence: "
@@ -338,9 +350,21 @@ def _evidence_keys_from_detail(detail):
     if idx < 0:
         return []
     tail = text[idx + len(marker):].strip()
-    if tail.endswith(")") and "(" in tail:
-        tail = tail[tail.rfind("(") + 1:-1]
-    return [k.strip() for k in tail.split(",") if k.strip()]
+    if "(" in tail:
+        # The key list; the closing paren may be cut by the DETAIL_MAX cap.
+        tail = tail[tail.rfind("(") + 1:]
+        if tail.endswith(")"):
+            tail = tail[:-1]
+        # A key is `<skill>#<id>`: a token without the separator is a remnant
+        # of a key cut mid-name, never a key.
+        return [k.strip() for k in tail.split(",")
+                if k.strip() and "#" in k and k.strip() not in LANE_CLASS_NAMES]
+    # Keys-only legacy tail. A class label here means the class list was cut
+    # before the key list: return nothing rather than mis-count a class.
+    tokens = [k.strip() for k in tail.split(",") if k.strip()]
+    if any(tok in LANE_CLASS_NAMES for tok in tokens):
+        return []
+    return [k for k in tokens if "#" in k]
 
 
 def lane_status(logs_dir, window_days=30, review_after=2, review_cover=50,
@@ -351,9 +375,11 @@ def lane_status(logs_dir, window_days=30, review_after=2, review_cover=50,
     window. Events = distinct UTC dates with a switch record (deduped; one
     degraded weekly run is one event). `needed` when events >= `review_after`
     within the window OR any single event carried >= `review_cover` percent of
-    that run's included evals. Cover counts each evidence eval once (the
-    parenthesised key list of the switch record), never per class — see
-    `_evidence_keys_from_detail`. Read-only; no schema change.
+    that run's included evals. Cover counts each evidence eval once — the
+    `eval` key of the marked death records, never the classes and never twice —
+    with the switch record's key list as the legacy fallback; the switch
+    `detail` is capped at DETAIL_MAX, so the records are the authoritative
+    source. Read-only; no schema change.
     """
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(days=window_days)
@@ -390,9 +416,21 @@ def lane_status(logs_dir, window_days=30, review_after=2, review_cover=50,
             final_keys = {r.get("eval") for r in recs
                           if r.get("kind") == "eval" and r.get("eval")
                           and r.get("eval_pass") is not None}
-            evidence_keys = set()
-            for r in switches:
-                evidence_keys.update(_evidence_keys_from_detail(r.get("detail")))
+            # The authoritative evidence set is the `eval` key on the marked
+            # death records themselves: a real weekly run names dozens of long
+            # keys and the switch `detail` is capped at DETAIL_MAX, so the
+            # string can lose keys (and its closing paren). Legacy records
+            # (pre-2026-11-01) carry no `eval`, so the switch-detail parse stays
+            # as their fallback — and as the fallback for a run with no marked
+            # records at all.
+            marked = [r for r in recs
+                      if (r.get("detail") or "").startswith(
+                          FALLBACK_EVIDENCE_PREFIX)]
+            evidence_keys = {r.get("eval") for r in marked if r.get("eval")}
+            if not marked or any(not r.get("eval") for r in marked):
+                for r in switches:
+                    evidence_keys.update(
+                        _evidence_keys_from_detail(r.get("detail")))
             cover = (len(evidence_keys) / len(final_keys) * 100.0
                      if final_keys else 0.0)
             events[m.group(1)] = {

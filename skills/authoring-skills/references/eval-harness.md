@@ -80,6 +80,15 @@ ADR-0013's domain. Rehearsal stub modes (no model, no network):
 first-line stall class), `:STALL-NOFIRST-DRILL:` (its launch/env negative) and
 `:EXTERNAL-REJECT:` (the env class that must never switch).
 
+**Escalation cover counts evals, not strings.** `eval-report.py lane-status`
+measures a run's degraded share from the `eval` key of each
+`lane-degradation-evidence:` record, so the switch `detail` — capped at 512
+chars, where a mass degradation (dozens of long keys) loses keys and its
+closing paren — can never shrink or inflate the number; the switch's key list
+is parsed only as the fallback for legacy records, and a class label is never
+counted as an eval key. Threshold (50% of a run, or two events in 30 days) and
+the report's output schema are unchanged.
+
 **Five-sibling manifest audit** (marker = tier-intent tag, not steering;
 no manifest edits per plan scope). All five carry `default_model_tier:
 "free"` at evals.json line 3: `auditing-supply-chain`, `modeling-threats`,

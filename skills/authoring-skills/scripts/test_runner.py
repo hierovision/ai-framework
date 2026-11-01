@@ -1637,6 +1637,45 @@ def test_per_eval_trigger_stall_deaths():
     print("PASS  per-eval trigger fires on three stall deaths, not on env stalls")
 
 
+def test_stall_evidence_records_carry_eval_key():
+    """The report's lane cover must never depend on the switch `detail` string
+    surviving the 512-char cap: every marked death record names its own eval
+    key (`eval` is an existing run-log field), so `lane_status` can count the
+    records instead of mining a truncated string (2026-11-01 review)."""
+    e = {"skill": "alpha", "eval_id": 7, "expect": {"text": ["A"]},
+         "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    lane = {"active": False, "eval_deaths": 3, "degraded_evals": set(),
+            "window_classes": set(), "consecutive_deaths": 0}
+    old_fresh = os.environ.get("BEVAL_MAX_FRESH_RETRIES")
+    old_cont = os.environ.get("BEVAL_MAX_CONTINUATIONS")
+    os.environ["BEVAL_MAX_FRESH_RETRIES"] = "2"
+    os.environ["BEVAL_MAX_CONTINUATIONS"] = "0"
+    try:
+        passed, _missing, _path = runner.run_eval(
+            e, lambda _e, turn=None: runner.EvalResult(raw=STALL_FIRST_LINE_RAW),
+            logs_dir=d, model=DRILL_PRIMARY_MODEL, lane_state=lane,
+            sleep=lambda _s: None)
+        assert not passed
+        marked = [rec for rec in _read_logs(d)
+                  if (rec.get("detail") or "").startswith(
+                      "lane-degradation-evidence: ")]
+        assert len(marked) == 3, marked
+        assert all(rec.get("eval") == "alpha#7" for rec in marked), marked
+        assert lane["degraded_evals"] == {"alpha#7"}, lane
+    finally:
+        if old_fresh is None:
+            os.environ.pop("BEVAL_MAX_FRESH_RETRIES", None)
+        else:
+            os.environ["BEVAL_MAX_FRESH_RETRIES"] = old_fresh
+        if old_cont is None:
+            os.environ.pop("BEVAL_MAX_CONTINUATIONS", None)
+        else:
+            os.environ["BEVAL_MAX_CONTINUATIONS"] = old_cont
+        shutil.rmtree(d)
+    print("PASS  every marked stall death record carries its eval key")
+
+
 def test_stall_drill_switches_lane():
     """Run-level (:FALLBACK-DRILL: seam, `:STALL-DRILL:` mode): a single-canary
     run that stalls three times with a first stdout line switches to the
@@ -2026,6 +2065,7 @@ def main():
         test_error_signature_stall_shapes,
         test_stall_class_truth_table,
         test_per_eval_trigger_stall_deaths,
+        test_stall_evidence_records_carry_eval_key,
         test_stall_drill_switches_lane,
         test_stall_no_first_line_never_switches,
         test_fallback_drill_switch_and_marking,

@@ -33,6 +33,12 @@ _MERGE = importlib.util.spec_from_file_location(
 merge_eval_logs = importlib.util.module_from_spec(_MERGE)
 _MERGE.loader.exec_module(merge_eval_logs)
 
+_LR = importlib.util.spec_from_file_location(
+    "log_run", os.path.join(REPO_ROOT, "skills", "observing-runs", "scripts",
+                            "log_run.py"))
+log_run = importlib.util.module_from_spec(_LR)
+_LR.loader.exec_module(log_run)
+
 FIXTURE_LINES = [
     {"ts": "2026-09-17T06:00:00Z", "run_id": "r1", "kind": "eval",
      "skill": "writing-unit-tests", "model": "free", "tokens_in": 800,
@@ -453,6 +459,49 @@ def test_failure_taxonomy_surfaces_lane_lists():
         shutil.rmtree(d)
 
 
+def test_lane_evidence_annotations_attach_to_eval_key():
+    """2026-11-01 sweep: the marked stall death records name their own eval key,
+    so `failure_taxonomy` attributes them to the eval (not the skill bucket) and
+    the lane rows survive the switch detail's 512-char cap."""
+    d = tempfile.mkdtemp()
+    try:
+        marked = ("lane-degradation-evidence: dead session: stall "
+                  "(first line 5916ms) — no work produced")
+        lines = [
+            # transient + fresh annotations, then the terminal dead verdict.
+            {"ts": "2026-10-31T06:00:00Z", "kind": "eval", "skill": "alpha",
+             "eval": "alpha#7", "model": "m", "outcome": "error",
+             "eval_pass": None, "detail": marked},
+            {"ts": "2026-10-31T06:01:00Z", "kind": "eval", "skill": "alpha",
+             "eval": "alpha#7", "model": "m", "outcome": "error",
+             "eval_pass": None, "detail": marked},
+            {"ts": "2026-10-31T06:02:00Z", "kind": "eval", "skill": "alpha",
+             "eval": "alpha#7", "model": "m", "outcome": "error",
+             "eval_pass": False, "detail": marked},
+            {"ts": "2026-10-31T06:03:00Z", "kind": "eval", "skill": None,
+             "model": "deepseek/deepseek-flash", "outcome": "error",
+             "eval_pass": None,
+             "detail": ("lane-switch: m -> deepseek/deepseek-flash; per-run; "
+                        "evidence: lane stall (alpha#7)")},
+        ]
+        with open(os.path.join(d, "run-2026-10-31.jsonl"), "w",
+                  encoding="utf-8") as fh:
+            for line in lines:
+                fh.write(json.dumps(line) + "\n")
+        out = report.failure_taxonomy(d)
+        assert len(out["lane_evidence"]) == 3, out["lane_evidence"]
+        assert len(out["lane_switches"]) == 1, out["lane_switches"]
+        # The annotated eval is terminal infra, attributed by its eval key.
+        assert out["terminal_infra"] == ["alpha#7"], out
+        # Cover from the records agrees with the switch record for one key.
+        assert report.lane_status(
+            d, now=datetime(2026, 11, 1, tzinfo=timezone.utc)
+        )["max_run_cover_pct"] == 100.0
+    finally:
+        shutil.rmtree(d)
+    print("PASS  lane evidence annotations keep their eval attribution")
+
+
 def _seed_lane_day(d, date, n_evals, n_evidence, classes=None):
     with open(os.path.join(d, f"run-{date}.jsonl"), "a", encoding="utf-8") as fh:
         for i in range(1, n_evals + 1):
@@ -482,6 +531,146 @@ def test_evidence_keys_parses_keys_not_classes():
     assert report._evidence_keys_from_detail(legacy) == ["s#1", "s#2"]
     assert report._evidence_keys_from_detail("no evidence tail") == []
     print("PASS  lane-switch evidence parses keys, not classes")
+
+
+LONG_SKILL = "designing-architecture"
+LANE_CLASSES = "ProviderModelNotFoundError, lane stall"
+# Independent oracle: the class labels the runner writes (never eval keys).
+CLASS_LABELS = ("ProviderModelNotFoundError", "lane stall",
+                "dead-session UnknownError")
+
+
+def _long_switch_detail(keys, classes=LANE_CLASSES):
+    """The switch record exactly as the runner writes it: `detail` is cut to
+    DETAIL_MAX before logging (`log_run` rejects anything longer)."""
+    detail = ("lane-switch: opencode-go/deepseek-v4.1-flash -> "
+              "deepseek/deepseek-flash; per-run; "
+              f"evidence: {classes} ({', '.join(keys)})")
+    return detail[:log_run.DETAIL_MAX]
+
+
+def _seed_long_degraded_run(d, date, n_final=114, n_evidence=60,
+                            with_eval_field=True, eval_on=None):
+    """A realistic mass-degradation day: `n_final` verdicts, `n_evidence` marked
+    death records, one truncated switch record. `eval_on` selects which marked
+    records carry the `eval` key (None = all when `with_eval_field`)."""
+    keys = [f"{LONG_SKILL}#{i}" for i in range(1, n_evidence + 1)]
+    path = os.path.join(d, f"run-{date}.jsonl")
+    with open(path, "w", encoding="utf-8") as fh:
+        for i in range(1, n_final + 1):
+            fh.write(json.dumps({
+                "ts": f"{date}T06:00:{i % 60:02d}Z", "kind": "eval",
+                "skill": LONG_SKILL, "eval": f"{LONG_SKILL}#{i}",
+                "model": "opencode-go/deepseek-v4.1-flash",
+                "outcome": "success", "eval_pass": True}) + "\n")
+        for i, key in enumerate(keys, start=1):
+            rec = {"ts": f"{date}T06:10:{i % 60:02d}Z", "kind": "eval",
+                   "skill": LONG_SKILL, "eval": None,
+                   "model": "opencode-go/deepseek-v4.1-flash",
+                   "outcome": "error", "eval_pass": None,
+                   "detail": ("lane-degradation-evidence: dead session: "
+                              "stall (first line 5916ms) — no work produced")}
+            if eval_on is not None:
+                if i in eval_on:
+                    rec["eval"] = key
+            elif with_eval_field:
+                rec["eval"] = key
+            fh.write(json.dumps(rec) + "\n")
+        fh.write(json.dumps({
+            "ts": f"{date}T06:20:00Z", "kind": "eval", "skill": None,
+            "model": "deepseek/deepseek-flash", "outcome": "error",
+            "eval_pass": None,
+            "detail": _long_switch_detail(keys)}) + "\n")
+    return path
+
+
+def test_evidence_keys_tolerates_truncated_tail():
+    """A truncated switch tail yields keys only — never a class name, never a
+    crash — and a tail cut before the key list yields nothing."""
+    keys = [f"{LONG_SKILL}#{i}" for i in range(1, 61)]
+    detail = _long_switch_detail(keys)
+    assert len(detail) == log_run.DETAIL_MAX and not detail.endswith(")")
+    parsed = report._evidence_keys_from_detail(detail)
+    assert parsed, parsed
+    assert not [k for k in parsed if k in CLASS_LABELS], parsed
+    assert all(k.startswith(f"{LONG_SKILL}#") for k in parsed), parsed
+    # Closing paren cut, every key intact -> the exact keys.
+    cut_paren = ("lane-switch: m -> d; per-run; evidence: "
+                 f"{LANE_CLASSES} (s#1, s#2")
+    assert report._evidence_keys_from_detail(cut_paren) == ["s#1", "s#2"], cut_paren
+    # Cut inside the class list, before any key -> nothing usable, no class.
+    cut_classes = ("lane-switch: m -> d; per-run; evidence: "
+                   "ProviderModelNotFoundError, lane sta")
+    assert report._evidence_keys_from_detail(cut_classes) == [], cut_classes
+    print("PASS  truncated switch tails yield keys only")
+
+
+def test_lane_status_long_evidence_uses_eval_keys():
+    """Regression (2026-11-01, review): 60 long `designing-architecture#N`
+    evidence evals over 114 final evals is 52.6% cover and escalates. The
+    switch `detail` is capped at DETAIL_MAX and loses keys plus its closing
+    paren, so the cover must come from the evidence records' `eval` key — the
+    truncated string alone under-counts to 12-14 keys."""
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    d = tempfile.mkdtemp()
+    try:
+        path = _seed_long_degraded_run(d, "2026-10-31")
+        detail = [json.loads(line) for line in open(path, encoding="utf-8")][-1]["detail"]
+        assert len(detail) == log_run.DETAIL_MAX and not detail.endswith(")"), detail[-20:]
+        from_string = report._evidence_keys_from_detail(detail)
+        assert len(from_string) < 60, from_string  # the cap does lose keys
+        out = report.lane_status(d, now=now)
+        assert out["fallback_events"] == 1, out
+        assert out["max_run_cover_pct"] == 52.6, out
+        assert out["routing_review"]["needed"] is True, out
+        assert ("max run cover 52.6% >= 50%"
+                in out["routing_review"]["basis"]), out["routing_review"]
+    finally:
+        shutil.rmtree(d)
+    print("PASS  long evidence keys: 52.6% cover and the review escalates")
+
+
+def test_lane_status_legacy_and_mixed_evidence_records():
+    """Legacy evidence records (no `eval`) still work through the switch-record
+    fallback: an intact short list is exact, and a truncated long list
+    under-counts honestly instead of counting classes. A mixed run (some
+    records carry `eval`, some do not) unions both sources."""
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    d = tempfile.mkdtemp()
+    try:
+        # Short legacy day: no evidence records at all, keys intact in the tail.
+        _seed_lane_day(d, "2026-10-31", n_evals=6, n_evidence=2,
+                       classes=LANE_CLASSES)
+        short = report.lane_status(d, now=now)
+        assert short["max_run_cover_pct"] == 33.3, short
+        # Long legacy day: no `eval` field -> string fallback, capped.
+        d2 = tempfile.mkdtemp()
+        try:
+            path = _seed_long_degraded_run(d2, "2026-10-31",
+                                           with_eval_field=False)
+            legacy = report.lane_status(d2, now=now)
+            detail = [json.loads(line) for line in open(path, encoding="utf-8")][-1]["detail"]
+            salvaged = report._evidence_keys_from_detail(detail)
+            assert salvaged and all(k.startswith(f"{LONG_SKILL}#") for k in salvaged), salvaged
+            assert legacy["max_run_cover_pct"] == round(
+                len(salvaged) / 114 * 100.0, 1), (salvaged, legacy)
+            assert legacy["routing_review"]["needed"] is False, legacy
+        finally:
+            shutil.rmtree(d2)
+        # Mixed day: only one marked record carries `eval`; the tail adds the
+        # legacy key, so the union is 2 of 6 = 33.3%, never 1 of 6.
+        d3 = tempfile.mkdtemp()
+        try:
+            _seed_long_degraded_run(d3, "2026-10-31", n_final=6, n_evidence=2,
+                                    eval_on={1})
+            mixed = report.lane_status(d3, now=now)
+            assert mixed["max_run_cover_pct"] == 33.3, mixed
+            assert mixed["routing_review"]["needed"] is False, mixed
+        finally:
+            shutil.rmtree(d3)
+    finally:
+        shutil.rmtree(d)
+    print("PASS  legacy and mixed evidence records keep a usable cover")
 
 
 def test_lane_status_mixed_class_share_not_overcounted():
@@ -627,7 +816,11 @@ def main():
         test_merge_eval_logs_concatenates_runs_and_quarantine,
         test_green_run_status_lane_marking,
         test_failure_taxonomy_surfaces_lane_lists,
+        test_lane_evidence_annotations_attach_to_eval_key,
         test_evidence_keys_parses_keys_not_classes,
+        test_evidence_keys_tolerates_truncated_tail,
+        test_lane_status_long_evidence_uses_eval_keys,
+        test_lane_status_legacy_and_mixed_evidence_records,
         test_lane_status_mixed_class_share_not_overcounted,
         test_lane_status_escalation,
         test_green_run_status_cli_lane_roundtrip,
