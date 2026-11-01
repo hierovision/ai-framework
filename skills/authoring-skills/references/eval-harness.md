@@ -85,8 +85,9 @@ measures a run's degraded share from the `eval` key of each
 `lane-degradation-evidence:` record, so the switch `detail` — capped at 512
 chars, where a mass degradation (dozens of long keys) loses keys and its
 closing paren — can never shrink or inflate the number; the switch's key list
-is parsed only as the fallback for legacy records, and a class label is never
-counted as an eval key. Threshold (50% of a run, or two events in 30 days) and
+is parsed only as the fallback for legacy records, and neither a class label
+nor an incomplete token (`s#`, `#2`, `designing-architecture#`, a key cut at
+the cap) is ever counted as an eval key. Threshold (50% of a run, or two events in 30 days) and
 the report's output schema are unchanged.
 
 **Five-sibling manifest audit** (marker = tier-intent tag, not steering;

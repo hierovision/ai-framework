@@ -491,6 +491,13 @@ def test_lane_evidence_annotations_attach_to_eval_key():
         out = report.failure_taxonomy(d)
         assert len(out["lane_evidence"]) == 3, out["lane_evidence"]
         assert len(out["lane_switches"]) == 1, out["lane_switches"]
+        # The display row carries the record's own eval key (additive field;
+        # ts/model/detail unchanged, top-level report schema unchanged).
+        assert set(out["lane_evidence"][0]) == {"ts", "model", "eval", "detail"}, \
+            out["lane_evidence"][0]
+        assert all(row["eval"] == "alpha#7"
+                   for row in out["lane_evidence"]), out["lane_evidence"]
+        assert out["lane_switches"][0]["eval"] is None, out["lane_switches"]
         # The annotated eval is terminal infra, attributed by its eval key.
         assert out["terminal_infra"] == ["alpha#7"], out
         # Cover from the records agrees with the switch record for one key.
@@ -603,6 +610,126 @@ def test_evidence_keys_tolerates_truncated_tail():
                    "ProviderModelNotFoundError, lane sta")
     assert report._evidence_keys_from_detail(cut_classes) == [], cut_classes
     print("PASS  truncated switch tails yield keys only")
+
+
+def test_evidence_key_shape_matrix():
+    """Every token shape the capped fallback can receive, in both paths.
+
+    The invariant: `_evidence_keys_from_detail` returns only complete
+    `<skill>#<id>` keys and never a class label (2026-11-01).
+    """
+    cases = [
+        # parenthesised (current writer), closing paren intact
+        ("ProviderModelNotFoundError, lane stall (s#1, s#2)", ["s#1", "s#2"]),
+        ("lane stall (s#1)", ["s#1"]),
+        # closing paren cut by the cap
+        ("lane stall (s#1, s#2", ["s#1", "s#2"]),
+        # keys-only tail (#114 writer)
+        ("s#1, s#2", ["s#1", "s#2"]),
+        (" s#1 ,  s#2 ", ["s#1", "s#2"]),
+        # empty id / empty skill / trailing separator: never keys
+        ("lane stall (s#)", []),
+        ("lane stall (#2)", []),
+        ("lane stall (s#1, s#)", ["s#1"]),
+        ("lane stall (s#1, #2)", ["s#1"]),
+        ("lane stall (s#1, designing-architecture#)", ["s#1"]),
+        ("s#", []),
+        ("#2", []),
+        ("s#1, s#", ["s#1"]),
+        ("s#1, #2", ["s#1"]),
+        ("designing-architecture#", []),
+        # a second '#' cannot be part of a key
+        ("lane stall (s##1, s#2)", ["s#2"]),
+        # whitespace inside a token is not a key; between tokens it is trimmed
+        ("lane stall (s #1, s#2)", ["s#2"]),
+        ("s#1, s#2 #3", ["s#1"]),
+        # class list cut before the key list: nothing salvageable
+        ("ProviderModelNotFoundError, lane stall", []),
+        ("ProviderModelNotFoundError, lane sta", []),
+        ("ProviderModelNotFoundError", []),
+    ]
+    for tail, expected in cases:
+        detail = f"lane-switch: m -> d; per-run; evidence: {tail}"
+        got = report._evidence_keys_from_detail(detail)
+        assert got == expected, (tail, got, expected)
+        for token in got:  # the invariant, independently of the code helper
+            skill, sep, ident = token.partition("#")
+            assert (sep and skill and ident and "#" not in ident
+                    and not any(ch.isspace() for ch in token)), (tail, token)
+            assert token not in CLASS_LABELS, (tail, token)
+    assert report._evidence_keys_from_detail("no evidence tail") == []
+    print("PASS  evidence-key shape matrix (complete keys only, no classes)")
+
+
+def test_evidence_keys_drops_a_token_cut_at_the_cap():
+    """A record at `DETAIL_MAX` has no provably complete trailing token: `s#1`
+    out of `s#12` is syntactically a key and even matches a real eval, so the
+    capped tail's last token is dropped rather than guessed."""
+    keys = [f"s#{i}" for i in range(1, 400)]
+    cut = last = None
+    for pad in range(0, 16):
+        text = ("lane-switch: m -> d; per-run" + " " * pad
+                + "; evidence: lane stall (" + ", ".join(keys) + ")")
+        text = text[:log_run.DETAIL_MAX]
+        fragment = text[text.rfind(",") + 1:].strip()
+        if "#" in fragment and fragment in keys and fragment != keys[-1]:
+            cut, last = text, fragment
+            break
+    assert cut is not None, "no cap offset lands inside a key"
+    assert last not in report._evidence_keys_from_detail(cut), last
+    parsed = report._evidence_keys_from_detail(cut)
+    assert parsed and all(k in keys for k in parsed), parsed
+    # An uncapped record keeps its trailing key.
+    short = "lane-switch: m -> d; per-run; evidence: lane stall (s#1, s#2)"
+    assert report._evidence_keys_from_detail(short) == ["s#1", "s#2"]
+    print("PASS  a key cut at the cap is dropped, not guessed")
+
+
+def _seed_legacy_switch_day(d, date, n_final, evidence_tail):
+    """A pre-`eval`-field day: verdicts + a legacy switch record, no marked
+    records, so `lane_status` must use the string fallback."""
+    with open(os.path.join(d, f"run-{date}.jsonl"), "w", encoding="utf-8") as fh:
+        for i in range(1, n_final + 1):
+            fh.write(json.dumps({
+                "ts": f"{date}T06:0{i}:00Z", "kind": "eval", "skill": "s",
+                "eval": f"s#{i}", "model": "m", "outcome": "success",
+                "eval_pass": True}) + "\n")
+        fh.write(json.dumps({
+            "ts": f"{date}T06:30:00Z", "kind": "eval", "skill": None,
+            "model": "deepseek/deepseek-flash", "outcome": "error",
+            "eval_pass": None,
+            "detail": ("lane-switch: m -> deepseek/deepseek-flash; per-run; "
+                       f"evidence: {evidence_tail}")}) + "\n")
+
+
+def test_lane_status_partial_key_cannot_move_cover():
+    """Legacy fallback: a day with 4 final evals and one real evidence key is
+    25.0% / `needed: false` with or without incomplete tokens (`s#`, `#2`,
+    `designing-architecture#`) in the same tail — the fakes neither add a key
+    nor cross the 50% threshold (the old `'#' in token` rule read 3 of 4 =
+    75.0% / `needed: true`)."""
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    d = tempfile.mkdtemp()
+    try:
+        _seed_legacy_switch_day(d, "2026-10-31", 4, "lane stall (s#1)")
+        clean = report.lane_status(d, now=now)
+        assert clean["max_run_cover_pct"] == 25.0, clean
+        assert clean["routing_review"]["needed"] is False, clean
+        d2 = tempfile.mkdtemp()
+        try:
+            _seed_legacy_switch_day(
+                d2, "2026-10-31", 4,
+                "lane stall (s#1, s#, #2, designing-architecture#)")
+            fakes = report.lane_status(d2, now=now)
+            assert fakes["max_run_cover_pct"] == 25.0, fakes
+            assert fakes["routing_review"]["needed"] is False, fakes
+            assert (fakes["max_run_cover_pct"]
+                    == clean["max_run_cover_pct"]), (clean, fakes)
+        finally:
+            shutil.rmtree(d2)
+    finally:
+        shutil.rmtree(d)
+    print("PASS  incomplete tokens cannot move the cover across the threshold")
 
 
 def test_lane_status_long_evidence_uses_eval_keys():
@@ -819,6 +946,9 @@ def main():
         test_lane_evidence_annotations_attach_to_eval_key,
         test_evidence_keys_parses_keys_not_classes,
         test_evidence_keys_tolerates_truncated_tail,
+        test_evidence_key_shape_matrix,
+        test_evidence_keys_drops_a_token_cut_at_the_cap,
+        test_lane_status_partial_key_cannot_move_cover,
         test_lane_status_long_evidence_uses_eval_keys,
         test_lane_status_legacy_and_mixed_evidence_records,
         test_lane_status_mixed_class_share_not_overcounted,

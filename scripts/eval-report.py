@@ -42,6 +42,7 @@ OBSERVE_SCRIPTS = os.path.join(REPO_ROOT, "skills", "observing-runs", "scripts")
 if OBSERVE_SCRIPTS not in sys.path:
     sys.path.insert(0, OBSERVE_SCRIPTS)
 import query_runs  # run-log schema owner / aggregator (single source of truth)
+import log_run  # DETAIL_MAX owner: the cap the switch/evidence details obey
 
 # AC4 / AC10: first weekly eval-behavioral run on main on/after this date.
 GREEN_RUN_EARLIEST = "2026-09-21"
@@ -256,8 +257,12 @@ def failure_taxonomy(logs_dir):
     # `detail` prefixes (no stream re-reads), so a degraded run is visible in
     # the merged report. Per-verdict lane attribution stays in per_skill.
     def _lane_rows(prefix):
+        # Additive display field: the row carries the record's own `eval` key so
+        # an operator can associate a lane row with its eval. The top-level
+        # report schema and the pre-existing row fields (ts/model/detail) are
+        # unchanged; every consumer keys on those, none on the row's key set.
         return [{"ts": r.get("ts"), "model": r.get("model"),
-                 "detail": r.get("detail")}
+                 "eval": r.get("eval"), "detail": r.get("detail")}
                 for r in records if (r.get("detail") or "").startswith(prefix)]
 
     lane_evidence = _lane_rows(FALLBACK_EVIDENCE_PREFIX)
@@ -324,6 +329,21 @@ def failure_taxonomy(logs_dir):
     }
 
 
+def _is_eval_key(token):
+    """True for one complete `<skill>#<id>` eval key.
+
+    The only key the runner writes is `run_behavioral_eval.eval_key`'s
+    `f"{skill}#{eval_id}"`. No skill name in this repo contains `#` or
+    whitespace, and an id is never empty, so a token with an empty skill, an
+    empty id, a second `#`, or any whitespace is a fragment of a key cut at the
+    `DETAIL_MAX` cap — not a key (2026-11-01).
+    """
+    skill, sep, ident = token.partition("#")
+    if not sep or not skill or not ident or "#" in ident:
+        return False
+    return not any(ch.isspace() for ch in token)
+
+
 def _evidence_keys_from_detail(detail):
     """Parse the eval keys out of a lane-switch record's `evidence:` tail.
 
@@ -340,31 +360,41 @@ def _evidence_keys_from_detail(detail):
     The switch `detail` is capped at `DETAIL_MAX` (512), so a mass-degradation
     run (dozens of long eval keys) truncates the list and may cut the closing
     `)`: parse everything after the LAST `(` whether or not the closing paren
-    survived, and drop any token that is a known class name in every path
-    (2026-11-01). `lane_status` prefers the `eval` key on the evidence records
-    themselves; this parser is the legacy fallback.
+    survived, and drop any token that is a known class name in every path.
+    `lane_status` prefers the `eval` key on the evidence records themselves;
+    this parser is the legacy fallback.
+
+    The invariant, in every path: a returned token is a COMPLETE
+    `<skill>#<id>` key and never a class label — see `_is_eval_key`. When the
+    record is at the cap its last token may have been cut mid-key (`s#1` out of
+    `s#12` is syntactically valid), so the trailing token of a capped record is
+    dropped rather than guessed.
     """
     text = detail or ""
     marker = "; evidence: "
     idx = text.find(marker)
     if idx < 0:
         return []
+    # `log_run` truncates the detail to DETAIL_MAX before logging, so a record
+    # at the cap has no provably complete trailing token.
+    truncated = len(text) >= log_run.DETAIL_MAX
     tail = text[idx + len(marker):].strip()
     if "(" in tail:
-        # The key list; the closing paren may be cut by the DETAIL_MAX cap.
+        # The key list; the closing paren may be cut by the cap.
         tail = tail[tail.rfind("(") + 1:]
         if tail.endswith(")"):
             tail = tail[:-1]
-        # A key is `<skill>#<id>`: a token without the separator is a remnant
-        # of a key cut mid-name, never a key.
-        return [k.strip() for k in tail.split(",")
-                if k.strip() and "#" in k and k.strip() not in LANE_CLASS_NAMES]
-    # Keys-only legacy tail. A class label here means the class list was cut
-    # before the key list: return nothing rather than mis-count a class.
-    tokens = [k.strip() for k in tail.split(",") if k.strip()]
-    if any(tok in LANE_CLASS_NAMES for tok in tokens):
-        return []
-    return [k for k in tokens if "#" in k]
+        tokens = [k.strip() for k in tail.split(",") if k.strip()]
+    else:
+        # Keys-only legacy tail. A class label here means the class list was
+        # cut before the key list: nothing is salvageable.
+        tokens = [k.strip() for k in tail.split(",") if k.strip()]
+        if any(tok in LANE_CLASS_NAMES for tok in tokens):
+            return []
+    if truncated and tokens:
+        tokens = tokens[:-1]
+    return [k for k in tokens
+            if k not in LANE_CLASS_NAMES and _is_eval_key(k)]
 
 
 def lane_status(logs_dir, window_days=30, review_after=2, review_cover=50,
