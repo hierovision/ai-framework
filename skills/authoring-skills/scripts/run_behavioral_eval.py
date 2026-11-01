@@ -83,6 +83,16 @@ TRANSIENT_RE = re.compile(
     r"unavailable|connection (refused|reset|error)|econnreset|fetch failed",
     re.IGNORECASE,
 )
+# Zero-event stall shapes (CI 2026-10-31): a timed-out invocation carries its own
+# raw marker with the first stdout line it managed to produce, if any. That
+# first-line latency separates lane degradation (the lane answered late or not
+# at all: 3268-5916ms observed in CI run 41234368868, job 124635016575) from a
+# launch/env failure (no first line at all).
+STALL_RAW_MARKER = "eval stall:"
+STALL_FIRST_LINE_RAW_RE = re.compile(r"first stdout line:\s*(\d+)\s*ms",
+                                     re.IGNORECASE)
+STALL_NO_FIRST_LINE = "stall (no first line)"
+STALL_SIGNATURE_RE = re.compile(r"stall \(first line \d+ms\)")
 
 # RM-056: log-proven per-run eval lane fallback. On a MODEL/opencode-service
 # degradation (proven from the run's own log records first), a run switches —
@@ -251,6 +261,13 @@ def _error_signature(ctx):
     in weekly run 36455843309 carried exactly one event —
     `UnknownError: Unexpected server error ... ref=err_*` — and that cause is
     what the report must aggregate. Returns e.g. `UnknownError ref=err_abc`.
+
+    A zero-event stall is its own class (fixed 2026-11-01 after the 2026-10-31
+    CI stalls): before this, it fell through to the opaque `no events`, which
+    the provider classifier rejects — so a stalled Go lane was retried instead
+    of switching lanes. The raw timeout marker names the first stdout line,
+    which is the lane-versus-launch discriminator; see
+    `is_provider_classed_error`.
     """
     for ev in (ctx.get("events") or []):
         if ev.get("type") == "error":
@@ -261,6 +278,12 @@ def _error_signature(ctx):
             base = name + (f" ref={ref}" if ref else "")
             cause = _resolved_cause(ctx.get("stderr") or "")
             return base + (f" ({cause})" if cause else "")
+    raw = ctx.get("raw") or ""
+    if STALL_RAW_MARKER in raw:
+        m = STALL_FIRST_LINE_RAW_RE.search(raw)
+        if m:
+            return f"stall (first line {m.group(1)}ms)"
+        return STALL_NO_FIRST_LINE
     return "no events"
 
 
@@ -693,14 +716,25 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             attempts += 1
             # Reliability annotation record: eval_pass=None so aggregators count
             # only FINAL verdicts toward pass rates (RM-001 null semantics).
+            # 2026-11-01: a transient attempt is a window death too, so it goes
+            # through the same classifier and carries the same evidence mark as
+            # the fresh/terminal deaths — otherwise a stall-class run showed
+            # only 2 of its 3 deaths as lane evidence.
+            sig = _error_signature(ctx)
+            marked = _note_provider_death(lane_state, eval_key(e), sig)
+            detail = ("transient attempt %d: %s: %s"
+                      % (attempts, sig, ctx["raw"]))
+            if marked:
+                detail = FALLBACK_EVIDENCE_PREFIX + detail
             log_run.log_record({
                 "kind": "eval",
                 "skill": e["skill"],
+                "eval": eval_key(e),
                 "agent": None,
                 "model": model or e["model_tier"],
                 "outcome": "error",
                 "eval_pass": None,
-                "detail": ("transient attempt %d: %s" % (attempts, ctx["raw"]))[:DETAIL_MAX],
+                "detail": detail[:DETAIL_MAX],
             }, logs_dir=logs_dir)
             if isinstance(result, EvalResult):
                 result.close()
@@ -790,6 +824,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             log_run.log_record({
                 "kind": "eval",
                 "skill": e["skill"],
+                "eval": eval_key(e),
                 "agent": None,
                 "model": model or e["model_tier"],
                 "outcome": "error",
@@ -996,14 +1031,23 @@ def is_provider_classed_error(detail):
     """RM-056 D1: True when a dead-session `detail` is provider/service-classed.
 
     Provider-classed = the model-resolution class
-    (`ProviderModelNotFoundError`) OR the dead-session `UnknownError` wrapper
-    class. The external-directory auto-reject class (RM-021's second root,
-    2026-09-28) is explicitly NOT a trigger — it is an env permission failure,
-    not a lane/service degradation. A content miss (`missing: ...`) is not one.
+    (`ProviderModelNotFoundError`), the dead-session `UnknownError` wrapper
+    class, OR a zero-event stall that produced a first stdout line
+    (`stall (first line <N>ms)`) — the lane answered something and then hung,
+    which is what the degraded Go lane did in CI run 41234368868. A stall with
+    NO first line (`stall (no first line)`) is a launch/env failure, not lane
+    degradation, and stays out. The external-directory auto-reject class
+    (RM-021's second root, 2026-09-28) is explicitly NOT a trigger — it is an
+    env permission failure, not a lane/service degradation. A content miss
+    (`missing: ...`) is not one.
     """
     text = detail or ""
     if "external_directory auto-reject" in text:
         return False
+    if STALL_NO_FIRST_LINE in text:
+        return False
+    if STALL_SIGNATURE_RE.search(text):
+        return True
     if is_model_resolution_error(text):
         return True
     return bool(_DEAD_SESSION_WRAPPER_RE.search(text))
@@ -1015,11 +1059,13 @@ def _note_provider_death(lane_state, key, signature):
 
     The mark (`lane-degradation-evidence:` prefix) is required on EVERY
     provider-classed death record in the window (the D1 classes: the
-    model-resolution class and the dead-session wrapper), never on the
-    external-directory env class. The consecutive-death counter (trigger T1)
-    advances only for the model-resolution class; any other outcome resets it,
-    so the threshold is genuinely three CONSECUTIVE deaths. Never mutates state
-    after the run has switched — the window is pre-switch evidence only.
+    model-resolution class, the dead-session wrapper, and a first-line stall),
+    never on the external-directory env class or a no-first-line stall. The
+    consecutive-death counter (trigger T1) advances only for the
+    model-resolution class; any other outcome resets it, so the threshold is
+    genuinely three CONSECUTIVE deaths. The stall class is named in the window
+    classes instead, so the switch record says what degraded. Never mutates
+    state after the run has switched — the window is pre-switch evidence only.
     """
     if lane_state is None or lane_state.get("active"):
         return False
@@ -1032,6 +1078,13 @@ def _note_provider_death(lane_state, key, signature):
     if is_model_resolution_error(text):
         lane_state["consecutive_deaths"] = lane_state.get("consecutive_deaths", 0) + 1
         lane_state.setdefault("window_classes", set()).add("ProviderModelNotFoundError")
+    elif STALL_SIGNATURE_RE.search(text):
+        # A stall that produced a first line is lane evidence, but it is not
+        # the model-resolution class, so it never advances the consecutive
+        # counter (T1 stays model-resolution specific); the named class goes
+        # into the switch record instead.
+        lane_state["consecutive_deaths"] = 0
+        lane_state.setdefault("window_classes", set()).add("lane stall")
     else:
         lane_state["consecutive_deaths"] = 0
         lane_state.setdefault("window_classes", set()).add("dead-session UnknownError")
@@ -1447,6 +1500,21 @@ _DRILL_EXTERNAL_STDERR = (
     "permission requested: external_directory "
     "(/tmp/audit-report-iL08P/*); auto-rejecting"
 )
+# Zero-event stall shapes from CI run 41234368868, job 124635016575: the Go
+# lane emitted its first stdout line at these latencies, then went silent for
+# the whole 240s budget. The `none` shape is the launch/env negative: the
+# process never produced a line at all.
+_DRILL_STALL_FIRST_MS = (5916, 3723, 3268)
+
+
+def _drill_stall_result(first_ms="none"):
+    """A raw stall exactly as `invoke_opencode` writes it on timeout."""
+    return EvalResult(
+        raw=(f"eval stall: subprocess timed out after 240s with no completion "
+             f"(first stdout line: {first_ms}; transient; subprocess group "
+             f"killed)"))
+
+
 _DRILL_FALLBACK_COST = 0.02
 
 
@@ -1466,8 +1534,30 @@ def stub_result(e, mode, calls, lane_state=None):
 
     Plus the RM-056 rehearsal modes: `:FALLBACK-DRILL:` (provider-classed
     dead streams on the primary lane, then the healthy direct-key lane once
-    the runner's threshold has switched — a faithful per-run rehearsal) and
-    `:EXTERNAL-REJECT:` (the env class that must never switch)."""
+    the runner's threshold has switched — a faithful per-run rehearsal),
+    `:STALL-DRILL:` (the zero-event stall class seen in CI run 41234368868;
+    first stdout line present, so it is lane evidence),
+    `:STALL-NOFIRST-DRILL:` (the launch/env negative: a stall with no first
+    stdout line, which must never switch) and `:EXTERNAL-REJECT:` (the env
+    class that must never switch)."""
+    if mode.startswith(":STALL-DRILL:"):
+        # 2026-10-31: a zero-event stall is the class that CI retried three
+        # times instead of switching. Once the switch has fired the healthy
+        # direct-key synthesis proves the run's lane actually moved.
+        if lane_state is not None and lane_state.get("active"):
+            return _drill_fallback_pass(e)
+        key = eval_key(e)
+        n = calls.get(key, 0)
+        calls[key] = n + 1
+        if n < len(_DRILL_STALL_FIRST_MS):
+            return _drill_stall_result(f"{_DRILL_STALL_FIRST_MS[n]}ms")
+        return _drill_fallback_pass(e)
+    if mode.startswith(":STALL-NOFIRST-DRILL:"):
+        # The NEGATIVE stall shape: no first stdout line at all (launch/env,
+        # never lane degradation) — must not switch however many times it runs.
+        if lane_state is not None and lane_state.get("active"):
+            return _drill_fallback_pass(e)
+        return _drill_stall_result("none")
     if mode.startswith(":FALLBACK-DRILL:"):
         # D6: once the switch has fired, further calls return the passing
         # direct-key synthesis, so a post-switch eval (the failed smoke's
@@ -1764,7 +1854,12 @@ def main(argv=None):
                         "':FLAKY:' emits a transient error first, then passes "
                         "(exercises the retry path). RM-056 rehearsal modes: "
                         "':FALLBACK-DRILL:' replays the provider-classed death "
-                        "class then a healthy fallback lane; ':EXTERNAL-REJECT:' "
+                        "class then a healthy fallback lane; ':STALL-DRILL:' "
+                        "replays the zero-event stall class (first stdout line "
+                        "present) that CI retried instead of switching; "
+                        "':STALL-NOFIRST-DRILL:' replays its launch/env "
+                        "negative (no first line; must never switch); "
+                        "':EXTERNAL-REJECT:' "
                         "replays the env class that must never switch. Typed "
                         "evals are synthesized to match their expect block.")
     p.add_argument("--event-fixture", default=None,

@@ -1541,6 +1541,232 @@ def test_fallback_lane_model_holder():
     print("PASS  lane_model follows the per-run lane holder")
 
 
+# ---------------------------------------------------------------------------
+# Zero-event stall class (incident 2026-10-31, CI run 41234368868 job
+# 124635016575; the re-run attempt 124638120782 repeats the same three stalls)
+#
+# The degraded Go lane emitted its first stdout line at 5916/3723/3268ms and
+# then went silent for the whole 240s budget. `_error_signature` collapsed all
+# three to the opaque "no events", which `is_provider_classed_error` rejects —
+# so the run retried the dead lane instead of switching. These tests pin the
+# two stall shapes and the switch they must (and must not) cause.
+# ---------------------------------------------------------------------------
+
+STALL_FIRST_LINE_RAW = (
+    "eval stall: subprocess timed out after 240s with no completion "
+    "(first stdout line: 5916ms; transient; subprocess group killed)")
+STALL_NO_FIRST_LINE_RAW = (
+    "eval stall: subprocess timed out after 240s with no completion "
+    "(first stdout line: none; transient; subprocess group killed)")
+
+
+def _sig(raw):
+    return runner._error_signature(runner.build_context(runner.EvalResult(raw=raw)))
+
+
+def test_error_signature_stall_shapes():
+    """`_error_signature` names a zero-event stall from its own raw marker:
+    the first-line latency when there was one, `no first line` otherwise.
+    The error-event path and the truly event-less path stay unchanged."""
+    assert _sig(STALL_FIRST_LINE_RAW) == "stall (first line 5916ms)", _sig(STALL_FIRST_LINE_RAW)
+    assert _sig(STALL_NO_FIRST_LINE_RAW) == "stall (no first line)"
+    # No stall marker, no events: the historical signature is untouched.
+    assert _sig("something else entirely") == "no events"
+    # The error-event path is untouched (signature still names the wrapper).
+    sig = _sig(FATAL_STREAM)
+    assert sig.startswith("UnknownError ref=err_x"), sig
+    print("PASS  _error_signature names both stall shapes")
+
+
+def test_stall_class_truth_table():
+    """`is_provider_classed_error`: a stall WITH a first line is lane
+    degradation (true); a stall with NO first line is launch/env (false).
+    The other classes keep their verdicts — the classifier is not weakened."""
+    assert runner.is_provider_classed_error("stall (first line 5916ms)")
+    assert runner.is_provider_classed_error(
+        "dead session: stall (first line 3268ms) — no work produced")
+    assert runner.is_provider_classed_error(
+        "fresh retry 1: session died with no work (stall (first line 3723ms)); "
+        "restarting fresh")
+    assert not runner.is_provider_classed_error("stall (no first line)")
+    assert not runner.is_provider_classed_error(
+        "dead session: stall (no first line) — no work produced")
+    # Unchanged verdicts for the pre-existing classes.
+    assert runner.is_provider_classed_error(
+        "dead session: UnknownError ref=err_1 "
+        "(ProviderModelNotFoundError: Model not found: x)")
+    assert runner.is_provider_classed_error(
+        "dead session: UnknownError ref=err_1 — no work produced")
+    assert not runner.is_provider_classed_error(
+        "dead session: UnknownError ref=err_1 "
+        "(external_directory auto-reject (/tmp/audit-report-iL08P/*))")
+    assert not runner.is_provider_classed_error(
+        "missing: text: phrase not found: 'Verdict'")
+    assert not runner.is_provider_classed_error("no events")
+    print("PASS  stall class truth table (first line -> lane, none -> env)")
+
+
+def _stall_turns(specs):
+    return [(f"turn{i}", runner.EvalResult(raw=raw))
+            for i, raw in enumerate(specs)]
+
+
+def test_per_eval_trigger_stall_deaths():
+    """Three stall deaths with a first line are a per-eval lane degradation
+    (trigger true); one launch-class stall in the set makes it false — the
+    per-eval path must not switch on an env failure. The death records carry
+    the evidence mark and the named class."""
+    state = {"active": False, "eval_deaths": 3, "degraded_evals": set(),
+             "window_classes": set()}
+    turns = _stall_turns([STALL_FIRST_LINE_RAW, STALL_FIRST_LINE_RAW,
+                          STALL_FIRST_LINE_RAW])
+    assert runner._per_eval_provider_trigger(turns, state) is True
+    for _label, res in turns:
+        assert runner._note_provider_death(
+            state, "alpha#1", runner._error_signature(runner.build_context(res)))
+    assert state["degraded_evals"] == {"alpha#1"}, state
+    assert state["window_classes"] == {"lane stall"}, state
+    assert state["consecutive_deaths"] == 0, state  # T1 stays model-resolution
+
+    no_first = _stall_turns([STALL_FIRST_LINE_RAW, STALL_FIRST_LINE_RAW,
+                             STALL_NO_FIRST_LINE_RAW])
+    assert runner._per_eval_provider_trigger(no_first, state) is False
+    # Two first-line stalls are below the three-death threshold.
+    assert runner._per_eval_provider_trigger(
+        _stall_turns([STALL_FIRST_LINE_RAW, STALL_FIRST_LINE_RAW]), state) is False
+    print("PASS  per-eval trigger fires on three stall deaths, not on env stalls")
+
+
+def test_stall_evidence_records_carry_eval_key():
+    """The report's lane cover must never depend on the switch `detail` string
+    surviving the 512-char cap: every marked death record names its own eval
+    key (`eval` is an existing run-log field), so `lane_status` can count the
+    records instead of mining a truncated string (2026-11-01 review)."""
+    e = {"skill": "alpha", "eval_id": 7, "expect": {"text": ["A"]},
+         "model_tier": "go"}
+    d = tempfile.mkdtemp()
+    lane = {"active": False, "eval_deaths": 3, "degraded_evals": set(),
+            "window_classes": set(), "consecutive_deaths": 0}
+    old_fresh = os.environ.get("BEVAL_MAX_FRESH_RETRIES")
+    old_cont = os.environ.get("BEVAL_MAX_CONTINUATIONS")
+    os.environ["BEVAL_MAX_FRESH_RETRIES"] = "2"
+    os.environ["BEVAL_MAX_CONTINUATIONS"] = "0"
+    try:
+        passed, _missing, _path = runner.run_eval(
+            e, lambda _e, turn=None: runner.EvalResult(raw=STALL_FIRST_LINE_RAW),
+            logs_dir=d, model=DRILL_PRIMARY_MODEL, lane_state=lane,
+            sleep=lambda _s: None)
+        assert not passed
+        marked = [rec for rec in _read_logs(d)
+                  if (rec.get("detail") or "").startswith(
+                      "lane-degradation-evidence: ")]
+        assert len(marked) == 3, marked
+        assert all(rec.get("eval") == "alpha#7" for rec in marked), marked
+        assert lane["degraded_evals"] == {"alpha#7"}, lane
+    finally:
+        if old_fresh is None:
+            os.environ.pop("BEVAL_MAX_FRESH_RETRIES", None)
+        else:
+            os.environ["BEVAL_MAX_FRESH_RETRIES"] = old_fresh
+        if old_cont is None:
+            os.environ.pop("BEVAL_MAX_CONTINUATIONS", None)
+        else:
+            os.environ["BEVAL_MAX_CONTINUATIONS"] = old_cont
+        shutil.rmtree(d)
+    print("PASS  every marked stall death record carries its eval key")
+
+
+def test_stall_drill_switches_lane():
+    """Run-level (:FALLBACK-DRILL: seam, `:STALL-DRILL:` mode): a single-canary
+    run that stalls three times with a first stdout line switches to the
+    fallback lane, marks every death record, and passes on that lane."""
+    root = _make_drill_root(1)
+    logs = tempfile.mkdtemp(prefix="beval-stall-logs-")
+    env = _fallback_env(BEVAL_FALLBACK_ENABLED="1",
+                        DEEPSEEK_API_KEY="sk-test")
+    try:
+        r = _run_drill(root, logs, ":STALL-DRILL:", env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert "lane switched for this run" in (r.stderr or ""), r.stderr
+        recs = _read_logs(logs)
+        ev, sw, ceil = _lane_records(logs)
+        assert len(sw) == 1 and not ceil, (ev, sw, ceil)
+        idx = recs.index(sw[0])
+        marked = [rec for rec in recs[:idx]
+                  if (rec.get("detail") or "").startswith(
+                      "lane-degradation-evidence: ")]
+        assert len(marked) == 3, marked  # transient + fresh + terminal death
+        assert all("stall (first line " in (rec.get("detail") or "")
+                   for rec in marked), marked
+        assert ev, "the death records must carry lane-degradation-evidence"
+        # The switch record names the stall class and the fallback lane.
+        det = sw[0]["detail"]
+        assert det.startswith("lane-switch: "), det
+        assert (f"{DRILL_PRIMARY_MODEL} -> {FALLBACK_DRILL_MODEL}; per-run"
+                in det), det
+        assert "lane stall" in det, det
+        assert sw[0]["model"] == FALLBACK_DRILL_MODEL, sw[0]
+        # The canary actually passes on the fallback lane.
+        verdicts = [rec for rec in recs[idx + 1:]
+                    if rec.get("eval_pass") is not None]
+        assert verdicts, "the post-switch re-attempt must produce a verdict"
+        assert all(rec["model"] == FALLBACK_DRILL_MODEL for rec in verdicts), verdicts
+        assert all(rec.get("eval_pass") is True for rec in verdicts), verdicts
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+    print("PASS  :STALL-DRILL: switches the lane on three first-line stalls")
+
+
+def test_stall_no_first_line_never_switches():
+    """Run-level negative, red-first for the CLASSIFIER (not only the seam).
+
+    The same stall shape WITHOUT a first stdout line is a launch/env failure.
+    The test pins the three primary death records by their own signatures
+    (transient, fresh, terminal), so it fails if the classification regresses
+    to the old opaque `no events` AND fails if the CLI dies before writing
+    any record. Sensitivity proof: flipping `is_provider_classed_error` to
+    treat `stall (no first line)` as provider-classed makes this test red
+    (the records gain the evidence mark and the lane switches); the classifier
+    is restored before commit.
+    """
+    root = _make_drill_root(1)
+    logs = tempfile.mkdtemp(prefix="beval-stall-nofl-logs-")
+    env = _fallback_env(BEVAL_FALLBACK_ENABLED="1",
+                        DEEPSEEK_API_KEY="sk-test")
+    try:
+        r = _run_drill(root, logs, ":STALL-NOFIRST-DRILL:", env)
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        recs = _read_logs(logs)
+        # The three primary-lane death records: transient retry, fresh retry,
+        # terminal. Each names its own no-first-line signature.
+        primary = [rec for rec in recs
+                   if rec.get("model") == DRILL_PRIMARY_MODEL]
+        assert len(primary) == 3, primary
+        details = [(rec.get("detail") or "") for rec in primary]
+        assert sum(d.startswith("transient attempt 1: ") for d in details) == 1, details
+        assert sum(d.startswith("fresh retry 1: ") for d in details) == 1, details
+        assert sum(d.startswith("dead session: ") for d in details) == 1, details
+        assert all("stall (no first line)" in d for d in details), details
+        # No evidence mark anywhere: the launch/env class never joins the
+        # provider-classed window, so the runner must not claim degradation.
+        assert not [rec for rec in recs
+                    if (rec.get("detail") or "").startswith(
+                        "lane-degradation-evidence: ")], recs
+        ev, sw, ceil = _lane_records(logs)
+        assert not ev and not sw and not ceil, (ev, sw, ceil)
+        assert not any(rec.get("model") == FALLBACK_DRILL_MODEL
+                       for rec in recs)
+        # The terminal record is the honest red verdict, not a silent pass.
+        terminal = [rec for rec in primary
+                    if (rec.get("detail") or "").startswith("dead session: ")]
+        assert terminal and terminal[0]["outcome"] == "error", primary
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
+    print("PASS  a no-first-line stall keeps its signature and never switches")
+
+
 def test_fallback_drill_switch_and_marking():
     """RM-056 AC1/AC2: >=3 terminal provider deaths -> ONE evidence record then
     ONE switch record (in order, kind=eval/eval_pass=None); every post-switch
@@ -1836,6 +2062,12 @@ def main():
         test_emit_flushes_print,
         test_fallback_is_provider_classed_error,
         test_fallback_lane_model_holder,
+        test_error_signature_stall_shapes,
+        test_stall_class_truth_table,
+        test_per_eval_trigger_stall_deaths,
+        test_stall_evidence_records_carry_eval_key,
+        test_stall_drill_switches_lane,
+        test_stall_no_first_line_never_switches,
         test_fallback_drill_switch_and_marking,
         test_fallback_disabled_exits_three,
         test_fallback_enabled_no_key_unavailable,

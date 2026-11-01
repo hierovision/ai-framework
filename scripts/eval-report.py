@@ -42,6 +42,7 @@ OBSERVE_SCRIPTS = os.path.join(REPO_ROOT, "skills", "observing-runs", "scripts")
 if OBSERVE_SCRIPTS not in sys.path:
     sys.path.insert(0, OBSERVE_SCRIPTS)
 import query_runs  # run-log schema owner / aggregator (single source of truth)
+import log_run  # DETAIL_MAX owner: the cap the switch/evidence details obey
 
 # AC4 / AC10: first weekly eval-behavioral run on main on/after this date.
 GREEN_RUN_EARLIEST = "2026-09-21"
@@ -55,6 +56,12 @@ RM002_CANARY_RUN = "35108912831"
 FALLBACK_EVIDENCE_PREFIX = "lane-degradation-evidence: "
 FALLBACK_SWITCH_PREFIX = "lane-switch: "
 FALLBACK_CEILING_PREFIX = "lane-fallback-ceiling: "
+# The trigger classes the runner names in `window_classes` and writes into the
+# switch record's evidence list (`run_behavioral_eval._note_provider_death`).
+# They are class labels, never eval keys: the cover parser must drop them in
+# every path so a class can never inflate a run's degraded share.
+LANE_CLASS_NAMES = ("ProviderModelNotFoundError", "lane stall",
+                    "dead-session UnknownError")
 
 # AC11 quota model (pass 4; documented in reference/per-change-eval-sla.md).
 # Measured ~100s per fresh-agent eval (PR #23, run 35392700424) supersedes
@@ -250,17 +257,25 @@ def failure_taxonomy(logs_dir):
     # `detail` prefixes (no stream re-reads), so a degraded run is visible in
     # the merged report. Per-verdict lane attribution stays in per_skill.
     def _lane_rows(prefix):
+        # Additive display field: the row carries the record's own `eval` key so
+        # an operator can associate a lane row with its eval. The top-level
+        # report schema and the pre-existing row fields (ts/model/detail) are
+        # unchanged; every consumer keys on those, none on the row's key set.
+        # An `eval` that is not a complete `<skill>#<id>` key is displayed as
+        # None: the row never presents a fake eval (2026-11-01).
         return [{"ts": r.get("ts"), "model": r.get("model"),
-                 "detail": r.get("detail")}
+                 "eval": _valid_eval(r), "detail": r.get("detail")}
                 for r in records if (r.get("detail") or "").startswith(prefix)]
 
     lane_evidence = _lane_rows(FALLBACK_EVIDENCE_PREFIX)
     lane_switches = _lane_rows(FALLBACK_SWITCH_PREFIX)
 
     # RM-021 AC3: per-eval terminal vs recovered infra classification.
+    # A record whose `eval` is not a complete key groups under its skill (the
+    # pre-`eval` behaviour), never under a fake eval bucket (2026-11-01).
     by_eval = {}
     for r in records:
-        key = r.get("eval") or (r.get("skill") or "(none)")
+        key = _valid_eval(r) or (r.get("skill") or "(none)")
         by_eval.setdefault(key, []).append(r)
     terminal_infra, recovered_infra = [], []
     for key, recs in sorted(by_eval.items()):
@@ -318,15 +333,84 @@ def failure_taxonomy(logs_dir):
     }
 
 
+def _is_eval_key(token):
+    """True for one complete `<skill>#<id>` eval key.
+
+    The only key the runner writes is `run_behavioral_eval.eval_key`'s
+    `f"{skill}#{eval_id}"`. No skill name in this repo contains `#` or
+    whitespace, and an id is never empty, so a token with an empty skill, an
+    empty id, a second `#`, or any whitespace is a fragment of a key cut at the
+    `DETAIL_MAX` cap — not a key (2026-11-01).
+    """
+    skill, sep, ident = token.partition("#")
+    if not sep or not skill or not ident or "#" in ident:
+        return False
+    return not any(ch.isspace() for ch in token)
+
+
+def _valid_eval(record):
+    """The record's `eval` field when it is a complete key, else None.
+
+    Every consumer in this module goes through this: a malformed field (`s#`,
+    `#2`, `designing-architecture#`, whitespace, a second `#`, a class label)
+    is not an eval identity, so it is never counted in the cover, never
+    displayed on a lane row, and never used as a `by_eval` bucket (2026-11-01).
+    """
+    value = (record or {}).get("eval")
+    return value if isinstance(value, str) and _is_eval_key(value) else None
+
+
 def _evidence_keys_from_detail(detail):
-    """Parse the `<...>; evidence: k1, k2` tail of a lane-switch record."""
+    """Parse the eval keys out of a lane-switch record's `evidence:` tail.
+
+    Two tails exist in the log:
+      `evidence: k1, k2`                     legacy, keys only
+      `evidence: <class>, <class> (k1, k2)`  current writer
+                                             (`_write_switch_record`)
+    Only the key list is evidence: a CLASS is not an eval key. Splitting the
+    whole tail on commas counted every class as a key, so a mixed-class switch
+    `ProviderModelNotFoundError, lane stall (s#1, s#2)` read as 3 keys over 2
+    evals — 50% cover where the true share is 33.3% — and falsely crossed the
+    routing-review threshold (2026-11-01).
+
+    The switch `detail` is capped at `DETAIL_MAX` (512), so a mass-degradation
+    run (dozens of long eval keys) truncates the list and may cut the closing
+    `)`: parse everything after the LAST `(` whether or not the closing paren
+    survived, and drop any token that is a known class name in every path.
+    `lane_status` prefers the `eval` key on the evidence records themselves;
+    this parser is the legacy fallback.
+
+    The invariant, in every path: a returned token is a COMPLETE
+    `<skill>#<id>` key and never a class label — see `_is_eval_key`. When the
+    record is at the cap its last token may have been cut mid-key (`s#1` out of
+    `s#12` is syntactically valid), so the trailing token of a capped record is
+    dropped rather than guessed.
+    """
     text = detail or ""
     marker = "; evidence: "
     idx = text.find(marker)
     if idx < 0:
         return []
+    # `log_run` truncates the detail to DETAIL_MAX before logging, so a record
+    # at the cap has no provably complete trailing token.
+    truncated = len(text) >= log_run.DETAIL_MAX
     tail = text[idx + len(marker):].strip()
-    return [k.strip() for k in tail.split(",") if k.strip()]
+    if "(" in tail:
+        # The key list; the closing paren may be cut by the cap.
+        tail = tail[tail.rfind("(") + 1:]
+        if tail.endswith(")"):
+            tail = tail[:-1]
+        tokens = [k.strip() for k in tail.split(",") if k.strip()]
+    else:
+        # Keys-only legacy tail. A class label here means the class list was
+        # cut before the key list: nothing is salvageable.
+        tokens = [k.strip() for k in tail.split(",") if k.strip()]
+        if any(tok in LANE_CLASS_NAMES for tok in tokens):
+            return []
+    if truncated and tokens:
+        tokens = tokens[:-1]
+    return [k for k in tokens
+            if k not in LANE_CLASS_NAMES and _is_eval_key(k)]
 
 
 def lane_status(logs_dir, window_days=30, review_after=2, review_cover=50,
@@ -337,7 +421,13 @@ def lane_status(logs_dir, window_days=30, review_after=2, review_cover=50,
     window. Events = distinct UTC dates with a switch record (deduped; one
     degraded weekly run is one event). `needed` when events >= `review_after`
     within the window OR any single event carried >= `review_cover` percent of
-    that run's included evals. Read-only; no schema change.
+    that run's included evals. Cover counts each evidence eval once — the
+    `eval` key of the marked death records, never the classes and never twice —
+    with the switch record's key list as the legacy fallback; the switch
+    `detail` is capped at DETAIL_MAX, so the records are the authoritative
+    source. Every key, in both paths, is shape-validated (`_is_eval_key`): a
+    malformed `eval` field is not counted on either side of the ratio.
+    Read-only; no schema change.
     """
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(days=window_days)
@@ -371,12 +461,25 @@ def lane_status(logs_dir, window_days=30, review_after=2, review_cover=50,
                         if (r.get("detail") or "").startswith(FALLBACK_SWITCH_PREFIX)]
             if not switches:
                 continue
-            final_keys = {r.get("eval") for r in recs
-                          if r.get("kind") == "eval" and r.get("eval")
-                          and r.get("eval_pass") is not None}
-            evidence_keys = set()
-            for r in switches:
-                evidence_keys.update(_evidence_keys_from_detail(r.get("detail")))
+            final_keys = {_valid_eval(r) for r in recs
+                          if r.get("kind") == "eval"
+                          and r.get("eval_pass") is not None} - {None}
+            # The authoritative evidence set is the `eval` key on the marked
+            # death records themselves: a real weekly run names dozens of long
+            # keys and the switch `detail` is capped at DETAIL_MAX, so the
+            # string can lose keys (and its closing paren). Legacy records
+            # (pre-2026-11-01) carry no `eval`, so the switch-detail parse stays
+            # as their fallback — and as the fallback for a run with no marked
+            # records at all. Both paths are shape-validated (`_is_eval_key`),
+            # so no consumer can count a malformed field.
+            marked = [r for r in recs
+                      if (r.get("detail") or "").startswith(
+                          FALLBACK_EVIDENCE_PREFIX)]
+            evidence_keys = {_valid_eval(r) for r in marked} - {None}
+            if not marked or any(_valid_eval(r) is None for r in marked):
+                for r in switches:
+                    evidence_keys.update(
+                        _evidence_keys_from_detail(r.get("detail")))
             cover = (len(evidence_keys) / len(final_keys) * 100.0
                      if final_keys else 0.0)
             events[m.group(1)] = {

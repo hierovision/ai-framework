@@ -261,7 +261,7 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
 - `skills/authoring-skills/scripts/run_behavioral_eval.py` — consumes `cwd`/
   `PWD`, `--standalone`, and per-run `OPENCODE_DB`/XDG isolation.
 
-## Eval startup latency (2026-10-28, extended 2026-10-29)
+## Eval startup latency (2026-10-28, extended 2026-10-29 and 2026-10-31)
 
 CI run 40709127604's `validating-ui#1` job killed three attempts at 240 s with
 zero JSON events and empty stderr. The same model/auth/runner produced the full
@@ -289,3 +289,17 @@ The runner now measures spawn → first non-empty stdout line
 detail (`first stdout line: none` for a true zero-event stall). The
 timeout path still kills the process group at the configured ceiling; the
 instrumentation only records when the first stdout line arrived.
+
+**2026-10-31 — the first-line measurement now feeds the lane classifier.**
+CI run 41234368868, job 124635016575 (the same run's re-run attempt
+124638120782 repeats it) recorded three Go-lane stalls with a first stdout
+line at 5916, 3723 and 3268 ms, then 240 s of silence; the same
+prompt completed locally in 111 s and `deepseek/deepseek-flash` routed with
+`DEEPSEEK_API_KEY`, so the lane — not the prompt — was degraded. The runner
+still retried instead of switching: `_error_signature` collapsed every
+zero-event stall to `no events`, which the provider classifier rejects. Fixed
+on 2026-11-01: a stall now signs as `stall (first line <N>ms)` (lane
+degradation, provider class) or `stall (no first line)` (launch/env, not a
+lane class), and the three stall deaths of a run are marked
+`lane-degradation-evidence:` before the `lane-switch:` record. Detail is in
+`eval-harness.md` §(c).
