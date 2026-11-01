@@ -738,7 +738,7 @@ def test_lane_status_partial_key_cannot_move_cover():
 
 
 MALFORMED_EVALS = ("s#", "#2", "designing-architecture#", "lane stall",
-                   "s #1", "s##1")
+                   "s #1", "s##1", " s#1 ")  # last: whitespace AROUND the key
 
 
 def _seed_eval_field_day(d, with_malformed):
@@ -788,9 +788,11 @@ def _seed_eval_field_day(d, with_malformed):
 def test_lane_status_malformed_eval_field_not_counted():
     """The record `eval` field is shape-validated exactly like the legacy
     string: a malformed eval (`s#`, `#2`, `designing-architecture#`, a class
-    label, whitespace, a double `#`) moves neither the denominator nor the
-    numerator, so the cover is identical with and without those records. The
-    same records also never form a `by_eval` bucket (they group by skill)."""
+    label, whitespace inside the key, a double `#`, whitespace around the key)
+    moves neither the denominator nor the numerator, so the cover is identical
+    with and without those records. The same records also never form a `by_eval`
+    bucket: they group by skill, so the recovered side names the skill bucket
+    and never a malformed token."""
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
     d = tempfile.mkdtemp()
     try:
@@ -814,11 +816,74 @@ def test_lane_status_malformed_eval_field_not_counted():
             assert out["terminal_infra"] == ["alpha"], out["terminal_infra"]
             assert not [k for k in out["terminal_infra"]
                         if k in MALFORMED_EVALS], out["terminal_infra"]
+            # ... and so do the malformed finals/marked records under skill
+            # `s`: the recovered side is the skill bucket `s` (plus the one
+            # genuine recovered eval `s#1`), never a malformed key.
+            assert out["recovered_infra"] == ["s", "s#1"], out["recovered_infra"]
+            assert not [k for k in out["recovered_infra"]
+                        if k in MALFORMED_EVALS], out["recovered_infra"]
+            # The seventh shape: the record field is verbatim (` s#1 ` is not a
+            # key) while the legacy string token is trimmed (` s#1 ` is).
+            assert report._valid_eval({"eval": " s#1 "}) is None
+            assert report._evidence_keys_from_detail(
+                "lane-switch: m -> d; per-run; "
+                "evidence: lane stall ( s#1 )") == ["s#1"]
         finally:
             shutil.rmtree(d2)
     finally:
         shutil.rmtree(d)
     print("PASS  malformed `eval` fields cannot move the cover or a bucket")
+
+
+def _seed_unusable_marked_day(d, bad_eval, switch_keys="s#1"):
+    """Four valid finals, ONE marked death whose `eval` is unusable, and a
+    switch record whose string carries the key: the only route to 25% cover is
+    the legacy-string recovery, 0% would mean no recovery."""
+    marked = ("lane-degradation-evidence: dead session: stall "
+              "(first line 5916ms) — no work produced")
+    path = os.path.join(d, "run-2026-10-31.jsonl")
+    with open(path, "w", encoding="utf-8") as fh:
+        for i in range(1, 5):
+            fh.write(json.dumps({
+                "ts": f"2026-10-31T06:0{i}:00Z", "kind": "eval",
+                "skill": "s", "eval": f"s#{i}", "model": "m",
+                "outcome": "success", "eval_pass": True}) + "\n")
+        fh.write(json.dumps({
+            "ts": "2026-10-31T06:20:00Z", "kind": "eval", "skill": "s",
+            "eval": bad_eval, "model": "m", "outcome": "error",
+            "eval_pass": None, "detail": marked}) + "\n")
+        fh.write(json.dumps({
+            "ts": "2026-10-31T06:30:00Z", "kind": "eval", "skill": None,
+            "model": "deepseek/deepseek-flash", "outcome": "error",
+            "eval_pass": None,
+            "detail": ("lane-switch: m -> deepseek/deepseek-flash; per-run; "
+                       f"evidence: lane stall ({switch_keys})")}) + "\n")
+    return path
+
+
+def test_lane_status_recovers_key_from_string_for_unusable_eval():
+    """Coverage (2026-11-01 review, Nit 1): with ONE marked record whose `eval`
+    is unusable and no valid marked record, the evidence key can only come from
+    the legacy switch string — 25.0% proves the recovery ran, 0.0% would mean
+    it did not. Both unusable shapes are exercised (`s#` and ` s#1 `), and the
+    display rows stay clean (lane row and switch row `null`)."""
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    for bad in ("s#", " s#1 "):
+        d = tempfile.mkdtemp()
+        try:
+            _seed_unusable_marked_day(d, bad)
+            out = report.lane_status(d, now=now)
+            assert out["max_run_cover_pct"] == 25.0, (bad, out)
+            assert out["routing_review"]["needed"] is False, (bad, out)
+            tax = report.failure_taxonomy(d)
+            assert [row.get("eval") for row in tax["lane_evidence"]] == [None], \
+                (bad, tax["lane_evidence"])
+            assert len(tax["lane_switches"]) == 1, (bad, tax["lane_switches"])
+            assert tax["lane_switches"][0].get("eval") is None, \
+                (bad, tax["lane_switches"])
+        finally:
+            shutil.rmtree(d)
+    print("PASS  an unusable marked eval recovers its key from the switch string")
 
 
 def test_lane_status_long_evidence_uses_eval_keys():
@@ -1039,6 +1104,7 @@ def main():
         test_evidence_keys_drops_a_token_cut_at_the_cap,
         test_lane_status_partial_key_cannot_move_cover,
         test_lane_status_malformed_eval_field_not_counted,
+        test_lane_status_recovers_key_from_string_for_unusable_eval,
         test_lane_status_long_evidence_uses_eval_keys,
         test_lane_status_legacy_and_mixed_evidence_records,
         test_lane_status_mixed_class_share_not_overcounted,
