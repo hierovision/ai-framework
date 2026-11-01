@@ -6,8 +6,9 @@ observable handle.
 
 - **Server part** (`server.ts`): subscribes to the connected server's event
   stream, associates each child session with its orchestrator, reduces it, and
-  appends rate-limited **synthetic** messages to the orchestrator (no model
-  turn).
+  appends rate-limited **synthetic** messages to the orchestrator. Routine and
+  terminal milestones add no model turn; an attention condition starts exactly
+  one bounded parent turn (RM-070).
 - **TUI part** (`tui.tsx`): a persistent sidebar strip + footer count, toasts
   and attention alerts, and the focus / steer / interrupt controls. It renders
   from the same event stream; it never reads heartbeat files.
@@ -49,11 +50,15 @@ Plugin options live under the plugin entry's options object:
 | `generationSeconds` | `600` | quiet budget inside an open assistant step |
 | `milestoneMinIntervalSeconds` | `30` | routine synthetic-milestone cap per delegate |
 | `staleGraceSeconds` | `600` | history window: a discovered row older than this collapses as stale |
+| `attentionWake` | `true` | `thrash`/`stall`/`needs-input`/`denied` start one parent turn (RM-070) |
+| `maxAttentionWakes` | `3` | attention turns per child per observer process |
 | `healthFile` | `<location>/.scratch/delegation-observer/health.json` | shared degradation record |
 | `statusFile` | — | opt-in observer snapshot read by `delegation.status` |
 | `DELEGATION_OBSERVER_ENABLED` (env, TUI) | — | `0/false/no/off` disables the TUI part |
 | `DELEGATION_OBSERVER_STALL_SECONDS` (env, TUI) | — | interactive threshold |
 | `DELEGATION_OBSERVER_STALE_GRACE_SECONDS` (env, TUI) | — | history window (positive seconds) |
+| `DELEGATION_OBSERVER_ATTENTION_WAKE` (env) | — | `0/false/no/off` disables attention wakes |
+| `DELEGATION_OBSERVER_MAX_ATTENTION_WAKES` (env) | — | positive integer cap |
 | `DELEGATION_OBSERVER_HEALTH_FILE` (env, TUI) | — | must match the server's `healthFile` |
 | `DELEGATION_OBSERVER_STATUS_FILE` (env, TUI) | — | fallback snapshot path |
 
@@ -61,6 +66,14 @@ The 2.1.4 host does not forward plugin entry options to the TUI part, so the
 env source is the end-to-end channel for the TUI; options still win where a
 host forwards them. The observer TUI writes a presence marker
 (`<location>/.scratch/delegation-observer/tui.json`) for the sentinel.
+
+The **server** part reads only the two RM-070 attention env keys
+(`DELEGATION_OBSERVER_ATTENTION_WAKE`,
+`DELEGATION_OBSERVER_MAX_ATTENTION_WAKES`). `DELEGATION_OBSERVER_ENABLED`,
+`DELEGATION_OBSERVER_STALL_SECONDS`, `DELEGATION_OBSERVER_STALE_GRACE_SECONDS`,
+`DELEGATION_OBSERVER_HEALTH_FILE` and `DELEGATION_OBSERVER_STATUS_FILE` remain
+the TUI channel: the server's thresholds and enabled flag are not
+env-overridable (ADR-0015 Decision 10; the shared supervision contract).
 
 **Sentinel companion.** `plugins/delegation-sentinel/` is an always-loadable
 TUI-only fallback: it renders one line when this plugin is absent, failed,
@@ -105,6 +118,12 @@ row *and* resets the observation clock to that event's observation time, so an
 old store timestamp can never be read as quiet time; from there the documented
 stall/thrash/needs-input semantics take over.
 
+Tool calls are labelled from `session.tool.input.started` (name) and
+`session.tool.input.ended` (input JSON) as well as
+`session.message.content.updated`: the headless 2.1.4 server emits the former
+pair and may emit neither a name on `session.tool.called` nor content updates,
+so thrash detection does not depend on a TUI being attached.
+
 If the host cannot answer `session.list()`/`session.status()`, the live map is
 unavailable: the banner says so and every discovered row is demoted to
 `unknown` (stale if its last event is past the grace window) — a last-known
@@ -115,27 +134,37 @@ map answers again.
 
 ## Milestones
 
-| Kind | Class | When |
-|---|---|---|
-| start | routine | first association |
-| first-tool | routine | first tool call of the child |
-| resume | routine | after a permission/form reply |
-| needs-input | attention | `permission.asked` / `form.created` (session id at `data.form.sessionID`) |
-| denied | attention | `permission.replied` with `reply:"reject"` — a warning, never a resume |
-| stall | attention | quiet beyond the applicable window (busy is never stalled) |
-| thrash | attention | identical tool target ≥ `loopRepeats` (one count per call id) |
-| retry | attention | vendor `retry` status, deduped per attempt |
-| terminal | exactly once | `session.execution.succeeded/failed/interrupted` |
+| Kind | Class | When | Parent turn |
+|---|---|---|---|
+| start | routine | first association | no |
+| first-tool | routine | first tool call of the child | no |
+| resume | routine | after a permission/form reply | no |
+| needs-input | attention | `permission.asked` / `form.created` (session id at `data.form.sessionID`) | **one wake** |
+| denied | attention | `permission.replied` with `reply:"reject"` — a warning, never a resume | **one wake** |
+| stall | attention | quiet beyond the applicable window (busy is never stalled) | **one wake** |
+| thrash | attention | identical tool target ≥ `loopRepeats` (one count per call id) | **one wake** |
+| retry | attention | vendor `retry` status, deduped per attempt | no (strip alert only) |
+| terminal | exactly once | `session.execution.succeeded/failed/interrupted` | no (the RM-058 wake prompts) |
 
-Every milestone is sent with `delivery: "steer"` and `resume: false`: it is
-queued for the parent's next turn and never starts one. A managed service
-activates the plugin once per location, so only the instance owning the
-parent session's directory emits. Routine milestones are capped at one per
-delegate per `milestoneMinIntervalSeconds` and deduplicated; attention milestones fire
+Every milestone is sent with `delivery: "steer"`. Routine and terminal
+milestones carry `resume: false`: they are queued for the parent's next turn
+and never start one. An attention milestone (`thrash`, `stall`, `needs-input`,
+`denied`) carries `wake: true` and is sent with `resume: true`, starting
+exactly one parent turn per condition (same child, same kind, same target).
+`attentionWake` (default true) disables that exception; `maxAttentionWakes`
+(default 3) caps it per child per process. Beyond the cap the milestone is
+still queued as context with `resume:false` and the drop is logged with its
+count (`attention wake dropped`). Retry stays strip-only. The wake text names
+the child, condition and task and says the parent may steer or interrupt;
+it never claims the child stopped. A managed service activates the plugin once
+per location, so only the instance owning the parent session's directory
+emits. Routine milestones are capped at one per delegate per
+`milestoneMinIntervalSeconds` and deduplicated; attention milestones fire
 immediately once per distinct condition; the terminal one fires exactly once
-and bypasses the cap. Milestones are `synthetic` messages — they add no model
-turn. The terminal **wake** (`DISPATCH WAKE …`, `scripts/observe_completion.py`)
-is unchanged and remains the only progress-path prompt.
+and bypasses the cap. Milestones are `synthetic` messages, so a wake costs one
+parent turn and nothing else. The terminal **wake** (`DISPATCH WAKE …`,
+`scripts/observe_completion.py`) is unchanged and remains the only terminal
+prompt.
 
 ## Controls
 
@@ -212,10 +241,10 @@ server build).
 ## Tests
 
 ```
-node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 114 tests
+node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 131 tests
 node ../delegation-sentinel/sentinel.test.ts           # 5 tests
 tsc -p . --noEmit
-node mutation-check.mjs                                # 28 break/restore proofs
+node mutation-check.mjs                                # 47 break/restore proofs
 ```
 
 `mutation-check.mjs` is the checked-in evidence behind every liveness guard:
@@ -236,9 +265,10 @@ original. It runs in CI with the offline suites.
   `ctx.client.plugin.list`.
 - Event vocabulary used: `session.created`, `session.renamed`,
   `session.status`, `session.step.started/ended/failed`,
-  `session.tool.called/success/failed`, `session.message.content.updated`,
-  `session.usage.updated`, `permission.asked/replied`, `form.created/replied/
-  cancelled`, `session.execution.succeeded/failed/interrupted`.
+  `session.tool.called/success/failed`, `session.tool.input.started/ended`,
+  `session.message.content.updated`, `session.usage.updated`,
+  `permission.asked/replied`, `form.created/replied/cancelled`,
+  `session.execution.succeeded/failed/interrupted`.
 
 ## Install / apply (owner step — deliberately not performed here)
 

@@ -17,9 +17,11 @@ import {
   DEFAULTS,
   TITLE_PREFIX,
   associateSessionInfo,
+  attentionEnvConfig,
   createState,
   delegationTitle,
   healthPath,
+  isWakeKind,
   markActive,
   observe,
   parseDelegationTitle,
@@ -1077,6 +1079,371 @@ test("a replayed create never emits start or terminal for store-terminal history
   }));
   assert.equal(terminal.milestones.length, 0);
   assert.equal(d.status, "completed");
+});
+
+// --- attention wakes (RM-070 AC1-AC8) --------------------------------------
+//
+// Attention conditions are actionable while they happen: the milestone that
+// reports thrash / stall / needs-input / denied is also the wake that starts
+// exactly one parent turn. Routine progress and terminal stay non-prompting,
+// the terminal wake remains the Python observer's job, and the budget is per
+// child per process.
+
+const isWake = (m) => m.wake === true;
+
+function thrash(state, sid, target, from = 0) {
+  let result;
+  for (let i = 0; i < DEFAULTS.loopRepeats; i += 1) {
+    result = observe(state, toolCalled(sid, `${target}:${from + i}`,
+      { command: target }));
+    advance(500);
+  }
+  return result;
+}
+
+test("the first thrash wakes the parent exactly once; a repeat never does", () => {
+  const state = fresh();
+  observe(state, child("ses_c", "ses_p", "thrash drill"));
+  const first = thrash(state, "ses_c", "git status");
+  const thrashWakes = first.milestones.filter(isWake);
+  assert.equal(thrashWakes.length, 1);
+  assert.equal(thrashWakes[0].kind, "thrash");
+  assert.equal(thrashWakes[0].attention, true);
+
+  // Same child, same kind, same target: the condition is already reported.
+  const repeat = observe(state, toolCalled("ses_c", "git status:again",
+    { command: "git status" }));
+  assert.equal(repeat.milestones.filter((m) => m.kind === "thrash").length, 0);
+  assert.equal(repeat.milestones.filter(isWake).length, 0);
+
+  // A different target is a different condition and earns its own wake.
+  const second = thrash(state, "ses_c", "git diff", 4);
+  assert.deepEqual(second.milestones.filter(isWake).map((m) => m.kind),
+    ["thrash"]);
+});
+
+test("needs-input, denied and stall each wake exactly once", () => {
+  const asked = () => event("permission.asked", {
+    sessionID: "ses_c", action: "read", resources: ["x"],
+  });
+
+  const needs = fresh();
+  observe(needs, child("ses_c", "ses_p", "needs drill"));
+  const needsFirst = observe(needs, asked());
+  assert.deepEqual(needsFirst.milestones.filter(isWake).map((m) => m.kind),
+    ["needs-input"]);
+  const needsRepeat = observe(needs, asked());
+  assert.equal(needsRepeat.milestones.length, 0,
+    "the same condition is not re-delivered, so it cannot wake twice");
+
+  const denied = fresh();
+  observe(denied, child("ses_c", "ses_p", "denied drill"));
+  observe(denied, asked());
+  const deniedFirst = observe(denied, event("permission.replied", {
+    sessionID: "ses_c", requestID: "p1", reply: "reject",
+  }));
+  assert.deepEqual(deniedFirst.milestones.filter(isWake).map((m) => m.kind),
+    ["denied"]);
+  observe(denied, asked());
+  const deniedRepeat = observe(denied, event("permission.replied", {
+    sessionID: "ses_c", requestID: "p2", reply: "reject",
+  }));
+  assert.equal(deniedRepeat.milestones.length, 0);
+
+  const stall = fresh();
+  observe(stall, child("ses_c", "ses_p", "stall drill"));
+  advance((DEFAULTS.stallSeconds + 1) * 1000);
+  const stallFirst = tick(stall, clock);
+  assert.deepEqual(stallFirst.milestones.filter(isWake).map((m) => m.kind),
+    ["stall"]);
+  advance(5_000);
+  assert.equal(tick(stall, clock).milestones.filter(isWake).length, 0);
+});
+
+test("routine and terminal milestones never wake (retry included)", () => {
+  const state = fresh();
+  const started = observe(state, child("ses_c", "ses_p", "routine drill"));
+  assert.equal(started.milestones[0].wake, false);
+  advance(DEFAULTS.milestoneMinIntervalSeconds * 1000 + 1);
+  const firstTool = observe(state, contentTool("ses_c", "t1", "read",
+    "running", { path: "a" }));
+  assert.equal(firstTool.milestones.filter((m) => m.kind === "first-tool")
+    .length, 1);
+  assert.ok(firstTool.milestones.every((m) => m.wake === false));
+
+  observe(state, event("permission.asked", {
+    sessionID: "ses_c", action: "read", resources: ["y"],
+  }));
+  advance(DEFAULTS.milestoneMinIntervalSeconds * 1000 + 1);
+  const replied = observe(state, event("permission.replied", {
+    sessionID: "ses_c", requestID: "p1", reply: "once",
+  }));
+  const resume = replied.milestones.find((m) => m.kind === "resume");
+  assert.ok(resume);
+  assert.equal(resume.wake, false);
+
+  const retried = observe(state, event("session.status", {
+    sessionID: "ses_c", type: "retry",
+    status: { type: "retry", attempt: 1 },
+  }));
+  const retry = retried.milestones.find((m) => m.kind === "retry");
+  assert.ok(retry);
+  assert.equal(retry.attention, true);
+  assert.equal(retry.wake, false, "retry is attention, not an owner decision");
+
+  const terminal = observe(state, event("session.execution.succeeded",
+    { sessionID: "ses_c" }));
+  const done = terminal.milestones.find((m) => m.kind === "terminal");
+  assert.ok(done);
+  assert.equal(done.wake, false, "the terminal wake is the Python observer's");
+});
+
+test("attention wakes are capped per child and the excess stays context", () => {
+  const state = createState({ maxAttentionWakes: 2 }, now);
+  observe(state, child("ses_c", "ses_p", "cap drill"));
+  const first = thrash(state, "ses_c", "echo A");
+  const second = thrash(state, "ses_c", "echo B", 4);
+  const third = thrash(state, "ses_c", "echo C", 8);
+
+  assert.deepEqual(first.milestones.filter(isWake).map((m) => m.kind),
+    ["thrash"]);
+  assert.deepEqual(second.milestones.filter(isWake).map((m) => m.kind),
+    ["thrash"]);
+  const capped = third.milestones.filter((m) => m.kind === "thrash");
+  assert.equal(capped.length, 1, "over-cap the condition is still reported");
+  assert.equal(capped[0].wake, false);
+  assert.equal(capped[0].attention, true);
+  assert.match(capped[0].text, /echo C/, "context survives the dropped wake");
+
+  // The budget is per child: a second delegate starts with its own.
+  observe(state, child("ses_other", "ses_p", "cap drill two"));
+  const other = thrash(state, "ses_other", "echo A");
+  assert.equal(other.milestones.filter(isWake).length, 1);
+  assert.equal(state.delegates.get("ses_c").attentionWakes, 2);
+  assert.equal(state.delegates.get("ses_other").attentionWakes, 1);
+});
+
+test("stale, archived, terminal and unknown rows never wake", () => {
+  const archived = fresh();
+  observe(archived, child("ses_c", "ses_p"));
+  observe(archived, event("session.archived", { sessionID: "ses_c" }));
+  const archivedAsked = observe(archived, event("permission.asked", {
+    sessionID: "ses_c", action: "read", resources: ["x"],
+  }));
+  assert.equal(archivedAsked.milestones.length, 0);
+  assert.equal(archived.delegates.get("ses_c").attentionWakes, 0);
+
+  const terminal = fresh();
+  observe(terminal, child("ses_c", "ses_p"));
+  observe(terminal, event("session.execution.succeeded",
+    { sessionID: "ses_c" }));
+  const terminalAsked = observe(terminal, event("permission.asked", {
+    sessionID: "ses_c", action: "read", resources: ["x"],
+  }));
+  assert.equal(terminalAsked.milestones.length, 0);
+
+  const stale = fresh();
+  associateSessionInfo(stale, {
+    id: "ses_old", parentID: "ses_p", title: "historical",
+    time: { created: clock - 3_600_000, updated: clock - 3_000_000 },
+  });
+  advance((DEFAULTS.stallSeconds + 1) * 1000);
+  assert.equal(tick(stale, clock).milestones.filter(isWake).length, 0);
+  assert.equal(stale.delegates.get("ses_old").attentionWakes, 0);
+
+  const unknown = fresh();
+  const orphan = observe(unknown, event("permission.asked", {
+    sessionID: "ses_unknown", action: "read", resources: ["x"],
+  }));
+  assert.equal(orphan.milestones.length, 0);
+});
+
+test("attention wake config: defaults, options, env and precedence", () => {
+  assert.equal(DEFAULTS.attentionWake, true);
+  assert.equal(DEFAULTS.maxAttentionWakes, 3);
+
+  const off = createState(tuiConfig({}, {
+    DELEGATION_OBSERVER_ATTENTION_WAKE: "0",
+  }), now);
+  assert.equal(off.config.attentionWake, false);
+  observe(off, child("ses_c", "ses_p", "config drill"));
+  const offAsked = observe(off, event("permission.asked", {
+    sessionID: "ses_c", action: "read", resources: ["x"],
+  }));
+  const offMilestone = offAsked.milestones.at(-1);
+  assert.equal(offMilestone.kind, "needs-input");
+  assert.equal(offMilestone.attention, true);
+  assert.equal(offMilestone.wake, false, "the disabled policy keeps context only");
+
+  const fromEnv = createState(tuiConfig({}, {
+    DELEGATION_OBSERVER_MAX_ATTENTION_WAKES: "1",
+  }), now);
+  assert.equal(fromEnv.config.maxAttentionWakes, 1);
+  observe(fromEnv, child("ses_c", "ses_p", "env cap drill"));
+  thrash(fromEnv, "ses_c", "echo A");
+  const overEnvCap = thrash(fromEnv, "ses_c", "echo B", 4);
+  assert.equal(overEnvCap.milestones.filter((m) => m.kind === "thrash")
+    .at(-1).wake, false);
+
+  // Options win over env; invalid env is ignored; defaults fill the gap.
+  const kept = tuiConfig({
+    options: { delegationObserver: { attentionWake: true, maxAttentionWakes: 5 } },
+  }, {
+    DELEGATION_OBSERVER_ATTENTION_WAKE: "false",
+    DELEGATION_OBSERVER_MAX_ATTENTION_WAKES: "1",
+  });
+  assert.equal(kept.attentionWake, true);
+  assert.equal(kept.maxAttentionWakes, 5);
+  assert.equal(createState(kept, now).config.maxAttentionWakes, 5);
+
+  const invalid = tuiConfig({}, {
+    DELEGATION_OBSERVER_ATTENTION_WAKE: "nonsense",
+    DELEGATION_OBSERVER_MAX_ATTENTION_WAKES: "0",
+  });
+  assert.equal(invalid.attentionWake, undefined);
+  assert.equal(invalid.maxAttentionWakes, undefined);
+  const defaults = createState(tuiConfig({}, {}), now);
+  assert.equal(defaults.config.attentionWake, DEFAULTS.attentionWake);
+  assert.equal(defaults.config.maxAttentionWakes, DEFAULTS.maxAttentionWakes);
+});
+
+test("the wake text names child, condition and task, offers steering, and never claims a stop", () => {
+  const needs = fresh();
+  observe(needs, child("ses_c", "ses_p", "RM-070 needs drill"));
+  const needsWake = observe(needs, event("permission.asked", {
+    sessionID: "ses_c", action: "read", resources: ["x"],
+  })).milestones.find(isWake);
+
+  const denied = fresh();
+  observe(denied, child("ses_c", "ses_p", "RM-070 denied drill"));
+  observe(denied, event("permission.asked", {
+    sessionID: "ses_c", action: "read", resources: ["x"],
+  }));
+  const deniedWake = observe(denied, event("permission.replied", {
+    sessionID: "ses_c", requestID: "p1", reply: "reject",
+  })).milestones.find(isWake);
+
+  const thrashState = fresh();
+  observe(thrashState, child("ses_c", "ses_p", "RM-070 thrash drill"));
+  const thrashWake = thrash(thrashState, "ses_c", "git status")
+    .milestones.find(isWake);
+
+  const stallState = fresh();
+  observe(stallState, child("ses_c", "ses_p", "RM-070 stall drill"));
+  advance((DEFAULTS.stallSeconds + 1) * 1000);
+  const stallWake = tick(stallState, clock).milestones.find(isWake);
+
+  for (const [name, wake, condition, task] of [
+    ["needs-input", needsWake, /needs input/, /RM-070 needs drill/],
+    ["denied", deniedWake, /permission denied/, /RM-070 denied drill/],
+    ["thrash", thrashWake, /thrash/, /RM-070 thrash drill/],
+    ["stall", stallWake, /stall/, /RM-070 stall drill/],
+  ]) {
+    assert.ok(wake, `${name}: a wake milestone exists`);
+    assert.equal(wake.wake, true, name);
+    assert.match(wake.text, /ses_c/, `${name}: names the child`);
+    assert.match(wake.text, condition, `${name}: names the condition`);
+    assert.match(wake.text, task, `${name}: names the task`);
+    assert.match(wake.text, /may steer or interrupt/, `${name}: offers control`);
+    assert.doesNotMatch(wake.text, /\bstopp?ed\b|\bdead\b|\bterminated\b/i,
+      `${name}: never claims the child stopped`);
+  }
+});
+
+test("tool input events label and count calls when content updates are absent", () => {
+  // The headless 2.1.4 server emits session.tool.input.started/ended (and
+  // session.tool.called without a name), but not message.content.updated.
+  // Without this path a real child can never be flagged as thrashing.
+  const state = fresh();
+  observe(state, child("ses_c", "ses_p", "input events drill"));
+  const started = (id, name) => event("session.tool.input.started", {
+    sessionID: "ses_c", id, name, assistantMessageID: "m1",
+  });
+  const ended = (id, input) => event("session.tool.input.ended", {
+    sessionID: "ses_c", id, text: JSON.stringify(input),
+  });
+  let wakes = 0;
+  for (let i = 0; i < DEFAULTS.loopRepeats; i += 1) {
+    const id = `call_${i}`;
+    observe(state, started(id, "shell"));
+    const r = observe(state, ended(id, { command: "echo LOOP" }));
+    wakes += r.milestones.filter(isWake).length;
+    advance(500);
+  }
+  assert.equal(wakes, 1, "three identical input-ended calls wake once");
+  const d = state.delegates.get("ses_c");
+  assert.equal(d.loop.count, DEFAULTS.loopRepeats);
+  assert.equal(d.phase, "shell: echo LOOP");
+  assert.match(d.warning, /thrash/);
+
+  // Code-mode input is a real target too (the build agent's execute tool).
+  const code = fresh();
+  observe(code, child("ses_c", "ses_p", "code mode"));
+  observe(code, event("session.tool.input.started", {
+    sessionID: "ses_c", id: "call_code", name: "execute",
+  }));
+  observe(code, event("session.tool.input.ended", {
+    sessionID: "ses_c", id: "call_code", text: JSON.stringify({ code: "return 1 + 1;" }),
+  }));
+  assert.equal(code.delegates.get("ses_c").tool.target, "return 1 + 1;");
+});
+
+test("the server attention env seam excludes TUI-only keys", () => {
+  const parsed = attentionEnvConfig({
+    DELEGATION_OBSERVER_ENABLED: "0",
+    DELEGATION_OBSERVER_STALL_SECONDS: "1",
+    DELEGATION_OBSERVER_STALE_GRACE_SECONDS: "1",
+    DELEGATION_OBSERVER_ATTENTION_WAKE: "0",
+    DELEGATION_OBSERVER_MAX_ATTENTION_WAKES: "2",
+  });
+  assert.deepEqual(parsed, { attentionWake: false, maxAttentionWakes: 2 });
+  assert.deepEqual(attentionEnvConfig({}), {});
+  assert.equal(isWakeKind("denied"), true);
+  assert.equal(isWakeKind("retry"), false);
+  assert.equal(isWakeKind("terminal"), false);
+  assert.equal(isWakeKind("start"), false);
+});
+
+test("one headless call seen through input events and a name-less tool.called counts once", () => {
+  // Live order: input.started -> input.ended -> tool.called (no name), same
+  // id. The call must be labelled and counted exactly once.
+  const state = fresh();
+  observe(state, child("ses_c", "ses_p", "overlap drill"));
+  advance(DEFAULTS.milestoneMinIntervalSeconds * 1000 + 1);
+  const call = (id) => {
+    observe(state, event("session.tool.input.started", {
+      sessionID: "ses_c", id, name: "shell",
+    }));
+    const ended = observe(state, event("session.tool.input.ended", {
+      sessionID: "ses_c", id, text: JSON.stringify({ command: "echo LOOP" }),
+    }));
+    const called = observe(state, event("session.tool.called", {
+      sessionID: "ses_c", id, input: { command: "echo LOOP" },
+    }));
+    return { ended, called };
+  };
+
+  const first = call("call_overlap_1");
+  const d = state.delegates.get("ses_c");
+  assert.equal(d.loop.count, 1, "one call, one count");
+  assert.equal(d.phase, "shell: echo LOOP", "the input-event label survives called");
+  assert.equal(first.ended.milestones.filter((m) => m.kind === "first-tool")
+    .length, 1);
+  assert.equal(first.called.milestones.length, 0, "called adds no second count");
+
+  // The guard is name-less-only: a late named called may refine the label,
+  // but the call-id guard still prevents a second count.
+  observe(state, event("session.tool.called", {
+    sessionID: "ses_c", id: "call_overlap_1", name: "read",
+    input: { command: "echo LOOP" },
+  }));
+  assert.equal(d.loop.count, 1);
+  assert.equal(d.phase, "read: echo LOOP");
+
+  call("call_overlap_2");
+  call("call_overlap_3");
+  assert.equal(d.loop.count, 3, "each full sequence counts exactly once");
+  assert.equal(d.emitted.has("thrash:echo LOOP"), true, "thrash fires at x3 only");
 });
 
 test("a name-less tool.called waits for the content update to label the call", () => {

@@ -329,8 +329,9 @@ is non-blocking and observable:
 - progress, needs-input and terminal state arrive from the **event stream**;
 - owner controls: focus/open, steer (same session id), interrupt (typed
   request on the same session id);
-- the RM-058 terminal wake still arrives exactly once — it is the only
-  progress-path prompt.
+- the RM-058 terminal wake still arrives exactly once; attention conditions
+  (thrash/stall/needs-input/denied) also start one bounded parent turn
+  (RM-070), while routine progress does not.
 
 **Association.** No side registry. In-session children are in the parent's
 tree (`session_v2.parent_id`, `session.created.parentID`). Run-vehicle
@@ -342,7 +343,8 @@ dispatch joins the shared V2 service when one is running; `--standalone` or
 grant-driven private servers keep the durable observer contract.
 
 **Status source.** Server events only: `session.created/renamed/status`,
-`session.step.*`, `session.tool.*`, `session.message.content.updated`,
+`session.step.*`, `session.tool.*` (including `session.tool.input.*`),
+`session.message.content.updated`,
 `session.usage.updated`, `permission.*`, `form.*`,
 `session.execution.succeeded/failed/interrupted`. The TUI never reads
 heartbeat files. Quiet/stall evaluation is a local clock over those event
@@ -382,12 +384,21 @@ liveness source and may be hidden — it never presents that state as healthy.
 through `DELEGATION_OBSERVER_STALE_GRACE_SECONDS`; it is not part of the shared
 supervision contract. See ADR-0015 (2026-10-30 amendment).
 
-**Milestones (synthetic, no model turn).** start, first tool, needs-input,
-denied, stall, thrash, retry, resume, terminal. Routine milestones are capped
-at one per delegate per 30 s and deduplicated; attention milestones
-(needs-input, denied, stall, thrash, retry) fire immediately once per distinct
-condition; terminal fires exactly once. A denied permission is a warning, never
-a resume. The terminal wake remains the single prompt.
+**Milestones (synthetic; attention wakes the parent once).** start, first tool,
+needs-input, denied, stall, thrash, retry, resume, terminal. Routine milestones
+are capped at one per delegate per 30 s and deduplicated. Attention milestones
+(needs-input, denied, stall, thrash) fire immediately once per distinct
+condition **and start exactly one parent turn** (RM-070); `retry` stays a strip
+alert. `maxAttentionWakes` (default 3) bounds those turns per child per observer
+process: over the cap the milestone is still queued as context and the drop is
+logged with its count (`attention wake dropped`). `attentionWake` (default
+true) disables the exception; options win over
+`DELEGATION_OBSERVER_ATTENTION_WAKE` /
+`DELEGATION_OBSERVER_MAX_ATTENTION_WAKES`, which win over the defaults. A wake
+names the child, condition and task, says the parent may steer or interrupt,
+and never claims the child stopped. A denied permission is a warning, never a
+resume. Terminal fires exactly once and does not wake; the terminal wake
+remains the only terminal prompt.
 
 **Thresholds.** One vocabulary, sourced from `scripts/supervision_contract.json`
 (generated from `watch_agent.py` / `observe_completion.py`): stall 240 s,
@@ -402,11 +413,14 @@ system never claims live visibility it does not have. The observer can also
 write the opt-in `--status-file` snapshot as a last-resort status surface.
 
 **Synthetic delivery.** Milestones are `session.synthetic` with
-`delivery: "steer"` and `resume: false`: they are queued for the parent's next
-turn and never start one (live: without `resume: false` the parent generated a
-turn). A service activates the plugin once per location, so only the instance
-whose location matches the parent session's directory emits — otherwise every
-location duplicates the milestone.
+`delivery: "steer"`. Routine and terminal milestones send `resume: false`:
+they are queued for the parent's next turn and never start one (live: without
+`resume: false` the parent generated a turn). An attention milestone marked
+`wake` sends `resume: true` and is the one bounded exception. A service
+activates the plugin once per location, so only the instance whose location
+matches the parent session's directory emits — otherwise every location
+duplicates the milestone. The trusted-root gate applies to wakes exactly as it
+does to context milestones.
 
 **Root routing and trust.** A delegate's milestone belongs to the root of its
 parent chain: the server walks up (bounded), follows a run-vehicle title
@@ -426,7 +440,11 @@ host does not forward a plugin entry's `options` to the TUI part, so the TUI
 reads the documented env source for every value it needs:
 `DELEGATION_OBSERVER_ENABLED`, `DELEGATION_OBSERVER_STALL_SECONDS`,
 `DELEGATION_OBSERVER_HEALTH_FILE`, `DELEGATION_OBSERVER_STATUS_FILE` (options
-win when a host does forward them). The observer TUI also writes a presence
+win when a host does forward them). The server part reads only
+`DELEGATION_OBSERVER_ATTENTION_WAKE` and
+`DELEGATION_OBSERVER_MAX_ATTENTION_WAKES` from env; the other keys stay
+TUI-only, so thresholds and `enabled` are not server-env-overridable. The
+observer TUI also writes a presence
 marker (`<location>/.scratch/delegation-observer/tui.json`, refreshed every
 10 s).
 
