@@ -289,3 +289,15 @@ The runner now measures spawn → first non-empty stdout line
 detail (`first stdout line: none` for a true zero-event stall). The
 timeout path still kills the process group at the configured ceiling; the
 instrumentation only records when the first stdout line arrived.
+
+**2026-10-30 — the first-line measurement now feeds the lane classifier.**
+CI run 41234368868, job 124635016575 recorded three Go-lane stalls with a
+first stdout line at 5916, 3723 and 3268 ms, then 240 s of silence; the same
+prompt completed locally in 111 s and `deepseek/deepseek-flash` routed with
+`DEEPSEEK_API_KEY`, so the lane — not the prompt — was degraded. The runner
+still retried instead of switching: `_error_signature` collapsed every
+zero-event stall to `no events`, which the provider classifier rejects. A
+stall now signs as `stall (first line <N>ms)` (lane degradation, provider
+class) or `stall (no first line)` (launch/env, not a lane class), and the
+three stall deaths of a run are marked `lane-degradation-evidence:` before
+the `lane-switch:` record. Detail is in `eval-harness.md` §(c).
