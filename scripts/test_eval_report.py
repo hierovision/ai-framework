@@ -478,6 +478,11 @@ def test_lane_evidence_annotations_attach_to_eval_key():
             {"ts": "2026-10-31T06:02:00Z", "kind": "eval", "skill": "alpha",
              "eval": "alpha#7", "model": "m", "outcome": "error",
              "eval_pass": False, "detail": marked},
+            # One marked record whose `eval` is not a complete key: the row must
+            # show None, not the malformed value (2026-11-01).
+            {"ts": "2026-10-31T06:02:30Z", "kind": "eval", "skill": "alpha",
+             "eval": "s#", "model": "m", "outcome": "error",
+             "eval_pass": None, "detail": marked},
             {"ts": "2026-10-31T06:03:00Z", "kind": "eval", "skill": None,
              "model": "deepseek/deepseek-flash", "outcome": "error",
              "eval_pass": None,
@@ -489,14 +494,14 @@ def test_lane_evidence_annotations_attach_to_eval_key():
             for line in lines:
                 fh.write(json.dumps(line) + "\n")
         out = report.failure_taxonomy(d)
-        assert len(out["lane_evidence"]) == 3, out["lane_evidence"]
+        assert len(out["lane_evidence"]) == 4, out["lane_evidence"]
         assert len(out["lane_switches"]) == 1, out["lane_switches"]
         # The display row carries the record's own eval key (additive field;
         # ts/model/detail unchanged, top-level report schema unchanged).
         assert set(out["lane_evidence"][0]) == {"ts", "model", "eval", "detail"}, \
             out["lane_evidence"][0]
-        assert all(row["eval"] == "alpha#7"
-                   for row in out["lane_evidence"]), out["lane_evidence"]
+        assert [row["eval"] for row in out["lane_evidence"]] == [
+            "alpha#7", "alpha#7", "alpha#7", None], out["lane_evidence"]
         assert out["lane_switches"][0]["eval"] is None, out["lane_switches"]
         # The annotated eval is terminal infra, attributed by its eval key.
         assert out["terminal_infra"] == ["alpha#7"], out
@@ -732,6 +737,90 @@ def test_lane_status_partial_key_cannot_move_cover():
     print("PASS  incomplete tokens cannot move the cover across the threshold")
 
 
+MALFORMED_EVALS = ("s#", "#2", "designing-architecture#", "lane stall",
+                   "s #1", "s##1")
+
+
+def _seed_eval_field_day(d, with_malformed):
+    """Four valid finals, one valid marked death, one switch record; optionally
+    six malformed records on each side plus a terminal malformed final."""
+    marked = ("lane-degradation-evidence: dead session: stall "
+              "(first line 5916ms) — no work produced")
+    path = os.path.join(d, "run-2026-10-31.jsonl")
+    with open(path, "w", encoding="utf-8") as fh:
+        for i in range(1, 5):
+            fh.write(json.dumps({
+                "ts": f"2026-10-31T06:0{i}:00Z", "kind": "eval",
+                "skill": "s", "eval": f"s#{i}", "model": "m",
+                "outcome": "success", "eval_pass": True}) + "\n")
+        fh.write(json.dumps({
+            "ts": "2026-10-31T06:20:00Z", "kind": "eval", "skill": "s",
+            "eval": "s#1", "model": "m", "outcome": "error",
+            "eval_pass": None, "detail": marked}) + "\n")
+        if with_malformed:
+            for j, bad in enumerate(MALFORMED_EVALS):
+                # a FINAL verdict whose `eval` is malformed (denominator side)
+                fh.write(json.dumps({
+                    "ts": f"2026-10-31T06:3{j}:00Z", "kind": "eval",
+                    "skill": "s", "eval": bad, "model": "m",
+                    "outcome": "success", "eval_pass": True}) + "\n")
+                # a MARKED death whose `eval` is malformed (numerator side)
+                fh.write(json.dumps({
+                    "ts": f"2026-10-31T06:4{j}:00Z", "kind": "eval",
+                    "skill": "s", "eval": bad, "model": "m",
+                    "outcome": "error", "eval_pass": None,
+                    "detail": marked}) + "\n")
+            # a terminal record with a malformed `eval`: groups by skill only
+            fh.write(json.dumps({
+                "ts": "2026-10-31T06:50:00Z", "kind": "eval", "skill": "alpha",
+                "eval": "s#", "model": "m", "outcome": "error",
+                "eval_pass": False, "detail": "dead session: stall (first line 1ms)"
+            }) + "\n")
+        fh.write(json.dumps({
+            "ts": "2026-10-31T06:55:00Z", "kind": "eval", "skill": None,
+            "model": "deepseek/deepseek-flash", "outcome": "error",
+            "eval_pass": None,
+            "detail": ("lane-switch: m -> deepseek/deepseek-flash; per-run; "
+                       "evidence: lane stall (s#1)")}) + "\n")
+    return path
+
+
+def test_lane_status_malformed_eval_field_not_counted():
+    """The record `eval` field is shape-validated exactly like the legacy
+    string: a malformed eval (`s#`, `#2`, `designing-architecture#`, a class
+    label, whitespace, a double `#`) moves neither the denominator nor the
+    numerator, so the cover is identical with and without those records. The
+    same records also never form a `by_eval` bucket (they group by skill)."""
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    d = tempfile.mkdtemp()
+    try:
+        _seed_eval_field_day(d, with_malformed=False)
+        clean = report.lane_status(d, now=now)
+        assert clean["max_run_cover_pct"] == 25.0, clean
+        assert clean["routing_review"]["needed"] is False, clean
+        d2 = tempfile.mkdtemp()
+        try:
+            _seed_eval_field_day(d2, with_malformed=True)
+            dirty = report.lane_status(d2, now=now)
+            assert dirty["max_run_cover_pct"] == 25.0, dirty
+            assert dirty["routing_review"]["needed"] is False, dirty
+            assert (dirty["max_run_cover_pct"]
+                    == clean["max_run_cover_pct"]), (clean, dirty)
+            out = report.failure_taxonomy(d2)
+            # Display rows show the valid key or None, never a malformed value.
+            row_evals = {row.get("eval") for row in out["lane_evidence"]}
+            assert row_evals == {"s#1", None}, out["lane_evidence"]
+            # by_eval grouping: the malformed terminal record groups by skill.
+            assert out["terminal_infra"] == ["alpha"], out["terminal_infra"]
+            assert not [k for k in out["terminal_infra"]
+                        if k in MALFORMED_EVALS], out["terminal_infra"]
+        finally:
+            shutil.rmtree(d2)
+    finally:
+        shutil.rmtree(d)
+    print("PASS  malformed `eval` fields cannot move the cover or a bucket")
+
+
 def test_lane_status_long_evidence_uses_eval_keys():
     """Regression (2026-11-01, review): 60 long `designing-architecture#N`
     evidence evals over 114 final evals is 52.6% cover and escalates. The
@@ -949,6 +1038,7 @@ def main():
         test_evidence_key_shape_matrix,
         test_evidence_keys_drops_a_token_cut_at_the_cap,
         test_lane_status_partial_key_cannot_move_cover,
+        test_lane_status_malformed_eval_field_not_counted,
         test_lane_status_long_evidence_uses_eval_keys,
         test_lane_status_legacy_and_mixed_evidence_records,
         test_lane_status_mixed_class_share_not_overcounted,

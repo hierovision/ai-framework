@@ -84,10 +84,14 @@ first-line stall class), `:STALL-NOFIRST-DRILL:` (its launch/env negative) and
 measures a run's degraded share from the `eval` key of each
 `lane-degradation-evidence:` record, so the switch `detail` — capped at 512
 chars, where a mass degradation (dozens of long keys) loses keys and its
-closing paren — can never shrink or inflate the number; the switch's key list
-is parsed only as the fallback for legacy records, and neither a class label
-nor an incomplete token (`s#`, `#2`, `designing-architecture#`, a key cut at
-the cap) is ever counted as an eval key. Threshold (50% of a run, or two events in 30 days) and
+closing paren — can never shrink or inflate the number. Both sources of a
+key are shape-validated against `<skill>#<id>` (non-empty skill, exactly one
+`#`, non-empty id, no whitespace): the record `eval` field and the legacy
+switch string. A class label or an incomplete token (`s#`, `#2`,
+`designing-architecture#`, a key cut at the cap) is therefore not counted in
+any path — record field, legacy string, mixed union, lane-row display, or the
+`by_eval` grouping — and the lane row shows `null` rather than a malformed
+value. Threshold (50% of a run, or two events in 30 days) and
 the report's output schema are unchanged.
 
 **Five-sibling manifest audit** (marker = tier-intent tag, not steering;

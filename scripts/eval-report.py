@@ -261,17 +261,21 @@ def failure_taxonomy(logs_dir):
         # an operator can associate a lane row with its eval. The top-level
         # report schema and the pre-existing row fields (ts/model/detail) are
         # unchanged; every consumer keys on those, none on the row's key set.
+        # An `eval` that is not a complete `<skill>#<id>` key is displayed as
+        # None: the row never presents a fake eval (2026-11-01).
         return [{"ts": r.get("ts"), "model": r.get("model"),
-                 "eval": r.get("eval"), "detail": r.get("detail")}
+                 "eval": _valid_eval(r), "detail": r.get("detail")}
                 for r in records if (r.get("detail") or "").startswith(prefix)]
 
     lane_evidence = _lane_rows(FALLBACK_EVIDENCE_PREFIX)
     lane_switches = _lane_rows(FALLBACK_SWITCH_PREFIX)
 
     # RM-021 AC3: per-eval terminal vs recovered infra classification.
+    # A record whose `eval` is not a complete key groups under its skill (the
+    # pre-`eval` behaviour), never under a fake eval bucket (2026-11-01).
     by_eval = {}
     for r in records:
-        key = r.get("eval") or (r.get("skill") or "(none)")
+        key = _valid_eval(r) or (r.get("skill") or "(none)")
         by_eval.setdefault(key, []).append(r)
     terminal_infra, recovered_infra = [], []
     for key, recs in sorted(by_eval.items()):
@@ -344,6 +348,18 @@ def _is_eval_key(token):
     return not any(ch.isspace() for ch in token)
 
 
+def _valid_eval(record):
+    """The record's `eval` field when it is a complete key, else None.
+
+    Every consumer in this module goes through this: a malformed field (`s#`,
+    `#2`, `designing-architecture#`, whitespace, a second `#`, a class label)
+    is not an eval identity, so it is never counted in the cover, never
+    displayed on a lane row, and never used as a `by_eval` bucket (2026-11-01).
+    """
+    value = (record or {}).get("eval")
+    return value if isinstance(value, str) and _is_eval_key(value) else None
+
+
 def _evidence_keys_from_detail(detail):
     """Parse the eval keys out of a lane-switch record's `evidence:` tail.
 
@@ -409,7 +425,9 @@ def lane_status(logs_dir, window_days=30, review_after=2, review_cover=50,
     `eval` key of the marked death records, never the classes and never twice —
     with the switch record's key list as the legacy fallback; the switch
     `detail` is capped at DETAIL_MAX, so the records are the authoritative
-    source. Read-only; no schema change.
+    source. Every key, in both paths, is shape-validated (`_is_eval_key`): a
+    malformed `eval` field is not counted on either side of the ratio.
+    Read-only; no schema change.
     """
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(days=window_days)
@@ -443,21 +461,22 @@ def lane_status(logs_dir, window_days=30, review_after=2, review_cover=50,
                         if (r.get("detail") or "").startswith(FALLBACK_SWITCH_PREFIX)]
             if not switches:
                 continue
-            final_keys = {r.get("eval") for r in recs
-                          if r.get("kind") == "eval" and r.get("eval")
-                          and r.get("eval_pass") is not None}
+            final_keys = {_valid_eval(r) for r in recs
+                          if r.get("kind") == "eval"
+                          and r.get("eval_pass") is not None} - {None}
             # The authoritative evidence set is the `eval` key on the marked
             # death records themselves: a real weekly run names dozens of long
             # keys and the switch `detail` is capped at DETAIL_MAX, so the
             # string can lose keys (and its closing paren). Legacy records
             # (pre-2026-11-01) carry no `eval`, so the switch-detail parse stays
             # as their fallback — and as the fallback for a run with no marked
-            # records at all.
+            # records at all. Both paths are shape-validated (`_is_eval_key`),
+            # so no consumer can count a malformed field.
             marked = [r for r in recs
                       if (r.get("detail") or "").startswith(
                           FALLBACK_EVIDENCE_PREFIX)]
-            evidence_keys = {r.get("eval") for r in marked if r.get("eval")}
-            if not marked or any(not r.get("eval") for r in marked):
+            evidence_keys = {_valid_eval(r) for r in marked} - {None}
+            if not marked or any(_valid_eval(r) is None for r in marked):
                 for r in switches:
                     evidence_keys.update(
                         _evidence_keys_from_detail(r.get("detail")))
