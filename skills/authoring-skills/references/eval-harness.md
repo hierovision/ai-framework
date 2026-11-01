@@ -68,7 +68,7 @@ pay-as-you-go (`opencode/*`, non-free) is never allowed in CI.
 only, never a re-bind — to the `deepseek/deepseek-flash` direct-key lane when
 the run's own log proves a MODEL/opencode-service degradation: provider-classed
 deaths (the model-resolution class, the dead-session `UnknownError` wrapper, or
-— since 2026-10-30 — a zero-event stall that produced a first stdout line,
+— since 2026-11-01 — a zero-event stall that produced a first stdout line,
 `stall (first line <N>ms)`; never the external-directory auto-reject class and
 never `stall (no first line)`, which is a launch/env failure). The switch is
 recorded (`lane-degradation-evidence:` then `lane-switch:` records) and marked

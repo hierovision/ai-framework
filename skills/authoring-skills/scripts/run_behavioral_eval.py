@@ -83,7 +83,7 @@ TRANSIENT_RE = re.compile(
     r"unavailable|connection (refused|reset|error)|econnreset|fetch failed",
     re.IGNORECASE,
 )
-# Zero-event stall shapes (2026-10-30): a timed-out invocation carries its own
+# Zero-event stall shapes (CI 2026-10-31): a timed-out invocation carries its own
 # raw marker with the first stdout line it managed to produce, if any. That
 # first-line latency separates lane degradation (the lane answered late or not
 # at all: 3268-5916ms observed in CI run 41234368868, job 124635016575) from a
@@ -262,11 +262,12 @@ def _error_signature(ctx):
     `UnknownError: Unexpected server error ... ref=err_*` — and that cause is
     what the report must aggregate. Returns e.g. `UnknownError ref=err_abc`.
 
-    A zero-event stall is its own class (2026-10-30): before this, it fell
-    through to the opaque `no events`, which the provider classifier rejects —
-    so a stalled Go lane was retried instead of switching lanes. The raw
-    timeout marker names the first stdout line, which is the lane-versus-launch
-    discriminator; see `is_provider_classed_error`.
+    A zero-event stall is its own class (fixed 2026-11-01 after the 2026-10-31
+    CI stalls): before this, it fell through to the opaque `no events`, which
+    the provider classifier rejects — so a stalled Go lane was retried instead
+    of switching lanes. The raw timeout marker names the first stdout line,
+    which is the lane-versus-launch discriminator; see
+    `is_provider_classed_error`.
     """
     for ev in (ctx.get("events") or []):
         if ev.get("type") == "error":
@@ -715,7 +716,7 @@ def run_eval(e, get_output, logs_dir=None, model=None, max_retries=1,
             attempts += 1
             # Reliability annotation record: eval_pass=None so aggregators count
             # only FINAL verdicts toward pass rates (RM-001 null semantics).
-            # 2026-10-30: a transient attempt is a window death too, so it goes
+            # 2026-11-01: a transient attempt is a window death too, so it goes
             # through the same classifier and carries the same evidence mark as
             # the fresh/terminal deaths — otherwise a stall-class run showed
             # only 2 of its 3 deaths as lane evidence.
@@ -1533,10 +1534,12 @@ def stub_result(e, mode, calls, lane_state=None):
     dead streams on the primary lane, then the healthy direct-key lane once
     the runner's threshold has switched — a faithful per-run rehearsal),
     `:STALL-DRILL:` (the zero-event stall class seen in CI run 41234368868;
-    first stdout line present, so it is lane evidence) and `:EXTERNAL-REJECT:`
-    (the env class that must never switch)."""
+    first stdout line present, so it is lane evidence),
+    `:STALL-NOFIRST-DRILL:` (the launch/env negative: a stall with no first
+    stdout line, which must never switch) and `:EXTERNAL-REJECT:` (the env
+    class that must never switch)."""
     if mode.startswith(":STALL-DRILL:"):
-        # 2026-10-30: a zero-event stall is the class that CI retried three
+        # 2026-10-31: a zero-event stall is the class that CI retried three
         # times instead of switching. Once the switch has fired the healthy
         # direct-key synthesis proves the run's lane actually moved.
         if lane_state is not None and lane_state.get("active"):

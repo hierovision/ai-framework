@@ -1542,7 +1542,8 @@ def test_fallback_lane_model_holder():
 
 
 # ---------------------------------------------------------------------------
-# Zero-event stall class (2026-10-30, CI run 41234368868 job 124635016575)
+# Zero-event stall class (incident 2026-10-31, CI run 41234368868 job
+# 124635016575; the re-run attempt 124638120782 repeats the same three stalls)
 #
 # The degraded Go lane emitted its first stdout line at 5916/3723/3268ms and
 # then went silent for the whole 240s budget. `_error_signature` collapsed all
@@ -1679,8 +1680,17 @@ def test_stall_drill_switches_lane():
 
 
 def test_stall_no_first_line_never_switches():
-    """Run-level negative: the same stall shape WITHOUT a first stdout line is
-    a launch/env failure — no lane records, no fallback lane, red run today."""
+    """Run-level negative, red-first for the CLASSIFIER (not only the seam).
+
+    The same stall shape WITHOUT a first stdout line is a launch/env failure.
+    The test pins the three primary death records by their own signatures
+    (transient, fresh, terminal), so it fails if the classification regresses
+    to the old opaque `no events` AND fails if the CLI dies before writing
+    any record. Sensitivity proof: flipping `is_provider_classed_error` to
+    treat `stall (no first line)` as provider-classed makes this test red
+    (the records gain the evidence mark and the lane switches); the classifier
+    is restored before commit.
+    """
     root = _make_drill_root(1)
     logs = tempfile.mkdtemp(prefix="beval-stall-nofl-logs-")
     env = _fallback_env(BEVAL_FALLBACK_ENABLED="1",
@@ -1688,14 +1698,34 @@ def test_stall_no_first_line_never_switches():
     try:
         r = _run_drill(root, logs, ":STALL-NOFIRST-DRILL:", env)
         assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        recs = _read_logs(logs)
+        # The three primary-lane death records: transient retry, fresh retry,
+        # terminal. Each names its own no-first-line signature.
+        primary = [rec for rec in recs
+                   if rec.get("model") == DRILL_PRIMARY_MODEL]
+        assert len(primary) == 3, primary
+        details = [(rec.get("detail") or "") for rec in primary]
+        assert sum(d.startswith("transient attempt 1: ") for d in details) == 1, details
+        assert sum(d.startswith("fresh retry 1: ") for d in details) == 1, details
+        assert sum(d.startswith("dead session: ") for d in details) == 1, details
+        assert all("stall (no first line)" in d for d in details), details
+        # No evidence mark anywhere: the launch/env class never joins the
+        # provider-classed window, so the runner must not claim degradation.
+        assert not [rec for rec in recs
+                    if (rec.get("detail") or "").startswith(
+                        "lane-degradation-evidence: ")], recs
         ev, sw, ceil = _lane_records(logs)
         assert not ev and not sw and not ceil, (ev, sw, ceil)
         assert not any(rec.get("model") == FALLBACK_DRILL_MODEL
-                       for rec in _read_logs(logs))
+                       for rec in recs)
+        # The terminal record is the honest red verdict, not a silent pass.
+        terminal = [rec for rec in primary
+                    if (rec.get("detail") or "").startswith("dead session: ")]
+        assert terminal and terminal[0]["outcome"] == "error", primary
     finally:
         shutil.rmtree(root, ignore_errors=True)
         shutil.rmtree(logs, ignore_errors=True)
-    print("PASS  a no-first-line stall never switches the lane")
+    print("PASS  a no-first-line stall keeps its signature and never switches")
 
 
 def test_fallback_drill_switch_and_marking():
