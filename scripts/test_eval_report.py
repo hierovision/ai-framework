@@ -453,7 +453,7 @@ def test_failure_taxonomy_surfaces_lane_lists():
         shutil.rmtree(d)
 
 
-def _seed_lane_day(d, date, n_evals, n_evidence):
+def _seed_lane_day(d, date, n_evals, n_evidence, classes=None):
     with open(os.path.join(d, f"run-{date}.jsonl"), "a", encoding="utf-8") as fh:
         for i in range(1, n_evals + 1):
             fh.write(json.dumps({
@@ -461,12 +461,76 @@ def _seed_lane_day(d, date, n_evals, n_evidence):
                 "eval": f"s#{i}", "model": "m", "outcome": "success",
                 "eval_pass": True}) + "\n")
         keys = ", ".join(f"s#{i}" for i in range(1, n_evidence + 1))
+        evidence = f"{classes} ({keys})" if classes else keys
         fh.write(json.dumps({
             "ts": f"{date}T06:30:00Z", "kind": "eval", "skill": None,
             "model": "deepseek/deepseek-flash", "outcome": "error",
             "eval_pass": None,
             "detail": ("lane-switch: m -> deepseek/deepseek-flash; per-run; "
-                       f"evidence: {keys}")}) + "\n")
+                       f"evidence: {evidence}")}) + "\n")
+
+
+def test_evidence_keys_parses_keys_not_classes():
+    """The switch writer emits `evidence: <class>, <class> (k1, k2)`; only the
+    parenthesised keys are eval keys. A class is not an eval key."""
+    mixed = ("lane-switch: m -> deepseek/deepseek-flash; per-run; "
+             "evidence: ProviderModelNotFoundError, lane stall (s#1, s#2)")
+    assert report._evidence_keys_from_detail(mixed) == ["s#1", "s#2"], mixed
+    one_class = ("lane-switch: m -> d; per-run; evidence: lane stall (s#1)")
+    assert report._evidence_keys_from_detail(one_class) == ["s#1"]
+    legacy = "lane-switch: m -> d; per-run; evidence: s#1, s#2"
+    assert report._evidence_keys_from_detail(legacy) == ["s#1", "s#2"]
+    assert report._evidence_keys_from_detail("no evidence tail") == []
+    print("PASS  lane-switch evidence parses keys, not classes")
+
+
+def test_lane_status_mixed_class_share_not_overcounted():
+    """Regression (2026-11-01): a mixed-class switch record over 6 final evals
+    is 33.3% cover (2 evidence evals of 6), not 50% (3 — the two classes were
+    counted as keys), so no routing review is raised. The corrected share is
+    also the one the escalation threshold is evaluated against: 2 of 4 = 50.0%
+    still escalates, 2 of 5 = 40.0% stays quiet."""
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    classes = "ProviderModelNotFoundError, lane stall"
+    d = tempfile.mkdtemp()
+    try:
+        _seed_lane_day(d, "2026-10-31", n_evals=6, n_evidence=2,
+                       classes=classes)
+        out = report.lane_status(d, now=now)
+        assert out["fallback_events"] == 1, out
+        assert out["max_run_cover_pct"] == 33.3, out
+        assert out["routing_review"]["needed"] is False, out
+        assert ("max run cover" not in out["routing_review"]["basis"]), out["routing_review"]
+        # At the threshold the corrected share escalates; 2 of 4 = 50.0%.
+        d2 = tempfile.mkdtemp()
+        try:
+            _seed_lane_day(d2, "2026-10-31", n_evals=4, n_evidence=2,
+                           classes=classes)
+            at = report.lane_status(d2, now=now)
+            assert at["max_run_cover_pct"] == 50.0, at
+            assert at["routing_review"]["needed"] is True, at
+            assert ("max run cover 50.0% >= 50%"
+                    in at["routing_review"]["basis"]), at["routing_review"]
+        finally:
+            shutil.rmtree(d2)
+        # 2 of 5 = 40.0% is below the threshold: quiet, classes included.
+        d3 = tempfile.mkdtemp()
+        try:
+            _seed_lane_day(d3, "2026-10-31", n_evals=5, n_evidence=2,
+                           classes=classes)
+            below = report.lane_status(d3, now=now)
+            assert below["max_run_cover_pct"] == 40.0, below
+            assert below["routing_review"]["needed"] is False, below
+        finally:
+            shutil.rmtree(d3)
+        # The same record loses nothing for the report's public schema.
+        assert set(out) == {"generated_at", "window_days", "fallback_events",
+                            "event_dates", "max_run_cover_pct",
+                            "routing_review"}, sorted(out)
+        assert set(out["routing_review"]) == {"needed", "basis"}, out
+    finally:
+        shutil.rmtree(d)
+    print("PASS  mixed-class lane cover is 33.3%, not 50% (threshold-correct)")
 
 
 def test_lane_status_escalation():
@@ -563,6 +627,8 @@ def main():
         test_merge_eval_logs_concatenates_runs_and_quarantine,
         test_green_run_status_lane_marking,
         test_failure_taxonomy_surfaces_lane_lists,
+        test_evidence_keys_parses_keys_not_classes,
+        test_lane_status_mixed_class_share_not_overcounted,
         test_lane_status_escalation,
         test_green_run_status_cli_lane_roundtrip,
         test_green_run_definition_documents_lane,

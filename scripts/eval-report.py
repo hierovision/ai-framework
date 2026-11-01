@@ -319,13 +319,27 @@ def failure_taxonomy(logs_dir):
 
 
 def _evidence_keys_from_detail(detail):
-    """Parse the `<...>; evidence: k1, k2` tail of a lane-switch record."""
+    """Parse the eval keys out of a lane-switch record's `evidence:` tail.
+
+    Two tails exist in the log:
+      `evidence: k1, k2`                     legacy, keys only
+      `evidence: <class>, <class> (k1, k2)`  current writer
+                                             (`_write_switch_record`)
+    Only the parenthesised key list is evidence: a CLASS is not an eval key.
+    Splitting the whole tail on commas counted every class as a key, so a
+    mixed-class switch `ProviderModelNotFoundError, lane stall (s#1, s#2)`
+    read as 3 keys over 2 evals — 50% cover where the true share is 33.3% —
+    and falsely crossed the routing-review threshold (2026-11-01). Each eval
+    key is counted once, which is the runner's own per-attempt accounting.
+    """
     text = detail or ""
     marker = "; evidence: "
     idx = text.find(marker)
     if idx < 0:
         return []
     tail = text[idx + len(marker):].strip()
+    if tail.endswith(")") and "(" in tail:
+        tail = tail[tail.rfind("(") + 1:-1]
     return [k.strip() for k in tail.split(",") if k.strip()]
 
 
@@ -337,7 +351,9 @@ def lane_status(logs_dir, window_days=30, review_after=2, review_cover=50,
     window. Events = distinct UTC dates with a switch record (deduped; one
     degraded weekly run is one event). `needed` when events >= `review_after`
     within the window OR any single event carried >= `review_cover` percent of
-    that run's included evals. Read-only; no schema change.
+    that run's included evals. Cover counts each evidence eval once (the
+    parenthesised key list of the switch record), never per class — see
+    `_evidence_keys_from_detail`. Read-only; no schema change.
     """
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(days=window_days)
