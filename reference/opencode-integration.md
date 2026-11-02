@@ -28,30 +28,46 @@ previous release tag is the code rollback; the C5 backup is the data rollback.
   (global `--log-level info --print-logs` to capture the plugin startup line).
 - Root `-m` / `--agent` were removed; emit only `run --agent` / `run --model`.
 
-## Version upgrades (post-cutover)
+## Version upgrades (standard)
 
-The one-time V1→V2 cutover is `scripts/opencode_v2_cutover.py`; later V2→V2
-upgrades use the same script with `--upgrade`.
+`scripts/opencode_upgrade.py` is the one supported upgrade path (ADR-0016).
+The one-time V1→V2 cutover remains `scripts/opencode_v2_cutover.py`; `apply`
+drives its `--upgrade` mode.
 
-1. Install the candidate into scratch and canary it against the V1 rollback
-   binary as the C1 "default" (the exact command is in
-   `scripts/opencode_v2_canary.py`'s docstring). Evidence lands under
-   `.scratch/v2-canary-<version>/`; migration residual `0` needs no further
-   classification.
-2. Bump `VERSION_PIN` (`scripts/opencode_v2.py`), `VERSION`
-   (`scripts/opencode_v2_cutover.py`), both CI `OPENCODE_VERSION` pins, this
-   page, the README, and the dated ADR amendment. Bump the plugin
-   `@opencode/plugin` / OpenTUI pins and refresh their lockfiles.
-3. From a normal terminal with every OpenCode session closed and the shared
-   service stopped (`opencode service stop`):
-   `python3 scripts/opencode_v2_cutover.py --preflight --upgrade`, then
-   `python3 scripts/opencode_v2_cutover.py --execute --upgrade
-   --drain-acknowledged`. The default source prefix is `.scratch/v2-prefix`;
-   pass `--source-prefix .scratch/v2-<version>-prefix` when the candidate was
-   installed elsewhere.
-4. Rollback is `--rollback --manifest <manifest>`: it restores the previous
-   versioned wrapper link and the pre-upgrade DB. The old versioned directory
-   is left in place.
+- `status` / `doctor` — install topology (`~/.yarn/bin/opencode` → versioned
+  wrapper → binary, config root, V1 rollback package), pinned/live/latest,
+  the last canary/apply stage, and the next command. `doctor` is read-only.
+- `check --pins-only` — offline consistency across every active pin seam; CI
+  runs it (run it locally before pushing). `check --remote` reads the
+  registry and drives the weekly issue-first drift workflow. `check --pr`
+  requires the ADR amendment's canary record.
+- `plan --to X` — target plugin/OpenTUI/solid-js matrix and the breaking
+  changes between the current and target releases; no writes.
+- `canary --to X` — installs into `.scratch/v2-<version>-prefix`, runs C1–C8
+  + migration against the V1 rollback binary as the C1 default, and
+  typechecks/tests the three plugins against the target
+  `@opencode/plugin`/OpenTUI in a scratch copy. Evidence:
+  `.scratch/v2-canary-<version>/`.
+- `prepare --to X` — bumps `VERSION_PIN`, the docs/reference/README and
+  plugin peer/README roots, refreshes lockfiles, and appends the dated ADR
+  amendment. `--dry-run` writes nothing; `--open-pr` opens the PR with the
+  generated canary/matrix body.
+- `apply --to X --drain-acknowledged` — the only human gate. Run from a
+  normal terminal after closing sessions (`--wait-for-drain` and
+  `--stop-service` help). It reuses the atomic cutover, then verifies the
+  binary, service `/api/info`, the 17-agent corpus, and the plugin loader;
+  any failure restores the previous link and pre-upgrade DB and reports
+  `ROLLED BACK`. Verification artifact:
+  `.scratch/opencode-v2/upgrade-<version>-verify.json`.
+- `rollback --manifest M` — manual restore (link + DB).
+- `prune --keep N` — remove old scratch prefixes/canary/compat dirs.
+- `upgrade --to X [--apply] [--resume]` — `check → plan → canary →
+  prepare`, stopping before apply unless `--apply`; `--resume` continues
+  from `.scratch/opencode-v2/upgrade-state.json`.
+
+`VERSION_PIN` in `scripts/opencode_v2.py` is the single source: the cutover
+imports it, CI exports `OPENCODE_VERSION` from it, and `check --pins-only`
+enforces the remaining seams. Never hand-edit one seam.
 
 The wrapper at `$HOME/.yarn/bin/opencode` selects both binary and config via
 `XDG_CONFIG_HOME`; the upgrade preserves the current config root

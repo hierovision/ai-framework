@@ -52,13 +52,14 @@ scoring uses the Rex Black rubric.
 - Detail files: per-ID provenance at docs/roadmap-detail/<ID>.md (relocated byte-exact 2026-10-11; owner ruling: no massive detail in the roadmap). Referenced from each row's Notes; consumed at design passes; pruned by the quarterly ALM review.
 - "plan" = `docs/maturity-plan.md`; issue refs = `hierovision/ai-framework#NN`.
 
-## Priority order (1–39)
+## Priority order (1–40)
 One list per horizon, rank order. Every line: `[ID](detail) (score) —
 title`. IDs link to that row's full record in `docs/roadmap-detail/`.
 Score = Impact × Urgency. `— in progress` marks the row under work.
 
-### Now (17)
+### Now (18)
 
+- [RM-071](docs/roadmap-detail/RM-071.md) (6) — Standardized OpenCode upgrade process — one orchestrator, canary gate, drained apply — in progress
 - [RM-016](docs/roadmap-detail/RM-016.md) (6) — Eval-harness independence — sanitized skill staging
 - [RM-018](docs/roadmap-detail/RM-018.md) (6) — Next.js + Supabase stack reference for `designing-architecture`
 - [RM-019](docs/roadmap-detail/RM-019.md) (6) — Empty-result guard for the runtime-validation `council-ux` consult path
@@ -112,6 +113,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 
 | ID | Title | Outcome | Horizon | Category | Impact | Urgency | Score | Status | Success measure | Blocked-by | Sources | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| RM-071 | Standardized OpenCode upgrade process — one orchestrator, canary gate, prepared pin bump, drained apply | — | Now | tooling | 3 | 2 | 6 | in-progress | A new OpenCode release goes from `check` to a verified live switch through one orchestrator, with a canary gate, consistent pins, and automatic rollback; the 2.2.5 upgrade is the first end-to-end run. | — | owner directive 2026-11-02 (standardize the upgrade process); 2.2.5 canary evidence `.scratch/v2-canary-2.2.5/`; PR #140 | fired 2026-11-02; detail: docs/roadmap-detail/RM-071.md. |
 | RM-016 | Eval-harness independence — sanitized skill staging | — | Now | evaluation | 3 | 2 | 6 | open | A re-run sourcing-external-skills suite shows zero answer-key reads with unchanged pass/fail — no weakened assertions. | — | 2026-09-28 triage (session) | fired 2026-09-28 (all 7 fresh-agent runs read the answer key); fix belongs in the behavioral runner. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-016.md. |
 | RM-018 | Next.js + Supabase stack reference for `designing-architecture` | — | Now | self-improvement | 2 | 3 | 6 | open | A Next.js + Supabase design pass selects the dedicated stack reference — no Vue-reference hand-translation. | — | hierovision/ai-framework#29; PLN design pass 2026-09-27 | fired 2026-09-27; re-anchored to paragon-learning-network (Decision 1, 2026-10-09). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-018.md. |
 | RM-019 | Empty-result guard for the runtime-validation `council-ux` consult path | — | Now | self-improvement | 2 | 3 | 6 | open | A runtime-validation pass records its consult outcome (clean / fallback / skip) — no silent lens loss. | — | RM-017 review 2026-09-28 | fired 2026-09-28 (RM-017 review); apply the RM-017 rule to the council-ux runtime path. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-019.md. |
@@ -172,7 +174,7 @@ None (threshold: null).
 
 ## Done
 
-Newest first; 31 closed of 70. The table carries the one-line
+Newest first; 31 closed of 71. The table carries the one-line
 
 | ID | Title | Outcome | Horizon | Category | Impact | Urgency | Score | Status | Success measure | Blocked-by | Sources | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|

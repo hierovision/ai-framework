@@ -33,7 +33,9 @@ than raw renderables. Decision 8's "pin exactly" now means `2.2.5`; Decision
 9's `2.1.4` path is joined by the `--upgrade` mode
 (`scripts/opencode_v2_cutover.py --preflight --upgrade` /
 `--execute --upgrade --drain-acknowledged`), which a live session cannot run
-because the drain gate sees its own OpenCode process.
+because the drain gate sees its own OpenCode process. The repeatable workflow
+around that mode is standardized in
+[ADR-0016](ADR-0016-opencode-upgrade-process.md).
 
 V1 and V2 cannot coexist under one `opencode` command, so this is a cutover,
 not a compatibility layer. The session DB auto-migration is one-way; the

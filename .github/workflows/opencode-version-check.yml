@@ -1,0 +1,79 @@
+# Weekly OpenCode version drift check.
+#
+# Detection only: opens/updates one issue with the exact upgrade command. It
+# never pushes a branch or performs the upgrade — the canary and the drained
+# apply stay owner-run (ADR-0016). A repo whose pin seams are inconsistent, or
+# a failed registry read, exits 2 and fails the job instead of opening an
+# issue.
+name: OpenCode version check
+
+on:
+  schedule:
+    # Weekly, Monday 09:00 UTC.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: opencode-version-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      # SHA-pinned (supply-chain safety — see securing-ci skill).
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (node24)
+        with:
+          node-version: "24"
+
+      - name: Check for a newer OpenCode
+        id: check
+        run: |
+          mkdir -p .scratch/opencode-v2
+          set +e
+          python3 scripts/opencode_upgrade.py check --remote --refresh --json \
+            > .scratch/opencode-v2/version-check.json
+          rc=$?
+          set -e
+          cat .scratch/opencode-v2/version-check.json
+          if [ "$rc" -eq 2 ]; then
+            echo "::error::pin seams or the registry check failed"
+            exit 2
+          fi
+          if [ "$rc" -eq 1 ]; then
+            echo "update=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or update the upgrade issue
+        if: steps.check.outputs.update == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY' > .scratch/opencode-v2/issue.md
+          import json
+          data = json.load(open(".scratch/opencode-v2/version-check.json"))
+          print("A newer OpenCode release is available.\n")
+          print(f"- pinned: `{data['pinned']}`")
+          print(f"- latest: `{data['latest']}`\n")
+          print("Run the standard upgrade:\n")
+          print("```sh")
+          print(f"python3 scripts/opencode_upgrade.py upgrade --to {data['latest']}")
+          print("```\n")
+          print("The canary and the drained `apply` are owner-run; see ADR-0016.")
+          PY
+          version=$(python3 -c 'import json; print(json.load(open(".scratch/opencode-v2/version-check.json"))["latest"])')
+          title="OpenCode upgrade available: $version"
+          existing=$(gh issue list --state open --search "$title" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file .scratch/opencode-v2/issue.md
+          else
+            gh issue create --title "$title" --body-file .scratch/opencode-v2/issue.md
+          fi

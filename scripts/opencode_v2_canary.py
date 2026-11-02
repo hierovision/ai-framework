@@ -230,7 +230,7 @@ def gate_c1(args):
     if not args.skip_install:
         proc = subprocess.run(
             ["npm", "install", "--global", "--prefix", prefix,
-             f"@opencode/cli@{v2.VERSION_PIN}"],
+             f"@opencode/cli@{args.version}"],
             capture_output=True, text=True)
         lines.append(f"install_exit={proc.returncode}")
         if proc.returncode != 0:
@@ -245,7 +245,7 @@ def gate_c1(args):
     iso = subprocess.run([binary, "--version"], capture_output=True, text=True)
     default = subprocess.run([args.default_bin, "--version"],
                              capture_output=True, text=True)
-    ok = v2.VERSION_PIN in iso.stdout and "1.19.4" in default.stdout
+    ok = args.version in iso.stdout and "1.19.4" in default.stdout
     lines += [
         f"isolated_command={binary} --version",
         f"isolated_output={iso.stdout.strip()}",
@@ -269,7 +269,7 @@ def gate_c2(args):
         evidence(root, "C2.txt", "C2=FAIL timeout")
         return False, "timeout"
     ok = status.returncode == 0 and api.returncode == 0 and \
-        '"version"' in (api.stdout or "")
+        args.version in (api.stdout or "")
     text = "\n".join([
         f"date={now_date()}",
         f"service_port={port}",
@@ -636,6 +636,8 @@ def main(argv=None):
         REPO, ".scratch", "v2-prefix", "bin", "opencode2"))
     ap.add_argument("--default-bin", default="opencode")
     ap.add_argument("--db-name", default="stability.db")
+    ap.add_argument("--version", default=v2.VERSION_PIN,
+                    help="candidate @opencode/cli version (default: pin)")
     ap.add_argument("--skip-install", action="store_true")
     args = ap.parse_args(argv)
     args.scratch_root = os.path.abspath(args.scratch_root)

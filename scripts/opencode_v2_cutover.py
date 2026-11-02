@@ -45,7 +45,7 @@ sys.path.insert(0, HERE)
 import opencode_v2 as v2  # noqa: E402
 import opencode_v2_consumer as consumer  # noqa: E402
 
-VERSION = "2.2.5"
+VERSION = v2.VERSION_PIN
 PROCESS_PATTERNS = (
     r"opencode(\.exe)?\b",
     r"dispatch_agent\.py",
