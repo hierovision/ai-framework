@@ -213,6 +213,7 @@ def test_status_supported_topology():
         os.chmod(os.path.join(bin_dir, "opencode"), 0o755)
         os.environ["PATH"] = bin_dir + os.pathsep + real_path
         os.environ["TEST_CONFIG"] = config
+        upgrade.write_state(root, "2.2.5", "canaried")
         payload = upgrade.status_payload(_args(root, home=home))
         assert payload["pinned"] == "2.2.5"
         assert payload["live"] == "2.2.5"
@@ -225,6 +226,16 @@ def test_status_supported_topology():
             os.environ.pop("TEST_CONFIG", None)
         else:
             os.environ["TEST_CONFIG"] = real_test_config
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_write_state_never_regresses():
+    root = _tmp("upgrade-state-")
+    try:
+        upgrade.write_state(root, "2.2.5", "applied")
+        upgrade.write_state(root, "2.2.5", "canaried")
+        assert upgrade.read_state(root)["stage"] == "applied"
+    finally:
         shutil.rmtree(root, ignore_errors=True)
 
 

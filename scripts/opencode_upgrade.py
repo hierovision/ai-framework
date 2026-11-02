@@ -149,6 +149,11 @@ def write_state(repo, target, stage, detail=None):
     state = read_state(repo)
     if state.get("target") != target:
         state = {"target": target, "stages": {}}
+    order = list(STAGE_ORDER)
+    current = state.get("stage")
+    if current in order and stage in order \
+            and order.index(stage) < order.index(current):
+        stage = current  # never regress applied -> canaried on a re-run
     state["stage"] = stage
     state.setdefault("stages", {})[stage] = {
         "at": now_iso(), "detail": detail or "ok"}
@@ -519,8 +524,9 @@ def status_payload(args):
     elif latest and version_key(latest) > version_key(pinned):
         next_command = ("python3 scripts/opencode_upgrade.py upgrade "
                         "--to " + latest)
-    elif state.get("stage") and state.get("stage") not in (
-            "applied", "rolled-back"):
+    elif (state.get("stage") and state.get("stage") not in (
+            "applied", "rolled-back")
+          and state.get("target") != pinned):
         next_command = ("python3 scripts/opencode_upgrade.py upgrade "
                         "--resume")
     return {
