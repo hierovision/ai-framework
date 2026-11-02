@@ -20,6 +20,12 @@ Rollback (`--rollback --manifest M`) stops V2 writers, preserves the failed V2
 DB, restores the final V1 DB through Python `sqlite3`, atomically restores the
 original link, repairs any mismatched V1 agent file from the C5 snapshot, and
 verifies V1 1.19.4 reads the restored DB.
+
+Later V2 -> V2 upgrades use `--preflight --upgrade` / `--execute --upgrade
+--drain-acknowledged`: the one-time consumer-readiness and V1 migration gates
+do not apply, the current config root is copied forward (so `cli.json` and
+`service.json` survive), and rollback restores the previous wrapper link plus
+the pre-upgrade DB from the manifest.
 """
 import argparse
 import datetime
@@ -39,7 +45,7 @@ sys.path.insert(0, HERE)
 import opencode_v2 as v2  # noqa: E402
 import opencode_v2_consumer as consumer  # noqa: E402
 
-VERSION = "2.1.4"
+VERSION = "2.2.5"
 PROCESS_PATTERNS = (
     r"opencode(\.exe)?\b",
     r"dispatch_agent\.py",
@@ -402,6 +408,156 @@ def write_manifest(path, payload):
     return path
 
 
+# --- V2 -> V2 upgrade --------------------------------------------------------
+
+def version_of(binary):
+    """Parse `opencode vX.Y.Z`; None when the binary cannot be probed."""
+    if not binary or not os.path.exists(binary):
+        return None
+    proc = subprocess.run([binary, "--version"], capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None
+    match = re.search(r"(\d+\.\d+\.\d+)", proc.stdout or "")
+    return match.group(1) if match else None
+
+
+def candidate_binary(prefix):
+    for name in ("opencode2", "opencode"):
+        path = os.path.join(prefix, "bin", name)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def upgrade_paths(args):
+    home = os.path.abspath(args.home or os.path.expanduser("~"))
+    link = args.link or os.path.join(home, ".yarn", "bin", "opencode")
+    return home, link
+
+
+def upgrade_checks(args):
+    """Read-only V2 -> V2 upgrade gates."""
+    home, link = upgrade_paths(args)
+    checks = []
+    ok, detail = check_drain(args)
+    checks.append(("drain", ok, detail))
+    checks.append(("tty", sys.stdin.isatty(),
+                   "interactive" if sys.stdin.isatty() else "non-TTY"))
+    current = version_of(link)
+    checks.append(("current-version", current is not None,
+                   current or f"cannot probe {link}"))
+    candidate = candidate_binary(args.source_prefix)
+    candidate_version = version_of(candidate)
+    checks.append(("candidate-version", candidate_version == VERSION,
+                   f"{candidate} -> {candidate_version}"))
+    checks.append(("version-changes", current != VERSION,
+                   f"{current} -> {VERSION}"))
+    source = os.path.abspath(args.source_db or v2.DEFAULT_DB)
+    checks.append(("source-db", os.path.isfile(source), source))
+    config_source = args.config_source
+    config_ok = (os.path.isdir(config_source) if config_source
+                 else os.path.isdir(os.path.join(REPO, "agents")))
+    checks.append(("config-source", config_ok,
+                   config_source or "repo agents/plugins"))
+    target = os.path.join(home, ".local", "lib", "opencode", VERSION)
+    occupied = os.path.isdir(target) and bool(os.listdir(target))
+    checks.append(("target-clear", args.force or not occupied, target))
+    return checks, home, link, current
+
+
+def upgrade_backup(args, root):
+    source = os.path.abspath(args.source_db or v2.DEFAULT_DB)
+    dest = args.final_backup or os.path.join(root, "pre-upgrade.db")
+    v2.assert_scratch_db(dest, os.path.join(REPO, ".scratch"))
+    sqlite_backup(source, dest)
+    check = integrity(dest)
+    if check != "ok":
+        return None, f"pre-upgrade backup integrity check failed: {check}"
+    return {"path": dest, "sha256": sha256(dest), "integrity": check,
+            "size": os.path.getsize(dest)}, None
+
+
+def upgrade_preflight(args):
+    checks, _home, _link, _current = upgrade_checks(args)
+    failed = [name for name, ok, _ in checks if not ok]
+    for name, ok, detail in checks:
+        print(f"{name}: {'PASS' if ok else 'FAIL'} {detail}")
+    return 1 if failed else 0
+
+
+def upgrade_execute(args):
+    """Drained, atomic V2 -> V2 switch; preserves the current config root."""
+    checks, home, link, current = upgrade_checks(args)
+    for name, ok, detail in checks:
+        print(f"{name}: {'PASS' if ok else 'FAIL'} {detail}")
+    if any(not ok for _name, ok, _detail in checks):
+        return 2
+    if not args.drain_acknowledged:
+        print("error: upgrade requires --drain-acknowledged", file=sys.stderr)
+        return 2
+
+    root = os.path.abspath(args.scratch_root)
+    os.makedirs(root, exist_ok=True)
+    backup, detail = upgrade_backup(args, root)
+    if not backup:
+        print(f"error: {detail}", file=sys.stderr)
+        return 2
+
+    args.config_source = args.config_source or default_config_source(home)
+    base = os.path.join(home, ".local", "lib", "opencode", VERSION)
+    current_base = os.path.join(home, ".local", "lib", "opencode", current)
+    if os.path.isdir(base) and args.force and base != current_base:
+        shutil.rmtree(base)
+    current_config = os.path.join(current_base, "config")
+    if os.path.isdir(current_config):
+        shutil.copytree(current_config, os.path.join(base, "config"),
+                        dirs_exist_ok=True)
+    staged, detail = stage_runtime(home, args)
+    if not staged:
+        print(f"error: staging failed: {detail}", file=sys.stderr)
+        return 2
+
+    original = original_link_state(link)
+    if original.get("type") == "file":
+        saved = os.path.join(staged["base"], "original-opencode")
+        shutil.copy2(link, saved)
+        original["saved_path"] = saved
+    manifest = {
+        "created": now_iso(),
+        "mode": "upgrade",
+        "version": VERSION,
+        "from_version": current,
+        "home": home,
+        "link": link,
+        "original_link": original,
+        "versioned": staged,
+        "config_hashes": stage_config_hash(staged["config_root"]),
+        "backup": backup,
+        "drain_acknowledged": True,
+        "switched": False,
+    }
+    manifest_path = args.manifest or os.path.join(
+        root, f"upgrade-{current}-to-{VERSION}.json")
+    write_manifest(manifest_path, manifest)
+    try:
+        atomic_link(staged["wrapper"], link)
+        manifest["switched"] = True
+        manifest["switched_at"] = now_iso()
+        write_manifest(manifest_path, manifest)
+    except OSError as exc:
+        print(f"error: atomic switch failed: {exc}", file=sys.stderr)
+        return 2
+
+    version = subprocess.run([link, "--version"], capture_output=True, text=True)
+    if VERSION not in (version.stdout or ""):
+        print(f"error: switched but version probe returned "
+              f"{version.stdout.strip()!r}", file=sys.stderr)
+        return 2
+    print(f"UPGRADE OK link={link} manifest={manifest_path}")
+    print(f"version={version.stdout.strip()}")
+    return 0
+
+
 def execute(args):
     home = os.path.abspath(args.home or os.path.expanduser("~"))
     link = args.link or os.path.join(home, ".yarn", "bin", "opencode")
@@ -549,6 +705,12 @@ def main(argv=None):
     mode.add_argument("--preflight", action="store_true")
     mode.add_argument("--execute", action="store_true")
     mode.add_argument("--rollback", action="store_true")
+    ap.add_argument("--upgrade", action="store_true",
+                    help="V2 -> V2 version upgrade (with --preflight or "
+                         "--execute); skips the one-time V1 readiness and "
+                         "migration gates")
+    ap.add_argument("--force", action="store_true",
+                    help="Replace an already-staged target version directory")
     ap.add_argument("--drain-acknowledged", action="store_true")
     ap.add_argument("--framework", default=REPO)
     ap.add_argument("--consumer", required=False)
@@ -578,6 +740,19 @@ def main(argv=None):
     ap.add_argument("--migration-acceptance", default=None,
                     help="Dated owner-acceptance JSON for a positive residual.")
     args = ap.parse_args(argv)
+
+    if args.upgrade:
+        if args.rollback:
+            print("error: --upgrade cannot combine with --rollback",
+                  file=sys.stderr)
+            return 2
+        if args.preflight:
+            return upgrade_preflight(args)
+        if not args.execute:
+            print("error: --upgrade requires --preflight or --execute",
+                  file=sys.stderr)
+            return 2
+        return upgrade_execute(args)
 
     if args.config_source is None and not args.rollback:
         args.config_source = default_config_source(

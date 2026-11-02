@@ -1,6 +1,6 @@
 {
   "name": "delegation-sentinel",
-  "version": "2.1.4",
+  "version": "2.2.5",
   "private": true,
   "type": "module",
   "description": "Always-loadable TUI fallback banner for the delegation observer",
@@ -9,9 +9,9 @@
     "typecheck": "tsc -p . --noEmit"
   },
   "peerDependencies": {
-    "@opencode/plugin": "2.1.4",
-    "@opentui/core": "0.6.8",
-    "@opentui/solid": "0.6.8",
+    "@opencode/plugin": "2.2.5",
+    "@opentui/core": "0.8.1",
+    "@opentui/solid": "0.8.1",
     "solid-js": "1.9.12"
   },
   "devDependencies": {

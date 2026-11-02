@@ -20,8 +20,8 @@ into `~/.config/opencode/agents/` so all projects discover them globally:
 ./install.sh
 ```
 
-Requires **OpenCode V2 `2.1.4`** (package `@opencode/cli@2.1.4`; exact pin,
-no `latest`, no caret range). `opencode --version` prints `opencode v2.1.4`.
+Requires **OpenCode V2 `2.2.5`** (package `@opencode/cli@2.2.5`; exact pin,
+no `latest`, no caret range). `opencode --version` prints `opencode v2.2.5`.
 
 Re-run after adding new skills or agents. `git pull` alone updates the
 content of already-linked skills/agents. Agent files are validated on

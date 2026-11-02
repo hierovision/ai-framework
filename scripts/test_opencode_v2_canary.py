@@ -38,7 +38,7 @@ log = os.path.join(scratch, "invocations.log")
 with open(log, "a", encoding="utf-8") as fh:
     fh.write(" ".join(args) + "\n")
 if "--version" in args:
-    print("opencode v2.1.4")
+    print("opencode v2.2.5")
     sys.exit(0)
 if (not os.path.isfile(c5) and args[:1] != ["--version"]
         and os.environ.get("V2_TEST_ALLOW_NO_C5") != "1"):

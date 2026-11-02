@@ -253,7 +253,8 @@ file byte-for-byte (and byte-compares the restore), and fails if a mutation
 survives, fails for the wrong test, or a restored file differs from its
 original. It runs in CI with the offline suites.
 
-## V2 API dependencies (verified against 2.1.4, 2026-10-29)
+## V2 API dependencies (verified against 2.1.4, 2026-10-29; typechecked
+against 2.2.5 + OpenTUI 0.8.1, 2026-11-02)
 
 - Loader: `<plugin-dir>/server` and `<plugin-dir>/tui` entrypoints (binary
   `Zg` resolves `server`, `tui`, `rpc`); a relative config path is required.
@@ -273,11 +274,11 @@ original. It runs in CI with the offline suites.
 ## Install / apply (owner step — deliberately not performed here)
 
 1. From the merged branch: `npm install` in this directory. `@opencode/plugin`
-   2.1.4, `solid-js` 1.9.12 and `@opentui/core`/`solid` 0.6.8 are declared as
+   2.2.5, `solid-js` 1.9.12 and `@opentui/core`/`solid` 0.8.1 are declared as
    exact **peer** dependencies (the host provides the versions; npm
    materializes them locally so the loader and typecheck resolve). The
    `typecheck` script (`tsc -p . --noEmit`) is the type-level proof against
-   2.1.4.
+   2.2.5.
 2. Add `./plugins/delegation-sentinel` alongside it (the fallback banner).
 3. Add `{ "package": "./plugins/delegation-observer" }` to the versioned V2
    config `plugins` array (keep the auto-compaction entry).

@@ -18,6 +18,15 @@ Usage:
   python3 scripts/opencode_v2_canary.py --all
   python3 scripts/opencode_v2_canary.py --gate C5
   python3 scripts/opencode_v2_canary.py --gate migration
+
+Post-cutover (the live default is already V2), canary the next version against
+the V1 rollback binary as the C1 "default":
+  python3 scripts/opencode_v2_canary.py --all --skip-install \
+    --prefix .scratch/v2-<version>-prefix \
+    --opencode-bin .scratch/v2-<version>-prefix/bin/opencode \
+    --default-bin ~/.config/yarn/global/node_modules/opencode-ai/bin/opencode.exe \
+    --v1-prefix .scratch/v1-prefix \
+    --scratch-root .scratch/v2-canary-<version>
 """
 import argparse
 import datetime
@@ -520,8 +529,9 @@ def gate_c8(args):
     hits = {}
     for pattern in patterns:
         proc = subprocess.run(
-            ["grep", "-R", "-l", "-i", pattern, "skills", "agents", "scripts",
-             "reference", ".github"],
+            ["grep", "-R", "-l", "-i", "--exclude-dir=node_modules",
+             "--exclude-dir=__pycache__", pattern, "skills", "agents",
+             "scripts", "reference", ".github"],
             cwd=REPO, capture_output=True, text=True)
         files = [f for f in (proc.stdout or "").splitlines()
                  if ".opencode/plans" not in f

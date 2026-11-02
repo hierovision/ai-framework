@@ -2,17 +2,20 @@
 
 Single home for the OpenCode V2 facts this library relies on. The vendor API
 changes; re-verify against the linked docs before relying on any line.
-**Validated 2026-10-26/27 against opencode `2.1.4`**; the canary evidence is
-under `.scratch/v2-canary/`.
+**Behavioral facts validated 2026-10-26/27 against opencode `2.1.4`; the
+`2.2.5` upgrade passed the canary on 2026-11-02** (evidence under
+`.scratch/v2-canary-2.2.5/`). Notes that cite `2.1.4` are the original probes;
+the canary revalidated version, service, model catalog, stability, config/
+plugin load, and migration, not every line.
 
 The migration cutover is atomic: there is no V1/V2 dual-run layer. The
 previous release tag is the code rollback; the C5 backup is the data rollback.
 
 ## Binary, package, version
 
-- Package: `@opencode/cli@2.1.4` (never the legacy V1 package, never `latest`).
-- `opencode --version` prints `opencode v2.1.4` (the exact string is
-  `opencode v2.1.4`).
+- Package: `@opencode/cli@2.2.5` (never the legacy V1 package, never `latest`).
+- `opencode --version` prints `opencode v2.2.5` (the exact string is
+  `opencode v2.2.5`).
 - `opencode run` flags: `--agent`, `--model/-m` (`provider/model#variant`),
   `--session/-s`, `--continue/-c`, `--fork`, `--format <default|json>`,
   `--file/-f`, `--title`, `--thinking`, `--auto`, `--standalone`,
@@ -24,6 +27,37 @@ previous release tag is the code rollback; the C5 backup is the data rollback.
   do not pass CLI log switches; post-smoke's loader probe is the one exception
   (global `--log-level info --print-logs` to capture the plugin startup line).
 - Root `-m` / `--agent` were removed; emit only `run --agent` / `run --model`.
+
+## Version upgrades (post-cutover)
+
+The one-time V1→V2 cutover is `scripts/opencode_v2_cutover.py`; later V2→V2
+upgrades use the same script with `--upgrade`.
+
+1. Install the candidate into scratch and canary it against the V1 rollback
+   binary as the C1 "default" (the exact command is in
+   `scripts/opencode_v2_canary.py`'s docstring). Evidence lands under
+   `.scratch/v2-canary-<version>/`; migration residual `0` needs no further
+   classification.
+2. Bump `VERSION_PIN` (`scripts/opencode_v2.py`), `VERSION`
+   (`scripts/opencode_v2_cutover.py`), both CI `OPENCODE_VERSION` pins, this
+   page, the README, and the dated ADR amendment. Bump the plugin
+   `@opencode/plugin` / OpenTUI pins and refresh their lockfiles.
+3. From a normal terminal with every OpenCode session closed and the shared
+   service stopped (`opencode service stop`):
+   `python3 scripts/opencode_v2_cutover.py --preflight --upgrade`, then
+   `python3 scripts/opencode_v2_cutover.py --execute --upgrade
+   --drain-acknowledged`. The default source prefix is `.scratch/v2-prefix`;
+   pass `--source-prefix .scratch/v2-<version>-prefix` when the candidate was
+   installed elsewhere.
+4. Rollback is `--rollback --manifest <manifest>`: it restores the previous
+   versioned wrapper link and the pre-upgrade DB. The old versioned directory
+   is left in place.
+
+The wrapper at `$HOME/.yarn/bin/opencode` selects both binary and config via
+`XDG_CONFIG_HOME`; the upgrade preserves the current config root
+(`cli.json`, `service.json`, and other non-agent/plugin files) by copying it
+forward before staging the reviewed agents/plugins/config. The pre-upgrade
+DB backup in the manifest is the data rollback.
 
 ## Service and typed API
 
@@ -138,8 +172,9 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
 
 ## Plugins
 
-- `@opencode/plugin@2.1.4` is the matching runtime package (the legacy V1
-  plugin package is not a V2 contract).
+- `@opencode/plugin@2.2.5` is the matching runtime package (the legacy V1
+  plugin package is not a V2 contract). 2.2.x requires OpenTUI 0.7 (2.2.0) and
+  0.8 (2.2.3+); this library pins `@opentui/core`/`solid` 0.8.1.
 - Shape: `Plugin.define({ id, async setup(ctx) { … return cleanup } })`;
   domain methods (`ctx.model.list()`, `ctx.session.compact({sessionID})`);
   an aborted `ctx.event.subscribe()` loop; cleanup returned from `setup`.

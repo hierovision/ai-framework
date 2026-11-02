@@ -104,7 +104,7 @@ jobs:
       # (the curl|bash path failed 403 under runner-IP rate limiting, 2026-09-20).
       - name: Install OpenCode V2 CLI (pinned via npm)
         env:
-          OPENCODE_VERSION: "2.1.4"
+          OPENCODE_VERSION: "2.2.5"
         run: npm install --global "@opencode/cli@${OPENCODE_VERSION}"
 
       - name: Add opencode to PATH

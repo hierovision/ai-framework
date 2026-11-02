@@ -68,7 +68,7 @@ def _config_root(path):
     return os.path.join(path, ".scratch", "versioned", "config")
 
 
-def _fake_bin(root, version="opencode v2.1.4"):
+def _fake_bin(root, version="opencode v2.2.5"):
     """Stub the V2 CLI: --version plus a standalone loader log on `run`.
 
     STUB_LOADER selects the loader evidence shape: pass (default), absent,
@@ -97,15 +97,15 @@ if [ "$1" = "run" ]; then
       ;;
     wrong)
       printf '%s\\n' 'timestamp=2026-10-29T00:00:00.000Z level=INFO msg="loading plugin" id=/tmp/not-the-plugin entrypoint=file:///tmp/not-the-plugin/index.js' >&2
-      printf '%s\\n' '{{"service":"auto-compact-at-threshold","level":"info","message":"auto-compact-at-threshold initialized","extra":{{"version":"2.1.4"}}}}' >&2
+      printf '%s\\n' '{{"service":"auto-compact-at-threshold","level":"info","message":"auto-compact-at-threshold initialized","extra":{{"version":"2.2.5"}}}}' >&2
       ;;
     untagged)
       printf '%s\\n' 'timestamp=2026-10-29T00:00:00.000Z level=INFO msg="loading plugin" id='"$cfg"' entrypoint=file://'"$cfg"'/index.js' >&2
-      printf '%s\\n' '{{"service":"auto-compact-at-threshold","level":"info","message":"auto-compact-at-threshold initialized","extra":{{"version":"2.1.4"}}}}' >&2
+      printf '%s\\n' '{{"service":"auto-compact-at-threshold","level":"info","message":"auto-compact-at-threshold initialized","extra":{{"version":"2.2.5"}}}}' >&2
       ;;
     *)
       printf '%s\\n' 'timestamp=2026-10-29T00:00:00.000Z level=INFO msg="loading plugin" id='"$cfg"' entrypoint=file://'"$cfg"'/index.js' >&2
-      printf '%s\\n' '{{"service":"auto-compact-at-threshold","level":"info","message":"auto-compact-at-threshold initialized","extra":{{"version":"2.1.4","probe":"'"$OPENCODE_LOADER_PROBE_TOKEN"'"}}}}' >&2
+      printf '%s\\n' '{{"service":"auto-compact-at-threshold","level":"info","message":"auto-compact-at-threshold initialized","extra":{{"version":"2.2.5","probe":"'"$OPENCODE_LOADER_PROBE_TOKEN"'"}}}}' >&2
       ;;
   esac
   exit 1

@@ -94,7 +94,7 @@ def _setup(root):
     os.makedirs(os.path.join(prefix, "bin"))
     fake = os.path.join(prefix, "bin", "opencode2")
     with open(fake, "w") as fh:
-        fh.write("#!/bin/sh\necho 'opencode v2.1.4'\n")
+        fh.write("#!/bin/sh\necho 'opencode v2.2.5'\n")
     os.chmod(fake, 0o755)
 
     config = os.path.join(root, "config")
@@ -160,6 +160,46 @@ def _q(arg):
     return "'" + arg.replace("'", "'\\''") + "'"
 
 
+def _upgrade_setup(root):
+    """A drained V2.1.4 home: link -> versioned wrapper, config to preserve."""
+    ctx = _setup(root)
+    current_base = os.path.join(ctx["home"], ".local", "lib", "opencode",
+                                "2.1.4")
+    os.makedirs(os.path.join(current_base, "bin"))
+    current_bin = os.path.join(current_base, "bin", "opencode")
+    with open(current_bin, "w") as fh:
+        fh.write("#!/bin/sh\necho 'opencode v2.1.4'\n")
+    os.chmod(current_bin, 0o755)
+    wrapper = os.path.join(current_base, "opencode-wrapper")
+    with open(wrapper, "w") as fh:
+        fh.write(f'#!/bin/sh\nexec "{current_bin}" "$@"\n')
+    os.chmod(wrapper, 0o755)
+    os.unlink(ctx["link"])
+    os.symlink(wrapper, ctx["link"])
+    config = os.path.join(current_base, "config", "opencode")
+    os.makedirs(config)
+    with open(os.path.join(config, "cli.json"), "w") as fh:
+        fh.write('{"theme":"test"}\n')
+    with open(os.path.join(config, "service.json"), "w") as fh:
+        fh.write('{"password":"secret"}\n')
+    with open(os.path.join(config, "opencode.jsonc"), "w") as fh:
+        fh.write('{"old":true}\n')
+    ctx.update({"current_base": current_base, "current_wrapper": wrapper,
+                "current_bin": current_bin})
+    return ctx
+
+
+def _upgrade_args(ctx, manifest, extra=()):
+    return [
+        "--upgrade", "--execute", "--drain-acknowledged",
+        "--processes-file", ctx["procs"],
+        "--source-db", ctx["source_db"],
+        "--source-prefix", ctx["prefix"], "--config-source", ctx["config"],
+        "--scratch-root", ctx["scratch"], "--home", ctx["home"],
+        "--link", ctx["link"], "--manifest", manifest,
+    ] + list(extra)
+
+
 def test_drain_failure_refuses_switch():
     root = _tmp("cutover-drain-")
     try:
@@ -214,7 +254,7 @@ def test_atomic_switch_temp_home():
         assert target.endswith("opencode-wrapper"), target
         wrapper = open(target).read()
         assert "XDG_CONFIG_HOME=" in wrapper
-        assert "2.1.4" in target
+        assert "2.2.5" in target
         data = json.load(open(manifest))
         assert data["switched"] is True
         assert data["original_link"]["target"] == ctx["v1_bin"]
@@ -447,6 +487,115 @@ def test_migration_owner_acceptance_accepts():
                   os.path.join(root, "absent-classification.json")])
         assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
         assert os.readlink(ctx["link"]).endswith("opencode-wrapper")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_upgrade_switches_and_preserves_config():
+    root = _tmp("cutover-upgrade-")
+    try:
+        ctx = _upgrade_setup(root)
+        manifest = os.path.join(root, "manifest.json")
+        r = _run(_upgrade_args(ctx, manifest))
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        new_base = os.path.join(ctx["home"], ".local", "lib", "opencode",
+                                "2.2.5")
+        assert os.readlink(ctx["link"]) == os.path.join(
+            new_base, "opencode-wrapper")
+        new_cfg = os.path.join(new_base, "config", "opencode")
+        assert json.load(open(os.path.join(new_cfg, "cli.json")))[
+            "theme"] == "test"
+        assert json.load(open(os.path.join(new_cfg, "service.json")))[
+            "password"] == "secret"
+        assert json.load(open(os.path.join(new_cfg, "opencode.jsonc")))[
+            "agents"]["title"]["model"] == "m"
+        data = json.load(open(manifest))
+        assert data["mode"] == "upgrade"
+        assert data["from_version"] == "2.1.4"
+        assert data["version"] == "2.2.5"
+        assert data["original_link"]["target"] == ctx["current_wrapper"]
+        assert data["switched"] is True
+        assert os.path.isfile(ctx["current_bin"])
+        version = subprocess.run([ctx["link"], "--version"],
+                                 capture_output=True, text=True)
+        assert "2.2.5" in version.stdout
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_upgrade_preflight_is_read_only():
+    root = _tmp("cutover-upgrade-preflight-")
+    try:
+        ctx = _upgrade_setup(root)
+        r = _run(["--upgrade", "--preflight",
+                  "--processes-file", ctx["procs"],
+                  "--source-db", ctx["source_db"],
+                  "--source-prefix", ctx["prefix"],
+                  "--config-source", ctx["config"],
+                  "--scratch-root", ctx["scratch"],
+                  "--home", ctx["home"], "--link", ctx["link"]])
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert "2.1.4 -> 2.2.5" in r.stdout
+        assert not os.path.exists(os.path.join(
+            ctx["home"], ".local", "lib", "opencode", "2.2.5"))
+        assert os.readlink(ctx["link"]) == ctx["current_wrapper"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_upgrade_non_tty_cannot_switch():
+    root = _tmp("cutover-upgrade-tty-")
+    try:
+        ctx = _upgrade_setup(root)
+        manifest = os.path.join(root, "manifest.json")
+        r = _run(_upgrade_args(ctx, manifest), use_tty=False)
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        assert "tty: FAIL" in r.stdout
+        assert os.readlink(ctx["link"]) == ctx["current_wrapper"]
+        assert not os.path.exists(manifest)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_upgrade_same_version_refuses():
+    root = _tmp("cutover-upgrade-same-")
+    try:
+        ctx = _upgrade_setup(root)
+        with open(ctx["current_bin"], "w") as fh:
+            fh.write("#!/bin/sh\necho 'opencode v2.2.5'\n")
+        manifest = os.path.join(root, "manifest.json")
+        r = _run(_upgrade_args(ctx, manifest))
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        assert "version-changes: FAIL" in r.stdout
+        assert os.readlink(ctx["link"]) == ctx["current_wrapper"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_upgrade_rollback_restores_link_and_db():
+    root = _tmp("cutover-upgrade-rollback-")
+    try:
+        ctx = _upgrade_setup(root)
+        manifest = os.path.join(root, "manifest.json")
+        r = _run(_upgrade_args(ctx, manifest))
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        real_db = os.path.join(ctx["home"], ".local", "share", "opencode",
+                               "opencode.db")
+        os.makedirs(os.path.dirname(real_db))
+        con = sqlite3.connect(real_db)
+        con.execute("CREATE TABLE failed_v2 (id TEXT)")
+        con.commit()
+        con.close()
+        rb = subprocess.run(
+            [sys.executable, SCRIPT, "--rollback", "--manifest", manifest,
+             "--home", ctx["home"]],
+            capture_output=True, text=True)
+        assert rb.returncode == 0, (rb.returncode, rb.stdout, rb.stderr)
+        assert os.readlink(ctx["link"]) == ctx["current_wrapper"]
+        con = sqlite3.connect(real_db)
+        assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert con.execute("SELECT COUNT(*) FROM session").fetchone()[0] == 1
+        con.close()
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
