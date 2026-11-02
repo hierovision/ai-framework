@@ -35,6 +35,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import sqlite3
 import socket
 import subprocess
@@ -195,6 +196,51 @@ def gate_c5(args):
     ]
     evidence(root, "C5.txt", "\n".join(lines))
     return ok, "\n".join(lines)
+
+
+def stop_scratch_services(root):
+    """Stop opencode services a gate started under this scratch root.
+
+    C2 and C7 start a service on a free port; leaving it running blocks the
+    later drained apply and makes the scratch binary look like the live one.
+    Only processes whose XDG_CONFIG_HOME is under `root` are touched.
+    """
+    root = os.path.abspath(root)
+    stopped = []
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            cmdline = open(f"/proc/{pid}/cmdline", "rb").read().decode(
+                "utf-8", "replace").split("\0")
+            environ = open(f"/proc/{pid}/environ", "rb").read().decode(
+                "utf-8", "replace").split("\0")
+        except OSError:
+            continue
+        if not any("opencode" in part for part in cmdline):
+            continue
+        values = dict(part.split("=", 1) for part in environ if "=" in part)
+        xdg = values.get("XDG_CONFIG_HOME")
+        if not xdg:
+            continue
+        xdg = os.path.abspath(xdg)
+        if xdg == root or xdg.startswith(root + os.sep):
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+                stopped.append(pid)
+            except OSError:
+                pass
+    for pid in stopped:
+        for _ in range(20):
+            if not os.path.exists(f"/proc/{pid}"):
+                break
+            time.sleep(0.05)
+        else:
+            try:
+                os.kill(int(pid), signal.SIGKILL)
+            except OSError:
+                pass
+    return stopped
 
 
 def scratch_env(root):
@@ -656,13 +702,18 @@ def main(argv=None):
         print("error: pass --all or --gate", file=sys.stderr)
         return 2
 
-    for name, fn in gates:
-        ok, detail = fn(args)
-        print(f"{name}: {'PASS' if ok else 'FAIL'}")
-        if not ok:
-            print(detail, file=sys.stderr)
-            return 1
-    return 0
+    try:
+        for name, fn in gates:
+            ok, detail = fn(args)
+            print(f"{name}: {'PASS' if ok else 'FAIL'}")
+            if not ok:
+                print(detail, file=sys.stderr)
+                return 1
+        return 0
+    finally:
+        stopped = stop_scratch_services(args.scratch_root)
+        if stopped:
+            print(f"scratch services stopped: {','.join(stopped)}")
 
 
 if __name__ == "__main__":

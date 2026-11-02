@@ -44,9 +44,9 @@ drives its `--upgrade` mode.
 - `plan --to X` — target plugin/OpenTUI/solid-js matrix and the breaking
   changes between the current and target releases; no writes.
 - `canary --to X` — installs into `.scratch/v2-<version>-prefix`, runs C1–C8
-  + migration against the V1 rollback binary as the C1 default, and
-  typechecks/tests the three plugins against the target
-  `@opencode/plugin`/OpenTUI in a scratch copy. Evidence:
+  + migration against the V1 rollback binary as the C1 default, typechecks/
+  tests the three plugins against the target `@opencode/plugin`/OpenTUI in a
+  scratch copy, then stops the C2/C7 scratch services it started. Evidence:
   `.scratch/v2-canary-<version>/`.
 - `prepare --to X` — bumps `VERSION_PIN`, the docs/reference/README and
   plugin peer/README roots, refreshes lockfiles, and appends the dated ADR

@@ -41,7 +41,9 @@ must replace.
    all three plugins against the target `@opencode/plugin` and OpenTUI in a
    scratch copy. A failing gate stops the pipeline; a plugin source change
    that typecheck cannot absorb is reported as a manual migration, never
-   forced.
+   forced. The canary stops the C2/C7 scratch services it started in a
+   `finally` block, so a candidate service cannot leak into the live drain
+   gate or masquerade as the live version.
 5. **Release intelligence is automatic.** `plan` reads the target plugin's
    peer dependencies and the public GitHub releases between the current and
    target versions, prints the CLI/plugin/OpenTUI/solid-js matrix and the
