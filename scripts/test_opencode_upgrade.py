@@ -244,7 +244,8 @@ def test_check_pr_requires_canary():
 def test_apply_requires_consent_and_post_smoke_failure():
     root = _tmp("upgrade-apply-")
     real = (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
-            upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes)
+            upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
+            upgrade.version_of)
     try:
         _fixture(root)
         args = _args(root, to="2.2.5", skip_canary=True)
@@ -258,6 +259,7 @@ def test_apply_requires_consent_and_post_smoke_failure():
         upgrade.post_upgrade_smoke = lambda a, t: [
             ("binary", False, "forced failure")]
         upgrade.stage_config.live_processes = lambda: []
+        upgrade.version_of = lambda binary: "2.2.5"
         out = io.StringIO()
         with contextlib.redirect_stdout(out), \
                 contextlib.redirect_stderr(out):
@@ -270,7 +272,8 @@ def test_apply_requires_consent_and_post_smoke_failure():
         assert "rollback:" in out.getvalue()
     finally:
         (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
-         upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes) = real
+         upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
+         upgrade.version_of) = real
         shutil.rmtree(root, ignore_errors=True)
 
 
