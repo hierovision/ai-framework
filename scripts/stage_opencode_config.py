@@ -9,9 +9,13 @@ backs up the old V1 tree first.
 Order (owner-run, from a normal terminal, TUI closed and service stopped):
 
   python3 scripts/stage_opencode_config.py --backup
-  opencode upgrade 2.2.5 --method yarn
-  opencode debug paths config     # ~/.config/opencode
-  opencode --version              # 2.2.5
+  yarn global add @opencode/cli@2.2.5   # same-version official install
+  opencode debug paths config           # ~/.config/opencode
+  opencode --version                    # 2.2.5
+
+`opencode upgrade 2.2.5 --method yarn` skips when 2.2.5 is already the
+running version, so the same-version migration uses the official yarn
+install directly. Later versions use `opencode upgrade <target> --method yarn`.
 
 The script copies the versioned config's `opencode.jsonc`, `cli.json`,
 `service.json`, and plugins; it links the repo agents/skills/reference through
@@ -179,8 +183,9 @@ def stage(args):
         copy_if_present(source, target, name)
     link_repo_surfaces(args.repo, target)
     print("staged the reviewed V2 config")
-    print("next: opencode upgrade "
-          f"{v2.VERSION_PIN} --method yarn")
+    print("next: yarn global add @opencode/cli@"
+          f"{v2.VERSION_PIN}   # same-version migration")
+    print("later: opencode upgrade <target> --method yarn")
     print("verify: opencode debug paths config   # " + target)
     return 0
 
@@ -196,8 +201,8 @@ def main(argv=None):
     ap.add_argument("--repo", default=REPO)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--force", action="store_true")
-    ap.add_argument("--no-backup", action="store_true",
-                    help="accepted for compatibility; backups are mandatory")
+    ap.add_argument("--backup", action="store_true",
+                    help="back up the V1 config/DB first (default)")
     args = ap.parse_args(argv)
     return stage(args)
 

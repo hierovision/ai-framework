@@ -27,8 +27,11 @@ window.
 
 1. **Supported binary and config.** Live install is yarn-global
    `@opencode/cli`; `opencode upgrade <target> --method yarn` is the live
-   upgrade. The config root is `~/.config/opencode`. The custom versioned
-   wrapper/binary dirs are retired.
+   upgrade for a new version. The **same-version** migration uses the
+   official `yarn global add @opencode/cli@<pin>` because `opencode upgrade`
+   skips an already-installed version. The config root is
+   `~/.config/opencode`. The custom versioned wrapper/binary dirs are
+   retired.
 2. **One-time config migration.** `scripts/stage_opencode_config.py` moves the
    reviewed V2 config (agents, plugins, `opencode.jsonc`, `cli.json`,
    `service.json`) to `~/.config/opencode`, backs up the V1 tree as
