@@ -1,8 +1,9 @@
 # Weekly OpenCode version drift check.
 #
 # Detection only: opens/updates one issue with the exact upgrade command. It
-# never pushes a branch or performs the upgrade — the canary and the drained
-# apply stay owner-run (ADR-0016). A repo whose pin seams are inconsistent, or
+# never pushes a branch or performs the upgrade — the canary and the supported
+# official upgrade stay owner-run (ADR-0017). A repo whose pin seams are
+# inconsistent, or
 # a failed registry read, exits 2 and fails the job instead of opening an
 # issue.
 name: OpenCode version check
@@ -63,11 +64,13 @@ jobs:
           print("A newer OpenCode release is available.\n")
           print(f"- pinned: `{data['pinned']}`")
           print(f"- latest: `{data['latest']}`\n")
-          print("Run the standard upgrade:\n")
+          print("Run the pre-merge gate, then the supported live upgrade:\n")
           print("```sh")
           print(f"python3 scripts/opencode_upgrade.py upgrade --to {data['latest']}")
+          print(f"opencode upgrade {data['latest']} --method yarn")
           print("```\n")
-          print("The canary and the drained `apply` are owner-run; see ADR-0016.")
+          print("The canary is the pre-merge gate; the official upgrade is "
+                "owner-run; see ADR-0017.")
           PY
           version=$(python3 -c 'import json; print(json.load(open(".scratch/opencode-v2/version-check.json"))["latest"])')
           title="OpenCode upgrade available: $version"

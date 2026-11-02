@@ -33,8 +33,8 @@ state or process detail — propose an ADR instead of adding prose here.
    contract; `reviewing-code` gates it before merge. An orchestrator that
    owns the roadmap lands the closure on the branch **before** merging —
    deferring it to `main` is the failure this rule forbids.
-7. **OpenCode version changes go through the upgrade orchestrator.** Use
-   `scripts/opencode_upgrade.py` (`status`, `plan`, `canary`, `prepare`,
-   `apply`); never hand-edit a single pin seam. The canary is the gate; the
-   live switch is owner-run, drained, and auto-rolls back on verification
-   failure (ADR-0016).
+7. **OpenCode version changes use the supported upgrade path.** Install the
+   yarn-global `@opencode/cli`; upgrade with `opencode upgrade <target>
+   --method yarn`; keep the default `~/.config/opencode` root. The canary and
+   `check --pins-only` are the pre-merge gates. Never reintroduce a versioned
+   wrapper or hand-edit a pin seam (ADR-0017).

@@ -8,8 +8,9 @@ changes; re-verify against the linked docs before relying on any line.
 the canary revalidated version, service, model catalog, stability, config/
 plugin load, and migration, not every line.
 
-The migration cutover is atomic: there is no V1/V2 dual-run layer. The
-previous release tag is the code rollback; the C5 backup is the data rollback.
+The supported install uses the default `~/.config/opencode` root. The V1
+`opencode-ai` package stays installed but shadowed for the retention window;
+the V1 config plus a pre-upgrade DB backup are the full restore.
 
 ## Binary, package, version
 
@@ -28,46 +29,56 @@ previous release tag is the code rollback; the C5 backup is the data rollback.
   (global `--log-level info --print-logs` to capture the plugin startup line).
 - Root `-m` / `--agent` were removed; emit only `run --agent` / `run --model`.
 
-## Version upgrades (standard)
+## Install and config root
 
-`scripts/opencode_upgrade.py` is the one supported upgrade path (ADR-0016).
-The one-time V1→V2 cutover remains `scripts/opencode_v2_cutover.py`; `apply`
-drives its `--upgrade` mode.
+- Package: `@opencode/cli@2.2.5` (never the legacy V1 package, never `latest`).
+- `opencode --version` prints `opencode v2.2.5`.
+- Supported upgrade: `opencode upgrade <target> --method
+  <curl|npm|pnpm|bun|yarn|vp|brew|winget>`; this machine uses yarn-global.
+- Config root: `~/.config/opencode` (or `XDG_CONFIG_HOME`). The reviewed
+  config is staged by `scripts/stage_opencode_config.py --backup`, which
+  backs up the V1 tree and links agents/skills/reference via `install.sh`.
+- The legacy V1 `opencode-ai` package (version 1.19.4) is shadowed for the
+  retention window; the V1 config plus a pre-upgrade DB backup are the full
+  restore.
+- The versioned wrapper/cutover is retired (ADR-0017; ADR-0014 is the
+  historical one-time cutover record). If yarn refuses the existing custom
+  `~/.yarn/bin/opencode` link during the migration, remove that one symlink
+  first; `yarn global add @opencode/cli@2.2.5` recreates it.
 
-- `status` / `doctor` — install topology (`~/.yarn/bin/opencode` → versioned
-  wrapper → binary, config root, V1 rollback package), pinned/live/latest,
-  the last canary/apply stage, and the next command. `doctor` is read-only.
+## Version upgrades (supported)
+
+`opencode upgrade <target> --method yarn` is the live command.
+`scripts/opencode_upgrade.py` is the pre-merge helper:
+
+- `status` / `doctor` — command, resolved binary, config root, pinned/live/
+  latest, last canary/verify, and the next command. `doctor` is read-only.
 - `check --pins-only` — offline consistency across every active pin seam; CI
-  runs it (run it locally before pushing). `check --remote` reads the
-  registry and drives the weekly issue-first drift workflow. `check --pr`
-  requires the ADR amendment's canary record.
+  runs it. `check --remote` drives the weekly issue-first drift workflow.
+  `check --pr` requires the ADR amendment's canary record.
 - `plan --to X` — target plugin/OpenTUI/solid-js matrix and the breaking
   changes between the current and target releases; no writes.
 - `canary --to X` — installs into `.scratch/v2-<version>-prefix`, runs C1–C8
-  + migration against the V1 rollback binary as the C1 default, typechecks/
-  tests the three plugins against the target `@opencode/plugin`/OpenTUI in a
-  scratch copy, then stops the C2/C7 scratch services it started. Evidence:
-  `.scratch/v2-canary-<version>/`.
+  + migration, typechecks/tests the three plugins against the target
+  `@opencode/plugin`/OpenTUI, runs a debug-TUI setup smoke, and stops its
+  scratch services. Evidence: `.scratch/v2-canary-<version>/`.
 - `prepare --to X` — bumps `VERSION_PIN`, the docs/reference/README and
   plugin peer/README roots, refreshes lockfiles, and appends the dated ADR
-  amendment. `--dry-run` writes nothing; `--open-pr` opens the PR with the
-  generated canary/matrix body.
-- `apply --to X --drain-acknowledged` — the only human gate. Run from a
-  normal terminal after closing sessions (`--wait-for-drain` and
-  `--stop-service` help). It reuses the atomic cutover, then verifies the
-  binary, service `/api/info`, the 17-agent corpus, and the plugin loader;
-  any failure restores the previous link and pre-upgrade DB and reports
-  `ROLLED BACK`. Verification artifact:
-  `.scratch/opencode-v2/upgrade-<version>-verify.json`.
-- `rollback --manifest M` — manual restore (link + DB).
+  amendment. `--dry-run` writes nothing; `--open-pr` opens the PR.
 - `prune --keep N` — remove old scratch prefixes/canary/compat dirs.
 - `upgrade --to X [--apply] [--resume]` — `check → plan → canary →
-  prepare`, stopping before apply unless `--apply`; `--resume` continues
-  from `.scratch/opencode-v2/upgrade-state.json`.
+  prepare`; with `--apply --drain-acknowledged` it backs up the DB/config,
+  runs the official `opencode upgrade`, and post-smokes (`--version`,
+  `/api/info`, agents, plugin loader, observer API). It refuses the retired
+  versioned layout and prints the migration commands instead.
 
-`VERSION_PIN` in `scripts/opencode_v2.py` is the single source: the cutover
-imports it, CI exports `OPENCODE_VERSION` from it, and `check --pins-only`
-enforces the remaining seams. Never hand-edit one seam.
+`VERSION_PIN` in `scripts/opencode_v2.py` is the single source: CI exports
+`OPENCODE_VERSION` from it, and `check --pins-only` enforces the remaining
+seams. Never hand-edit one seam.
+
+Rollback: `opencode upgrade <previous> --method yarn` plus the pre-upgrade
+DB/config backup. V1: reinstall the shadowed V1 bin and restore the V1
+config/DB backups.
 
 The wrapper at `$HOME/.yarn/bin/opencode` selects both binary and config via
 `XDG_CONFIG_HOME`; the upgrade preserves the current config root

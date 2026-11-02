@@ -291,7 +291,7 @@ def gate_c1(args):
     iso = subprocess.run([binary, "--version"], capture_output=True, text=True)
     default = subprocess.run([args.default_bin, "--version"],
                              capture_output=True, text=True)
-    ok = args.version in iso.stdout and "1.19.4" in default.stdout
+    ok = args.version in iso.stdout and args.default_version in default.stdout
     lines += [
         f"isolated_command={binary} --version",
         f"isolated_output={iso.stdout.strip()}",
@@ -684,6 +684,10 @@ def main(argv=None):
     ap.add_argument("--db-name", default="stability.db")
     ap.add_argument("--version", default=v2.VERSION_PIN,
                     help="candidate @opencode/cli version (default: pin)")
+    ap.add_argument("--default-version", default=v2.VERSION_PIN,
+                    help="expected version of the current default command "
+                         "(supported install: the current pin; pre-cutover: "
+                         "1.19.4)")
     ap.add_argument("--skip-install", action="store_true")
     args = ap.parse_args(argv)
     args.scratch_root = os.path.abspath(args.scratch_root)

@@ -18,6 +18,7 @@ import {
   OBSERVER_ID,
   SENTINEL_ID,
   healthRecordPath,
+  observerPresent,
   observerStatePath,
   parsePresence,
   sentinelBanner,
@@ -37,7 +38,8 @@ function readJson(path: string | null) {
 
 export function createSentinelModel(ctx: any) {
   const enabled = sentinelEnabled(process.env);
-  const location = ctx?.location?.directory ?? ctx?.location?.path;
+  const location = ctx?.location?.directory ?? ctx?.location?.path
+    ?? process.cwd();
   const presencePath = observerStatePath(location);
   const healthPath = healthRecordPath(location);
   const [version, setVersion] = createSignal(0);
@@ -85,8 +87,13 @@ export function createSentinelModel(ctx: any) {
       })(),
     );
     const presenceAgeMs = presence ? Date.now() - presence.ts : null;
+    const healthUpdated = Number(health.updated) || 0;
     return sentinelBanner({
-      observerPresent: status.present,
+      observerPresent: observerPresent({
+        pluginPresent: status.present,
+        healthUpdated,
+        presenceTs: presence?.ts ?? null,
+      }),
       observerState: status.state,
       observerDisabled: process.env.DELEGATION_OBSERVER_ENABLED
         ? ["0", "false", "no", "off"].includes(

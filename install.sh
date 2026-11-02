@@ -19,6 +19,8 @@ usage() {
   echo "    $AGENTS_TARGET"
   echo "    $REFERENCE_TARGET"
   echo "  Override targets with OPENCODE_SKILLS_DIR / OPENCODE_AGENTS_DIR / OPENCODE_REFERENCE_DIR."
+  echo "  After the supported @opencode/cli install, stage the reviewed V2 config:"
+  echo "    python3 scripts/stage_opencode_config.py --backup"
 }
 
 # Remove symlinks in $target that point under $src (this repo).

@@ -17,9 +17,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { createDefinition, createTuiModel, projection, readPluginStatus } from "./model.ts";
+import { createDefinition, createTuiModel, presencePathFor, projection, readPluginStatus } from "./model.ts";
 
 const OLD = Date.now() - 20 * 3_600_000;
+
+test("presence falls back to the TUI cwd when location is absent", () => {
+  assert.equal(
+    presencePathFor({}, {}),
+    join(process.cwd(), ".scratch", "delegation-observer", "tui.json"),
+  );
+  assert.equal(
+    presencePathFor({ location: { directory: "/tmp/x" } }, {}),
+    "/tmp/x/.scratch/delegation-observer/tui.json",
+  );
+  assert.equal(presencePathFor({}, { presenceFile: "/tmp/y" }), "/tmp/y");
+});
 
 function mockHost({
   sessions = [],

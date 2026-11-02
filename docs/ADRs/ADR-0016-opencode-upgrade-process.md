@@ -2,7 +2,12 @@
 
 ## Status
 
-accepted 2026-11-02
+superseded by [ADR-0017](ADR-0017-supported-opencode-upgrade.md) 2026-11-02
+
+> **Superseded 2026-11-02.** The custom versioned install/apply pipeline this
+> decision standardized was retired in favor of the supported
+> `@opencode/cli` + `opencode upgrade --method yarn` path. The canary,
+> pin-check, release-matrix, and post-smoke essentials carry forward.
 
 ## Context
 

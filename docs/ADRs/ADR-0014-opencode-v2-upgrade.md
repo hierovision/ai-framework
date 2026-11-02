@@ -35,7 +35,9 @@ than raw renderables. Decision 8's "pin exactly" now means `2.2.5`; Decision
 `--execute --upgrade --drain-acknowledged`), which a live session cannot run
 because the drain gate sees its own OpenCode process. The repeatable workflow
 around that mode is standardized in
-[ADR-0016](ADR-0016-opencode-upgrade-process.md).
+[ADR-0016](ADR-0016-opencode-upgrade-process.md), which was superseded by
+[ADR-0017](ADR-0017-supported-opencode-upgrade.md) when the custom versioned
+layout was retired for the supported install path.
 
 V1 and V2 cannot coexist under one `opencode` command, so this is a cutover,
 not a compatibility layer. The session DB auto-migration is one-way; the

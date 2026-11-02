@@ -372,7 +372,7 @@ def pre_merge(args):
         print(f"{name}: {'PASS' if ok else 'FAIL'} {detail}")
     if failed:
         print(f"error: post-smoke failed: {', '.join(failed)}", file=sys.stderr)
-        print("error: run `opencode_v2_cutover.py --rollback --manifest M`",
+        print("error: rollback — restore the pre-upgrade DB/config backup",
               file=sys.stderr)
         return 1
     print(f"POST-SMOKE PASS artifact={path}")
