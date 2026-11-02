@@ -18,6 +18,15 @@ Usage:
   python3 scripts/opencode_v2_canary.py --all
   python3 scripts/opencode_v2_canary.py --gate C5
   python3 scripts/opencode_v2_canary.py --gate migration
+
+Post-cutover (the live default is already V2), canary the next version against
+the V1 rollback binary as the C1 "default":
+  python3 scripts/opencode_v2_canary.py --all --skip-install \
+    --prefix .scratch/v2-<version>-prefix \
+    --opencode-bin .scratch/v2-<version>-prefix/bin/opencode \
+    --default-bin ~/.config/yarn/global/node_modules/opencode-ai/bin/opencode.exe \
+    --v1-prefix .scratch/v1-prefix \
+    --scratch-root .scratch/v2-canary-<version>
 """
 import argparse
 import datetime
@@ -26,6 +35,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import sqlite3
 import socket
 import subprocess
@@ -188,6 +198,51 @@ def gate_c5(args):
     return ok, "\n".join(lines)
 
 
+def stop_scratch_services(root):
+    """Stop opencode services a gate started under this scratch root.
+
+    C2 and C7 start a service on a free port; leaving it running blocks the
+    later drained apply and makes the scratch binary look like the live one.
+    Only processes whose XDG_CONFIG_HOME is under `root` are touched.
+    """
+    root = os.path.abspath(root)
+    stopped = []
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            cmdline = open(f"/proc/{pid}/cmdline", "rb").read().decode(
+                "utf-8", "replace").split("\0")
+            environ = open(f"/proc/{pid}/environ", "rb").read().decode(
+                "utf-8", "replace").split("\0")
+        except OSError:
+            continue
+        if not any("opencode" in part for part in cmdline):
+            continue
+        values = dict(part.split("=", 1) for part in environ if "=" in part)
+        xdg = values.get("XDG_CONFIG_HOME")
+        if not xdg:
+            continue
+        xdg = os.path.abspath(xdg)
+        if xdg == root or xdg.startswith(root + os.sep):
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+                stopped.append(pid)
+            except OSError:
+                pass
+    for pid in stopped:
+        for _ in range(20):
+            if not os.path.exists(f"/proc/{pid}"):
+                break
+            time.sleep(0.05)
+        else:
+            try:
+                os.kill(int(pid), signal.SIGKILL)
+            except OSError:
+                pass
+    return stopped
+
+
 def scratch_env(root):
     paths = v2.scratch_env(root)
     return paths
@@ -221,7 +276,7 @@ def gate_c1(args):
     if not args.skip_install:
         proc = subprocess.run(
             ["npm", "install", "--global", "--prefix", prefix,
-             f"@opencode/cli@{v2.VERSION_PIN}"],
+             f"@opencode/cli@{args.version}"],
             capture_output=True, text=True)
         lines.append(f"install_exit={proc.returncode}")
         if proc.returncode != 0:
@@ -236,7 +291,7 @@ def gate_c1(args):
     iso = subprocess.run([binary, "--version"], capture_output=True, text=True)
     default = subprocess.run([args.default_bin, "--version"],
                              capture_output=True, text=True)
-    ok = v2.VERSION_PIN in iso.stdout and "1.19.4" in default.stdout
+    ok = args.version in iso.stdout and args.default_version in default.stdout
     lines += [
         f"isolated_command={binary} --version",
         f"isolated_output={iso.stdout.strip()}",
@@ -260,7 +315,7 @@ def gate_c2(args):
         evidence(root, "C2.txt", "C2=FAIL timeout")
         return False, "timeout"
     ok = status.returncode == 0 and api.returncode == 0 and \
-        '"version"' in (api.stdout or "")
+        args.version in (api.stdout or "")
     text = "\n".join([
         f"date={now_date()}",
         f"service_port={port}",
@@ -520,8 +575,9 @@ def gate_c8(args):
     hits = {}
     for pattern in patterns:
         proc = subprocess.run(
-            ["grep", "-R", "-l", "-i", pattern, "skills", "agents", "scripts",
-             "reference", ".github"],
+            ["grep", "-R", "-l", "-i", "--exclude-dir=node_modules",
+             "--exclude-dir=__pycache__", pattern, "skills", "agents",
+             "scripts", "reference", ".github"],
             cwd=REPO, capture_output=True, text=True)
         files = [f for f in (proc.stdout or "").splitlines()
                  if ".opencode/plans" not in f
@@ -626,6 +682,12 @@ def main(argv=None):
         REPO, ".scratch", "v2-prefix", "bin", "opencode2"))
     ap.add_argument("--default-bin", default="opencode")
     ap.add_argument("--db-name", default="stability.db")
+    ap.add_argument("--version", default=v2.VERSION_PIN,
+                    help="candidate @opencode/cli version (default: pin)")
+    ap.add_argument("--default-version", default=v2.VERSION_PIN,
+                    help="expected version of the current default command "
+                         "(supported install: the current pin; pre-cutover: "
+                         "1.19.4)")
     ap.add_argument("--skip-install", action="store_true")
     args = ap.parse_args(argv)
     args.scratch_root = os.path.abspath(args.scratch_root)
@@ -644,13 +706,18 @@ def main(argv=None):
         print("error: pass --all or --gate", file=sys.stderr)
         return 2
 
-    for name, fn in gates:
-        ok, detail = fn(args)
-        print(f"{name}: {'PASS' if ok else 'FAIL'}")
-        if not ok:
-            print(detail, file=sys.stderr)
-            return 1
-    return 0
+    try:
+        for name, fn in gates:
+            ok, detail = fn(args)
+            print(f"{name}: {'PASS' if ok else 'FAIL'}")
+            if not ok:
+                print(detail, file=sys.stderr)
+                return 1
+        return 0
+    finally:
+        stopped = stop_scratch_services(args.scratch_root)
+        if stopped:
+            print(f"scratch services stopped: {','.join(stopped)}")
 
 
 if __name__ == "__main__":

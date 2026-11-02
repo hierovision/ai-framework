@@ -23,6 +23,22 @@ evals pass `OPENCODE_LOG_LEVEL=ERROR`, so the ban is repo policy, not a V2
 constraint. The Context paragraph above, which lists `--log-level` as
 removed, is superseded to that extent.
 
+**2026-11-02 amendment — version pin 2.2.5.** The pin moves from `2.1.4` to
+`2.2.5`. The isolated canary passed C1–C8 and the migration rehearsal with
+residual `0` on 2026-11-02 (evidence `.scratch/v2-canary-2.2.5/`). `2.2.x`
+moves TUI plugins to OpenTUI 0.7 (`2.2.0`) and 0.8 (`2.2.3+`); both TUI
+plugins typecheck and test against `@opencode/plugin@2.2.5` + OpenTUI `0.8.1`
+with dependency bumps only, because they compose through plugin slots rather
+than raw renderables. Decision 8's "pin exactly" now means `2.2.5`; Decision
+9's `2.1.4` path is joined by the `--upgrade` mode
+(`scripts/opencode_v2_cutover.py --preflight --upgrade` /
+`--execute --upgrade --drain-acknowledged`), which a live session cannot run
+because the drain gate sees its own OpenCode process. The repeatable workflow
+around that mode is standardized in
+[ADR-0016](ADR-0016-opencode-upgrade-process.md), which was superseded by
+[ADR-0017](ADR-0017-supported-opencode-upgrade.md) when the custom versioned
+layout was retired for the supported install path.
+
 V1 and V2 cannot coexist under one `opencode` command, so this is a cutover,
 not a compatibility layer. The session DB auto-migration is one-way; the
 backup is the rollback.
@@ -59,18 +75,20 @@ backup is the rollback.
    liveness with a read-only DB fallback; `time_idle`/`idle_outcome` is the
    completion signal when present, with the assistant terminal marker as the
    fallback for migrated rows. Both shares one adapter.
-8. **Version policy** — pin exactly `2.1.4` in CI, the reference, and this
-   ADR. No `latest`, no caret range, no auto-update. A failed canary allows
-   only the highest `2.x` that passes C1–C6; `2.0.32` is not presumed safe.
-   If none passes, stay on V1 `1.19.4` and report.
+8. **Version policy** — pin exactly the current release (`2.2.5` as of
+   2026-11-02; see the amendment) in CI, the reference, and this ADR. No
+   `latest`, no caret range, no auto-update. A failed canary allows only the
+   highest `2.x` that passes C1–C6; `2.0.32` is not presumed safe. If none
+   passes, stay on the previous pin and report.
 9. **Drained atomic switch** — the owner runs
    `scripts/opencode_v2_cutover.py --execute --drain-acknowledged` from a
    normal terminal after both PRs are merge-ready and every session is
    closed. It takes a final verified V1 backup, stages
-   `$HOME/.local/lib/opencode/2.1.4/` (runtime + versioned config root +
+   `$HOME/.local/lib/opencode/<version>/` (runtime + versioned config root +
    wrapper), and atomically renames `$HOME/.yarn/bin/opencode` onto the
    wrapper. The wrapper sets `XDG_CONFIG_HOME` to the versioned root, so one
    link selects binary and config. V1 config/agents/plugin are untouched.
+   Later V2→V2 upgrades use the `--upgrade` mode (2026-11-02 amendment).
 10. **Consumer readiness is commit-bound** — Paragon's isolated worktree is
     validated by `scripts/opencode_v2_consumer.py ready`, which records exact
     framework/consumer SHAs and both PR URLs. The cutover refuses stale,

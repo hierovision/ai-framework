@@ -27,7 +27,7 @@ have. The watchdog and the terminal wake remain the authoritative fallback.
 ## Install / dependencies
 
 The sentinel is a V2 plugin package with peer dependencies only
-(`@opencode/plugin` 2.1.4, `solid-js` 1.9.12, `@opentui/core`/`solid` 0.6.8):
+(`@opencode/plugin` 2.2.5, `solid-js` 1.9.12, `@opentui/core`/`solid` 0.8.1):
 
 ```
 cd plugins/delegation-sentinel && npm install     # materializes the peers + devDeps

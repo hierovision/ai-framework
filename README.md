@@ -20,8 +20,15 @@ into `~/.config/opencode/agents/` so all projects discover them globally:
 ./install.sh
 ```
 
-Requires **OpenCode V2 `2.1.4`** (package `@opencode/cli@2.1.4`; exact pin,
-no `latest`, no caret range). `opencode --version` prints `opencode v2.1.4`.
+Requires **OpenCode V2 `2.2.5`** (package `@opencode/cli@2.2.5`; exact pin,
+no `latest`, no caret range). `opencode --version` prints `opencode v2.2.5`.
+Install/upgrade with the supported command (`opencode upgrade <target> --method
+yarn` for a new version; `yarn global add @opencode/cli@2.2.5` for the
+same-version migration, because `opencode upgrade` skips an already-installed
+version); the config root is `~/.config/opencode`. The reviewed config is
+staged with `python3 scripts/stage_opencode_config.py --backup`. The canary
+and pin check are the pre-merge gates; see ADR-0017. Never hand-edit a pin
+seam.
 
 Re-run after adding new skills or agents. `git pull` alone updates the
 content of already-linked skills/agents. Agent files are validated on

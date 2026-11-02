@@ -74,6 +74,29 @@ export function sentinelBanner(input: SentinelInput = {}): string | null {
   return null;
 }
 
+/**
+ * True when any fresh signal says the observer is present.
+ *
+ * 2.2.x TUI contexts may omit `location` and `plugin.list` can be empty; a
+ * fresh server health record or TUI presence marker is still real evidence.
+ */
+export function observerPresent(input: {
+  pluginPresent?: boolean;
+  healthUpdated?: number;
+  presenceTs?: number | null;
+  now?: number;
+  staleMs?: number;
+} = {}): boolean {
+  const now = input.now ?? Date.now();
+  const stale = input.staleMs ?? PRESENCE_STALE_MS;
+  if (input.pluginPresent) return true;
+  const health = Number(input.healthUpdated) || 0;
+  if (health > 0 && now - health < stale) return true;
+  const presence = Number(input.presenceTs) || 0;
+  if (presence > 0 && now - presence < stale) return true;
+  return false;
+}
+
 /** Parse the observer TUI presence marker; null when absent/invalid. */
 export function parsePresence(text: string | null | undefined): { pid: number; ts: number } | null {
   if (!text || !String(text).trim()) return null;

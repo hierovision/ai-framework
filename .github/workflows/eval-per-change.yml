@@ -235,12 +235,15 @@ jobs:
       # 2026-09-20: opencode.ai/install queries the GitHub API internally and
       # failed with 403 under runner-IP rate limiting (run 35530398048) —
       # switched to the npm registry package, which needs no GitHub API, and
-      # PINNED to the version validated locally (1.18.18) instead of
-      # resolving "latest" (version drift is a correctness hazard: the CLI
-      # emits different event-stream shapes across versions).
+      # PINNED to the canary-validated version instead of resolving "latest"
+      # (version drift is a correctness hazard: the CLI emits different
+      # event-stream shapes across versions). The pin is the adapter's
+      # VERSION_PIN — do not duplicate the literal here.
+      - name: Resolve pinned OpenCode version
+        run: |
+          echo "OPENCODE_VERSION=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); import opencode_v2; print(opencode_v2.VERSION_PIN)')" >> "$GITHUB_ENV"
+
       - name: Install OpenCode V2 CLI (pinned via npm)
-        env:
-          OPENCODE_VERSION: "2.1.4"
         run: npm install --global "@opencode/cli@${OPENCODE_VERSION}"
 
       - name: Add opencode to PATH

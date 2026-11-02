@@ -8,6 +8,7 @@ import test from "node:test";
 
 import {
   healthRecordPath,
+  observerPresent,
   observerStatePath,
   parsePresence,
   sentinelBanner,
@@ -16,6 +17,28 @@ import {
 
 test("a healthy observer renders no sentinel line", () => {
   assert.equal(sentinelBanner({ presenceAgeMs: 1_000 }), null);
+});
+
+test("a fresh health or presence record counts as present", () => {
+  const now = 1_000_000;
+  assert.equal(
+    observerPresent({ pluginPresent: false, healthUpdated: now - 1_000, now }),
+    true,
+  );
+  assert.equal(
+    observerPresent({
+      pluginPresent: false, healthUpdated: 0, presenceTs: now - 1_000, now,
+    }),
+    true,
+  );
+  assert.equal(
+    observerPresent({
+      pluginPresent: false, healthUpdated: now - 60_000,
+      presenceTs: null, now,
+    }),
+    false,
+  );
+  assert.equal(observerPresent({ pluginPresent: true, now }), true);
 });
 
 test("every unavailable condition renders a fallback naming the watchdog", () => {

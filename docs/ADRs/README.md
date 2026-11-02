@@ -32,6 +32,8 @@ Every ADR carries `## Status` with one of:
 | [ADR-0013](ADR-0013-go-first-model-policy.md) | Go-first model policy — Go defaults, free opt-in, kimi-k3/gpt-6-luna excluded, 2026-11-01 review | accepted 2026-10-03 |
 | [ADR-0014](ADR-0014-opencode-v2-upgrade.md) | OpenCode V2 cutover — native config, one adapter, drained atomic switch | accepted 2026-10-27 |
 | [ADR-0015](ADR-0015-observable-delegation.md) | Observable delegation — event-driven status, synthetic milestones, owner controls (supersedes RM-058's deferred progress choice) | accepted 2026-10-29 |
+| [ADR-0016](ADR-0016-opencode-upgrade-process.md) | Standardized OpenCode upgrades — one orchestrator, canary gate, prepared pin bump, drained apply | superseded by [ADR-0017](ADR-0017-supported-opencode-upgrade.md) 2026-11-02 |
+| [ADR-0017](ADR-0017-supported-opencode-upgrade.md) | Supported OpenCode install/upgrade path — yarn-global CLI, default config root, thin canary/pin check | accepted 2026-11-02 |
 
 ## Where a decision goes
 

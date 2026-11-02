@@ -33,3 +33,8 @@ state or process detail — propose an ADR instead of adding prose here.
    contract; `reviewing-code` gates it before merge. An orchestrator that
    owns the roadmap lands the closure on the branch **before** merging —
    deferring it to `main` is the failure this rule forbids.
+7. **OpenCode version changes use the supported upgrade path.** Install the
+   yarn-global `@opencode/cli`; upgrade with `opencode upgrade <target>
+   --method yarn`; keep the default `~/.config/opencode` root. The canary and
+   `check --pins-only` are the pre-merge gates. Never reintroduce a versioned
+   wrapper or hand-edit a pin seam (ADR-0017).

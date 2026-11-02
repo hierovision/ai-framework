@@ -97,6 +97,13 @@ export function projection<T>(version: () => number, compute: () => T): () => T 
  * guarded: a host that throws or returns a non-array list degrades to a
  * visible banner, never to a startup crash.
  */
+/** Presence path; 2.2.x TUI contexts may omit `location`, so fall back to cwd. */
+export function presencePathFor(ctx: any, config: any): string {
+  return config?.presenceFile
+    ?? join(ctx?.location?.directory ?? process.cwd(),
+            ".scratch", "delegation-observer", "tui.json");
+}
+
 export function createTuiModel(ctx: any) {
   const config = tuiConfig(ctx);
   const state = createState(config, Date.now);
@@ -108,10 +115,7 @@ export function createTuiModel(ctx: any) {
 
   // Presence marker for the independent sentinel: when this TUI part fails to
   // load, no marker exists and the sentinel shows the fallback line.
-  const presenceFile = config.presenceFile
-    ?? (ctx?.location?.directory
-      ? join(ctx.location.directory, ".scratch", "delegation-observer", "tui.json")
-      : null);
+  const presenceFile = presencePathFor(ctx, config);
   const writePresence = () => {
     if (!presenceFile) return;
     try {
@@ -131,7 +135,8 @@ export function createTuiModel(ctx: any) {
   // checks only, never as the progress source, and throttled so a busy stream
   // does not turn into file polling.
   const healthFile = config.healthFile
-    ?? healthPath(ctx?.location?.directory ?? ctx?.location?.path);
+    ?? healthPath(ctx?.location?.directory ?? ctx?.location?.path
+      ?? process.cwd());
   let lastHealthRead = 0;
   const refreshServerHealth = () => {
     if (!healthFile) return;

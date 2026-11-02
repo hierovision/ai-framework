@@ -90,8 +90,10 @@ jobs:
           python3 scripts/test_model_policy.py
           python3 scripts/test_opencode_v2_canary.py
           python3 scripts/test_opencode_v2_consumer.py
-          python3 scripts/test_opencode_v2_cutover.py
           python3 scripts/test_opencode_v2_post_smoke.py
+          python3 scripts/test_opencode_upgrade.py
+          python3 scripts/test_stage_opencode_config.py
+          python3 scripts/opencode_upgrade.py check --pins-only
           python3 scripts/test_scratch_cleanup.py
           python3 scripts/supervision_contract.py --check
           python3 scripts/test_supervision_contract.py
