@@ -235,6 +235,7 @@ def check_seams(repo=REPO, version=None, opentui=None):
         else:
             results.append((seam["path"], True, expected))
     results.extend(check_plugin_jsons(repo, version, opentui))
+    results.extend(check_lockfiles(repo, version, opentui))
     results.extend(check_adr_amendment(repo, version))
     return results
 
@@ -272,6 +273,40 @@ def check_plugin_jsons(repo=REPO, version=None, opentui=None):
                 problems.append("@opentui/core mismatch")
             if peers.get("@opentui/solid") != opentui:
                 problems.append("@opentui/solid mismatch")
+        results.append((rel, not problems,
+                        ", ".join(problems) if problems else version))
+    return results
+
+
+def check_lockfiles(repo=REPO, version=None, opentui=None):
+    """Verify the resolved lockfile roots, not only the declared package.json."""
+    version = version or v2.VERSION_PIN
+    opentui = opentui or current_opentui(repo)
+    results = []
+    for name in PLUGIN_DIRS:
+        rel = f"plugins/{name}/package-lock.json"
+        path = os.path.join(repo, rel)
+        if not os.path.isfile(path):
+            continue
+        data = read_json(path)
+        if not isinstance(data, dict):
+            results.append((rel, False, "unreadable"))
+            continue
+        problems = []
+        packages = data.get("packages") or {}
+        root = packages.get("", {})
+        if root.get("version") != version:
+            problems.append(f"root version={root.get('version')}")
+        resolved = (packages.get("node_modules/@opencode/plugin") or {}).get(
+            "version")
+        if resolved != version:
+            problems.append(f"@opencode/plugin={resolved}")
+        if name in TUI_PLUGINS:
+            peers = root.get("peerDependencies") or {}
+            if peers.get("@opentui/core") != opentui:
+                problems.append(f"@opentui/core={peers.get('@opentui/core')}")
+            if peers.get("@opentui/solid") != opentui:
+                problems.append(f"@opentui/solid={peers.get('@opentui/solid')}")
         results.append((rel, not problems,
                         ", ".join(problems) if problems else version))
     return results
