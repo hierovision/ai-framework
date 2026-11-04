@@ -36,3 +36,12 @@ report is triaged.
 Suppressions/overrides are honored only with a dated record in the affected
 file — a quiet exception is never acceptable (the cardinal rule,
 `skills/debugging-test-failures/SKILL.md`).
+
+### Solo-owner approval exception (2026-11-03)
+
+`main` requires a pull request and the `quality-gates` + `pre-commit-check`
+checks; force-push and deletion are denied. Required approvals are 0 because
+the owner is the only engineer on this repository and GitHub does not count
+the author's own approval. Compensating controls: required CI, secret scanning
++ push protection, Dependabot alerts + security updates, and CodeQL default
+setup. Review date: 2027-01-25, or when a second engineer is added.
