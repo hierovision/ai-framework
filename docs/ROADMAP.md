@@ -1,7 +1,7 @@
 ---
 title: ai-framework Roadmap
 established: 2026-08-28
-last_triaged: 2026-10-27
+last_triaged: 2026-11-06
 rubric: impact-urgency   # switched from priority-1-5-composite on 2026-10-11 (RM-053 contract); prior scores preserved per row
 threshold: null   # no cut threshold in effect
 sources:
@@ -15,7 +15,7 @@ sources:
 
 # ai-framework Roadmap
 
-> Last triaged: 2026-10-16 · Rubric: impact-urgency (1–3 each; Score = Impact × Urgency) · Schema per skills/triaging-requirements/references/roadmap-format.md (merged 2026-10-11, PR #111)
+> Last triaged: 2026-11-06 · Rubric: impact-urgency (1–3 each; Score = Impact × Urgency) · Schema per skills/triaging-requirements/references/roadmap-format.md (merged 2026-10-11, PR #111)
 
 ## Summary
 
@@ -52,12 +52,12 @@ scoring uses the Rex Black rubric.
 - Detail files: per-ID provenance at docs/roadmap-detail/<ID>.md (relocated byte-exact 2026-10-11; owner ruling: no massive detail in the roadmap). Referenced from each row's Notes; consumed at design passes; pruned by the quarterly ALM review.
 - "plan" = `docs/maturity-plan.md`; issue refs = `hierovision/ai-framework#NN`.
 
-## Priority order (1–39)
+## Priority order (1–40)
 One list per horizon, rank order. Every line: `[ID](detail) (score) —
 title`. IDs link to that row's full record in `docs/roadmap-detail/`.
 Score = Impact × Urgency. `— in progress` marks the row under work.
 
-### Now (17)
+### Now (18)
 
 - [RM-016](docs/roadmap-detail/RM-016.md) (6) — Eval-harness independence — sanitized skill staging
 - [RM-018](docs/roadmap-detail/RM-018.md) (6) — Next.js + Supabase stack reference for `designing-architecture`
@@ -75,6 +75,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 - [RM-051](docs/roadmap-detail/RM-051.md) (4) — UX-consult trigger calibration for conversational surfaces (designing-architecture Step 5b)
 - [RM-054](docs/roadmap-detail/RM-054.md) (4) — Session-guard multi-wave scope, long-lived budget default, watch exit + kill-authority notes
 - [RM-065](docs/roadmap-detail/RM-065.md) (4) — Status ownership belongs to the delivering PR — triage closure cross-ref
+- [RM-072](docs/roadmap-detail/RM-072.md) (4) — Delegation observer milestone noise — coalesce routine milestones in the TUI strip
 - [RM-035](docs/roadmap-detail/RM-035.md) (2) — Cite exact ADR filenames in plans and dispatch prompts
 
 
@@ -128,6 +129,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 | RM-051 | UX-consult trigger calibration for conversational surfaces (designing-architecture Step 5b) | — | Now | self-improvement | 2 | 2 | 4 | open | Step 5b consults only on interaction-semantics changes; copy-only changes record an explicit skip; the conversational brief covers message structure, labels, and truncation honesty. | — | hierovision/ai-framework#92; marvin-slack consults 2026-10-03 (user agreement recorded in the issue) | proposed (entered 2026-10-09, merged contracts keep it); fired 2026-10-03. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-051.md. |
 | RM-054 | Session-guard multi-wave scope, long-lived budget default, watch exit + kill-authority notes | — | Now | self-improvement | 2 | 2 | 4 | open | A new wave is supervised cleanly after a historical failure in the same tree; long-lived sessions are not aborted by the budget; --watch exits; kill authority documented or accepted. | — | paragon handoff 2026-10-09 appendix (§C); session `ses_ef8102f5dffevLUPFG0feyKAX8`; family of RM-045/RM-047/048 | fired 2026-10-09/10 (paragon guard appendix); (1)–(2) hermetic red-first tests, (3)–(4) documented contracts. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-054.md. |
 | RM-065 | Status ownership belongs to the delivering PR — triage closure cross-ref | — | Now | self-improvement | 2 | 2 | 4 | proposed | The delivering PR owns status (same-PR closure per reference/git-workflow.md §Roadmap closure); the triage skill cites that rule and never gates status transitions. | — | hierovision/ai-framework#112; consumer handoff 2026-10-12 (paragon status-lifecycle); paragon fix PR #41 (`a5553b3`) | fired 2026-10-12 (paragon drifted: two Done-in-fact items sat Open-on-paper between passes); correction is a citation cross-ref in SKILL.md Step 7 + roadmap-format.md — no behavior change. detail: docs/roadmap-detail/RM-065.md |
+| RM-072 | Delegation observer milestone noise — coalesce routine milestones in the TUI strip | — | Now | observability | 2 | 2 | 4 | open | A multi-delegate session shows at most one strip line per delegate per meaningful state change; routine milestones stop producing standalone lines, while attention and terminal milestones remain visible. | — | owner report 2026-11-06 (two-subagent session) | fired 2026-11-06 (15+ `delegation-observer milestone` lines with no state/value); fix belongs in the observer's emission/coalescing or the TUI strip; RM-069/RM-070 semantics unchanged. detail: docs/roadmap-detail/RM-072.md. |
 | RM-035 | Cite exact ADR filenames in plans and dispatch prompts | — | Now | self-improvement | 1 | 2 | 2 | open | Plans and dispatch prompts cite exact ADR filenames — zero glob-recovery on first read. | — | RM-031 candidate `adr-reference-by-number-not-path` (`.scratch/skill-gap-analysis/subagent-issues.md`, 2026-09-27) | fired 2026-09-27. prev: 4 (priority-1-5-composite); detail: docs/roadmap-detail/RM-035.md. |
 
 ## Next (dated/near — opportunities in validation)
@@ -230,6 +232,8 @@ Resolved 2026-10-09 — Decision 4 (user call): **RM-007/RM-008/RM-009/RM-010 �
 Resolved 2026-10-09 — Decision 5 (user call): **RM-011 — first review dated.** The first quarterly ALM review is dated 2026-11-01, batched into RM-040's monthly sustainability sitting. All five calls of this pass are resolved; no open calls remain.
 
 ## Triage log
+
+- **2026-11-06** — RM-072 added from the owner's report during a two-subagent session: 15+ `delegation-observer milestone` strip lines with no state/value. Now, score 4; detail: docs/roadmap-detail/RM-072.md. Open 39 → 40 (31 done of 71).
 
 - **2026-11-01** — eval-harness stall fix opened unmerged at [PR #139](https://github.com/hierovision/ai-framework/pull/139) (`fix/eval-stall-lane-fallback`). Incident date 2026-10-31: [PR #138](https://github.com/hierovision/ai-framework/pull/138)'s `evals (designing-architecture, core)` job (run 41234368868, job 124635016575) recorded three Go-lane stalls with a first stdout line at 5916/3723/3268 ms, then 240 s of silence, and retried the degraded lane instead of switching. Root cause: `_error_signature` collapsed every zero-event stall to `no events`, which `is_provider_classed_error` rejects, so neither `_note_provider_death` nor the per-eval trigger could fire. Fix (2026-11-01): a stall signs as `stall (first line <N>ms)` (lane class, provider-classed) or `stall (no first line)` (launch/env, not a lane class); the transient-attempt, fresh-retry and terminal death records of a stall run all carry `lane-degradation-evidence:` before one `lane-switch:` record to `deepseek/deepseek-flash`. The same PR fixes the report's lane cover (`scripts/eval-report.py`): both key sources — the record `eval` field and the legacy switch string — are shape-validated against `<skill>#<id>`, so a class label or an incomplete token is not counted in any path (record field, string, mixed union, lane-row display, `by_eval` grouping; a mixed-class switch over 6 evals reads 33.3% instead of 50%), and the cover comes from the `eval` key on the marked death records, so a truncated switch detail (512-char cap; 60 long keys over 114 evals reads 52.6%, not 14.0%) cannot hide the escalation. The same pass hardened the pre-existing `by_eval` grouping, which keyed any `eval` field without validation (a malformed field formed a fake infra bucket); the threshold and the report schema are unchanged. No roadmap row (incident fix, not schedulable work); Open unchanged.
 
