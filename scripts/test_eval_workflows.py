@@ -27,7 +27,7 @@ WF_DIR = os.path.join(os.path.dirname(HERE), ".github", "workflows")
 PER_CHANGE = os.path.join(WF_DIR, "eval-per-change.yml")
 BEHAVIORAL = os.path.join(WF_DIR, "eval-behavioral.yml")
 
-PIN = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+PIN = "cf430e030ddbb5b0abf93d22962f4752f3646cd9"
 OLD_PIN = "b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882"
 
 
