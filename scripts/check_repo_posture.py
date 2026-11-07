@@ -37,7 +37,9 @@ DEPENDABOT = os.path.join(REPO_ROOT, ".github", "dependabot.yml")
 
 REQUIRED_CHECKS = {"quality-gates", "pre-commit-check", "dependency-audit"}
 REQUIRED_NPM_DIRS = {
-    "/.opencode",
+    # `/.opencode` is host-local: its package.json is gitignored, so it is not
+    # a tracked npm surface. Configuring it made every Dependabot run fail
+    # `dependency_file_not_found` (observed 2026-11-07).
     "/plugins/auto-compact-at-threshold",
     "/plugins/delegation-observer",
     "/plugins/delegation-sentinel",
