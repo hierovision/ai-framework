@@ -41,6 +41,22 @@ export interface ObserverConfig {
    */
   staleGraceSeconds: number;
   /**
+   * RM-074: how long an observed *completed* delegate stays in the sidebar
+   * after `terminal.at`. A TUI display window, not a supervision threshold.
+   */
+  terminalGraceSeconds: number;
+  /**
+   * RM-074: the same window for an observed *terminal failure* — failures stay
+   * actionable for longer than a normal completion.
+   */
+  failedTerminalGraceSeconds: number;
+  /**
+   * RM-074: identical edit/write calls that flag thrash. Sourced from
+   * `watch_agent.EDIT_WRITE_LOOP_REPEATS` through the generated supervision
+   * contract; other tools keep `loopRepeats`.
+   */
+  editWriteLoopRepeats: number;
+  /**
    * RM-070: an attention condition starts exactly one parent turn while it is
    * happening. Routine progress and terminal stay non-prompting.
    */
@@ -60,6 +76,9 @@ export const DEFAULTS: ObserverConfig = {
   milestoneDescription: "delegation-observer milestone",
   titleMaxLength: 160,
   staleGraceSeconds: 600,
+  terminalGraceSeconds: 300,
+  failedTerminalGraceSeconds: 3600,
+  editWriteLoopRepeats: 8,
   attentionWake: true,
   maxAttentionWakes: 3,
 };
@@ -81,6 +100,12 @@ export type Provenance = "observed" | "discovered";
 export interface Delegate {
   sessionID: string;
   orchestratorID: string;
+  /**
+   * RM-074: the display root resolved from the bulk session index. Presentation
+   * metadata only — it never replaces `orchestratorID` for wake routing/trust.
+   * `null` means the chain was cyclic or missing: unresolved, never guessed.
+   */
+  rootID: string | null;
   via: Association;
   agent: string;
   task: string;
@@ -122,6 +147,12 @@ export interface ObserverState {
   now: () => number;
   delegates: Map<string, Delegate>;
   /**
+   * RM-074: the last known session tree (id -> parent/title) used to resolve a
+   * delegate's display root. Filled by bulk association; never used for wake
+   * routing or trust.
+   */
+  roots: Map<string, { parentID: string | null; title: string | null }>;
+  /**
    * The host's live active map (session id -> busy right now). Filled by
    * `session.list()`/`session.status()` on every refresh; it is the only
    * evidence that makes a discovered-only session `running`.
@@ -141,6 +172,12 @@ export interface Milestone {
   text: string;
   description: string;
   attention: boolean;
+  /**
+   * RM-074: the reducer's existing condition key (`thrash:<target>`,
+   * `needs:permission:<detail>`, …). Internal delivery metadata for durable
+   * dedupe; the `session.synthetic` request shape is unchanged.
+   */
+  conditionKey: string;
   /**
    * RM-070: this milestone starts (or, when false, does not start) a parent
    * turn. Only thrash/stall/needs-input/denied can be true, and only while
@@ -267,6 +304,10 @@ export function envConfig(
   };
   take("stallSeconds", env?.DELEGATION_OBSERVER_STALL_SECONDS, positive);
   take("staleGraceSeconds", env?.DELEGATION_OBSERVER_STALE_GRACE_SECONDS, positive);
+  take("terminalGraceSeconds", env?.DELEGATION_OBSERVER_TERMINAL_GRACE_SECONDS,
+    positive);
+  take("failedTerminalGraceSeconds",
+    env?.DELEGATION_OBSERVER_FAILED_TERMINAL_GRACE_SECONDS, positive);
   take("attentionWake", env?.DELEGATION_OBSERVER_ATTENTION_WAKE, boolean);
   take("maxAttentionWakes", env?.DELEGATION_OBSERVER_MAX_ATTENTION_WAKES,
     positiveInteger);
@@ -316,6 +357,7 @@ export function createState(overrides: Partial<ObserverConfig> = {},
     config: { ...DEFAULTS, ...overrides },
     now,
     delegates: new Map<string, Delegate>(),
+    roots: new Map(),
     active: new Map<string, boolean>(),
     connection: "connected",
     degradation: null,
@@ -351,7 +393,10 @@ function isActive(state: ObserverState, sessionID: string): boolean {
  * - `archived` is final, for observed and live rows too (the store removed it
  *   from the working set);
  * - a session terminal in the store but never observed here is history;
- * - an observed session is live state, so the clock classifier owns it;
+ * - an observed terminal row ages from `terminal.at` by outcome (RM-074):
+ *   completed 300 s, failed 3600 s;
+ * - an observed non-terminal session is live state, so the clock classifier
+ *   owns it;
  * - a live active-map entry is real liveness;
  * - otherwise the session is stale once its real last event (or, failing
  *   that, its created time) is older than the grace window. No timestamp at
@@ -360,7 +405,13 @@ function isActive(state: ObserverState, sessionID: string): boolean {
 export function isStale(state: ObserverState, d: Delegate,
   now: number = state.now()): boolean {
   if (d.archived) return true;
-  if (d.terminal) return d.provenance !== "observed";
+  if (d.terminal) {
+    if (d.provenance !== "observed") return true;
+    const grace = d.terminal.outcome === "failed"
+      ? state.config.failedTerminalGraceSeconds
+      : state.config.terminalGraceSeconds;
+    return now - d.terminal.at >= grace * 1000;
+  }
   if (d.provenance === "observed") return false;
   if (isActive(state, d.sessionID)) return false;
   const at = d.lastActivityAt ?? d.startedAt;
@@ -468,6 +519,7 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
   const parentID = info.parentID ?? info.parent_id ?? null;
   const marker = parseDelegationTitle(info.title ?? "");
   if (!parentID && !marker) return null;
+  state.roots.set(sessionID, { parentID, title: info.title ?? null });
   const knownActive = state.active.get(sessionID);
   const live = knownActive ?? Boolean(info.active);
   // Record the promotion so the map and the row agree: reconciliation denies
@@ -479,6 +531,7 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
   delegate = {
     sessionID,
     orchestratorID: parentID || marker?.orchestratorID || "",
+    rootID: null,
     via: parentID ? "parent" : "title",
     agent: info.agent || marker?.agent || "?",
     task: marker?.task || (info.title ?? "").trim() || "delegated task",
@@ -527,6 +580,10 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
     }
   }
   state.delegates.set(sessionID, delegate);
+  // The display root is only what the index proves. An unindexed parent or a
+  // cycle leaves it null (`unresolved`) — the row projection and the toast
+  // label then agree, and neither guesses the immediate parent (RM-074).
+  delegate.rootID = resolveRootID(state, delegate.orchestratorID);
   delegate.stale = isStale(state, delegate, now);
   return delegate;
 }
@@ -542,6 +599,90 @@ export function associateSessionInfo(state: ObserverState, info: SessionInfoLike
   const sessionID = info?.id ?? info?.sessionID;
   if (!sessionID || !info) return null;
   return associate(state, sessionID, info, "discovered");
+}
+
+/** Bound on the display-root walk: a deep tree must not stall the reducer. */
+const MAX_ROOT_HOPS = 8;
+
+/**
+ * Resolve the display root of a session through the indexed parent chain.
+ *
+ * - a parent chain that ends at a session with no parent is a root;
+ * - a child with no parent that carries the title marker follows the marker;
+ * - a cycle, a hop over the bound, or a parent missing from the index returns
+ *   `null` (unresolved) — never another root.
+ *
+ * Presentation only: this never feeds `resolveParent`, the trust gate or the
+ * same-directory gate.
+ */
+export function resolveRootID(state: ObserverState, sessionID: string): string | null {
+  let current: string | undefined = sessionID;
+  const seen = new Set<string>();
+  for (let hop = 0; hop < MAX_ROOT_HOPS && current; hop += 1) {
+    if (seen.has(current)) return null;
+    seen.add(current);
+    const entry = state.roots.get(current);
+    if (!entry) return null;
+    if (entry.parentID) {
+      current = entry.parentID;
+      continue;
+    }
+    const marker = parseDelegationTitle(entry.title ?? "");
+    if (marker?.orchestratorID && marker.orchestratorID !== current) {
+      current = marker.orchestratorID;
+      continue;
+    }
+    return current;
+  }
+  return null;
+}
+
+/** Index a session list into the tree used for display-root resolution. */
+export function indexSessions(state: ObserverState, sessions: SessionInfoLike[]): void {
+  for (const info of sessions ?? []) {
+    const sessionID = info?.id ?? info?.sessionID;
+    if (!sessionID) continue;
+    state.roots.set(sessionID, {
+      parentID: info.parentID ?? info.parent_id ?? null,
+      title: info.title ?? null,
+    });
+  }
+}
+
+/**
+ * Re-resolve every delegate's display root from the current index. Called after
+ * bootstrap and on every TUI refresh/rebuild; a row whose chain is unresolved
+ * gets `null` rather than a guessed root.
+ */
+export function applyRootAssociations(state: ObserverState): void {
+  for (const d of state.delegates.values()) {
+    if (!d.orchestratorID) {
+      d.rootID = null;
+      continue;
+    }
+    const entry = state.roots.get(d.orchestratorID);
+    const resolved = entry ? resolveRootID(state, d.orchestratorID) : null;
+    d.rootID = resolved;
+  }
+}
+
+/**
+ * Bulk association for `session.list()`: index the whole tree first, then
+ * associate every row, then resolve display roots. Two passes are required —
+ * a child listed before its worker must still resolve through it.
+ */
+export function associateSessionList(
+  state: ObserverState,
+  sessions: SessionInfoLike[],
+): number {
+  const list = (sessions ?? []).filter((info) => Boolean(info));
+  indexSessions(state, list);
+  let associated = 0;
+  for (const info of list) {
+    if (associateSessionInfo(state, info)) associated += 1;
+  }
+  applyRootAssociations(state);
+  return associated;
 }
 
 // --- milestone helpers -----------------------------------------------------
@@ -608,6 +749,7 @@ function milestone(
     description: state.config.milestoneDescription,
     attention,
     wake: wakeNow,
+    conditionKey: key,
   };
 }
 
@@ -649,8 +791,39 @@ function toolTarget(name: string, input: unknown) {
   return String(value).split("\n")[0].slice(0, 80);
 }
 
+/**
+ * RM-074: a loop must be judged on progress, not on a repeated file name. The
+ * fingerprint is a canonical serialization of the complete tool input plus the
+ * resolved tool name and target, so two semantically identical calls are the
+ * same key and a changed edit payload starts a new sequence. Keys are sorted
+ * recursively so JSON key order can never create or hide a loop.
+ */
+function canonicalInput(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalInput).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  const entries = Object.keys(record).sort().map(
+    (key) => `${JSON.stringify(key)}:${canonicalInput(record[key])}`);
+  return `{${entries.join(",")}}`;
+}
+
+export function inputFingerprint(name: string, target: string, input: unknown): string {
+  return `${name}\u0000${target}\u0000${canonicalInput(input ?? {})}`;
+}
+
+/** RM-074: edit/write loops use the watchdog-owned 8, every other tool 3. */
+export function loopThreshold(config: ObserverConfig, name: string): number {
+  return name === "edit" || name === "write"
+    ? config.editWriteLoopRepeats
+    : config.loopRepeats;
+}
+
 function applyTool(state: ObserverState, d: Delegate, name: string, target: string,
-  id: string, status: string) {
+  input: unknown, id: string, status: string) {
   const now = state.now();
   touch(d, now);
   const running = status === "running" || status === "pending"
@@ -670,8 +843,9 @@ function applyTool(state: ObserverState, d: Delegate, name: string, target: stri
     // One call, one count. `session.message.content.updated` re-delivers the
     // same tool block (same id, same target) on every delta; counting those
     // would flag thrash for a single long-running call. The loop key is the
-    // target (tool:target's discriminating half) so a late tool name cannot
-    // re-key an already-counted call.
+    // canonical input fingerprint (RM-074): a changed edit payload is progress,
+    // while identical calls accumulate. The condition key stays `thrash:<target>`
+    // so RM-070 dedupe sees one condition per target.
     const counted = Boolean(id) && d.calls.has(id);
     if (target && !counted && named) {
       if (id) {
@@ -681,13 +855,16 @@ function applyTool(state: ObserverState, d: Delegate, name: string, target: stri
           if (oldest !== undefined) d.calls.delete(oldest);
         }
       }
-      if (!d.loop || d.loop.key !== target) d.loop = { key: target, count: 0 };
+      const fingerprint = inputFingerprint(name, target, input);
+      if (!d.loop || d.loop.key !== fingerprint) {
+        d.loop = { key: fingerprint, count: 0 };
+      }
       d.loop.count += 1;
       const label = `${name}: ${target}`;
       const first = milestone(state, d, "first-tool", "first-tool",
         `first tool: ${label}`);
       if (first) state.pending.push(first);
-      if (d.loop.count >= state.config.loopRepeats) {
+      if (d.loop.count >= loopThreshold(state.config, name)) {
         const thrash = milestone(state, d, "thrash", `thrash:${target}`,
           attentionText(d, "thrash", `${name}: ${target} x${d.loop.count}`),
           { attention: true });
@@ -912,7 +1089,7 @@ export function observe(state: ObserverState, event: any): ObserveResult {
       } catch {
         input = {};
       }
-      applyTool(state, d, name, toolTarget(name, input), id, "running");
+      applyTool(state, d, name, toolTarget(name, input), input, id, "running");
       break;
     }
     case "session.tool.called": {
@@ -924,13 +1101,13 @@ export function observe(state: ObserverState, event: any): ObserveResult {
       // prevents a second count either way.
       if (id && !name && d.calls.has(id)) break;
       applyTool(state, d, name ?? "tool", toolTarget(name ?? "tool", data.input),
-        id, "running");
+        data.input, id, "running");
       break;
     }
     case "session.tool.success":
     case "session.tool.failed": {
       const name = data.name ?? data.tool ?? d.tool?.name ?? "tool";
-      applyTool(state, d, name, d.tool?.target ?? "", String(data.id ?? ""),
+      applyTool(state, d, name, d.tool?.target ?? "", {}, String(data.id ?? ""),
         type.endsWith("success") ? "completed" : "error");
       break;
     }
@@ -939,7 +1116,7 @@ export function observe(state: ObserverState, event: any): ObserveResult {
         if (!block || block.type !== "tool") continue;
         const st = block.state ?? {};
         applyTool(state, d, block.name ?? "tool", toolTarget(block.name, st.input),
-          String(block.id ?? ""), st.status ?? "unknown");
+          st.input, String(block.id ?? ""), st.status ?? "unknown");
       }
       break;
     }

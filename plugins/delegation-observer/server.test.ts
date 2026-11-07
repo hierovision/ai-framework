@@ -6,7 +6,7 @@
  * Run: node --test plugins/delegation-observer/server.test.ts
  */
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -545,4 +545,144 @@ test("an untrusted parent receives no attention wake", async () => {
   await handle.done;
   assert.equal(synthetic.length, 0);
   assert.match(handle.state.degradation, /unverified orchestrator ses_parent/);
+});
+
+// --- RM-074: durable attention claims across observer rebuilds -------------
+
+const failingCall = (id, sid = "ses_child") => ({
+  type: "session.tool.called",
+  data: { sessionID: sid, id, name: "bash", input: { command: "pytest -q" } },
+});
+
+const claimFiles = (dir) => readdirSync(dir).filter((name) => name.endsWith(".json"));
+
+test("attention condition is not redelivered after observer rebuild", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rm074-claims-"));
+  try {
+    const sequence = [
+      childCreated(),
+      failingCall("call_1"), failingCall("call_2"), failingCall("call_3"),
+    ];
+    const first = fakeCtx(sequence, {
+      get: async ({ sessionID }) => ({ id: sessionID }),
+    });
+    const a = startTestObserver(first.ctx, {
+      now: clock, intervalMs: 0, claimsDirectory: dir,
+    });
+    await a.done;
+    const wakesA = first.synthetic.filter(
+      (s) => s.metadata?.kind === "thrash" && s.resume === true);
+    assert.equal(wakesA.length, 1, "observer A wakes once for the condition");
+
+    // Fresh observer B: the child is pre-existing, then the same stream
+    // replays, followed by a distinct condition for a third delegate C.
+    const replay = [
+      ...sequence,
+      childCreated("ses_c_child", "ses_parent"),
+      {
+        type: "permission.asked",
+        data: { sessionID: "ses_c_child", action: "read", resources: ["c"] },
+      },
+    ];
+    const second = fakeCtx(replay, {
+      list: [{ id: "ses_child", parentID: "ses_parent", title: "drill", agent: "implementer" }],
+      get: async ({ sessionID }) => ({ id: sessionID }),
+    });
+    const b = startTestObserver(second.ctx, {
+      now: clock, intervalMs: 0, claimsDirectory: dir,
+    });
+    await b.done;
+    const wakesB = second.synthetic.filter(
+      (s) => s.metadata?.kind === "thrash" && s.resume === true);
+    assert.equal(wakesB.length, 0, "the persisted claim suppresses the duplicate");
+    assert.equal(wakesA.length + wakesB.length, 1, "at most one delivery");
+    assert.match(b.lastLog(), /attention dedupe skipped/);
+
+    // A distinct condition on C is a different (child, condition) pair and
+    // still follows the current wake rules.
+    const needsC = second.synthetic.filter(
+      (s) => s.metadata?.delegate === "ses_c_child"
+        && s.metadata?.kind === "needs-input");
+    assert.equal(needsC.length, 1, "a distinct condition still delivers");
+    assert.equal(needsC[0].resume, true);
+    assert.equal(needsC[0].metadata.wake, true);
+
+    const files = claimFiles(dir);
+    assert.equal(files.length, 2, "one claim per (child, condition)");
+    const claims = files.map((name) =>
+      JSON.parse(readFileSync(join(dir, name), "utf8")));
+    const claim = claims.find((entry) =>
+      entry.child === "ses_child" && String(entry.condition).startsWith("thrash:"));
+    assert.ok(claim, "the thrash claim exists");
+    assert.equal(claim.child, "ses_child");
+    assert.match(claim.condition, /^thrash:/);
+    assert.equal(claim.root, "ses_parent");
+    assert.equal(claim.wake, true);
+    assert.equal(claim.pid, process.pid);
+    assert.equal(claim.location, null);
+    assert.equal(typeof claim.at, "number");
+    const cClaim = claims.find((entry) => entry.child === "ses_c_child");
+    assert.match(cClaim?.condition ?? "", /^needs:/);
+    assert.equal(cClaim?.root, "ses_parent");
+    assert.equal(cClaim?.wake, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("untrusted attention creates no durable claim", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rm074-untrusted-"));
+  try {
+    const { ctx, synthetic } = fakeCtx([childCreated(), asked()], {
+      get: async ({ sessionID }) => ({ id: sessionID, parentID: "ses_other" }),
+    });
+    const handle = startTestObserver(ctx, {
+      now: clock, intervalMs: 0, claimsDirectory: dir,
+    });
+    await handle.done;
+    assert.equal(synthetic.length, 0);
+    assert.deepEqual(claimFiles(dir), [],
+      "an untrusted milestone never creates a claim");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a rejected synthetic releases its durable claim", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rm074-rollback-"));
+  try {
+    const sequence = [childCreated(), asked()];
+    const first = fakeCtx(sequence, {
+      syntheticFails: true,
+      get: async ({ sessionID }) => ({ id: sessionID }),
+    });
+    const a = startTestObserver(first.ctx, {
+      now: clock, intervalMs: 0, claimsDirectory: dir,
+    });
+    await a.done;
+    assert.deepEqual(claimFiles(dir), [],
+      "a rejected send rolls its claim back so a later observer can retry");
+
+    const second = fakeCtx(sequence, {
+      get: async ({ sessionID }) => ({ id: sessionID }),
+    });
+    const b = startTestObserver(second.ctx, {
+      now: clock, intervalMs: 0, claimsDirectory: dir,
+    });
+    await b.done;
+    const needs = second.synthetic.filter((s) => s.metadata?.kind === "needs-input");
+    assert.equal(needs.length, 1, "the retry delivers the attention milestone");
+    assert.equal(needs[0].resume, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a location-less observer keeps in-process dedupe and says so", async () => {
+  const { ctx } = fakeCtx([childCreated(), asked()], {
+    get: async ({ sessionID }) => ({ id: sessionID }),
+  });
+  const handle = startTestObserver(ctx, { now: clock, intervalMs: 0 });
+  await handle.done;
+  assert.match(handle.lastLog(), /durable attention dedupe unavailable/);
 });

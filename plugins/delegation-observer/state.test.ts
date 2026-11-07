@@ -16,7 +16,7 @@ import test from "node:test";
 import {
   DEFAULTS,
   TITLE_PREFIX,
-  associateSessionInfo,
+  associateSessionInfo, associateSessionList,
   attentionEnvConfig,
   createState,
   delegationTitle,
@@ -298,6 +298,12 @@ test("repeated content updates for one tool call never count as thrash", () => {
   }
   assert.equal(thrash, 1);
   assert.equal(state.delegates.get("ses_c").loop.count, DEFAULTS.loopRepeats);
+});
+
+test("the edit/write threshold is the shared supervision contract", () => {
+  assert.equal(DEFAULTS.editWriteLoopRepeats, CONTRACT.edit_write_loop_repeats);
+  assert.equal(DEFAULTS.editWriteLoopRepeats, 8);
+  assert.equal(DEFAULTS.loopRepeats, 3);
 });
 
 test("the same call seen via tool.called and content.updated counts once", () => {
@@ -1393,6 +1399,8 @@ test("the server attention env seam excludes TUI-only keys", () => {
     DELEGATION_OBSERVER_ENABLED: "0",
     DELEGATION_OBSERVER_STALL_SECONDS: "1",
     DELEGATION_OBSERVER_STALE_GRACE_SECONDS: "1",
+    DELEGATION_OBSERVER_TERMINAL_GRACE_SECONDS: "1",
+    DELEGATION_OBSERVER_FAILED_TERMINAL_GRACE_SECONDS: "1",
     DELEGATION_OBSERVER_ATTENTION_WAKE: "0",
     DELEGATION_OBSERVER_MAX_ATTENTION_WAKES: "2",
   });
@@ -1460,4 +1468,214 @@ test("a name-less tool.called waits for the content update to label the call", (
   assert.equal(labelled.milestones.filter((m) => m.kind === "first-tool").length, 1);
   assert.match(labelled.milestones[0].text, /shell: echo LOOP/);
   assert.equal(state.delegates.get("ses_c").loop.count, 1);
+});
+
+// --- RM-074: terminal aging, root attribution, progress-aware thrash --------
+
+test("observed terminal rows age by outcome", () => {
+  // Completed rows live 300 s; terminal failures live 3600 s. Both boundaries
+  // are the same `terminal.at` projection the TUI renders.
+  const state = fresh();
+  const at = clock;
+  observe(state, child("ses_done", "ses_p"));
+  observe(state, event("session.execution.succeeded", { sessionID: "ses_done" }));
+  observe(state, child("ses_bad", "ses_p"));
+  observe(state, event("session.execution.failed", { sessionID: "ses_bad" }));
+
+  clock = at + 120_000; // two minutes
+  tick(state, clock);
+  assert.equal(state.delegates.get("ses_done").stale, false);
+  assert.equal(state.delegates.get("ses_bad").stale, false);
+
+  clock = at + 300_000; // the completed boundary is inclusive
+  tick(state, clock);
+  assert.equal(state.delegates.get("ses_done").stale, true);
+  assert.equal(state.delegates.get("ses_bad").stale, false,
+    "a terminal failure keeps the longer window");
+
+  clock = at + 3_600_000;
+  tick(state, clock);
+  assert.equal(state.delegates.get("ses_bad").stale, true);
+
+  // A store-terminal row that was never observed stays immediately stale.
+  const store = fresh();
+  associateSessionInfo(store, {
+    id: "ses_store", parentID: "ses_p", title: "store terminal",
+    time: { created: clock - 60_000, updated: clock - 30_000 },
+    outcome: "succeeded",
+  });
+  assert.equal(store.delegates.get("ses_store").stale, true);
+
+  // Running/waiting and clock-classified failed rows do not age through these
+  // windows: they are current work, not terminal history.
+  const running = fresh();
+  observe(running, child("ses_run", "ses_p"));
+  advance(12 * 3_600_000);
+  tick(running, clock);
+  assert.equal(running.delegates.get("ses_run").stale, false);
+  assert.equal(running.delegates.get("ses_run").terminal, null);
+
+  const dead = fresh();
+  observe(dead, child("ses_dead", "ses_p"));
+  advance((DEFAULTS.stallSeconds * 2 + 5) * 1000);
+  tick(dead, clock);
+  assert.equal(dead.delegates.get("ses_dead").status, "failed");
+  assert.equal(dead.delegates.get("ses_dead").terminal, null,
+    "a clock-classified failed row is not a terminal failure");
+  assert.equal(dead.delegates.get("ses_dead").stale, false);
+});
+
+test("terminal grace config defaults env and option precedence", () => {
+  assert.equal(DEFAULTS.terminalGraceSeconds, 300);
+  assert.equal(DEFAULTS.failedTerminalGraceSeconds, 3600);
+
+  const fromEnv = tuiConfig({}, {
+    DELEGATION_OBSERVER_TERMINAL_GRACE_SECONDS: "90",
+    DELEGATION_OBSERVER_FAILED_TERMINAL_GRACE_SECONDS: "120",
+  });
+  assert.equal(fromEnv.terminalGraceSeconds, 90);
+  assert.equal(fromEnv.failedTerminalGraceSeconds, 120);
+
+  const kept = tuiConfig({
+    options: {
+      delegationObserver: { terminalGraceSeconds: 45, failedTerminalGraceSeconds: 60 },
+    },
+  }, {
+    DELEGATION_OBSERVER_TERMINAL_GRACE_SECONDS: "90",
+    DELEGATION_OBSERVER_FAILED_TERMINAL_GRACE_SECONDS: "120",
+  });
+  assert.equal(kept.terminalGraceSeconds, 45, "a forwarded option wins");
+  assert.equal(kept.failedTerminalGraceSeconds, 60);
+
+  const invalid = tuiConfig({}, {
+    DELEGATION_OBSERVER_TERMINAL_GRACE_SECONDS: "0",
+    DELEGATION_OBSERVER_FAILED_TERMINAL_GRACE_SECONDS: "-5",
+  });
+  assert.equal(invalid.terminalGraceSeconds, undefined);
+  assert.equal(invalid.failedTerminalGraceSeconds, undefined);
+
+  const nonNumeric = tuiConfig({}, {
+    DELEGATION_OBSERVER_TERMINAL_GRACE_SECONDS: "soon",
+    DELEGATION_OBSERVER_FAILED_TERMINAL_GRACE_SECONDS: "Infinity",
+  });
+  assert.equal(nonNumeric.terminalGraceSeconds, undefined);
+  assert.equal(nonNumeric.failedTerminalGraceSeconds, undefined);
+
+  const state = createState(tuiConfig({}, {
+    DELEGATION_OBSERVER_TERMINAL_GRACE_SECONDS: "90",
+  }), now);
+  assert.equal(state.config.terminalGraceSeconds, 90);
+  assert.equal(state.config.failedTerminalGraceSeconds,
+    DEFAULTS.failedTerminalGraceSeconds, "the unset key keeps its default");
+});
+
+test("bulk association resolves roots across a store rebuild", () => {
+  const sessions = [
+    { id: "ses_root_a", parentID: null, title: "root A" },
+    { id: "ses_root_b", parentID: null, title: "root B" },
+    { id: "ses_worker", parentID: "ses_root_a", title: "worker" },
+    { id: "ses_direct", parentID: "ses_root_a", title: "direct" },
+    { id: "ses_nested", parentID: "ses_worker", title: "nested" },
+    { id: "ses_vehicle", parentID: null,
+      title: "[delegate:ses_root_b] build: vehicle" },
+  ];
+  const state = fresh();
+  associateSessionList(state, sessions);
+  assert.equal(state.delegates.get("ses_direct").rootID, "ses_root_a");
+  assert.equal(state.delegates.get("ses_nested").rootID, "ses_root_a",
+    "a nested child resolves through its worker to the owning root");
+  assert.equal(state.delegates.get("ses_vehicle").rootID, "ses_root_b",
+    "a title-marked vehicle resolves through its marker");
+
+  // Rebuilding state from the same store list reproduces the same labels.
+  const rebuilt = fresh();
+  associateSessionList(rebuilt, sessions);
+  for (const id of ["ses_direct", "ses_nested", "ses_vehicle"]) {
+    assert.equal(rebuilt.delegates.get(id).rootID,
+      state.delegates.get(id).rootID, id);
+  }
+
+  // A cycle or a missing parent is unresolved — never another root.
+  const broken = fresh();
+  associateSessionList(broken, [
+    { id: "ses_root_a", parentID: null, title: "root A" },
+    { id: "ses_root_b", parentID: null, title: "root B" },
+    { id: "ses_c1", parentID: "ses_c2", title: "cycle one" },
+    { id: "ses_c2", parentID: "ses_c1", title: "cycle two" },
+    { id: "ses_orphan", parentID: "ses_missing", title: "orphan" },
+  ]);
+  assert.equal(broken.delegates.get("ses_c1").rootID, null);
+  assert.equal(broken.delegates.get("ses_c2").rootID, null);
+  assert.equal(broken.delegates.get("ses_orphan").rootID, null);
+});
+
+test("distinct edits to one file are progress not thrash", () => {
+  const state = fresh();
+  observe(state, child("ses_c", "ses_p"));
+  let thrash = 0;
+  // Eight distinct payloads: six is the reported pass, and past the edit/write
+  // cap a progress term is the only thing that keeps the counter from firing.
+  for (let i = 0; i < DEFAULTS.editWriteLoopRepeats; i += 1) {
+    const r = observe(state, contentTool("ses_c", `edit_${i}`, "edit",
+      "running", {
+        filePath: "docs/ROADMAP.md",
+        oldString: `old line ${i}`,
+        newString: `new line ${i}`,
+      }));
+    thrash += r.milestones.filter((m) => m.kind === "thrash").length;
+    advance(1_000);
+  }
+  assert.equal(thrash, 0,
+    "a changed edit payload starts a new loop sequence");
+});
+
+test("three identical failing calls thrash once", () => {
+  const state = fresh();
+  observe(state, child("ses_c", "ses_p"));
+  let thrash = 0;
+  for (let i = 0; i < 3; i += 1) {
+    const r = observe(state, toolCalled("ses_c", `bash_${i}`,
+      { command: "pytest -q" }, "bash"));
+    thrash += r.milestones.filter((m) => m.kind === "thrash").length;
+    advance(500);
+  }
+  assert.equal(thrash, 1, "the third identical call is the one thrash");
+  assert.equal(state.delegates.get("ses_c").loop.count, DEFAULTS.loopRepeats);
+});
+
+test("edit and write loops fire at eight while other tools use three", () => {
+  for (const name of ["edit", "write"]) {
+    const state = fresh();
+    observe(state, child("ses_c", "ses_p"));
+    const input = name === "edit"
+      ? { filePath: "src/a.ts", oldString: "x", newString: "y" }
+      : { filePath: "src/a.ts", content: "same payload" };
+    let thrash = 0;
+    for (let i = 0; i < DEFAULTS.editWriteLoopRepeats - 1; i += 1) {
+      const r = observe(state, contentTool("ses_c", `${name}_${i}`, name,
+        "running", input));
+      thrash += r.milestones.filter((m) => m.kind === "thrash").length;
+      advance(500);
+    }
+    assert.equal(thrash, 0, `${name}: seven identical calls are below the cap`);
+    const eighth = observe(state, contentTool("ses_c", `${name}_7`, name,
+      "running", input));
+    assert.equal(eighth.milestones.filter((m) => m.kind === "thrash").length, 1,
+      `${name}: the eighth identical call is one thrash`);
+    assert.equal(state.delegates.get("ses_c").loop.count,
+      DEFAULTS.editWriteLoopRepeats);
+  }
+
+  // Bash and every other tool keep the generic threshold.
+  const bash = fresh();
+  observe(bash, child("ses_c", "ses_p"));
+  let thrash = 0;
+  for (let i = 0; i < DEFAULTS.loopRepeats; i += 1) {
+    const r = observe(bash, toolCalled("ses_c", `bash_${i}`,
+      { command: "git status" }, "bash"));
+    thrash += r.milestones.filter((m) => m.kind === "thrash").length;
+    advance(500);
+  }
+  assert.equal(thrash, 1, "bash still fires at loopRepeats");
+  assert.equal(bash.delegates.get("ses_c").loop.count, DEFAULTS.loopRepeats);
 });

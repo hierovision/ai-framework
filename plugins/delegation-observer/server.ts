@@ -31,14 +31,15 @@
  *     (`Zg` in the 2.1.4 binary), so no package export map is involved.
  */
 
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import {
   DEFAULTS,
   type Milestone,
   type ObserverConfig,
-  associateSessionInfo,
+  associateSessionList,
   attentionEnvConfig,
   createState,
   degrade,
@@ -76,6 +77,8 @@ export function startObserver(ctx: any, options: {
   intervalMs?: number;
   config?: Partial<ObserverConfig>;
   healthFile?: string | null;
+  /** RM-074: hermetic override for the durable attention-claim directory. */
+  claimsDirectory?: string | null;
   env?: Record<string, string | undefined>;
   onHealthWrite?: (record: Record<string, unknown>) => void;
 } = {}) {
@@ -189,11 +192,80 @@ export function startObserver(ctx: any, options: {
     return entry;
   }
 
+  // --- durable attention claims (RM-074) -----------------------------------
+  //
+  // One claim per (child, condition) survives a TUI/observer rebuild. The file
+  // is created exclusively (`wx`) so two observers racing the same condition
+  // cannot both win. Content is diagnostic evidence; existence is the marker.
+  const claimsDirectory = (() => {
+    if (options.claimsDirectory) return options.claimsDirectory;
+    if (options.healthFile) return join(dirname(options.healthFile), "attention-claims");
+    const directory = ctx?.location?.directory;
+    if (!directory) return null;
+    return join(directory, ".scratch", "delegation-observer", "attention-claims");
+  })();
+  const inProcessClaims = new Set<string>();
+  let durableDedupeWarned = false;
+
+  function recordDedupeUnavailable(reason: string) {
+    if (durableDedupeWarned) return;
+    durableDedupeWarned = true;
+    log("warn", "durable attention dedupe unavailable", { reason });
+  }
+
+  function claimAttention(
+    m: { sessionID: string; parentID: string; conditionKey?: string; wake?: boolean },
+    rootID: string | undefined,
+  ): { claimed: boolean; path: string | null } {
+    const key = `${m.sessionID}\u0000${m.conditionKey ?? ""}`;
+    if (!claimsDirectory) {
+      if (inProcessClaims.has(key)) return { claimed: false, path: null };
+      inProcessClaims.add(key);
+      return { claimed: true, path: null };
+    }
+    const file = join(claimsDirectory,
+      `${createHash("sha256").update(key).digest("hex")}.json`);
+    try {
+      mkdirSync(claimsDirectory, { recursive: true });
+      writeFileSync(file, JSON.stringify({
+        child: m.sessionID,
+        root: rootID ?? m.parentID,
+        condition: m.conditionKey ?? null,
+        wake: Boolean(m.wake),
+        pid: process.pid,
+        location: ctx?.location?.directory ?? null,
+        at: Date.now(),
+      }) + "\n", { encoding: "utf8", flag: "wx" });
+      return { claimed: true, path: file };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === "EEXIST") {
+        return { claimed: false, path: file };
+      }
+      recordDedupeUnavailable(String((error as Error)?.message ?? error));
+      if (inProcessClaims.has(key)) return { claimed: false, path: null };
+      inProcessClaims.add(key);
+      return { claimed: true, path: null };
+    }
+  }
+
+  function releaseClaim(path: string | null) {
+    if (!path) return;
+    try {
+      unlinkSync(path);
+    } catch {
+      // Already gone: a rejected send must not fail teardown.
+    }
+  }
+
+  if (!claimsDirectory) {
+    recordDedupeUnavailable("no location or claims directory");
+  }
+
   const emit = async (result: {
     milestones: Array<{
       parentID: string; sessionID: string; kind: Milestone["kind"];
       text: string; description: string;
-      attention?: boolean; wake?: boolean;
+      attention?: boolean; wake?: boolean; conditionKey?: string;
     }>;
   }) => {
     for (const m of result.milestones) {
@@ -208,6 +280,31 @@ export function startObserver(ctx: any, options: {
           reason: config.attentionWake ? "cap" : "disabled",
           attentionWakes: delegate?.attentionWakes ?? 0,
           maxAttentionWakes: config.maxAttentionWakes,
+        });
+      }
+      // RM-074: one durable claim per (child, condition) after the trust and
+      // same-directory gates. Claim before sending: the remaining crash window
+      // makes this at-most-once delivery, not transactional exactly-once.
+      let claim: { claimed: boolean; path: string | null } | null = null;
+      if (isWakeKind(m.kind)) {
+        claim = claimAttention(m, parent.rootID);
+        if (!claim.claimed) {
+          log("info", "attention dedupe skipped", {
+            sessionID: m.sessionID,
+            condition: m.conditionKey ?? null,
+            kind: m.kind,
+            root: parent.rootID ?? null,
+            path: claim.path,
+          });
+          continue;
+        }
+        log("info", "attention claim recorded", {
+          sessionID: m.sessionID,
+          condition: m.conditionKey ?? null,
+          kind: m.kind,
+          root: parent.rootID ?? null,
+          wake: Boolean(m.wake),
+          path: claim.path,
         });
       }
       try {
@@ -230,6 +327,7 @@ export function startObserver(ctx: any, options: {
           },
         });
       } catch (error) {
+        releaseClaim(claim?.path ?? null);
         degrade(state, `synthetic failed: ${(error as Error)?.message ?? error}`);
         log("warn", "synthetic milestone failed", {
           sessionID: m.parentID, kind: m.kind, error: String((error as Error)?.message ?? error),
@@ -250,11 +348,13 @@ export function startObserver(ctx: any, options: {
     stallSeconds: config.stallSeconds,
     callSeconds: config.callSeconds,
     loopRepeats: config.loopRepeats,
+    editWriteLoopRepeats: config.editWriteLoopRepeats,
     generationSeconds: config.generationSeconds,
     milestoneMinIntervalSeconds: config.milestoneMinIntervalSeconds,
     attentionWake: config.attentionWake,
     maxAttentionWakes: config.maxAttentionWakes,
     healthFile: healthFile ?? null,
+    claimsDirectory: claimsDirectory ?? null,
     location: ctx?.location?.directory ?? null,
     pid: process.pid,
   });
@@ -265,20 +365,18 @@ export function startObserver(ctx: any, options: {
     try {
       const listed = await ctx.session.list();
       const sessions = Array.isArray(listed) ? listed : (listed?.data ?? []);
-      for (const info of sessions) {
-        associateSessionInfo(state, {
-          id: info.id,
-          parentID: info.parentID,
-          title: info.title,
-          agent: info.agent,
-          time: info.time,
-          // `SessionInfo.outcome` is the real 2.1.4 field. The server has no
-          // live status map (`SessionDomain` exposes no `active`), so every
-          // listed row here is discovery and needs a store outcome or an
-          // in-process event to say anything stronger than `unknown`.
-          outcome: info.outcome,
-        });
-      }
+      // `SessionInfo.outcome` is the real 2.1.4 field. The server has no live
+      // status map (`SessionDomain` exposes no `active`), so every listed row
+      // here is discovery and needs a store outcome or an in-process event to
+      // say anything stronger than `unknown`.
+      associateSessionList(state, sessions.map((info: any) => ({
+        id: info.id,
+        parentID: info.parentID,
+        title: info.title,
+        agent: info.agent,
+        time: info.time,
+        outcome: info.outcome,
+      })));
     } catch (error) {
       log("warn", "session bootstrap failed", { error: String((error as Error)?.message ?? error) });
     }

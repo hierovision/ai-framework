@@ -50,6 +50,7 @@ def contract():
         "stall_seconds": watch_agent.DEFAULT_STALL_SECONDS,
         "call_seconds": watch_agent.DEFAULT_CALL_SECONDS,
         "loop_repeats": watch_agent.DEFAULT_LOOP_REPEATS,
+        "edit_write_loop_repeats": watch_agent.EDIT_WRITE_LOOP_REPEATS,
         "generation_seconds": watch_agent.DEFAULT_GENERATION_SECONDS,
         "milestone_min_interval_seconds": 30,
         "terminal_wake_deadline_seconds": _load_observer().DEFAULT_DEADLINE,

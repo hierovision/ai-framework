@@ -262,3 +262,68 @@ rest of ADR-0015 stands.
 
 Evidence: `docs/roadmap-detail/RM-070.md` (unit, mutation and isolated live
 drill).
+
+## Amendment (2026-11-07) — signal quality: display aging, root labels, progress classification, durable claims (RM-074)
+
+The owner's 2026-11-07 reports found four signal defects while the underlying
+wake contract held: observed terminal rows never aged out, rows and toasts were
+directory-wide with no root attribution, a re-edited file was counted as thrash,
+and one attention condition could be delivered again after an observer rebuild.
+This amendment narrows Decisions 3, 4 and 5 (and the 2026-10-30 display
+narrowing); the RM-070 wake contract itself stands.
+
+1. **Terminal display windows.** An observed terminal row ages from
+   `terminal.at` by outcome: `terminalGraceSeconds` (default 300 s) for a
+   completed row, `failedTerminalGraceSeconds` (default 3600 s) for a terminal
+   failure. Both are TUI display settings carried through the existing
+   options/env seam (`DELEGATION_OBSERVER_TERMINAL_GRACE_SECONDS`,
+   `DELEGATION_OBSERVER_FAILED_TERMINAL_GRACE_SECONDS`), not supervision
+   thresholds and not part of the generated contract. Store-terminal rows never
+   observed here stay immediately stale; a clock-classified `failed` row has no
+   terminal event and does not age through these windows. The row exposes the
+   exact `terminalAt` it was classified from.
+2. **Sidebar/footer hygiene.** One eligibility projection feeds the sidebar and
+   footer: stale rows never render there, the sidebar cap stays eight delegate
+   rows, and the `N stale delegates hidden (alt+g to inspect)` accounting line
+   lives only in `session.panel`. A stale-only state renders no heading, lines
+   or footer count.
+3. **Root attribution is presentation-only.** Bootstrap (server and TUI) indexes
+   the session list and resolves a display `rootID` through `parent_id`,
+   following a run-vehicle title marker when a child has no parent; the walk is
+   bounded and cycle-safe, and a cycle/missing parent is labelled unresolved
+   rather than guessed. Sidebar lines carry the shortest unique root prefix
+   (six-character floor, lengthened on collision), the panel and toast/attention
+   titles and bodies carry the full owning root. `orchestratorID` remains the
+   immediate association: `resolveParent`, the trusted-root check, the
+   same-directory gate and the synthetic wake text are unchanged. No active-root
+   filtering and no host/plugin API addition.
+4. **Progress-aware thrash.** The loop key is a canonical fingerprint of the
+   complete tool input plus the resolved tool name and target (sorted object
+   keys), with the existing call-id guard; a changed edit payload starts a new
+   sequence. The condition key stays `thrash:<target>` for RM-070 dedupe, and a
+   successful tool status is never by itself progress. Edit/write flags at
+   `editWriteLoopRepeats` (8, owned by `watch_agent.EDIT_WRITE_LOOP_REPEATS` and
+   published through `scripts/supervision_contract.json`); other tools keep
+   `loopRepeats` (3). This names the watchdog's existing constant; it changes no
+   Python behavior.
+5. **Durable attention claims.** Wake-eligible delivery is guarded by an
+   exclusive claim file per (child, condition) under
+   `<location>/.scratch/delegation-observer/attention-claims/`, checked only
+   after the trusted-root and same-directory gates. An existing claim suppresses
+   the duplicate and logs the skip; a rejected send releases its claim; untrusted
+   and out-of-location milestones create no claim. Claim-before-send is
+   **at-most-once** delivery, not transactional exactly-once: a crash after
+   claiming and before sending loses the delivery rather than duplicating it.
+   `attentionWakes`/`maxAttentionWakes` remain per observer process. The
+   location-less fallback is in-process dedupe with a logged durability limit.
+
+**Explicitly retained:** the RM-070 wake kinds and their trusted-root and
+same-directory gates, `resume` behavior, the per-process `maxAttentionWakes`
+cap, the terminal wake as the only terminal prompt, and `session.list()`/
+host-API shapes. **Excluded:** active-root filtering, RM-072 milestone
+coalescing, claim pruning/compaction, transactional exactly-once claims, and any
+watchdog behavior change beyond naming its edit/write constant.
+
+Evidence: `docs/roadmap-detail/RM-074.md`; implementation in
+`plugins/delegation-observer/` (unit, server-rebuild and 54-proof
+mutation-check evidence).
