@@ -51,8 +51,8 @@ file — a quiet exception is never acceptable (the cardinal rule,
 
 ### Solo-owner approval exception (2026-11-03)
 
-`main` requires a pull request and the `quality-gates` + `pre-commit-check`
-checks; force-push and deletion are denied. Required approvals are 0 because
+`main` requires a pull request and the `quality-gates`, `pre-commit-check`, and
+`dependency-audit` checks; force-push and deletion are denied. Required approvals are 0 because
 the owner is the only engineer on this repository and GitHub does not count
 the author's own approval. Compensating controls: required CI, secret scanning
 + push protection, Dependabot alerts + security updates, and CodeQL default
