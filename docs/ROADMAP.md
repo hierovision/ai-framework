@@ -1,7 +1,7 @@
 ---
 title: ai-framework Roadmap
 established: 2026-08-28
-last_triaged: 2026-11-06
+last_triaged: 2026-11-07
 rubric: impact-urgency   # switched from priority-1-5-composite on 2026-10-11 (RM-053 contract); prior scores preserved per row
 threshold: null   # no cut threshold in effect
 sources:
@@ -10,12 +10,13 @@ sources:
   - "triage sessions (user directives; dated in row Sources)"
   - "consumer handoff: Stonegate/paragon-learning-network (2026-10-09; two documents in ~/repos/temp — roadmap-structure + exec-operating-system)"
   - "plan follow-up blocks (pending RM-028 ingestion)"
+  - ".opencode/plans/fix-consumer-security-exposure.md (Phase 2/3 residuals; 2026-11-07)"
   - "planner landscape dossier 2026-10-16 (.scratch/landscape-dossier-2026-10-16.md; five candidates vs the as-if-done framework)"
 ---
 
 # ai-framework Roadmap
 
-> Last triaged: 2026-11-06 · Rubric: impact-urgency (1–3 each; Score = Impact × Urgency) · Schema per skills/triaging-requirements/references/roadmap-format.md (merged 2026-10-11, PR #111)
+> Last triaged: 2026-11-07 · Rubric: impact-urgency (1–3 each; Score = Impact × Urgency) · Schema per skills/triaging-requirements/references/roadmap-format.md (merged 2026-10-11, PR #111)
 
 ## Summary
 
@@ -52,12 +53,12 @@ scoring uses the Rex Black rubric.
 - Detail files: per-ID provenance at docs/roadmap-detail/<ID>.md (relocated byte-exact 2026-10-11; owner ruling: no massive detail in the roadmap). Referenced from each row's Notes; consumed at design passes; pruned by the quarterly ALM review.
 - "plan" = `docs/maturity-plan.md`; issue refs = `hierovision/ai-framework#NN`.
 
-## Priority order (1–40)
+## Priority order (1–42)
 One list per horizon, rank order. Every line: `[ID](detail) (score) —
 title`. IDs link to that row's full record in `docs/roadmap-detail/`.
 Score = Impact × Urgency. `— in progress` marks the row under work.
 
-### Now (19)
+### Now (21)
 
 - [RM-016](docs/roadmap-detail/RM-016.md) (6) — Eval-harness independence — sanitized skill staging
 - [RM-018](docs/roadmap-detail/RM-018.md) (6) — Next.js + Supabase stack reference for `designing-architecture`
@@ -67,6 +68,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 - [RM-042](docs/roadmap-detail/RM-042.md) (6) — Model-policy checker CI hardening — offline suite + consumer-checker tests
 - [RM-066](docs/roadmap-detail/RM-066.md) (6) — Roadmap contract coherence — ordering + five more spec conflicts (consumer conformance scan)
 - [RM-074](docs/roadmap-detail/RM-074.md) (6) — Delegation observer signal quality — scope, thrash, terminal aging, sidebar hygiene
+- [RM-075](docs/roadmap-detail/RM-075.md) (6) — Consumer security hardening — Phase 2 per-consumer remediation and handoff briefs
 - [RM-034](docs/roadmap-detail/RM-034.md) (4) — Plan body carries in-scope policy decisions (cold-executable plan-format)
 - [RM-036](docs/roadmap-detail/RM-036.md) (4) — Align implementing-features Step 11 with the git-workflow push/PR contract
 - [RM-037](docs/roadmap-detail/RM-037.md) (4) — Scoped-slice plan maintenance: History + plan-staging ownership
@@ -77,6 +79,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 - [RM-054](docs/roadmap-detail/RM-054.md) (4) — Session-guard multi-wave scope, long-lived budget default, watch exit + kill-authority notes
 - [RM-065](docs/roadmap-detail/RM-065.md) (4) — Status ownership belongs to the delivering PR — triage closure cross-ref
 - [RM-072](docs/roadmap-detail/RM-072.md) (4) — Delegation observer milestone noise — coalesce routine milestones in the TUI strip
+- [RM-076](docs/roadmap-detail/RM-076.md) (4) — Consumer security hardening — Phase 3 continuous detection
 - [RM-035](docs/roadmap-detail/RM-035.md) (2) — Cite exact ADR filenames in plans and dispatch prompts
 
 
@@ -121,6 +124,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 | RM-042 | Model-policy checker CI hardening — offline suite + consumer-checker tests | — | Now | tooling | 2 | 3 | 6 | open | The model-policy tools run inside quality-gates with a failing fixture naming the offending binding. | — | plan follow-up `go-first-model-bindings` (merged #96) | fired 2026-10-04 (scripts shipped without a CI slot or tests). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-042.md. |
 | RM-066 | Roadmap contract coherence — ordering + five more spec conflicts (consumer conformance scan) | — | Now | self-improvement | 3 | 2 | 6 | proposed | The shipped triage skill, roadmap-format, and checker are mutually coherent (one ordering rule, a defined proposed→open transition, one meaning for review) and a consumer can produce a conforming roadmap. | — | hierovision/ai-framework#113; consumer conformance scan 2026-10-12/13 (Stonegate-Software/paragon-learning-network) | fired 2026-10-12/13 (six conflicts: ordering, proposed→open, review meaning, Done-migration path, checker usability, section layout); same family as RM-053/RM-057 — the contract landed but the skill/format/checker were not brought along. detail: docs/roadmap-detail/RM-066.md |
 | RM-074 | Delegation observer signal quality — scope, thrash, terminal aging, sidebar hygiene | — | Now | observability | 2 | 3 | 6 | open | In a directory with two root sessions, the sidebar shows only actionable or ≤5-min-old terminal delegates attributed to their root (no hidden-count line), six distinct edits to one file raise zero thrash, and three identical failing calls still raise exactly one. | — | owner reports 2026-11-07 (two sessions); `plugins/delegation-observer/state.ts:363,684–698`; `view.ts:82–84,136–147`; `server.ts:200–220,266` | fired 2026-11-07: false thrash x3 on one healthy edit pass, five completed delegates at 12–15h in the strip plus "29 stale delegates hidden", and thrash toasts in every session. Four defects: terminal aging (observed terminal rows never stale), scope (`session.list()` unfiltered; toasts directory-wide), classification (target-keyed counter, no progress term), delivery (duplicate wake for one target). RM-072 is the strip-coalescing sibling. detail: docs/roadmap-detail/RM-074.md |
+| RM-075 | Consumer security hardening — Phase 2 per-consumer remediation and handoff briefs | — | Now | integration | 3 | 2 | 6 | open | Every known consumer's exposure is fixed, dated-accepted, or decommissioned, and each of the five isolated per-repo passes leaves a verification record. | — | owner directive 2026-11-07; `.opencode/plans/fix-consumer-security-exposure.md`; RM-073 detail; `SECURITY.md` | fired 2026-11-06 (RM-073 done; Phase 2 downstream gate). Impact 3: five consumers retain exposures; Urgency 2: Phase 0 contained live credentials and Phase 1 landed propagation controls. detail: docs/roadmap-detail/RM-075.md |
 | RM-034 | Plan body carries in-scope policy decisions (cold-executable plan-format) | — | Now | self-improvement | 2 | 2 | 4 | open | A cold implementer executes an in-scope user-frozen policy phase from the plan body alone. | — | RM-031 candidate `phase-policy-detail-not-in-plan` (`.scratch/skill-gap-analysis/subagent-issues.md`, 2026-09-27) | fired 2026-09-27; plan-policy-into-body rule (RM-034). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-034.md. |
 | RM-036 | Align implementing-features Step 11 with the git-workflow push/PR contract | — | Now | self-improvement | 2 | 2 | 4 | open | Skill body and git-workflow state ONE push/PR contract; an implement pass lands branch + PR unprompted. | — | RM-031 candidate `implementer-stops-before-push-pr`; `reference/git-workflow.md` §Commit discipline / §Push, PR, merge | fired 2026-09-27 (pass ended local-only). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-036.md. |
 | RM-037 | Scoped-slice plan maintenance: History + plan-staging ownership | — | Now | self-improvement | 2 | 2 | 4 | open | A scoped-slice pass records plan History and states who stages the tracked plan file. | — | RM-031 candidate `plan-file-maintenance-skipped-in-scoped-execution` (`.scratch/skill-gap-analysis/subagent-issues.md`, 2026-09-27) | fired 2026-09-27. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-037.md. |
@@ -131,6 +135,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 | RM-054 | Session-guard multi-wave scope, long-lived budget default, watch exit + kill-authority notes | — | Now | self-improvement | 2 | 2 | 4 | open | A new wave is supervised cleanly after a historical failure in the same tree; long-lived sessions are not aborted by the budget; --watch exits; kill authority documented or accepted. | — | paragon handoff 2026-10-09 appendix (§C); session `ses_ef8102f5dffevLUPFG0feyKAX8`; family of RM-045/RM-047/048 | fired 2026-10-09/10 (paragon guard appendix); (1)–(2) hermetic red-first tests, (3)–(4) documented contracts. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-054.md. |
 | RM-065 | Status ownership belongs to the delivering PR — triage closure cross-ref | — | Now | self-improvement | 2 | 2 | 4 | proposed | The delivering PR owns status (same-PR closure per reference/git-workflow.md §Roadmap closure); the triage skill cites that rule and never gates status transitions. | — | hierovision/ai-framework#112; consumer handoff 2026-10-12 (paragon status-lifecycle); paragon fix PR #41 (`a5553b3`) | fired 2026-10-12 (paragon drifted: two Done-in-fact items sat Open-on-paper between passes); correction is a citation cross-ref in SKILL.md Step 7 + roadmap-format.md — no behavior change. detail: docs/roadmap-detail/RM-065.md |
 | RM-072 | Delegation observer milestone noise — coalesce routine milestones in the TUI strip | — | Now | observability | 2 | 2 | 4 | open | A multi-delegate session shows at most one strip line per delegate per meaningful state change; routine milestones stop producing standalone lines, while attention and terminal milestones remain visible. | — | owner report 2026-11-06 (two-subagent session) | fired 2026-11-06 (15+ `delegation-observer milestone` lines with no state/value); fix belongs in the observer's emission/coalescing or the TUI strip; RM-069/RM-070 semantics unchanged. detail: docs/roadmap-detail/RM-072.md. |
+| RM-076 | Consumer security hardening — Phase 3 continuous detection | — | Now | tooling | 2 | 2 | 4 | open | The next consumer-security sweep is a repeatable, CI-gated command with byte-identical offline output and a complete disposition register. | — | owner directive 2026-11-07; `.opencode/plans/fix-consumer-security-exposure.md`; RM-073 detail; `SECURITY.md` | fired 2026-11-06 (RM-073 done; plan OQ16's separate Phase 3 design gate). Impact 2: repeatable fleet detection; Urgency 2: the next sweep must be CI-gated. Original AC1–AC4/AC11 + `security.yml`. detail: docs/roadmap-detail/RM-076.md |
 | RM-035 | Cite exact ADR filenames in plans and dispatch prompts | — | Now | self-improvement | 1 | 2 | 2 | open | Plans and dispatch prompts cite exact ADR filenames — zero glob-recovery on first read. | — | RM-031 candidate `adr-reference-by-number-not-path` (`.scratch/skill-gap-analysis/subagent-issues.md`, 2026-09-27) | fired 2026-09-27. prev: 4 (priority-1-5-composite); detail: docs/roadmap-detail/RM-035.md. |
 
 ## Next (dated/near — opportunities in validation)
@@ -174,7 +179,7 @@ None (threshold: null).
 
 ## Done
 
-Newest first; 34 closed of 74. The table carries the one-line
+Newest first; 34 closed of 76. The table carries the one-line
 
 | ID | Title | Outcome | Horizon | Category | Impact | Urgency | Score | Status | Success measure | Blocked-by | Sources | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -235,6 +240,8 @@ Resolved 2026-10-09 — Decision 5 (user call): **RM-011 — first review dated.
 
 ## Triage log
 
+- **2026-11-07** — RM-076 added for consumer-security Phase 3 continuous detection: the plan's original AC1–AC4/AC11, advisory snapshot, deterministic offline sweep, disposition and handoff checkers, per-repo audit posture, and weekly `security.yml`. Now, score 4 (Impact 2 × Urgency 2); trigger fired 2026-11-06 when RM-073 completed and OQ16's separate Phase 3 design gate opened. Open 41 → 42 (34 done of 76); detail: docs/roadmap-detail/RM-076.md.
+- **2026-11-07** — RM-075 added for consumer-security Phase 2: five isolated per-consumer remediation passes and handoff briefs with exact versions, commands, and verification. Now, score 6 (Impact 3 × Urgency 2); trigger fired 2026-11-06 when RM-073 completed. Phase 0 contained the live credentials and Phase 1 landed the framework controls, so the remaining consumer exposures do not inherit Phase 1's acute urgency. Open 40 → 41 (34 done of 75); detail: docs/roadmap-detail/RM-075.md.
 - **2026-11-07** — RM-074 added from the owner's reports during a two-root session: false `thrash` on one healthy multi-edit pass (same-target counter, no progress term), five completed delegates at 12–15h still listed as live plus `29 stale delegates hidden`, thrash toasts surfaced in every session (directory-wide), and a duplicate wake for one target. Observability, score 6; RM-072 is the strip-coalescing sibling. Open 39 → 40 (34 done of 74); detail: docs/roadmap-detail/RM-074.md.
 - **2026-11-07** — RM-041 CLOSED by its own delete clause D1 ([PR #154](https://github.com/hierovision/ai-framework/pull/154)). `python3 scripts/model-liveness-check.py` reports zero live `jev-*` IDs in the Zen catalog, so the trigger-gated Jev advisory evaluation is stale: the evaluation doc was deleted and the row moved Later→Done. No trigger ever fired — no ADR, no spend approval, no `scripts/jev_decide.py`. detail: docs/roadmap-detail/RM-041.md. Open 40 → 39 (34 done of 73).
 - **2026-11-06** — RM-073 CLOSED ([PR #144](https://github.com/hierovision/ai-framework/pull/144), `feat/rm-073-consumer-security-phase-1`): Phase 1 P1-1…P1-11 delivered — main-only secret-bearing eval on the `eval` environment, pattern redaction, eval child-env allowlist, auth-store read-root removal, untrusted-content fence, pinned/contained skill deps, hash-pinned CI, Dependabot + owner-run posture checker, install manifest, V1 plugin pin removed, consumer fleet record. Verification: the plan's full Phase 1 list green; quality-gates, pre-commit-check and dependency-audit green on the PR and `evals` correctly skipped there. Owner residuals: move `OPENCODE_API_KEY`/`DEEPSEEK_API_KEY` into the `eval` environment and delete the repo copies, prove a green main eval, write the live host manifest post-merge. Open 41 → 40 (33 done of 73).
