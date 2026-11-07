@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { associateSessionInfo, createState, observe, tick } from "./state.ts";
+import { associateSessionInfo, associateSessionList, createState, observe, tick } from "./state.ts";
 import {
   associationGap,
   createControls,
@@ -16,9 +16,11 @@ import {
   footerStatus,
   isChildSession,
   isLiveStatus,
+  panelHistoryLine,
   projectDelegate,
   readLiveMap,
   readStatusSnapshot,
+  rootLabels,
   selectableRows,
   sidebarLines,
   visibleRows,
@@ -323,10 +325,10 @@ test("historical rows collapse to one line and never claim to be running", () =>
   assert.ok(rows.filter((r) => r.stale).every((r) => r.status !== "running"),
     "a discovered row is never rendered as running");
   const lines = sidebarLines(rows, 8);
-  assert.equal(lines.length, 2, "one live line plus one collapsed stale line");
+  assert.equal(lines.length, 1, "the sidebar shows live work only");
   assert.match(lines[0], /implementer/);
   assert.match(lines[0], /running: starting/);
-  assert.equal(lines[1], "4 stale delegates hidden");
+  assert.equal(panelHistoryLine(rows), "4 stale delegates hidden (alt+g to inspect)");
   assert.equal(footerStatus(rows), "delegates 1 · 1 running");
 });
 
@@ -431,7 +433,7 @@ test("stale rows are not selectable and not actionable", async () => {
   assert.equal(byId.focus.enabled, true, "viewing history stays possible");
 });
 
-test("an all-stale set reports the collapsed count in the footer", () => {
+test("an all-stale set keeps its count only in the panel", () => {
   clock = 1_000_000;
   const state = createState({}, now);
   for (const [id, hours] of [["ses_h1", 20], ["ses_h2", 19]]) {
@@ -442,8 +444,163 @@ test("an all-stale set reports the collapsed count in the footer", () => {
   }
   const rows = visibleRows(state, clock);
   assert.equal(rows.length, 2);
-  assert.equal(footerStatus(rows), "2 stale delegates hidden");
-  assert.deepEqual(sidebarLines(rows, 8), ["2 stale delegates hidden"]);
+  assert.equal(footerStatus(rows), "", "the footer never carries history accounting");
+  assert.deepEqual(sidebarLines(rows, 8), []);
+  assert.equal(panelHistoryLine(rows), "2 stale delegates hidden (alt+g to inspect)");
   assert.deepEqual(selectableRows(rows), []);
   assert.equal(footerStatus([]), "");
+});
+
+// --- RM-074: terminal aging, sidebar hygiene, root attribution --------------
+
+test("terminal visibility uses terminal at and outcome grace", () => {
+  clock = 1_000_000;
+  const state = createState({}, now);
+  const observedTerminal = (id, type) => {
+    observe(state, {
+      type: "session.created",
+      data: { sessionID: id, parentID: "ses_p", title: id, agent: "implementer" },
+    });
+    observe(state, { type, data: { sessionID: id } });
+  };
+  observedTerminal("ses_done", "session.execution.succeeded");
+  observedTerminal("ses_bad", "session.execution.failed");
+  const at = clock;
+
+  clock = at + 120_000;
+  tick(state, clock);
+  let rows = visibleRows(state, clock);
+  assert.equal(rows.find((r) => r.sessionID === "ses_done")?.stale, false,
+    "a two-minute-old completion is present");
+  assert.equal(rows.find((r) => r.sessionID === "ses_bad")?.stale, false);
+
+  clock = at + 300_000;
+  tick(state, clock);
+  rows = visibleRows(state, clock);
+  assert.equal(rows.find((r) => r.sessionID === "ses_done")?.stale, true,
+    "five minutes after terminal.at the completion is history");
+  assert.equal(rows.find((r) => r.sessionID === "ses_bad")?.stale, false);
+
+  clock = at + 3_600_000;
+  tick(state, clock);
+  rows = visibleRows(state, clock);
+  assert.equal(rows.find((r) => r.sessionID === "ses_bad")?.stale, true,
+    "a terminal failure keeps its longer window");
+
+  // A twelve-hour-old observed completion never renders.
+  const old = createState({}, now);
+  observe(old, {
+    type: "session.created",
+    data: { sessionID: "ses_ancient", parentID: "ses_p", title: "ancient", agent: "implementer" },
+  });
+  observe(old, { type: "session.execution.succeeded", data: { sessionID: "ses_ancient" } });
+  clock += 12 * 3_600_000;
+  tick(old, clock);
+  assert.deepEqual(sidebarLines(visibleRows(old, clock), 8), []);
+});
+
+test("terminal at is projected without fabrication", () => {
+  const state = seeded();
+  let row = projectDelegate(state.delegates.get("ses_child"), clock);
+  assert.equal(row.terminalAt, null, "a running row has no terminal timestamp");
+  clock += 1_000;
+  observe(state, {
+    type: "session.execution.succeeded",
+    data: { sessionID: "ses_child" },
+  });
+  row = projectDelegate(state.delegates.get("ses_child"), clock);
+  assert.equal(row.terminal, "completed");
+  assert.equal(row.terminalAt, clock);
+});
+
+test("sidebar hides stale rows and keeps history in the panel", () => {
+  clock = 1_000_000;
+  const state = createState({}, now);
+  associateSessionInfo(state, {
+    id: "ses_old", parentID: "ses_p", title: "history", agent: "implementer",
+    time: { created: clock - 20 * 3_600_000, updated: clock - 19 * 3_600_000 },
+  });
+  observe(state, {
+    type: "session.created",
+    data: { sessionID: "ses_now", parentID: "ses_p", title: "current", agent: "implementer" },
+  });
+  observe(state, {
+    type: "session.created",
+    data: { sessionID: "ses_recent", parentID: "ses_p", title: "just done", agent: "reviewer" },
+  });
+  observe(state, { type: "session.execution.succeeded", data: { sessionID: "ses_recent" } });
+  clock += 120_000;
+  tick(state, clock);
+
+  const rows = visibleRows(state, clock);
+  const lines = sidebarLines(rows, 8);
+  assert.equal(lines.length, 2, "live work plus the recent completion");
+  assert.equal(lines.some((line) => line.includes("history")), false);
+  assert.doesNotMatch(lines.join("\n"), /stale delegates hidden/,
+    "the sidebar carries signals, not history accounting");
+  assert.equal(panelHistoryLine(rows), "1 stale delegates hidden (alt+g to inspect)");
+  assert.equal(footerStatus(rows), "delegates 2 · 1 running · 1 completed");
+});
+
+test("stale only state has no sidebar or footer count", () => {
+  clock = 1_000_000;
+  const state = createState({}, now);
+  for (const id of ["ses_h1", "ses_h2"]) {
+    associateSessionInfo(state, {
+      id, parentID: "ses_p", title: id,
+      time: { created: clock - 20 * 3_600_000, updated: clock - 19 * 3_600_000 },
+    });
+  }
+  const rows = visibleRows(state, clock);
+  assert.deepEqual(sidebarLines(rows, 8), []);
+  assert.equal(footerStatus(rows), "");
+  assert.equal(panelHistoryLine(rows), "2 stale delegates hidden (alt+g to inspect)");
+});
+
+test("rows carry their owning root label", () => {
+  clock = 1_000_000;
+  const state = createState({}, now);
+  associateSessionList(state, [
+    { id: "ses_aaaa", parentID: null, title: "root A" },
+    { id: "ses_bbbb", parentID: null, title: "root B" },
+    { id: "ses_worker", parentID: "ses_aaaa", title: "worker",
+      time: { created: clock - 60_000, updated: clock - 30_000 } },
+    { id: "ses_direct", parentID: "ses_aaaa", title: "direct", agent: "implementer",
+      time: { created: clock - 60_000, updated: clock - 30_000 } },
+    { id: "ses_nested", parentID: "ses_worker", title: "nested", agent: "implementer",
+      time: { created: clock - 60_000, updated: clock - 30_000 } },
+    { id: "ses_vehicle", parentID: null,
+      title: "[delegate:ses_bbbb] build: vehicle", agent: "build",
+      time: { created: clock - 60_000, updated: clock - 30_000 } },
+  ]);
+  const rows = visibleRows(state, clock);
+  const nested = rows.find((row) => row.sessionID === "ses_nested");
+  const vehicle = rows.find((row) => row.sessionID === "ses_vehicle");
+  assert.equal(nested.rootID, "ses_aaaa");
+  assert.equal(vehicle.rootID, "ses_bbbb");
+
+  const labels = rootLabels(rows);
+  assert.equal(labels.get("ses_aaaa"), "ses_aa",
+    "the shortest unique prefix of the listed roots");
+  assert.equal(labels.get("ses_bbbb"), "ses_bb");
+
+  const lines = sidebarLines(rows, 8);
+  assert.ok(lines.some((line) => line.includes("[ses_aa]")), lines.join("\n"));
+  assert.ok(lines.some((line) => line.includes("[ses_bb]")), lines.join("\n"));
+  assert.ok(lines.every((line) => line.length <= 64));
+});
+
+test("a single listed root keeps a readable prefix", () => {
+  clock = 1_000_000;
+  const state = createState({}, now);
+  associateSessionList(state, [
+    { id: "ses_root_long", parentID: null, title: "root" },
+    {
+      id: "ses_child", parentID: "ses_root_long", title: "work", agent: "implementer",
+      time: { created: clock - 60_000, updated: clock - 30_000 },
+    },
+  ]);
+  const labels = rootLabels(visibleRows(state, clock));
+  assert.equal(labels.get("ses_root_long").length >= 6, true,
+    "a lone root does not collapse to a one-character label");
 });

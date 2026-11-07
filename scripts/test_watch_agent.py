@@ -142,6 +142,44 @@ def test_loop_and_blocking_detection():
     assert an["blocking_waits"], an
 
 
+def test_edit_write_loop_threshold():
+    """RM-074 AC7: the edit/write class has its own named cap (8) while every
+    other tool keeps the caller's generic loop_repeats (3). Re-editing one file
+    is normal iteration until the identical call repeats enough times."""
+    def edit_parts(count):
+        return [
+            (i * 1_000, {"type": "tool", "tool": "edit",
+                         "state": {"status": "completed",
+                                   "input": {"filePath": "docs/ROADMAP.md",
+                                             "oldString": "same",
+                                             "newString": "same"}}})
+            for i in range(1, count + 1)
+        ]
+
+    assert watch.EDIT_WRITE_LOOP_REPEATS == 8
+    seven = watch.analyze_session(None, edit_parts(7), call_seconds=300,
+                                  loop_repeats=3)
+    assert [k for k, _ in seven["loops"] if k.startswith("edit:")] == [], seven["loops"]
+    eight = watch.analyze_session(None, edit_parts(8), call_seconds=300,
+                                  loop_repeats=3)
+    edit_loops = [v for k, v in eight["loops"] if k.startswith("edit:")]
+    assert edit_loops and edit_loops[0] >= watch.EDIT_WRITE_LOOP_REPEATS, \
+        eight["loops"]
+
+    bash_parts = [
+        (i * 1_000, {"type": "tool", "tool": "bash",
+                     "state": {"status": "completed",
+                               "input": {"command": "echo hi"}}})
+        for i in range(1, 4)
+    ]
+    bash = watch.analyze_session(None, bash_parts, call_seconds=300,
+                                 loop_repeats=3)
+    assert any(k == "bash:echo hi" for k, _ in bash["loops"]), bash["loops"]
+    assert not any(v >= 8 for k, v in bash["loops"] if k.startswith("bash:")), \
+        bash["loops"]
+
+
+
 def test_completed_result_not_stalled():
     """AC5: an analysis reporting a completed result (non-empty final text
     followed by the terminal `step-finish` marker, no in-flight call) yields

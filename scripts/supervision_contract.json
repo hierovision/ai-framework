@@ -4,8 +4,15 @@
   "stall_seconds": 240,
   "call_seconds": 300,
   "loop_repeats": 3,
+  "edit_write_loop_repeats": 8,
   "generation_seconds": 600,
   "milestone_min_interval_seconds": 30,
   "terminal_wake_deadline_seconds": 300,
-  "statuses": ["running", "waiting", "warning", "failed", "completed"]
+  "statuses": [
+    "running",
+    "waiting",
+    "warning",
+    "failed",
+    "completed"
+  ]
 }

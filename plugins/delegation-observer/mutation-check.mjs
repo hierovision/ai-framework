@@ -80,39 +80,33 @@ const MUTATIONS = [
     id: "archived-after-live",
     why: "archived must outrank the live map",
     file: "state.ts",
-    from:
-      "  if (d.archived) return true;\n"
-      + "  if (d.terminal) return d.provenance !== \"observed\";\n"
-      + "  if (d.provenance === \"observed\") return false;\n"
-      + "  if (isActive(state, d.sessionID)) return false;\n",
-    to:
-      "  if (d.terminal) return d.provenance !== \"observed\";\n"
-      + "  if (d.provenance === \"observed\") return false;\n"
-      + "  if (isActive(state, d.sessionID)) return false;\n"
-      + "  if (d.archived) return true;\n",
+    from: "  if (d.archived) return true;\n",
+    to: "  if (d.archived) return !isActive(state, d.sessionID);\n",
     expect: "an archived session is stale even when the live map calls it running",
   },
   {
     id: "archived-after-observed",
     why: "archived must outrank observed provenance on the clock refresh",
     file: "state.ts",
-    from:
-      "  if (d.archived) return true;\n"
-      + "  if (d.terminal) return d.provenance !== \"observed\";\n"
-      + "  if (d.provenance === \"observed\") return false;\n",
-    to:
-      "  if (d.terminal) return d.provenance !== \"observed\";\n"
-      + "  if (d.provenance === \"observed\") return false;\n"
-      + "  if (d.archived) return true;\n",
+    from: "  if (d.archived) return true;\n",
+    to: '  if (d.archived) return d.provenance !== "observed";\n',
     expect: "archive after start hides an observed row, unarchive restores it",
   },
   {
-    id: "drop-stale-collapse",
-    why: "history collapses to one line instead of a wall of rows",
+    id: "sidebar-includes-stale",
+    why: "stale rows are collapsed history and never render in the strip",
     file: "view.ts",
-    from: "  if (stale > 0) lines.push(`${stale} stale delegates hidden`);\n",
-    to: "",
-    expect: "historical rows collapse to one line and never claim to be running",
+    from:
+      "export function eligibleRows(rows: DelegateRow[]): DelegateRow[] {\n"
+      + "  const list = rows ?? [];\n"
+      + "  return list.filter((row) => !row.stale);\n"
+      + "}",
+    to:
+      "export function eligibleRows(rows: DelegateRow[]): DelegateRow[] {\n"
+      + "  const list = rows ?? [];\n"
+      + "  return list;\n"
+      + "}",
+    expect: "sidebar hides stale rows and keeps history in the panel",
   },
   {
     id: "select-stale-rows",
@@ -446,6 +440,74 @@ const MUTATIONS = [
     from: "      if (id && !name && d.calls.has(id)) break;",
     to: "      if (id && d.calls.has(id)) break;",
     expect: "one headless call seen through input events and a name-less tool.called counts once",
+  },
+  // RM-074: terminal aging, root attribution, progress-aware thrash and
+  // durable attention claims. Each guard turns its named test red.
+  {
+    id: "observed-terminal-never-ages",
+    why: "an observed terminal row ages from terminal.at by outcome",
+    file: "state.ts",
+    from:
+      "  if (d.terminal) {\n"
+      + "    if (d.provenance !== \"observed\") return true;\n"
+      + "    const grace = d.terminal.outcome === \"failed\"\n"
+      + "      ? state.config.failedTerminalGraceSeconds\n"
+      + "      : state.config.terminalGraceSeconds;\n"
+      + "    return now - d.terminal.at >= grace * 1000;\n"
+      + "  }\n",
+    to: "  if (d.terminal) return d.provenance !== \"observed\";\n",
+    expect: "observed terminal rows age by outcome",
+  },
+  {
+    id: "root-uses-immediate-parent",
+    why: "the display root resolves through the whole chain, not the immediate parent",
+    file: "state.ts",
+    from: "    d.rootID = resolved;\n",
+    to: "    d.rootID = d.orchestratorID;\n",
+    expect: "bulk association resolves roots across a store rebuild",
+  },
+  {
+    id: "loop-ignores-input-fingerprint",
+    why: "a loop key includes the complete tool input, not just the target",
+    file: "state.ts",
+    from: "  return `${name}\\u0000${target}\\u0000${canonicalInput(input ?? {})}`;\n",
+    to: "  return `${name}\\u0000${target}`;\n",
+    expect: "distinct edits to one file are progress not thrash",
+  },
+  {
+    id: "edit-write-uses-generic-loop-cap",
+    why: "edit/write loops use the watchdog-owned 8, other tools keep 3",
+    file: "state.ts",
+    from:
+      "  return name === \"edit\" || name === \"write\"\n"
+      + "    ? config.editWriteLoopRepeats\n"
+      + "    : config.loopRepeats;\n",
+    to: "  return config.loopRepeats;\n",
+    expect: "edit and write loops fire at eight while other tools use three",
+  },
+  {
+    id: "wake-claim-ignored-on-rebuild",
+    why: "an existing durable claim suppresses the duplicate synthetic",
+    file: "server.ts",
+    from: "        if (!claim.claimed) {\n",
+    to: "        if (false) {\n",
+    expect: "attention condition is not redelivered after observer rebuild",
+  },
+  {
+    id: "untrusted-creates-claim",
+    why: "trust and location gates run before any claim is created",
+    file: "server.ts",
+    from: "      if (!parent.trusted) continue;\n",
+    to: "      if (false) continue;\n",
+    expect: "untrusted attention creates no durable claim",
+  },
+  {
+    id: "rejected-send-keeps-claim",
+    why: "a rejected synthetic releases its claim so a later observer can retry",
+    file: "server.ts",
+    from: "        releaseClaim(claim?.path ?? null);\n",
+    to: "        /* claim retained */\n",
+    expect: "a rejected synthetic releases its durable claim",
   },
 ];
 
