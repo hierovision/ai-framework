@@ -52,13 +52,14 @@ scoring uses the Rex Black rubric.
 - Detail files: per-ID provenance at docs/roadmap-detail/<ID>.md (relocated byte-exact 2026-10-11; owner ruling: no massive detail in the roadmap). Referenced from each row's Notes; consumed at design passes; pruned by the quarterly ALM review.
 - "plan" = `docs/maturity-plan.md`; issue refs = `hierovision/ai-framework#NN`.
 
-## Priority order (1–40)
+## Priority order (1–41)
 One list per horizon, rank order. Every line: `[ID](detail) (score) —
 title`. IDs link to that row's full record in `docs/roadmap-detail/`.
 Score = Impact × Urgency. `— in progress` marks the row under work.
 
-### Now (18)
+### Now (19)
 
+- [RM-073](docs/roadmap-detail/RM-073.md) (9) — Consumer security hardening — Phase 1 framework propagation controls — in progress
 - [RM-016](docs/roadmap-detail/RM-016.md) (6) — Eval-harness independence — sanitized skill staging
 - [RM-018](docs/roadmap-detail/RM-018.md) (6) — Next.js + Supabase stack reference for `designing-architecture`
 - [RM-019](docs/roadmap-detail/RM-019.md) (6) — Empty-result guard for the runtime-validation `council-ux` consult path
@@ -113,6 +114,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 
 | ID | Title | Outcome | Horizon | Category | Impact | Urgency | Score | Status | Success measure | Blocked-by | Sources | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| RM-073 | Consumer security hardening — Phase 1 framework propagation controls | — | Now | self-improvement | 3 | 3 | 9 | in-progress | The secret-bearing eval path is main-only (fork and same-repo PRs cannot reach the provider keys); redaction, the child-env allowlist, the auth-store read-root removal, pinned skill deps, and hash-pinned CI are verified. | — | owner directive 2026-10-25; Phase 0 closed 2026-11-06; plan `.opencode/plans/fix-consumer-security-exposure.md` (rev 2026-11-06) | fired 2026-10-25 (consumer sweep); Phase 1 of the plan; the eval-per-change `evals` job currently runs same-repo PR-head code with provider keys; P1-1 makes it main-only. Phase 2 consumer handoffs and Phase 3 sweep tooling remain. detail: docs/roadmap-detail/RM-073.md. |
 | RM-016 | Eval-harness independence — sanitized skill staging | — | Now | evaluation | 3 | 2 | 6 | open | A re-run sourcing-external-skills suite shows zero answer-key reads with unchanged pass/fail — no weakened assertions. | — | 2026-09-28 triage (session) | fired 2026-09-28 (all 7 fresh-agent runs read the answer key); fix belongs in the behavioral runner. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-016.md. |
 | RM-018 | Next.js + Supabase stack reference for `designing-architecture` | — | Now | self-improvement | 2 | 3 | 6 | open | A Next.js + Supabase design pass selects the dedicated stack reference — no Vue-reference hand-translation. | — | hierovision/ai-framework#29; PLN design pass 2026-09-27 | fired 2026-09-27; re-anchored to paragon-learning-network (Decision 1, 2026-10-09). prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-018.md. |
 | RM-019 | Empty-result guard for the runtime-validation `council-ux` consult path | — | Now | self-improvement | 2 | 3 | 6 | open | A runtime-validation pass records its consult outcome (clean / fallback / skip) — no silent lens loss. | — | RM-017 review 2026-09-28 | fired 2026-09-28 (RM-017 review); apply the RM-017 rule to the council-ux runtime path. prev: 3 (priority-1-5-composite); detail: docs/roadmap-detail/RM-019.md. |
@@ -233,6 +235,7 @@ Resolved 2026-10-09 — Decision 5 (user call): **RM-011 — first review dated.
 
 ## Triage log
 
+- **2026-11-06** — RM-073 added (Phase 1 of the consumer security plan; Phase 0 closed 2026-11-06): framework propagation controls (fork guard/eval environment, pattern redaction, eval env allowlist, auth-store read root, untrusted-content fence, pinned skill deps, hash-pinned CI, posture/dependabot, install manifest, V1 plugin removal, consumer fleet record). Now, score 9; detail: docs/roadmap-detail/RM-073.md. Open 40 → 41 (31 done of 72).
 - **2026-11-06** — RM-072 added from the owner's report during a two-subagent session: 15+ `delegation-observer milestone` strip lines with no state/value. Now, score 4; detail: docs/roadmap-detail/RM-072.md. Open 39 → 40 (31 done of 71).
 
 - **2026-11-01** — eval-harness stall fix opened unmerged at [PR #139](https://github.com/hierovision/ai-framework/pull/139) (`fix/eval-stall-lane-fallback`). Incident date 2026-10-31: [PR #138](https://github.com/hierovision/ai-framework/pull/138)'s `evals (designing-architecture, core)` job (run 41234368868, job 124635016575) recorded three Go-lane stalls with a first stdout line at 5916/3723/3268 ms, then 240 s of silence, and retried the degraded lane instead of switching. Root cause: `_error_signature` collapsed every zero-event stall to `no events`, which `is_provider_classed_error` rejects, so neither `_note_provider_death` nor the per-eval trigger could fire. Fix (2026-11-01): a stall signs as `stall (first line <N>ms)` (lane class, provider-classed) or `stall (no first line)` (launch/env, not a lane class); the transient-attempt, fresh-retry and terminal death records of a stall run all carry `lane-degradation-evidence:` before one `lane-switch:` record to `deepseek/deepseek-flash`. The same PR fixes the report's lane cover (`scripts/eval-report.py`): both key sources — the record `eval` field and the legacy switch string — are shape-validated against `<skill>#<id>`, so a class label or an incomplete token is not counted in any path (record field, string, mixed union, lane-row display, `by_eval` grouping; a mixed-class switch over 6 evals reads 33.3% instead of 50%), and the cover comes from the `eval` key on the marked death records, so a truncated switch detail (512-char cap; 60 long keys over 114 evals reads 52.6%, not 14.0%) cannot hide the escalation. The same pass hardened the pre-existing `by_eval` grouping, which keyed any `eval` field without validation (a malformed field formed a fake infra bucket); the threshold and the report schema are unchanged. No roadmap row (incident fix, not schedulable work); Open unchanged.

@@ -57,6 +57,7 @@ OBSERVE_SCRIPTS = os.path.join(SKILLS_ROOT, "observing-runs", "scripts")
 if OBSERVE_SCRIPTS not in sys.path:
     sys.path.insert(0, OBSERVE_SCRIPTS)
 import log_run  # RM-001 single source of truth (AC2)
+import redact  # RM-073 P1-2: pattern redaction shared with the run log
 
 # Repo-root scripts/ (quarantine.py lives there per the plan's Files to Create).
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
@@ -293,13 +294,15 @@ def _redact(text):
     2026-09-28: extracted from `_persist_event_streams` so server-log capture
     (stderr) passes through the same redaction as event streams — error text
     can echo env values.
+
+    RM-073 P1-2 (2026-11-06): the three-value match is now pattern-based (the
+    shared `redact` module: `sk-`, `xoxb-`, `ghp_`, `github_pat_`,
+    `sb_secret_`, `AKIA…`, PEM blocks) and additionally masks the values of
+    the provider keys this process owns — including
+    `OPENCODE_CONFIG_CONTENT`, which can embed a key.
     """
-    out = text or ""
-    for env_key in ("DEEPSEEK_API_KEY", "OPENCODE_API_KEY", "OPENCODE_GO_API_KEY"):
-        secret = os.environ.get(env_key)
-        if secret and secret in out:
-            out = out.replace(secret, "***")
-    return out
+    values = redact.env_secret_values()
+    return redact.redact(text, values=values)
 
 
 def assert_behavior(expected, output):
@@ -1192,16 +1195,46 @@ def _copy_fixture_files(tmp, skill, files, skills_root=None):
     return copied
 
 
-def sandbox_env(environ):
-    """Child env with CI workspace hints removed (RM-021, 2026-10-03).
+# RM-073 P1-3 (2026-11-06): the eval child env is an ALLOWLIST, not a
+# GITHUB_*/RUNNER_* deny-list. The deny-list handed the agent every other
+# credential the runner process held (cloud, Slack, Supabase, GitHub tokens).
+# `BEVAL_*` is deliberately absent: the runner's own config stays in the
+# parent. `XDG_*` is allowed because the workflow's generated config root and
+# the per-run state/cache dirs arrive through it.
+SANDBOX_ALLOW_EXACT = frozenset({
+    "PATH",
+    "HOME",
+    "PWD",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "SHELL",
+    "USER",
+    "LOGNAME",
+    "OPENCODE_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "OPENCODE_LOG_LEVEL",
+    "OPENCODE_DB",
+    "OPENCODE_CONFIG_CONTENT",
+})
+SANDBOX_ALLOW_PREFIXES = ("XDG_",)
 
-    `GITHUB_*`/`RUNNER_*` hand the agent absolute host paths (the checkout)
-    to probe; sessions that followed them were auto-rejected as
-    `external_directory` and ended with 0 writes. Credentials
-    (`OPENCODE_API_KEY`, `OPENCODE_CONFIG_CONTENT`), PATH, and HOME stay.
+
+def sandbox_env(environ):
+    """Child env built from an allowlist (RM-073 P1-3, 2026-11-06).
+
+    Only the keys the agent needs to run survive: PATH/HOME/PWD/TMPDIR, the
+    locale basics, every `XDG_*` root (the workflow's generated config root
+    plus the per-run state/cache dirs), and the OpenCode/provider keys the
+    runner intentionally passes. `GITHUB_*`/`RUNNER_*` workspace hints are
+    dropped as before, along with every other credential in the parent env
+    (`AWS_*`, `AZURE_*`, `SLACK_*`, `SUPABASE_*`, `GH_TOKEN`, `GITHUB_TOKEN`)
+    and the runner's own `BEVAL_*` configuration.
     """
     return {k: v for k, v in environ.items()
-            if not (k.startswith("GITHUB_") or k.startswith("RUNNER_"))}
+            if k in SANDBOX_ALLOW_EXACT or k.startswith(SANDBOX_ALLOW_PREFIXES)}
 
 
 def eval_timeout(e, environ):

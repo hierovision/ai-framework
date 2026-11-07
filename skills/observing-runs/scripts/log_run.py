@@ -33,6 +33,9 @@ SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 # repo root = skills/observing-runs/scripts -> observing-runs -> skills -> repo
 # (THREE levels up; the pre-2026-09-16 code took two and landed at skills/).
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(SCRIPT_DIR)))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+import redact  # RM-073 P1-2: pattern redaction is shared with the eval runner
 DEFAULT_LOGS_DIR = os.environ.get("OBSERVE_LOG_DIR", os.path.join(REPO_ROOT, "logs"))
 
 # Fields that MUST be present in the caller's record (no safe default).
@@ -95,11 +98,18 @@ def validate_record(rec):
 
 
 def build_record(rec):
-    """Return a complete, well-formed record (fills defaults)."""
+    """Return a complete, well-formed record (fills defaults).
+
+    RM-073 P1-2: `detail` is free text and is redacted before persistence.
+    The schema is unchanged — only the value is masked.
+    """
     out = {}
     for f, allowed in FIELD_TYPES.items():
         if f in rec and rec[f] is not None:
             out[f] = rec[f]
+    if out.get("detail"):
+        out["detail"] = redact.redact(
+            out["detail"], values=redact.env_secret_values())
     out.setdefault("ts", utc_now_iso())
     out.setdefault("run_id", str(uuid.uuid4()))
     out.setdefault("skill", None)

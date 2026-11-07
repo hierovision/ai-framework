@@ -11,6 +11,12 @@
 #   Layer 2 pre-push    -> optional local advisory run (--no-quarantine)
 #   Layer 3 this file   -> marker-selected evals on pull_request / push to main
 #
+# Trust boundary (RM-073 P1-1, 2026-11-06): the `evals` job executes
+# checked-out branch code with provider credentials. It therefore NEVER runs
+# on a pull_request (fork OR same-repo): the job is gated to `push` on `main`
+# and draws its keys from the `eval` environment, whose branch policy is
+# `main`. The PR path keeps the no-secret `pre-commit-check` and `plan` jobs.
+#
 # Marker selection (RM-003 pass 4, AC6/AC12):
 #   - a skill change runs that skill's `"default": true` canary (fallback:
 #     first eval in file order) via `--default --skill <skill>`.
@@ -62,7 +68,7 @@ jobs:
         with:
           node-version: "24"
       - name: Install pyyaml (validate_skill.py dependency)
-        run: pip3 install --quiet pyyaml
+        run: python3 -m pip install --require-hashes -r scripts/ci-requirements.txt
       - name: Validate hook installer syntax
         run: bash -n scripts/install-hooks.sh
       - name: Install and exercise the pre-commit hook
@@ -89,7 +95,7 @@ jobs:
       - name: Setup Python
         run: |
           python3 --version
-          pip3 install --quiet pyyaml
+          python3 -m pip install --require-hashes -r scripts/ci-requirements.txt
 
       - name: Determine changed files
         id: changed
@@ -207,7 +213,12 @@ jobs:
   # surfaces the regression in 2-3 min.
   evals:
     needs: plan
-    if: needs.plan.outputs.matrix != '[]'
+    # RM-073 P1-1: main-only. `pull_request` (including same-repo PRs) must
+    # never start this job — it runs PR-head or branch code with the provider
+    # keys. The provider keys are `eval` environment secrets, not repository
+    # secrets; the environment's branch policy is `main`.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.plan.outputs.matrix != '[]'
+    environment: eval
     runs-on: ubuntu-latest
     # AC8: static ceiling for the whole matrix; the target is <=12 min.
     timeout-minutes: 20
@@ -228,7 +239,7 @@ jobs:
       - name: Setup Python
         run: |
           python3 --version
-          pip3 install --quiet pyyaml
+          python3 -m pip install --require-hashes -r scripts/ci-requirements.txt
 
       # opencode is NOT preinstalled on GitHub-hosted runners; the docs install
       # script is the supported path (https://opencode.ai/docs/, 2026-09-16).
@@ -263,7 +274,8 @@ jobs:
 
       - name: Run selected eval
         env:
-          # Repository-level secret ONLY; consumed by the runner, never echoed.
+          # `eval` environment secret (RM-073 P1-1) — this job is main-only.
+          # Consumed by the runner, never echoed.
           # Eval lane (user directive 2026-09-29): opencode-go flat-rate,
           # `opencode-go/deepseek-v4.1-flash` (same model as the weekly — measured 3/3
           # canary probes, 34s light / 168s heavy, cheapest adequate). See
@@ -338,7 +350,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
 
       - name: Setup Python
-        run: pip3 install --quiet pyyaml
+        run: python3 -m pip install --require-hashes -r scripts/ci-requirements.txt
 
       - name: Download per-eval logs
         # Best-effort: no per-leg artifact exists for a docs-only run.

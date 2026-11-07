@@ -1,0 +1,8 @@
+{
+  "name": "validating-ui",
+  "private": true,
+  "description": "Pinned Playwright for scripts/smoke.mjs (RM-073 P1-6)",
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

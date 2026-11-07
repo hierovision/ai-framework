@@ -11,16 +11,133 @@ REFERENCE_SRC="$REPO_DIR/reference"
 SKILLS_TARGET="${OPENCODE_SKILLS_DIR:-$HOME/.config/opencode/skills}"
 AGENTS_TARGET="${OPENCODE_AGENTS_DIR:-$HOME/.config/opencode/agents}"
 REFERENCE_TARGET="${OPENCODE_REFERENCE_DIR:-$HOME/.config/opencode/reference}"
+# RM-073 P1-9: the install manifest records what was installed, from which
+# commit, and whether the tree was dirty. `--check` compares the live tree to
+# it; `--require-clean` refuses to install from an uncommitted tree.
+MANIFEST="${OPENCODE_INSTALL_MANIFEST:-$HOME/.config/opencode/.ai-framework-install.json}"
 
 usage() {
-  echo "Usage: $0 [--uninstall]"
+  echo "Usage: $0 [--uninstall | --check | --require-clean]"
   echo "  Links skills/*/, agents/*.md and reference/ into the global opencode config:"
   echo "    $SKILLS_TARGET"
   echo "    $AGENTS_TARGET"
   echo "    $REFERENCE_TARGET"
-  echo "  Override targets with OPENCODE_SKILLS_DIR / OPENCODE_AGENTS_DIR / OPENCODE_REFERENCE_DIR."
+  echo "  Writes the install manifest: $MANIFEST"
+  echo "    {repo_path, commit, dirty, installed_at}"
+  echo "  --check         verify the manifest matches HEAD and every link exists (no writes)"
+  echo "  --require-clean refuse to install from a tree with uncommitted changes"
+  echo "  Override targets with OPENCODE_SKILLS_DIR / OPENCODE_AGENTS_DIR / OPENCODE_REFERENCE_DIR"
+  echo "  and the manifest path with OPENCODE_INSTALL_MANIFEST."
   echo "  After the supported @opencode/cli install, stage the reviewed V2 config:"
   echo "    python3 scripts/stage_opencode_config.py --backup"
+}
+
+# --- install manifest (RM-073 P1-9) ---------------------------------------
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+repo_commit() {
+  git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo "unknown"
+}
+
+repo_dirty() {
+  if ! git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    echo false
+    return 0
+  fi
+  if [ -n "$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)" ]; then
+    echo true
+  else
+    echo false
+  fi
+}
+
+manifest_write() {
+  local commit dirty installed_at
+  commit="$(repo_commit)"
+  dirty="$(repo_dirty)"
+  installed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  mkdir -p "$(dirname "$MANIFEST")"
+  cat > "$MANIFEST" <<EOF
+{
+  "repo_path": "$(json_escape "$REPO_DIR")",
+  "commit": "$(json_escape "$commit")",
+  "dirty": $dirty,
+  "installed_at": "$installed_at"
+}
+EOF
+  echo "wrote manifest $MANIFEST (commit $commit, dirty=$dirty)"
+}
+
+manifest_string() {
+  sed -n 's/^[[:space:]]*"'"$1"'":[[:space:]]*"\([^"]*\)".*/\1/p' "$MANIFEST" | head -1
+}
+
+manifest_bool() {
+  sed -n 's/^[[:space:]]*"'"$1"'":[[:space:]]*\(true\|false\).*/\1/p' "$MANIFEST" | head -1
+}
+
+check_links() {
+  local failed=0 entry name
+  for entry in "$SKILLS_SRC"/*; do
+    [ -d "$entry" ] || continue
+    [ -f "$entry/SKILL.md" ] || continue
+    name="$(basename "$entry")"
+    if [ ! -L "$SKILLS_TARGET/$name" ]; then
+      echo "error: missing skill link: $SKILLS_TARGET/$name" >&2
+      failed=1
+    fi
+  done
+  for entry in "$AGENTS_SRC"/*.md; do
+    [ -e "$entry" ] || continue
+    name="$(basename "$entry")"
+    if [ ! -L "$AGENTS_TARGET/$name" ]; then
+      echo "error: missing agent link: $AGENTS_TARGET/$name" >&2
+      failed=1
+    fi
+  done
+  if [ ! -L "$REFERENCE_TARGET" ]; then
+    echo "error: missing reference link: $REFERENCE_TARGET" >&2
+    failed=1
+  fi
+  return "$failed"
+}
+
+check_install() {
+  if [ ! -f "$MANIFEST" ]; then
+    echo "error: no install manifest at $MANIFEST — run $0 first" >&2
+    return 1
+  fi
+  local failed=0 recorded_path recorded_commit recorded_dirty head
+  recorded_path="$(manifest_string repo_path)"
+  recorded_commit="$(manifest_string commit)"
+  recorded_dirty="$(manifest_bool dirty)"
+  head="$(repo_commit)"
+  if [ "$recorded_path" != "$REPO_DIR" ]; then
+    echo "error: manifest repo_path '$recorded_path' != '$REPO_DIR'" >&2
+    failed=1
+  fi
+  if [ "$recorded_commit" != "$head" ]; then
+    echo "error: manifest commit $recorded_commit != HEAD $head (re-run $0)" >&2
+    failed=1
+  fi
+  if [ "$recorded_dirty" != "false" ]; then
+    echo "error: manifest records a dirty install (re-run $0 from a clean commit)" >&2
+    failed=1
+  fi
+  check_links || failed=1
+  if [ "$failed" -eq 0 ]; then
+    echo "OK: install manifest matches HEAD $head and every link exists"
+  fi
+  return "$failed"
+}
+
+require_clean() {
+  if [ "$(repo_dirty)" = "true" ]; then
+    echo "error: $REPO_DIR has uncommitted changes; --require-clean refuses to install (commit or stash first)" >&2
+    return 1
+  fi
 }
 
 # Remove symlinks in $target that point under $src (this repo).
@@ -45,6 +162,10 @@ uninstall() {
   uninstall_dir "$SKILLS_SRC" "$SKILLS_TARGET"
   uninstall_dir "$AGENTS_SRC" "$AGENTS_TARGET"
   uninstall_dir "$REPO_DIR" "$REFERENCE_TARGET"
+  if [ -f "$MANIFEST" ]; then
+    rm "$MANIFEST"
+    echo "removed manifest $MANIFEST"
+  fi
 }
 
 # Validate an agent's native V2 frontmatter: the ID is path-derived, so a
@@ -129,10 +250,13 @@ install() {
     ln -s "$REFERENCE_SRC" "$REFERENCE_TARGET"
     echo "linked reference"
   fi
+  manifest_write
 }
 
 case "${1:-}" in
   --uninstall) uninstall ;;
+  --check) check_install ;;
+  --require-clean) require_clean && install ;;
   -h|--help) usage ;;
   "") install ;;
   *) usage >&2; exit 1 ;;

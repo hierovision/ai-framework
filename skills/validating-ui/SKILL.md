@@ -72,6 +72,13 @@ Runtime dirs: `.opencode/smoke/` (journey modules), `.opencode/evidence/`
 are **runtime artifacts, gitignored by default** (the library's
 `.gitignore` ignores `.opencode/`); never commit them.
 
+**Dependency resolution.** `smoke.mjs` imports `playwright`; ESM resolves it
+from the skill's own real location (not the consumer project, and not
+`NODE_PATH`, which ESM ignores). Install the tracked exact pin once per
+checkout with `npm ci --prefix skills/validating-ui`. Never create a
+cross-repo `node_modules` symlink or install ad hoc into the framework
+checkout.
+
 **Net discipline (R1):** console **errors AND warnings AND pageerrors**
 block the run (exit non-zero) unless the message matches an allowlist
 entry. Dev-mode framework warnings can carry runtime defects that

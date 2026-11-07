@@ -49,7 +49,7 @@
 // fixture so the classification + report-emission logic can be unit-checked
 // WITHOUT a real browser install).
 // ---------------------------------------------------------------------------
-export { runAudit, buildReport, classifyImpact, wcagScFromTags, routeForRule, MANUAL_CHECKLIST, CONFORMANCE_TAGS, SCHEMA_VERSION }
+export { runAudit, buildReport, classifyImpact, wcagScFromTags, routeForRule, MANUAL_CHECKLIST, CONFORMANCE_TAGS, SCHEMA_VERSION, readAxeCoreSource }
 
 const SCHEMA_VERSION = '1.0'
 
@@ -562,7 +562,7 @@ async function main() {
     process.exit(o.help ? 0 : 1)
   }
   const { default: pw } = await import('playwright').catch(() => ({ default: null }))
-  if (!pw) { process.stderr.write('audit: cannot import playwright (resolution gap); for a browser-free run pass a canned axeResults via the importable API, or install/copy playwright + axe-core next to the skill.\n'); process.exit(1) }
+  if (!pw) { process.stderr.write('audit: cannot import playwright (resolution gap); for a browser-free run pass a canned axeResults via the importable API, or install the pinned deps: npm ci --prefix skills/auditing-accessibility\n'); process.exit(1) }
   const axeSource = await readAxeCoreSource()
   const chromiumLaunchOptions = process.env.AUDIT_CHROMIUM_EXECUTABLE
     ? { executablePath: process.env.AUDIT_CHROMIUM_EXECUTABLE, headless: true }
@@ -577,33 +577,42 @@ async function main() {
   process.stdout.write(`verdict: ${res.verdict}  rollup: ${JSON.stringify(res.severity_rollup)}  violations: ${res.violations}\n`)
 }
 
-// Resolve the axe-core UMD bundle. The skill dir is symlinked into the global
-// skills path, so a project-local axe-core will not be found from the
-// script's own location — mirror the capturing-ui-evidence playwright
-// resolution guidance: (a) NODE_PATH=<project>/node_modules; (b) install
-// axe-core into the skill dir once; (c) copy audit.mjs + axe-core into the
-// project. A `_canned: true` axeResults path bypasses this for the no-browser
-// objective self-check.
+// Resolve the axe-core UMD bundle (RM-073 P1-6, 2026-11-06).
+//
+// Resolution order, and ONLY this order:
+//   1. AXE_CORE_PATH — an explicit operator override.
+//   2. the skill's own pinned install
+//      (skills/auditing-accessibility/node_modules/axe-core), resolved from
+//      THIS module's real location.
+//
+// The process CWD is never consulted. The old candidates
+// (`path.resolve('node_modules/axe-core/...')`) let a consumer checkout's
+// node_modules — a different version, or a poisoned copy — win over the
+// skill's pin. `NODE_PATH` is likewise not consulted. Install the pin with
+// `npm ci --prefix skills/auditing-accessibility`; a `_canned: true`
+// axeResults path bypasses this for the no-browser objective self-check.
 let AXE_BUNDLE_CACHE = null
 async function readAxeCoreSource() {
   if (AXE_BUNDLE_CACHE) return AXE_BUNDLE_CACHE
   const fs = await import('node:fs/promises')
   const path = await import('node:path')
+  const url = await import('node:url')
+  const moduleDir = path.dirname(url.fileURLToPath(import.meta.url))
+  const skillRoot = path.resolve(moduleDir, '..')
   const candidates = [
     process.env.AXE_CORE_PATH,
-    path.resolve('node_modules/axe-core/axe.min.js'),
-    path.resolve('node_modules', 'axe-core', 'axe.min.js'),
+    path.join(skillRoot, 'node_modules', 'axe-core', 'axe.min.js'),
   ].filter(Boolean)
   for (const c of candidates) {
     try { AXE_BUNDLE_CACHE = await fs.readFile(c, 'utf8'); return AXE_BUNDLE_CACHE } catch {}
   }
   try {
-    const url = await import('node:url')
-    const mod = await import(url.pathToFileURL(path.resolve('node_modules/axe-core/package.json')).href)
-    const p = path.resolve('node_modules/axe-core', mod.main || 'axe.js')
+    const mod = await import(url.pathToFileURL(
+      path.join(skillRoot, 'node_modules', 'axe-core', 'package.json')).href)
+    const p = path.join(skillRoot, 'node_modules', 'axe-core', mod.main || 'axe.js')
     AXE_BUNDLE_CACHE = await fs.readFile(p, 'utf8'); return AXE_BUNDLE_CACHE
   } catch {}
-  throw new Error('audit: axe-core UMD bundle not resolvable (set AXE_CORE_PATH, or NODE_PATH=<project>/node_modules, or install axe-core next to the skill)')
+  throw new Error('audit: axe-core UMD bundle not resolvable (set AXE_CORE_PATH, or run npm ci --prefix skills/auditing-accessibility)')
 }
 
 function parseAcceptedFile(p) {
@@ -650,8 +659,8 @@ function helpText() {
     '                         {rule_id,target,justification,date}',
     '',
     'env:',
-    '  AXE_CORE_PATH          path to axe-core UMD bundle',
-    '  NODE_PATH=<proj>/node_modules  resolve axe-core + playwright from project',
+    '  AXE_CORE_PATH          path to an axe-core UMD bundle (overrides the pin)',
+    '  playwright/axe-core    resolved from the skill install: npm ci --prefix skills/auditing-accessibility',
     '  AUDIT_CHROMIUM_EXECUTABLE      reuse a host/cached chromium binary',
     '',
     'The agent INVOKES this script (execute, do not reimplement). The',
