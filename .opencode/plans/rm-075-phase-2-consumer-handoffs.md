@@ -1,7 +1,7 @@
 ---
 slug: rm-075-phase-2-consumer-handoffs
 title: Deliver five isolated Phase 2 consumer security remediation handoffs
-status: draft
+status: approved
 created: 2026-11-07
 revised: [2026-11-07]
 related: [fix-consumer-security-exposure, RM-075, RM-073, RM-076]
@@ -1235,3 +1235,4 @@ trials do not prove runtime compatibility, and API readbacks do not prove a
 secret was never exposed. The plan also cannot prove direct `pln` Supabase
 project health without an approved owner-supplied read-only check. Every such
 limit must remain visible in the closure record.
+- 2026-11-07 — Owner approved the plan with all recommended defaults (RM-075/RM-076 design pass); status `draft` → `approved`.
