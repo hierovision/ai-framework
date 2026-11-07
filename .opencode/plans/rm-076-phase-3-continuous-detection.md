@@ -482,3 +482,29 @@ Inspect the run's four active audit gates and retired `pln` status, then downloa
 - 2026-11-07 — Security review of the cross-repo credential: it is an environment secret on a `main`-restricted environment, never repo-level (this repository is public), with the 90-day PAT expiry and rotation recorded when created; the GitHub App remains the acceptable alternative.
 - 2026-11-07 — UX consult skipped: no user-facing UI. No matching Vue/Next stack reference applies; generic Python/GitHub Actions planning is recorded in Open Question 8.
 - 2026-11-07 — Owner approved the plan with all recommended defaults (RM-075/RM-076 design pass); status `draft` → `approved`.
+- 2026-11-07 — Implemented P3-1…P3-9 on `feat/rm-076-phase-3-continuous-detection`
+  from `origin/main` at `b0e00d8`: inventory, deterministic offline sweep,
+  sanctioned fetcher, register/handoff checkers, three posture modes, four
+  sanitized `docs/security/` files, `security.yml`, CI wiring, fixtures, and
+  six hermetic test modules. Full Verification exits 0 (six modules, default
+  register, fixture register+sweep, determinism `cmp`/`sha256sum`, local
+  posture, yamllint, eval-workflow suite, roadmap verbatim, `git diff --check`);
+  dry-run status-delta `cmp` and the socket/sanitizer canaries pass.
+- 2026-11-07 — P3-10 conditional branch taken: the row stays **open** and no
+  `docs/ROADMAP.md` counter/horizon edit is made. RM-075's five real briefs
+  are absent (`check_security_handoffs.py` no-argument run exits 1 with
+  `BLOCKED`), and the owner-only environment secret, live posture runs, and
+  live `security.yml` dispatch are not performed. The detail file records all
+  four residuals; no brief was fabricated and the checker was not weakened.
+- 2026-11-07 — Mechanical deviations (feature unchanged): `--snapshot` was
+  added to the sweep so CI can consume the intake artifact's dated filename;
+  `--inventory`/`--register`/`--today` options make every mode testable and
+  explicit; `check_repo_posture.py` treats "no mode named" as the original
+  live `--repo hierovision/ai-framework` default; the fetcher's git-revision
+  probe requires the checkout's own `.git` so hermetic fixture directories
+  cannot inherit the surrounding worktree HEAD. The fixture register is
+  synthetic and is never the tracked register.
+- 2026-11-07 — Runtime UI validation skipped: no user-facing UI. No Vue/Next
+  stack reference applies (Open Question 8). Follow-ups: none beyond the
+  owner-only residuals recorded in `docs/roadmap-detail/RM-076.md`; record the
+  read-only credential's expiry/rotation there when it is created.
