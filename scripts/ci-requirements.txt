@@ -1,0 +1,31 @@
+# Hash-pinned Python install set for every CI workflow (RM-073 P1-7).
+#
+# Every workflow install MUST use:
+#   python3 -m pip install --require-hashes -r scripts/ci-requirements.txt
+#
+# `--require-hashes` refuses any package, version, dependency, or artifact not
+# listed here, so a compromised index or a drifting transitive dependency
+# cannot enter the gate. Regenerate deliberately (never with a floating
+# install): bump the pin, add that release's hashes, and let CI prove it.
+#
+# pyyaml  — validate_skill.py + check_roadmap_verbatim.py
+# yamllint — workflow lint
+# pathspec — yamllint's only runtime dependency
+#
+# pyyaml ships per-interpreter wheels; the CPython 3.10–3.14 manylinux x86_64
+# wheels plus the sdist cover GitHub's ubuntu-latest runners without pinning
+# the runner's Python minor version.
+pyyaml==6.0.3 \
+    --hash=sha256:9c7708761fccb9397fe64bbc0395abcae8c4bf7b0eac081e12b809bf47700d0b \
+    --hash=sha256:b8bb0864c5a28024fac8a632c443c87c5aa6f215c0b126c449ae1a150412f31d \
+    --hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc \
+    --hash=sha256:0f29edc409a6392443abf94b9cf89ce99889a1dd5376d94316ae5145dfedd5d6 \
+    --hash=sha256:c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5 \
+    --hash=sha256:00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c \
+    --hash=sha256:d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f
+yamllint==1.38.0 \
+    --hash=sha256:09e5f29531daab93366bb061e76019d5e91691ef0a40328f04c927387d1d364d \
+    --hash=sha256:fc394a5b3be980a4062607b8fdddc0843f4fa394152b6da21722f5d59013c220
+pathspec==1.1.1 \
+    --hash=sha256:17db5ecd524104a120e173814c90367a96a98d07c45b2e10c2f3919fff91bf5a \
+    --hash=sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189

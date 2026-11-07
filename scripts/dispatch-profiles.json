@@ -1,5 +1,5 @@
 {
-  "_comment": "RM-058 D4: per-agent-class least-privilege dispatch profiles. `allow_dirs` are external read roots granted through the dispatcher's generated XDG_CONFIG_HOME (ordered deny-first + allow roots; merged with explicit --allow-dirs). `worktree` is the profile default for D3's worktree dispatch (v1 ships false; an explicit --worktree <name> overrides). `timeout` is the default run budget. Class resolution: exact agent key, then `aliases`, then longest-prefix profile name (council-architecture -> council, test-writer -> test).",
+  "_comment": "RM-058 D4: per-agent-class least-privilege dispatch profiles. `allow_dirs` are external read roots granted through the dispatcher's generated XDG_CONFIG_HOME (ordered deny-first + allow roots; merged with explicit --allow-dirs). `worktree` is the profile default for D3's worktree dispatch (v1 ships false; an explicit --worktree <name> overrides). `timeout` is the default run budget. Class resolution: exact agent key, then `aliases`, then longest-prefix profile name (council-architecture -> council, test-writer -> test). RM-073 P1-4 (2026-11-06): the auth/session store ($HOME/.local/share/opencode) is NOT an allow root for any profile.",
   "aliases": {
     "vision-critic-fast": "reviewer",
     "vision-critic-final": "reviewer",
@@ -14,37 +14,55 @@
     "timeout": 600
   },
   "architect": {
-    "allow_dirs": ["$HOME/repos", "$HOME/.config/opencode", "$HOME/.local/share/opencode"],
+    "allow_dirs": [
+      "$HOME/repos",
+      "$HOME/.config/opencode"
+    ],
     "worktree": false,
     "timeout": 600
   },
   "reviewer": {
-    "allow_dirs": ["$HOME/repos", "$HOME/.config/opencode", "$HOME/.local/share/opencode"],
+    "allow_dirs": [
+      "$HOME/repos",
+      "$HOME/.config/opencode"
+    ],
     "worktree": false,
     "timeout": 600
   },
   "council": {
-    "allow_dirs": ["$HOME/repos", "$HOME/.config/opencode", "$HOME/.local/share/opencode"],
+    "allow_dirs": [
+      "$HOME/repos",
+      "$HOME/.config/opencode"
+    ],
     "worktree": false,
     "timeout": 600
   },
   "planner": {
-    "allow_dirs": ["$HOME/repos", "$HOME/.config/opencode", "$HOME/.local/share/opencode"],
+    "allow_dirs": [
+      "$HOME/repos",
+      "$HOME/.config/opencode"
+    ],
     "worktree": false,
     "timeout": 600
   },
   "implementer": {
-    "allow_dirs": ["$HOME/repos"],
+    "allow_dirs": [
+      "$HOME/repos"
+    ],
     "worktree": false,
     "timeout": 600
   },
   "test": {
-    "allow_dirs": ["$HOME/repos"],
+    "allow_dirs": [
+      "$HOME/repos"
+    ],
     "worktree": false,
     "timeout": 600
   },
   "meta-loop": {
-    "allow_dirs": ["$HOME/repos"],
+    "allow_dirs": [
+      "$HOME/repos"
+    ],
     "worktree": false,
     "timeout": 600
   }

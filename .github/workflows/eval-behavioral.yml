@@ -29,8 +29,10 @@
 #     minutes per run (6 jobs) but each is short; the weekly schedule + manual
 #     dispatch only keeps it inside the budget (see per-change-eval-sla.md).
 #   - `permissions: contents: read` — read-only is all the runner needs.
-#   - Model access uses a REPOSITORY-level secret (org-level secrets are NOT
-#     available to private Free repos). Consumed via ${{ secrets.* }}, never echoed.
+#   - Model access uses the `eval` ENVIRONMENT's secrets (RM-073 P1-1: the
+#     provider keys live on the `eval` environment so the secret-bearing job
+#     has a main-only branch policy; repository-level copies are removed).
+#     Consumed via ${{ secrets.* }}, never echoed.
 #   - Run logs uploaded as artifacts with `retention-days: 30`.
 #   - `concurrency` prevents overlapping weekly runs.
 #   - Eval lane (user directive 2026-09-29): opencode-go flat-rate,
@@ -70,6 +72,10 @@ concurrency:
 
 jobs:
   behavioral-eval:
+    # RM-073 P1-1: the provider keys are `eval` environment secrets. Declaring
+    # the environment is what makes them visible to this job and applies the
+    # environment's main-only branch policy.
+    environment: eval
     runs-on: ubuntu-latest
     # Each shard is ~50-60 min measured-weight; 150 is comfortable headroom.
     timeout-minutes: 150
@@ -98,7 +104,7 @@ jobs:
       - name: Setup Python
         run: |
           python3 --version
-          pip3 install --quiet pyyaml
+          python3 -m pip install --require-hashes -r scripts/ci-requirements.txt
 
       # opencode is NOT preinstalled on GitHub-hosted runners; pinned via npm
       # (the curl|bash path failed 403 under runner-IP rate limiting, 2026-09-20).
@@ -121,7 +127,8 @@ jobs:
 
       - name: Run shard evals (fresh agent per eval)
         env:
-          # Repository-level secret ONLY. Consumed by the runner; never echoed.
+          # `eval` environment secret (RM-073 P1-1). Consumed by the runner;
+          # never echoed.
           # Eval lane (user directive 2026-09-29): opencode-go flat-rate,
           # same model family the suite already ran — no personal API key.
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}

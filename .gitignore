@@ -44,10 +44,11 @@ __pycache__/
 # === Local agent scratch (must stay inside the repo worktree; never /tmp) ===
 .scratch/
 
-# Playwright installed into the capturing-ui-evidence skill dir per its
-# SKILL.md bootstrap (the installed skill is a symlink here) — environment
-# artifact, not library content.
-skills/capturing-ui-evidence/package*.json
+# === Skill-local npm installs (RM-073 P1-6, 2026-11-06) ===
+# `node_modules/` stays ignored (see OS/tooling noise), but the manifests and
+# lockfiles are TRACKED: they are the pin + audit surface. Install with
+# `npm ci --prefix skills/<skill>`; never an ad-hoc install into a consumer
+# checkout (see each skill's Dependency resolution section).
 
 # === Deprecated docs (removed from the repo; never track) ===
 PLAN.md

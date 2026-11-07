@@ -218,6 +218,39 @@ def test_lane_and_nested_agent_override():
         shutil.rmtree(work, ignore_errors=True)
 
 
+def test_secret_bearing_jobs_are_main_only():
+    """RM-073 P1-1 (2026-11-06): no pull_request path can reach the provider
+    keys. The `evals` job runs only on push to main, declares the `eval`
+    environment (main branch policy), and the PR jobs carry no secrets. Every
+    job in either eval workflow that references a provider secret must declare
+    `environment: eval` — otherwise removing the repository-level copies would
+    silently break it (the weekly gate included)."""
+    doc = _load(PER_CHANGE)
+    on_block = doc.get("on") or doc.get(True) or {}
+    assert "pull_request" in on_block, on_block
+    assert "push" in on_block, on_block
+    evals = doc["jobs"]["evals"]
+    assert evals.get("environment") == "eval", evals.get("environment")
+    guard = str(evals.get("if"))
+    assert "github.event_name == 'push'" in guard, guard
+    assert "pull_request" not in guard, guard
+    assert "refs/heads/main" in guard, guard
+    for name in ("pre-commit-check", "plan"):
+        job = doc["jobs"][name]
+        assert "environment" not in job, f"{name} must stay secret-free"
+        assert "secrets." not in json.dumps(job), f"{name} references a secret"
+
+    for path in (PER_CHANGE, BEHAVIORAL):
+        wdoc = _load(path)
+        for name, job in wdoc["jobs"].items():
+            blob = json.dumps(job)
+            if ("secrets.OPENCODE_API_KEY" in blob
+                    or "secrets.DEEPSEEK_API_KEY" in blob):
+                assert job.get("environment") == "eval", \
+                    f"{os.path.basename(path)}/{name} uses provider secrets without environment: eval"
+    print("PASS  secret-bearing eval jobs are main-only and use environment: eval")
+
+
 def test_report_downloads_per_artifact():
     """RM-021 (2026-10-03): actions/download-artifact v7 flattened
     pattern-matched artifacts, so same-named shard run logs overwrote and the
@@ -249,6 +282,7 @@ def main():
         test_weekly_timeout_is_150,
         test_skills_dispatch_input_wired,
         test_lane_and_nested_agent_override,
+        test_secret_bearing_jobs_are_main_only,
         test_report_downloads_per_artifact,
         test_behavioral_report_emits_lane_escalation,
     ]

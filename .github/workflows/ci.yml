@@ -64,7 +64,7 @@ jobs:
       # both shipped un-gated on 2026-09-28/29 (RM-021).
       - name: Offline unit suites (hermetic, no model calls)
         run: |
-          pip install --quiet pyyaml
+          python3 -m pip install --require-hashes -r scripts/ci-requirements.txt
           python3 skills/observing-runs/scripts/test_query.py
           python3 skills/observing-runs/scripts/test_log.py
           python3 skills/observing-runs/scripts/test_prune.py
@@ -76,6 +76,17 @@ jobs:
           python3 scripts/test_quarantine.py
           python3 scripts/test_stall_timeout.py
           python3 scripts/test_eval_workflows.py
+          # RM-073 Phase 1 hermetic suites: redaction shapes, eval child-env
+          # allowlist, auth-store read root + leaf subagent deny, pinned skill
+          # deps (poisoned-CWD axe), the untrusted-content fence, install
+          # manifest, roadmap contract.
+          python3 scripts/test_log_redaction.py
+          python3 scripts/test_eval_env.py
+          python3 scripts/test_agent_permissions.py
+          python3 scripts/test_skill_deps.py
+          node skills/refining-issue-acceptance/evals/fixtures/untrusted-content.test.mjs
+          bash scripts/test_install_sh.sh
+          python3 scripts/check_roadmap_verbatim.py
           python3 scripts/check_v2_config.py
           python3 scripts/check_v2_config.py --baseline main
           python3 scripts/check_v2_surfaces.py
@@ -120,5 +131,41 @@ jobs:
       # comments for which stylistic rules are disabled and why).
       - name: Lint workflow YAML
         run: |
-          pip install --quiet yamllint
+          python3 -m pip install --require-hashes -r scripts/ci-requirements.txt
           python3 -m yamllint -c .yamllint.yaml .github/workflows/
+
+  # RM-073 P1-6/P1-8: audit the npm surfaces this pass pins — `.opencode`
+  # (host-local: its manifest is gitignored, so the guard skips it here) and
+  # the three skill installs. The plugin trees are dependency surfaces too, but
+  # their peer/dev trees carry pre-existing advisories outside Phase 1's scope;
+  # Dependabot covers them and the follow-up bump is recorded on the PR. Keeping
+  # them out of this job keeps the gate about the pins this pass introduced.
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (node24)
+        with:
+          node-version: "24"
+      - name: Audit pinned npm surfaces (production dependency tree)
+        run: |
+          set -euo pipefail
+          audit_surface() {
+            local dir="$1"
+            if [ ! -f "$dir/package.json" ]; then
+              echo "skip $dir (no manifest)"
+              return 0
+            fi
+            if [ ! -f "$dir/package-lock.json" ]; then
+              echo "skip $dir (no lockfile — audit needs one)"
+              return 0
+            fi
+            npm ci --prefix "$dir" --omit=dev --no-audit --no-fund
+            npm audit --prefix "$dir" --omit=dev
+          }
+          audit_surface .opencode
+          audit_surface skills/capturing-ui-evidence
+          audit_surface skills/auditing-accessibility
+          audit_surface skills/validating-ui

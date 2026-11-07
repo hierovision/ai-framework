@@ -24,6 +24,18 @@ report is triaged.
 - The eval event-stream persistence path — model outputs + repo content
   are persisted as CI artifacts in a PUBLIC repo (the governance comment
   in the eval workflows); the redaction rule is the compensating control.
+- **Consumer fleet (known).** This library's propagation controls reach five
+  known consumer repos: `excel-daily-monitor`, `marvin-slack`, `pln`
+  (retired/archived 2026-10-25), `pt`/`phasetimer`, and
+  `paragon-learning-network`. An exposure that traces to a framework control
+  (`install.sh`, the eval harness, a skill script, redaction, or a dependency
+  pin) is in scope here; repo-local findings are fixed in that consumer's own
+  repo. **Sweep cadence:** a dated sweep on every framework release that
+  changes a propagation control, and at least quarterly. The 2026-10-25 sweep
+  and Phase 0 containment record live with the consumer-security plan; Phase 3
+  turns the next sweep into a repeatable CI-gated operation. Unknown public
+  consumers cannot be enumerated — the Phase 1 framework controls are what
+  protect them.
 
 ## Not in scope
 

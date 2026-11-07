@@ -10,7 +10,10 @@
 //     file/module/function leak)
 //   - --dry-run (default): print the before -> after and VALIDATION result
 //   - --apply: re-validate, then `gh issue edit` the live issue — but only
-//     after the agent has obtained explicit user confirmation (external effect)
+//     with --confirm, which the agent passes only after explicit user
+//     confirmation of the dry-run output (external effect; see
+//     reference/untrusted-content.md). Without --confirm the script refuses
+//     before any network call.
 //
 // A bad spec is never pushed: --apply refuses (exit non-zero) on validation
 // failure, and --dry-run exits non-zero on failure so evals can assert the
@@ -32,11 +35,13 @@ function parseArgs(argv) {
   const a = {
     issue: null, repo: null, refinedBody: null, title: null,
     currentBody: null, currentTitle: null, dryRun: false, apply: false,
+    confirm: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const t = argv[i];
     if (t === "--dry-run") a.dryRun = true;
     else if (t === "--apply") a.apply = true;
+    else if (t === "--confirm") a.confirm = true;
     else if (t === "--issue") a.issue = argv[++i];
     else if (t === "--repo") a.repo = argv[++i];
     else if (t === "--refined-body") a.refinedBody = argv[++i];
@@ -44,7 +49,7 @@ function parseArgs(argv) {
     else if (t === "--current-body") a.currentBody = argv[++i];
     else if (t === "--current-title") a.currentTitle = argv[++i];
     else if (t === "--help" || t === "-h") {
-      console.log("Usage: node refine-issue.mjs --refined-body <file> [--issue <n> --repo owner/name | --current-title <t> --current-body <file>] [--title <proposed>] [--dry-run|--apply]");
+      console.log("Usage: node refine-issue.mjs --refined-body <file> [--issue <n> --repo owner/name | --current-title <t> --current-body <file>] [--title <proposed>] [--dry-run|--apply --confirm]");
       process.exit(0);
     } else {
       console.error(`error: unknown arg "${t}"`);
@@ -53,6 +58,12 @@ function parseArgs(argv) {
   }
   if (!a.refinedBody) { console.error("error: --refined-body <file> is required"); process.exit(2); }
   if (!existsSync(a.refinedBody)) { console.error(`error: refined body not found: ${a.refinedBody}`); process.exit(2); }
+  // RM-073 P1-5: an external side effect needs explicit confirmation. The
+  // refusal happens before any fetch or `gh` call.
+  if (a.apply && !a.confirm) {
+    console.error("error: --apply requires --confirm — editing a live issue is an external side effect. Show the dry run to the user, then re-run with --confirm after they approve (see reference/untrusted-content.md).");
+    process.exit(2);
+  }
   // Default-safe: if neither --apply nor --dry-run is given, dry-run.
   if (!a.apply && !a.dryRun) a.dryRun = true;
   return a;

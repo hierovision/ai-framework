@@ -995,11 +995,15 @@ def test_profile_env_merge():
         assert r.rc == 0, (r.rc, r.stderr)
         allowed = _allow_set(_ext_map(dump))
         roots = [os.path.expanduser("~/repos"),
-                 os.path.expanduser("~/.config/opencode"),
-                 os.path.expanduser("~/.local/share/opencode"), extra]
+                 os.path.expanduser("~/.config/opencode"), extra]
         for d in roots:
             assert os.path.join(os.path.abspath(d), "**") in allowed, \
                 (d, allowed)
+        # RM-073 P1-4 (2026-11-06): the auth/session store is no longer an
+        # allow root for any profile — it holds credentials and session data.
+        assert os.path.join(os.path.abspath(
+            os.path.expanduser("~/.local/share/opencode")), "**") not in allowed, \
+            allowed
 
         dump2 = os.path.join(work, "env2.json")
         r2 = _run("valid", agent="test-writer", extra=["--profile", "auto",
