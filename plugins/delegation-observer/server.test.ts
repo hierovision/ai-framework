@@ -574,8 +574,17 @@ test("attention condition is not redelivered after observer rebuild", async () =
       (s) => s.metadata?.kind === "thrash" && s.resume === true);
     assert.equal(wakesA.length, 1, "observer A wakes once for the condition");
 
-    // Fresh observer B: the child is pre-existing, then the same stream replays.
-    const second = fakeCtx(sequence, {
+    // Fresh observer B: the child is pre-existing, then the same stream
+    // replays, followed by a distinct condition for a third delegate C.
+    const replay = [
+      ...sequence,
+      childCreated("ses_c_child", "ses_parent"),
+      {
+        type: "permission.asked",
+        data: { sessionID: "ses_c_child", action: "read", resources: ["c"] },
+      },
+    ];
+    const second = fakeCtx(replay, {
       list: [{ id: "ses_child", parentID: "ses_parent", title: "drill", agent: "implementer" }],
       get: async ({ sessionID }) => ({ id: sessionID }),
     });
@@ -589,9 +598,22 @@ test("attention condition is not redelivered after observer rebuild", async () =
     assert.equal(wakesA.length + wakesB.length, 1, "at most one delivery");
     assert.match(b.lastLog(), /attention dedupe skipped/);
 
+    // A distinct condition on C is a different (child, condition) pair and
+    // still follows the current wake rules.
+    const needsC = second.synthetic.filter(
+      (s) => s.metadata?.delegate === "ses_c_child"
+        && s.metadata?.kind === "needs-input");
+    assert.equal(needsC.length, 1, "a distinct condition still delivers");
+    assert.equal(needsC[0].resume, true);
+    assert.equal(needsC[0].metadata.wake, true);
+
     const files = claimFiles(dir);
-    assert.equal(files.length, 1, "one claim per child condition");
-    const claim = JSON.parse(readFileSync(join(dir, files[0]), "utf8"));
+    assert.equal(files.length, 2, "one claim per (child, condition)");
+    const claims = files.map((name) =>
+      JSON.parse(readFileSync(join(dir, name), "utf8")));
+    const claim = claims.find((entry) =>
+      entry.child === "ses_child" && String(entry.condition).startsWith("thrash:"));
+    assert.ok(claim, "the thrash claim exists");
     assert.equal(claim.child, "ses_child");
     assert.match(claim.condition, /^thrash:/);
     assert.equal(claim.root, "ses_parent");
@@ -599,6 +621,10 @@ test("attention condition is not redelivered after observer rebuild", async () =
     assert.equal(claim.pid, process.pid);
     assert.equal(claim.location, null);
     assert.equal(typeof claim.at, "number");
+    const cClaim = claims.find((entry) => entry.child === "ses_c_child");
+    assert.match(cClaim?.condition ?? "", /^needs:/);
+    assert.equal(cClaim?.root, "ses_parent");
+    assert.equal(cClaim?.wake, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

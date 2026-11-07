@@ -322,7 +322,7 @@ server build).
 ## Tests
 
 ```
-node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 152 tests
+node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 153 tests
 node ../delegation-sentinel/sentinel.test.ts           # 6 tests
 tsc -p . --noEmit
 node mutation-check.mjs                                # 54 break/restore proofs

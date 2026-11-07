@@ -130,9 +130,16 @@ export function rootLabels(rows: DelegateRow[]): Map<string, string> {
   const roots = [...new Set((rows ?? []).map((row) => row.rootID ?? "unresolved"))];
   const labels = new Map<string, string>();
   for (const root of roots) {
+    // The unresolved sentinel is a label, not a root id: render it whole so the
+    // row and the toast say exactly the same thing.
+    if (root === "unresolved") {
+      labels.set(root, root);
+      continue;
+    }
     let length = Math.min(MIN_ROOT_LABEL, root.length);
     while (length < root.length && roots.some((other) =>
-      other !== root && other.slice(0, length) === root.slice(0, length))) {
+      other !== root && other !== "unresolved"
+      && other.slice(0, length) === root.slice(0, length))) {
       length += 1;
     }
     labels.set(root, root.slice(0, length));

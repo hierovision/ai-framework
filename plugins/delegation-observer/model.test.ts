@@ -256,10 +256,10 @@ test("the event stream drives rows and attention toasts through the listener", (
     const waiting = model.liveRows().find((r) => r.sessionID === "ses_new");
     assert.equal(waiting?.status, "waiting");
     assert.match(waiting?.needsInput ?? "", /external_directory/);
-    assert.equal(calls.toasts.at(-1)?.title, "delegate needs-input — root ses_parent");
+    assert.equal(calls.toasts.at(-1)?.title, "delegate needs-input — root unresolved");
     assert.match(calls.toasts.at(-1)?.message ?? "", /ses_new/);
     assert.match(calls.toasts.at(-1)?.message ?? "", /external_directory/);
-    assert.match(calls.toasts.at(-1)?.message ?? "", /root ses_parent/);
+    assert.match(calls.toasts.at(-1)?.message ?? "", /root unresolved/);
   } finally {
     model.dispose();
     assert.equal(calls.listenersDisposed, 1, "dispose unsubscribes the listener");
@@ -761,6 +761,46 @@ test("two roots keep bootstrap and event rows attributed", () => {
     const rows = model.liveRows();
     assert.equal(rows.find((r) => r.sessionID === "ses_nested")?.rootID, "ses_aaaa");
     assert.equal(rows.find((r) => r.sessionID === "ses_vehicle")?.rootID, "ses_bbbb");
+  } finally {
+    model.dispose();
+  }
+});
+
+test("an unindexed intermediate parent leaves row and toast unresolved", () => {
+  const { ctx, calls } = mockHost({
+    sessions: [rootA(), rootB()],
+    status: () => "running",
+  });
+  const model = createTuiModel(ctx);
+  try {
+    calls.listeners[0]({
+      details: {
+        type: "session.created",
+        data: {
+          sessionID: "ses_deep", parentID: "ses_ghost",
+          title: "deep child", agent: "implementer",
+        },
+      },
+    });
+    const row = model.liveRows().find((r) => r.sessionID === "ses_deep");
+    assert.equal(row?.rootID, null,
+      "an unindexed intermediate is unresolved, not the immediate parent");
+    assert.ok(model.sidebar().some((line) => line.includes("[unresolved]")),
+      "the row label says unresolved");
+
+    calls.listeners[0]({
+      details: {
+        type: "permission.asked",
+        data: { sessionID: "ses_deep", action: "read", resources: ["x"] },
+      },
+    });
+    const toast = calls.toasts.at(-1);
+    assert.match(toast?.title ?? "", /root unresolved/);
+    assert.match(toast?.message ?? "", /root unresolved/);
+    assert.doesNotMatch(`${toast?.title} ${toast?.message}`, /ses_ghost/,
+      "the toast never falls back to the immediate parent");
+    assert.doesNotMatch(`${toast?.title} ${toast?.message}`, /ses_aaaa|ses_bbbb/,
+      "and never guesses another listed root");
   } finally {
     model.dispose();
   }

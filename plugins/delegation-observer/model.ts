@@ -222,13 +222,12 @@ export function createTuiModel(ctx: any) {
 
   /**
    * RM-074: the owning root of a milestone's TUI notice. The full root id goes
-   * into the title and body so a directory-wide signal is attributable; the
-   * server's synthetic wake text is unchanged.
+   * into the title and body so a directory-wide signal is attributable; an
+   * unresolved chain is labelled `unresolved` exactly like the row — never the
+   * immediate parent, which the row projection does not claim either.
    */
   const milestoneRoot = (milestone: any): string =>
-    state.delegates.get(milestone.sessionID)?.rootID
-      ?? milestone.parentID
-      ?? "unresolved";
+    state.delegates.get(milestone.sessionID)?.rootID ?? "unresolved";
 
   const alertFor = (milestone: any) => {
     if (!milestone.attention && milestone.kind !== "terminal") return;

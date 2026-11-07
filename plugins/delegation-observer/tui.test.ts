@@ -593,10 +593,13 @@ test("rows carry their owning root label", () => {
 test("a single listed root keeps a readable prefix", () => {
   clock = 1_000_000;
   const state = createState({}, now);
-  observe(state, {
-    type: "session.created",
-    data: { sessionID: "ses_child", parentID: "ses_root_long", title: "work", agent: "implementer" },
-  });
+  associateSessionList(state, [
+    { id: "ses_root_long", parentID: null, title: "root" },
+    {
+      id: "ses_child", parentID: "ses_root_long", title: "work", agent: "implementer",
+      time: { created: clock - 60_000, updated: clock - 30_000 },
+    },
+  ]);
   const labels = rootLabels(visibleRows(state, clock));
   assert.equal(labels.get("ses_root_long").length >= 6, true,
     "a lone root does not collapse to a one-character label");

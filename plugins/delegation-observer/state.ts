@@ -531,7 +531,7 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
   delegate = {
     sessionID,
     orchestratorID: parentID || marker?.orchestratorID || "",
-    rootID: parentID || marker?.orchestratorID || null,
+    rootID: null,
     via: parentID ? "parent" : "title",
     agent: info.agent || marker?.agent || "?",
     task: marker?.task || (info.title ?? "").trim() || "delegated task",
@@ -580,8 +580,10 @@ function associate(state: ObserverState, sessionID: string, info: SessionInfoLik
     }
   }
   state.delegates.set(sessionID, delegate);
-  const resolvedRoot = resolveRootID(state, delegate.orchestratorID);
-  if (resolvedRoot) delegate.rootID = resolvedRoot;
+  // The display root is only what the index proves. An unindexed parent or a
+  // cycle leaves it null (`unresolved`) — the row projection and the toast
+  // label then agree, and neither guesses the immediate parent (RM-074).
+  delegate.rootID = resolveRootID(state, delegate.orchestratorID);
   delegate.stale = isStale(state, delegate, now);
   return delegate;
 }
