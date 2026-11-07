@@ -13,7 +13,10 @@ Two halves, both hermetic (no network, no model calls):
     absent from the Go catalog; plus the AC3(d) probe contract: a >20s
     responder is classified not-live, the probe shape carries the documented
     endpoint + `x-opencode-session` + a bare catalog ID, protocol-unsupported
-    is not death, and the timeout can never be extended past 20s.
+    is not death, and the timeout can never be extended past 20s. The D1
+    anti-rot sentinel is exercised hermetically against fixture repos: stale
+    doc (present, no live `jev-*` IDs), dormant (absent), and valid
+    (present with a live `jev-*` ID).
 
 Run: python3 scripts/test_model_policy.py
 """
@@ -283,6 +286,49 @@ def test_hard_exclusions_cover_families():
     for allowed in ("glm-5.3-flash", "kimi-k2.7-code", "gpt-5.6-luna",
                     "mimo-v2.6-pro", "deepseek-v4.1-flash"):
         assert CHECKER.is_excluded(allowed, exclusions) is None, allowed
+
+
+# --- D1 anti-rot sentinel (plan jev-system-one-evaluation, AC8) -------------
+
+
+def _jev_doc_repo(with_doc):
+    """A fixture repo whose only content is (optionally) the Jev eval doc."""
+    root = tempfile.mkdtemp(prefix="jev-d1-")
+    _FIXTURE_ROOTS.append(root)
+    if with_doc:
+        os.makedirs(os.path.join(root, "reference"))
+        with open(os.path.join(root, CHECKER.JEV_EVAL_DOC), "w",
+                  encoding="utf-8") as fh:
+            fh.write("# Jev system-one evaluation (fixture)\n")
+    return root
+
+
+def test_d1_stale_doc_with_no_live_jev_ids_fails():
+    """D1: the doc present with zero live `jev-*` Zen IDs is stale — exactly
+    one error naming the doc and the deletion remedy."""
+    repo = _jev_doc_repo(with_doc=True)
+    errors = CHECKER.stale_evaluation_errors(
+        repo, {"glm-5.3-flash", "deepseek-v4.1-flash"})
+    assert errors == [
+        f"{CHECKER.JEV_EVAL_DOC} is present but zero live `jev-*` IDs remain "
+        f"in the Zen catalog (D1) — delete the doc + close RM-041"
+    ], errors
+
+
+def test_d1_absent_doc_is_dormant():
+    """D1: absent the doc the alarm is dormant — empty list, no crash, even
+    with a catalog that has no Jev IDs."""
+    repo = _jev_doc_repo(with_doc=False)
+    assert CHECKER.stale_evaluation_errors(repo, {"glm-5.3-flash"}) == []
+
+
+def test_d1_doc_with_live_jev_ids_is_not_stale():
+    """D1: a reintroduced doc *with* a live `jev-*` Zen ID is not stale — the
+    clause's own definition of validity."""
+    repo = _jev_doc_repo(with_doc=True)
+    errors = CHECKER.stale_evaluation_errors(
+        repo, {"glm-5.3-flash", "jev-system-one-preview"})
+    assert errors == [], errors
 
 
 # --- probe contract (AC3(d)) ------------------------------------------------
