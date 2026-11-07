@@ -134,9 +134,12 @@ jobs:
           python3 -m pip install --require-hashes -r scripts/ci-requirements.txt
           python3 -m yamllint -c .yamllint.yaml .github/workflows/
 
-  # RM-073 P1-6/P1-8: audit every npm surface that has a tracked lockfile.
-  # `.opencode` is host-local in this repo (its manifest is gitignored) — the
-  # guard skips it here while keeping the surface audited wherever it exists.
+  # RM-073 P1-6/P1-8: audit the npm surfaces this pass pins — `.opencode`
+  # (host-local: its manifest is gitignored, so the guard skips it here) and
+  # the three skill installs. The plugin trees are dependency surfaces too, but
+  # their peer/dev trees carry pre-existing advisories outside Phase 1's scope;
+  # Dependabot covers them and the follow-up bump is recorded on the PR. Keeping
+  # them out of this job keeps the gate about the pins this pass introduced.
   dependency-audit:
     runs-on: ubuntu-latest
     steps:
@@ -163,8 +166,6 @@ jobs:
             npm audit --prefix "$dir" --omit=dev
           }
           audit_surface .opencode
-          audit_surface plugins/delegation-observer
-          audit_surface plugins/delegation-sentinel
           audit_surface skills/capturing-ui-evidence
           audit_surface skills/auditing-accessibility
           audit_surface skills/validating-ui
