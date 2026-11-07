@@ -9,6 +9,9 @@
 //   pageerror   -> exit non-zero (pageerror blocks)
 //   bad-evidence-> the schema validator rejects the bundled malformed
 //                  artifact (exit non-zero)
+//   newcontext  -> the real-browser API shape works: a factory exposing
+//                  only newContext() runs clean and receives the target
+//                  as the context baseURL
 //   usage       -> the CLI contract holds: --help exits 0 with usage
 //                  text; missing required args exit 2; parseArgs maps
 //                  every flag (guards the CLI surface that runSmoke
@@ -45,11 +48,11 @@ function validateEvidence(a) {
   return { ok: true };
 }
 
-async function runState(state, log = () => {}) {
+async function runState(state, log = () => {}, factory = null) {
   const { runSmoke } = await import(SMOKE);
   const { createFakeBrowser } = await import(FAKE);
   const outDir = mkdtempSync(join(tmpdir(), "validating-ui-"));
-  const browserFactory = () => createFakeBrowser(state);
+  const browserFactory = factory || (() => createFakeBrowser(state));
   const result = await runSmoke({
     target: "http://localhost:9999",
     journey: JOURNEY,
@@ -96,6 +99,25 @@ const CHECKS = {
   "bad-evidence": async () => {
     const artifact = JSON.parse(readFileSync(BAD_EVIDENCE, "utf-8"));
     return validateEvidence(artifact).ok === false;
+  },
+  // A real Playwright Browser exposes `newContext()`, never
+  // `createBrowserContext()` — the shape the canned fake uses. This state
+  // pins the real-browser path (and the target handed to the context as
+  // baseURL) so the harness cannot regress to the fake-only API again.
+  newcontext: async (log) => {
+    const { createFakeBrowser } = await import(FAKE);
+    let seen = null;
+    const factory = () => {
+      const fake = createFakeBrowser("green");
+      return {
+        async newContext(opts) { seen = opts; return fake.createBrowserContext(opts); },
+        async close() { await fake.close(); },
+      };
+    };
+    const { result, evidence } = await runState("green", log, factory);
+    const ok = result.exitCode === 0 && evidence.net_clean === true && !!seen && seen.baseURL === "http://localhost:9999";
+    if (!ok) log(`newcontext: exit=${result.exitCode} net_clean=${evidence.net_clean} baseURL=${seen && seen.baseURL}`);
+    return ok;
   },
   usage: async (log) => {
     // Coverage-gate expansion: the CLI surface (parseArgs / usage /
