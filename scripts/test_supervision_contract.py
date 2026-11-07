@@ -42,6 +42,12 @@ def main():
     check("loop cap is the watchdog's",
           payload["loop_repeats"] == watch_agent.DEFAULT_LOOP_REPEATS,
           payload["loop_repeats"])
+    check("edit/write loop cap is the watchdog's",
+          payload["edit_write_loop_repeats"] == watch_agent.EDIT_WRITE_LOOP_REPEATS,
+          payload.get("edit_write_loop_repeats"))
+    check("edit/write loop cap is 8",
+          payload["edit_write_loop_repeats"] == 8,
+          payload.get("edit_write_loop_repeats"))
     check("generation budget is the watchdog's",
           payload["generation_seconds"] == watch_agent.DEFAULT_GENERATION_SECONDS,
           payload["generation_seconds"])

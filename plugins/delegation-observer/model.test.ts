@@ -55,9 +55,10 @@ function mockHost({
     listeners: Array<(event: any) => void>;
     listenersDisposed: number;
     slotsDisposed: number;
+    attention: any[];
   } = {
     focus: [], toasts: [], dialogs: [], commands: [], slots: [],
-    listeners: [], listenersDisposed: 0, slotsDisposed: 0,
+    listeners: [], listenersDisposed: 0, slotsDisposed: 0, attention: [],
   };
   const ctx = {
     options,
@@ -87,7 +88,7 @@ function mockHost({
         return () => { calls.slotsDisposed += 1; };
       },
     },
-    attention: { notify: async () => {} },
+    attention: { notify: async (input: any) => calls.attention.push(input) },
     keymap: {
       layer: (fn: () => any) => {
         calls.commands.push(...(fn().commands ?? []));
@@ -255,9 +256,10 @@ test("the event stream drives rows and attention toasts through the listener", (
     const waiting = model.liveRows().find((r) => r.sessionID === "ses_new");
     assert.equal(waiting?.status, "waiting");
     assert.match(waiting?.needsInput ?? "", /external_directory/);
-    assert.equal(calls.toasts.at(-1)?.title, "delegate needs-input");
+    assert.equal(calls.toasts.at(-1)?.title, "delegate needs-input — root ses_parent");
     assert.match(calls.toasts.at(-1)?.message ?? "", /ses_new/);
     assert.match(calls.toasts.at(-1)?.message ?? "", /external_directory/);
+    assert.match(calls.toasts.at(-1)?.message ?? "", /root ses_parent/);
   } finally {
     model.dispose();
     assert.equal(calls.listenersDisposed, 1, "dispose unsubscribes the listener");
@@ -711,5 +713,113 @@ test("presence is written at construction and removed on dispose", () => {
     assert.equal(model.state.connection, "disconnected");
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- RM-074: two-root attribution and sidebar projection --------------------
+
+const rootA = (time = OLD) => ({
+  id: "ses_aaaa", parentID: null, title: "root A", agent: "build",
+  time: { created: time, updated: time },
+});
+const rootB = (time = OLD) => ({
+  id: "ses_bbbb", parentID: null, title: "root B", agent: "build",
+  time: { created: time, updated: time },
+});
+const workerA = (time = OLD) => ({
+  id: "ses_worker", parentID: "ses_aaaa", title: "worker", agent: "implementer",
+  time: { created: time, updated: time },
+});
+
+test("two roots keep bootstrap and event rows attributed", () => {
+  const { ctx, calls } = mockHost({
+    sessions: [rootA(), rootB(), workerA()],
+    status: () => "running",
+  });
+  const model = createTuiModel(ctx);
+  try {
+    assert.equal(model.liveRows().find((r) => r.sessionID === "ses_worker")?.rootID,
+      "ses_aaaa");
+    calls.listeners[0]({
+      details: {
+        type: "session.created",
+        data: {
+          sessionID: "ses_nested", parentID: "ses_worker",
+          title: "nested", agent: "implementer",
+        },
+      },
+    });
+    calls.listeners[0]({
+      details: {
+        type: "session.created",
+        data: {
+          sessionID: "ses_vehicle", parentID: null,
+          title: "[delegate:ses_bbbb] build: vehicle", agent: "build",
+        },
+      },
+    });
+    const rows = model.liveRows();
+    assert.equal(rows.find((r) => r.sessionID === "ses_nested")?.rootID, "ses_aaaa");
+    assert.equal(rows.find((r) => r.sessionID === "ses_vehicle")?.rootID, "ses_bbbb");
+  } finally {
+    model.dispose();
+  }
+});
+
+test("the sidebar projection is empty for stale only rows", () => {
+  const { ctx } = mockHost({
+    sessions: [child("ses_old")],
+    status: () => "idle",
+  });
+  const model = createTuiModel(ctx);
+  try {
+    assert.equal(model.liveRows()[0]?.stale, true);
+    assert.deepEqual(model.sidebar(), []);
+  } finally {
+    model.dispose();
+  }
+});
+
+test("attention and terminal toasts name their owning root", () => {
+  const { ctx, calls } = mockHost({
+    sessions: [
+      rootA(), rootB(),
+      { id: "ses_a_child", parentID: "ses_aaaa", title: "a child", agent: "implementer",
+        time: { created: OLD, updated: OLD } },
+      { id: "ses_b_child", parentID: "ses_bbbb", title: "b child", agent: "implementer",
+        time: { created: OLD, updated: OLD } },
+    ],
+    status: () => "running",
+  });
+  const model = createTuiModel(ctx);
+  try {
+    calls.listeners[0]({
+      details: {
+        type: "permission.asked",
+        data: { sessionID: "ses_b_child", action: "read", resources: ["x"] },
+      },
+    });
+    const attentionToast = calls.toasts.at(-1);
+    assert.match(attentionToast?.title ?? "", /ses_bbbb/);
+    assert.match(attentionToast?.message ?? "", /ses_bbbb/);
+    assert.doesNotMatch(`${attentionToast?.title} ${attentionToast?.message}`,
+      /ses_aaaa/, "root B's signal is never labelled root A");
+    const attention = calls.attention.at(-1);
+    assert.match(attention?.title ?? "", /ses_bbbb/);
+    assert.match(attention?.message ?? "", /ses_bbbb/);
+
+    calls.listeners[0]({
+      details: {
+        type: "session.execution.succeeded",
+        data: { sessionID: "ses_a_child" },
+      },
+    });
+    const terminalToast = calls.toasts.at(-1);
+    assert.match(terminalToast?.title ?? "", /ses_aaaa/);
+    assert.match(terminalToast?.message ?? "", /ses_aaaa/);
+    assert.doesNotMatch(`${terminalToast?.title} ${terminalToast?.message}`,
+      /ses_bbbb/, "a root A terminal notice never names root B");
+  } finally {
+    model.dispose();
   }
 });

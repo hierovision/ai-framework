@@ -22,7 +22,7 @@ import {
   createTuiModel,
 } from "./model.ts";
 import type { TuiModel } from "./model.ts";
-import { footerStatus, sidebarLines } from "./view.ts";
+import { panelHistoryLine } from "./view.ts";
 
 export { PLUGIN_ID, TICK_MS, createTuiModel, readPluginStatus } from "./model.ts";
 
@@ -32,9 +32,9 @@ function StatusStrip(props: any) {
       <Show when={props.banner()}>
         <text>! {props.banner()}</text>
       </Show>
-      <Show when={props.rows().length > 0}>
+      <Show when={props.sidebar().length > 0}>
         <text>Delegates</text>
-        <For each={sidebarLines(props.rows(), 8)}>
+        <For each={props.sidebar()}>
           {(line) => <text>{line}</text>}
         </For>
       </Show>
@@ -44,9 +44,9 @@ function StatusStrip(props: any) {
 
 function FooterCount(props: any) {
   return (
-    <Show when={props.banner() || footerStatus(props.rows())}>
+    <Show when={props.banner() || props.footer()}>
       <text>
-        {props.banner() ? "! delegates unavailable" : footerStatus(props.rows())}
+        {props.banner() ? "! delegates unavailable" : props.footer()}
       </text>
     </Show>
   );
@@ -54,7 +54,7 @@ function FooterCount(props: any) {
 
 function DelegatePanel(props: any) {
   const live = () => props.rows().filter((row: any) => !row.stale);
-  const stale = () => props.rows().length - live().length;
+  const history = () => panelHistoryLine(props.rows());
   return (
     <box flexDirection="column" padding={1}>
       <text>Delegates — event stream</text>
@@ -65,7 +65,7 @@ function DelegatePanel(props: any) {
         {(row: any) => (
           <box flexDirection="column">
             <text>
-              {row.agent} {row.sessionID} [{row.status}] {row.phase}
+              [{row.rootID ?? "unresolved"}] {row.agent} {row.sessionID} [{row.status}] {row.phase}
             </text>
             <text>
               elapsed {row.elapsed} · quiet {row.quiet} · tok {row.tokensIn}/
@@ -76,14 +76,16 @@ function DelegatePanel(props: any) {
           </box>
         )}
       </For>
-      <Show when={stale() > 0}>
-        <text>{stale()} stale delegates hidden (alt+g to inspect)</text>
+      <Show when={history()}>
+        <text>{history()}</text>
       </Show>
       <text>
         thresholds: stall {props.state.config.stallSeconds}s · call{" "}
         {props.state.config.callSeconds}s · loop {props.state.config.loopRepeats}x
+        · edit/write {props.state.config.editWriteLoopRepeats}x
         · generation {props.state.config.generationSeconds}s · stale grace{" "}
-        {props.state.config.staleGraceSeconds}s
+        {props.state.config.staleGraceSeconds}s · terminal grace{" "}
+        {props.state.config.terminalGraceSeconds}s/{props.state.config.failedTerminalGraceSeconds}s
       </text>
     </box>
   );
@@ -91,8 +93,8 @@ function DelegatePanel(props: any) {
 
 export function createDefinition(Plugin: any) {
   return buildDefinition(Plugin, {
-    strip: (model: TuiModel) => <StatusStrip rows={model.rows} banner={model.banner} />,
-    footer: (model: TuiModel) => <FooterCount rows={model.rows} banner={model.banner} />,
+    strip: (model: TuiModel) => <StatusStrip sidebar={model.sidebar} banner={model.banner} />,
+    footer: (model: TuiModel) => <FooterCount footer={model.footer} banner={model.banner} />,
     panel: (model: TuiModel, input: any) => (
       <Show when={input?.name === "delegates"}>
         <DelegatePanel rows={model.rows} banner={model.banner} state={model.state} />

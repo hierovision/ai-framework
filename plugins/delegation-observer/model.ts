@@ -27,9 +27,11 @@ import { dirname, join } from "node:path";
 import { createSignal } from "solid-js";
 
 import {
-  associateSessionInfo,
+  applyRootAssociations,
+  associateSessionList,
   createState,
   healthPath,
+  indexSessions,
   observe,
   reconcileActive,
   parseHealthRecord,
@@ -40,9 +42,11 @@ import {
   associationGap,
   createControls,
   degradationBanner,
+  footerStatus,
   readLiveMap,
   readStatusSnapshot,
   selectableRows,
+  sidebarLines,
   visibleRows,
 } from "./view.ts";
 
@@ -172,6 +176,17 @@ export function createTuiModel(ctx: any) {
   };
   const sessionStatus = (sessionID: string) => ctx.data.session.status(sessionID);
 
+  /** The `SessionInfoLike` view of the host list (bootstrap and root refresh). */
+  const sessionInfos = () => sessionList().map((info) => ({
+    id: info?.id,
+    parentID: info?.parentID,
+    title: info?.title,
+    agent: info?.agent,
+    time: info?.time,
+    outcome: info?.outcome,
+    active: info?.active,
+  }));
+
   /**
    * Refresh the live active map — the only evidence a discovered row may use.
    * Returns false when the host could not answer, which the banner reports
@@ -194,27 +209,36 @@ export function createTuiModel(ctx: any) {
     return map.available;
   };
 
+  /** RM-074: re-resolve display roots from the current store tree. */
+  const refreshRoots = () => {
+    indexSessions(state, sessionInfos());
+    applyRootAssociations(state);
+  };
+
   const bootstrap = () => {
     refreshActive(); // fill the map first: association consults it
-    for (const info of sessionList()) {
-      associateSessionInfo(state, {
-        id: info?.id,
-        parentID: info?.parentID,
-        title: info?.title,
-        agent: info?.agent,
-        time: info?.time,
-        outcome: info?.outcome,
-        active: info?.active,
-      });
-    }
+    associateSessionList(state, sessionInfos());
   };
+
+  /**
+   * RM-074: the owning root of a milestone's TUI notice. The full root id goes
+   * into the title and body so a directory-wide signal is attributable; the
+   * server's synthetic wake text is unchanged.
+   */
+  const milestoneRoot = (milestone: any): string =>
+    state.delegates.get(milestone.sessionID)?.rootID
+      ?? milestone.parentID
+      ?? "unresolved";
 
   const alertFor = (milestone: any) => {
     if (!milestone.attention && milestone.kind !== "terminal") return;
+    const root = milestoneRoot(milestone);
+    const title = `delegate ${milestone.kind} — root ${root}`;
+    const message = `root ${root}: ${milestone.text}`;
     try {
       ctx.ui.toast.show({
-        title: `delegate ${milestone.kind}`,
-        message: milestone.text,
+        title,
+        message,
         variant: milestone.kind === "terminal" ? "success" : "warning",
       });
     } catch {
@@ -224,8 +248,8 @@ export function createTuiModel(ctx: any) {
       : milestone.kind === "terminal" ? "subagent_done" : "question";
     try {
       void ctx.attention?.notify?.({
-        title: `delegate ${milestone.kind}`,
-        message: milestone.text,
+        title,
+        message,
         sound: { name: sound },
       });
     } catch {
@@ -248,6 +272,7 @@ export function createTuiModel(ctx: any) {
   bootstrap();
   const timer = setInterval(() => {
     refreshActive();
+    refreshRoots();
     apply(tick(state));
     refreshServerHealth();
     bump();
@@ -270,6 +295,9 @@ export function createTuiModel(ctx: any) {
   // `node --test` sees fresh values instead of a value frozen at construction.
 
   const liveRows = () => visibleRows(state, Date.now());
+  /** RM-074: the sidebar and footer render one eligibility projection. */
+  const liveSidebar = () => sidebarLines(liveRows(), 8);
+  const liveFooter = () => footerStatus(liveRows());
 
   /** Sessions with their live status, for the association-gap count only. */
   const liveSessionRows = () => {
@@ -303,6 +331,8 @@ export function createTuiModel(ctx: any) {
 
   const rows = projection(version, liveRows);
   const banner = projection(version, liveBanner);
+  const sidebar = projection(version, liveSidebar);
+  const footer = projection(version, liveFooter);
 
   // --- owner actions ------------------------------------------------------
 
@@ -487,6 +517,8 @@ export function createTuiModel(ctx: any) {
     state,
     rows,
     banner,
+    sidebar,
+    footer,
     liveRows,
     liveBanner,
     refreshPlugin,
