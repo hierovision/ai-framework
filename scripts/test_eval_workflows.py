@@ -274,10 +274,48 @@ def test_behavioral_report_emits_lane_escalation():
     print("PASS  weekly report job emits the RM-056 lane escalation signal")
 
 
+def test_supply_chain_fixture_manifests_are_inert():
+    """Containment (2026-11-07): no npm manifest inside the supply-chain eval
+    fixtures is visible under its dependency-graph-scanned name. The fixtures
+    store manifests as `<name>.fixture`; the eval runner materializes them to
+    their real names only inside the per-run temp workspace."""
+    repo = os.path.dirname(HERE)
+    fixture_root = os.path.join(
+        repo, "skills", "auditing-supply-chain", "evals", "fixtures")
+    forbidden = {
+        "package.json", "package-lock.json", "npm-shrinkwrap.json",
+        "yarn.lock", "pnpm-lock.yaml",
+    }
+    offenders = []
+    for dirpath, _, filenames in os.walk(fixture_root):
+        for name in filenames:
+            if name in forbidden:
+                offenders.append(
+                    os.path.relpath(os.path.join(dirpath, name), repo))
+    assert not offenders, \
+        f"fixture manifests are dependency-graph visible: {offenders}"
+
+    evals_path = os.path.join(
+        repo, "skills", "auditing-supply-chain", "evals", "evals.json")
+    with open(evals_path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    missing = []
+    for ev in doc.get("evals", []):
+        for rel in ev.get("files", []):
+            if os.path.basename(rel) not in ("package.json", "package-lock.json"):
+                continue
+            src = os.path.join(os.path.dirname(evals_path), rel)
+            if not (os.path.isfile(src) or os.path.isfile(src + ".fixture")):
+                missing.append(rel)
+    assert not missing, f"listed manifests have no source: {missing}"
+    print("PASS  supply-chain fixture manifests are inert (.fixture only)")
+
+
 def main():
     tests = [
         test_per_change_matrix_and_aggregation,
         test_per_change_selection_flags_and_cache,
+        test_supply_chain_fixture_manifests_are_inert,
         test_artifact_pin_node24_both_workflows,
         test_weekly_timeout_is_150,
         test_skills_dispatch_input_wired,

@@ -1145,6 +1145,21 @@ def preflight_model(model):
                    f"direct-key lane — advisory only)")
 
 
+def _fixture_source(repo_root, rel_to_repo):
+    """Resolve a fixture file: the real name first, then `<name>.fixture`.
+
+    Containment (2026-11-07): npm manifests in eval fixtures are stored with a
+    `.fixture` suffix so GitHub's dependency graph and Dependabot never parse
+    them. The run workspace always receives the real filename — the suffix is
+    a repository-storage detail, never visible to the evaluated agent.
+    """
+    exact = os.path.join(repo_root, rel_to_repo)
+    if os.path.isfile(exact):
+        return exact
+    suffixed = exact + ".fixture"
+    return suffixed if os.path.isfile(suffixed) else None
+
+
 def _fixture_repo_rels(skill, files, skills_root=None):
     """Repo-relative destinations of an eval's fixture files.
 
@@ -1170,7 +1185,7 @@ def _fixture_repo_rels(skill, files, skills_root=None):
         # escape. Reject anything not under the repo root.
         if not (norm_src == norm_repo or norm_src.startswith(norm_repo + os.sep)):
             continue
-        if not os.path.isfile(norm_src):
+        if not _fixture_source(repo_root, os.path.relpath(norm_src, norm_repo)):
             continue
         rels.append(os.path.relpath(norm_src, norm_repo).replace(os.sep, "/"))
     return rels
@@ -1187,7 +1202,9 @@ def _copy_fixture_files(tmp, skill, files, skills_root=None):
     repo_root = os.path.dirname(skills_root)
     copied = 0
     for rel_to_repo in _fixture_repo_rels(skill, files, skills_root):
-        src = os.path.join(repo_root, rel_to_repo)
+        src = _fixture_source(repo_root, rel_to_repo)
+        if not src:
+            continue
         dst = os.path.join(tmp, rel_to_repo)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy(src, dst)
