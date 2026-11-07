@@ -6,8 +6,9 @@
 Reads the live GitHub settings through `gh api` and asserts the Phase 0
 containment is still in place:
 
-  - `main` requires a PR and the `quality-gates` + `pre-commit-check` checks,
-    with strict up-to-date, admins enforced, and no force-push/deletion;
+  - `main` requires a PR and the `quality-gates`, `pre-commit-check`, and
+    `dependency-audit` checks, with strict up-to-date, admins enforced, and no
+    force-push/deletion;
   - the required approval count is 0 under the dated solo-owner exception
     recorded in SECURITY.md (the owner is the only engineer; a real reviewer
     requirement would lock every merge);
@@ -34,7 +35,7 @@ REPO_ROOT = os.path.dirname(HERE)
 SECURITY = os.path.join(REPO_ROOT, "SECURITY.md")
 DEPENDABOT = os.path.join(REPO_ROOT, ".github", "dependabot.yml")
 
-REQUIRED_CHECKS = {"quality-gates", "pre-commit-check"}
+REQUIRED_CHECKS = {"quality-gates", "pre-commit-check", "dependency-audit"}
 REQUIRED_NPM_DIRS = {
     "/.opencode",
     "/plugins/auto-compact-at-threshold",

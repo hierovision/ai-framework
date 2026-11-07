@@ -1199,6 +1199,51 @@ def test_fixture_copy_contained_layout():
         shutil.rmtree(root)
 
 
+def test_fixture_dotfixture_source_materializes_real_name():
+    """Containment (2026-11-07): a `<name>.fixture` source — kept out of
+    GitHub's dependency graph — is staged under its real name inside the run
+    workspace, never with the `.fixture` suffix."""
+    root = tempfile.mkdtemp(prefix="beval-dotfixture-")
+    try:
+        repo = os.path.join(root, "repo")
+        skill = "auditing-supply-chain"
+        fixture = os.path.join(
+            repo, "skills", skill, "evals", "fixtures", "phasewave", "demo")
+        os.makedirs(fixture)
+        with open(os.path.join(fixture, "package.json.fixture"), "w") as fh:
+            fh.write('{"name": "demo"}')
+        with open(os.path.join(fixture, "package-lock.json.fixture"), "w") as fh:
+            fh.write('{"lockfileVersion": 1}')
+
+        tmp = tempfile.mkdtemp(prefix="beval-tmp-")
+        try:
+            files = [
+                "fixtures/phasewave/demo/package.json",
+                "fixtures/phasewave/demo/package-lock.json",
+            ]
+            copied = runner._copy_fixture_files(
+                tmp, skill, files, skills_root=os.path.join(repo, "skills"))
+            assert copied == 2, copied
+            for name in ("package.json", "package-lock.json"):
+                dst = os.path.join(
+                    tmp, "skills", skill, "evals", "fixtures", "phasewave",
+                    "demo", name)
+                assert os.path.isfile(dst), \
+                    f"{name} not materialized: {os.listdir(os.path.dirname(dst))}"
+                assert not os.path.exists(dst + ".fixture"), \
+                    f"{name}.fixture leaked into the workdir"
+            rels = runner._fixture_repo_rels(
+                skill, files, skills_root=os.path.join(repo, "skills"))
+            assert rels == [
+                f"skills/{skill}/evals/fixtures/phasewave/demo/package.json",
+                f"skills/{skill}/evals/fixtures/phasewave/demo/package-lock.json",
+            ], rels
+        finally:
+            shutil.rmtree(tmp)
+    finally:
+        shutil.rmtree(root)
+
+
 def test_crash_isolation_records_infra_and_continues():
     """RM-021 AC2: an unexpected exception in one eval is recorded as that eval's
     infra error and the runner continues; the other eval still runs."""
@@ -2051,6 +2096,7 @@ def main():
         test_legacy_eval_capped_at_one_nudge,
         test_no_event_stall_stops_after_two_attempts,
         test_fixture_copy_contained_layout,
+        test_fixture_dotfixture_source_materializes_real_name,
         test_crash_isolation_records_infra_and_continues,
         test_completeness_assertion_names_missing_eval,
         test_eval_record_carries_eval_key,

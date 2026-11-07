@@ -204,7 +204,10 @@ function validateManifest(skill, manifestPath, data, evalsDir) {
       } else {
         for (const rel of e.files) {
           const target = resolve(evalsDir, rel);
-          if (!existsSync(target)) {
+          // Containment (2026-11-07): npm manifests in fixtures are stored as
+          // `<name>.fixture` so GitHub never parses them; the eval runner
+          // materializes the real name at run time.
+          if (!existsSync(target) && !existsSync(`${target}.fixture`)) {
             errors.push(`${where}: files[] entry does not resolve: ${rel}`);
           }
         }

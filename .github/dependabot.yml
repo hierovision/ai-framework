@@ -36,6 +36,11 @@ updates:
       npm-minor-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    # The runtime is Node 24 (all workflows pin node-version: "24"). A types
+    # major above the runtime would type-check APIs that may not exist there.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /plugins/delegation-sentinel
@@ -46,6 +51,11 @@ updates:
       npm-minor-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    # The runtime is Node 24 (all workflows pin node-version: "24"). A types
+    # major above the runtime would type-check APIs that may not exist there.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /skills/capturing-ui-evidence
