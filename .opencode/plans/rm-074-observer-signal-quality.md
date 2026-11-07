@@ -485,3 +485,33 @@ The live drill must specifically review short-root label comprehension,
   Python contract generators, and a custom mutation runner. No matching
   `designing-architecture` stack reference exists; the generic planning path
   and the repository's own verification contracts apply.
+- 2026-11-07 — Implemented on `feat/rm-074-observer-signal-quality` from
+  `origin/main` at `081ac48`. The frontmatter read `status: draft`; the
+  spawning session explicitly confirmed the plan as approved, so the pass
+  proceeded (approval is recorded here rather than silently assumed).
+  Delivered WS1–WS4 as written: outcome display windows (`terminalGraceSeconds`
+  300 s / `failedTerminalGraceSeconds` 3600 s, env under options, invalid
+  values ignored) and `terminalAt`; one `eligibleRows` sidebar/footer
+  projection with `panelHistoryLine` panel-only and the 8-row cap; bounded
+  cycle-safe `indexSessions`/`associateSessionList`/`applyRootAssociations`
+  used by server bootstrap and TUI bootstrap/refresh, with display-only
+  `rootID`, unresolved cycles/missing parents, sidebar unique-prefix labels and
+  full-root panel/toast titles; canonical full-input loop fingerprints with
+  `editWriteLoopRepeats` 8 sourced from `watch_agent.EDIT_WRITE_LOOP_REPEATS`
+  through the regenerated contract (other tools 3); `Milestone.conditionKey`
+  plus durable claim files (`wx`, post trust/location gates, claim-before-send,
+  rollback on rejected send, location-less in-process fallback + log), with the
+  at-most-once ceiling documented. No contract-level mismatch and no scope
+  change; `state.test.ts:281–300` remains byte-identical. Verification: 152
+  plugin tests (158 with the sentinel), 54 mutation proofs including the eight
+  named ones, typecheck, Python contract/watch tests, roadmap-verbatim,
+  v2-surfaces and `git diff --check` all exit 0. Red-first output is stored
+  outside git under `.scratch/rm-074/red-first/`. The live TUI drill could not
+  run headless and is a manual-validation handoff in PR #165, not claimed as
+  passed.
+  ### Follow-ups
+  - The live TUI drill (two roots, label comprehension, 64-column truncation,
+    empty stale-only sidebar, aging boundaries, restart dedupe) needs a
+    disposable service and stays with the owner before merge.
+  - Claim-file pruning/compaction and a transactional exactly-once guarantee
+    remain out of scope (they need separate operational evidence).
