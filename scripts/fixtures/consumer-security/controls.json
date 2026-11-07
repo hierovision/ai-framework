@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "controls": [
+    {
+      "repo": "pt",
+      "control_id": "consumer-local/unsafe-postmessage",
+      "severity": "high",
+      "scope": "runtime",
+      "origin": "consumer-local"
+    },
+    {
+      "repo": "pln",
+      "control_id": "consumer-local/legacy-unmaintained",
+      "severity": "medium",
+      "scope": "runtime",
+      "origin": "consumer-local"
+    }
+  ]
+}

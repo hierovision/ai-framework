@@ -1,0 +1,54 @@
+{
+  "controls": [
+    {
+      "control_id": "consumer-local/excel-required-pr-checks-unavailable",
+      "origin": "consumer-local",
+      "repo": "excel-daily-monitor",
+      "scope": "runtime",
+      "severity": "medium"
+    },
+    {
+      "control_id": "consumer-local/posture/secret-scanning",
+      "origin": "consumer-local",
+      "repo": "marvin-slack",
+      "scope": "runtime",
+      "severity": "high"
+    },
+    {
+      "control_id": "consumer-local/posture/secret-scanning-push-protection",
+      "origin": "consumer-local",
+      "repo": "marvin-slack",
+      "scope": "runtime",
+      "severity": "high"
+    },
+    {
+      "control_id": "consumer-local/posture/secret-scanning",
+      "origin": "consumer-local",
+      "repo": "pt",
+      "scope": "runtime",
+      "severity": "high"
+    },
+    {
+      "control_id": "consumer-local/posture/secret-scanning-push-protection",
+      "origin": "consumer-local",
+      "repo": "pt",
+      "scope": "runtime",
+      "severity": "high"
+    },
+    {
+      "control_id": "consumer-local/pt-dev-service-role-key-local",
+      "origin": "consumer-local",
+      "repo": "pt",
+      "scope": "runtime",
+      "severity": "medium"
+    },
+    {
+      "control_id": "consumer-local/paragon-production-wait-timer-unavailable",
+      "origin": "consumer-local",
+      "repo": "paragon-learning-network",
+      "scope": "runtime",
+      "severity": "medium"
+    }
+  ],
+  "schema_version": 1
+}
