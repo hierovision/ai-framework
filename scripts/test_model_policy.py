@@ -310,8 +310,9 @@ def test_d1_stale_doc_with_no_live_jev_ids_fails():
     errors = CHECKER.stale_evaluation_errors(
         repo, {"glm-5.3-flash", "deepseek-v4.1-flash"})
     assert errors == [
-        f"{CHECKER.JEV_EVAL_DOC} is present but zero live `jev-*` IDs remain "
-        f"in the Zen catalog (D1) — delete the doc + close RM-041"
+        "reference/jev-system-one-evaluation.md is present but zero live "
+        "`jev-*` IDs remain in the Zen catalog (D1) — delete the doc + close "
+        "RM-041"
     ], errors
 
 
