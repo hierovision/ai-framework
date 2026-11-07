@@ -359,17 +359,43 @@ event (`SessionInfo.time.updated`), never the observer's boot clock — so two
 delegates with different last events never share a quiet value, and an unknown
 clock renders as `—` instead of a fabricated duration.
 
-**Terminal, archived and history.** `SessionInfo.outcome` (the real field:
-`"succeeded" | "failed" | "interrupted"`) is terminal and outranks the live
-map: such a row reads `completed`/`failed`, emits no synthetic start/terminal
-milestone, and cannot be revived or demoted by the live map. `time.archived` and
-`session.archived` hide a row for good — the map and later events cannot
-revive it, only `session.unarchived` can. A row that is archived, terminal in
-the store without being observed here, or (discovered) older than
-`staleGraceSeconds` is stale: never `running`, never clock-classified, and
-collapsed into one `N stale delegates hidden` line that is not selectable in
-the focus/steer/interrupt picker; `delegation.history` (alt+g) focuses one
+**Terminal, archived and history (2026-11-07).** `SessionInfo.outcome` (the
+real field: `"succeeded" | "failed" | "interrupted"`) is terminal and outranks
+the live map: such a row reads `completed`/`failed`, emits no synthetic
+start/terminal milestone, and cannot be revived or demoted by the live map.
+`time.archived` and `session.archived` hide a row for good — the map and later
+events cannot revive it, only `session.unarchived` can. An **observed** terminal
+row stays visible until its outcome display window ends: completed 300 s,
+terminal failure 3600 s after `terminal.at` (`terminalGraceSeconds` /
+`failedTerminalGraceSeconds`, TUI display settings with no Python owner). A
+store-terminal row never observed here is history immediately; a
+clock-classified `failed` row with no terminal event stays actionable. A row
+that is archived, store-terminal without being observed, past its terminal
+window, or (discovered) older than `staleGraceSeconds` is stale: never
+`running`, never clock-classified, never in the sidebar/footer, never a
+selection target. The `N stale delegates hidden (alt+g to inspect)` line lives
+only in `session.panel`; a stale-only state renders no sidebar heading, no
+lines and no footer count. `delegation.history` (alt+g) focuses a stale row
 read-only.
+
+**Root labels.** The session list is directory-wide, so bootstrap (server and
+TUI) indexes the whole tree and resolves each delegate's display `rootID`
+through `parent_id`, following a run-vehicle title marker when a child has no
+parent; the walk is bounded and cycle-safe, and a cycle/missing parent is
+labelled unresolved rather than guessed. `rootID` is presentation metadata
+only: wake routing still uses the immediate association and the trusted-root
+walk. Sidebar lines use the shortest unique root prefix (six-character floor,
+lengthened on collision), the panel uses the full id, and toast/attention
+titles and bodies name the full owning root; synthetic wake text is unchanged.
+
+**Progress-aware thrash (2026-11-07).** A loop counts a canonical fingerprint
+of the complete tool input plus the resolved tool name and target (object keys
+sorted), so a changed edit payload is progress and identical calls accumulate.
+The call-id guard keeps re-delivery at one count, and the condition key stays
+`thrash:<target>` so input classification never multiplies wake conditions.
+Edit/write calls flag at `editWriteLoopRepeats` (8, owned by
+`watch_agent.EDIT_WRITE_LOOP_REPEATS` and published through the generated
+contract); bash/read/grep and other tools keep `loopRepeats` (3).
 
 **First event on a discovered row.** A live-map entry promotes the row; the
 first real event promotes it *and* resets the observation clock to that
@@ -400,10 +426,27 @@ and never claims the child stopped. A denied permission is a warning, never a
 resume. Terminal fires exactly once and does not wake; the terminal wake
 remains the only terminal prompt.
 
+**Durable attention claims (2026-11-07).** The reducer's per-condition dedupe
+lasts one instance, so wake-eligible delivery (`thrash`/`stall`/`needs-input`/
+`denied`) is guarded by a persistent claim file per (child, condition) under
+`<location>/.scratch/delegation-observer/attention-claims/`, created
+exclusively after the trusted-root and same-directory gates. An existing claim
+suppresses the duplicate synthetic and logs `attention dedupe skipped`; a
+rejected send removes its new claim so a later observer can retry; untrusted
+or out-of-location milestones create no claim. Claim-before-send means
+**at-most-once** delivery: a crash after claiming and before sending loses the
+delivery rather than duplicating it — the host offers no transaction for
+exactly-once. `attentionWakes` / `maxAttentionWakes` stay per observer process
+and are not persisted. A location-less host keeps in-process dedupe only and
+logs `durable attention dedupe unavailable`.
+
 **Thresholds.** One vocabulary, sourced from `scripts/supervision_contract.json`
 (generated from `watch_agent.py` / `observe_completion.py`): stall 240 s,
-call-in-flight 300 s, open-generation 600 s, loop 3 repeats, milestone cap
-30 s, wake deadline 300 s. `state.test.ts` fails if the plugin drifts.
+call-in-flight 300 s, open-generation 600 s, loop 3 repeats, edit/write loop 8
+repeats, milestone cap 30 s, wake deadline 300 s. `state.test.ts` fails if the
+plugin drifts. The terminal display windows (`terminalGraceSeconds` 300 s,
+`failedTerminalGraceSeconds` 3600 s) and `staleGraceSeconds` are observer-owned
+display settings, not part of that contract.
 
 **Degradation is visible.** If the plugin is absent/failed, its event stream
 disconnects, it is disabled by config, or running sessions have no delegate
@@ -439,6 +482,9 @@ last-resort surface and is read by the `delegation.status` command. This TUI
 host does not forward a plugin entry's `options` to the TUI part, so the TUI
 reads the documented env source for every value it needs:
 `DELEGATION_OBSERVER_ENABLED`, `DELEGATION_OBSERVER_STALL_SECONDS`,
+`DELEGATION_OBSERVER_STALE_GRACE_SECONDS`,
+`DELEGATION_OBSERVER_TERMINAL_GRACE_SECONDS`,
+`DELEGATION_OBSERVER_FAILED_TERMINAL_GRACE_SECONDS`,
 `DELEGATION_OBSERVER_HEALTH_FILE`, `DELEGATION_OBSERVER_STATUS_FILE` (options
 win when a host does forward them). The server part reads only
 `DELEGATION_OBSERVER_ATTENTION_WAKE` and
