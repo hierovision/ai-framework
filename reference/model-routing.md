@@ -182,9 +182,9 @@ unchanged seats were validated 2026-10-04.
   questions → values + probabilities; no AI SDK package). $0.042/1M
   input, output free; free variant limited-time. **Never a role-binding
   candidate** — not a chat model; no routing pass may rank or bind it
-  in any tier. Evaluated for advisory use 2026-10-03:
-  `reference/jev-system-one-evaluation.md` (trigger-gated; ROADMAP
-  RM-041).
+  in any tier. Advisory-triage evaluation closed 2026-11-07 by its
+  delete clause D1 — zero live `jev-*` IDs in the Zen catalog; the
+  evaluation doc was removed with RM-041.
 
 ## Vision capability strategy
 

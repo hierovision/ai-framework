@@ -52,7 +52,7 @@ scoring uses the Rex Black rubric.
 - Detail files: per-ID provenance at docs/roadmap-detail/<ID>.md (relocated byte-exact 2026-10-11; owner ruling: no massive detail in the roadmap). Referenced from each row's Notes; consumed at design passes; pruned by the quarterly ALM review.
 - "plan" = `docs/maturity-plan.md`; issue refs = `hierovision/ai-framework#NN`.
 
-## Priority order (1–40)
+## Priority order (1–39)
 One list per horizon, rank order. Every line: `[ID](detail) (score) —
 title`. IDs link to that row's full record in `docs/roadmap-detail/`.
 Score = Impact × Urgency. `— in progress` marks the row under work.
@@ -90,7 +90,7 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 - [RM-049](docs/roadmap-detail/RM-049.md) (2) — Session-guard blocking-wait on completed children — gate the append on not-done
 
 
-### Later (15)
+### Later (14)
 
 - [RM-008](docs/roadmap-detail/RM-008.md) (3) — Encoded boundary manifest per agent
 - [RM-055](docs/roadmap-detail/RM-055.md) (3) — Executive operating system — chief-of-staff persona + operating-cadence/health/signals skills
@@ -106,7 +106,6 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 - [RM-061](docs/roadmap-detail/RM-061.md) (2) — Design-entry process sizing — depth and gate frequency as explicit plan decisions
 - [RM-063](docs/roadmap-detail/RM-063.md) (2) — Brownfield codebase survey skill — candidate brief (RM-029 program)
 - [RM-064](docs/roadmap-detail/RM-064.md) (2) — File-based phase checkpoints — multi-phase run resume
-- [RM-041](docs/roadmap-detail/RM-041.md) (1) — Jev (System One) advisory eval content-failure triage — trigger-gated
 
 
 ## Now (fired — solutions in flight)
@@ -162,7 +161,6 @@ Score = Impact × Urgency. `— in progress` marks the row under work.
 | RM-061 | Design-entry process sizing — depth and gate frequency as explicit plan decisions | — | Later | self-improvement | 2 | 1 | 2 | waiting | Plans state their chosen process depth (scoped slice vs full loop) and human-gate frequency explicitly — a trivial change is not forced through the full loop, and the default is defensible from the plan alone. | — | planner landscape dossier 2026-10-16 (`.scratch/landscape-dossier-2026-10-16.md`); BMAD right-sized process; APM gate-frequency dial | Trigger: derived — fires with the RM-034 plan-format design pass or the next designing-architecture amendment (owner call 2026-10-16; the earlier mis-sizing observation was not a reliable trigger). Row retained, not merged into RM-034. detail: docs/roadmap-detail/RM-061.md |
 | RM-063 | Brownfield codebase survey skill — candidate brief (RM-029 program) | — | Later | self-improvement | 2 | 1 | 2 | waiting | A survey skill establishes verified context on an inherited codebase — what is actually there, plus the checks its work must satisfy (git hooks, CI required checks, lint/type/test config, branch protection) — before design, screened through ADR-0011/0012. | — | planner landscape dossier 2026-10-16 (`.scratch/landscape-dossier-2026-10-16.md`); BMAD "start in an existing codebase" | 14th brief in the RM-029 program family (RM-029 untouched). Trigger: first inherited-codebase engagement (RM-012-class consumer exercise) — occasion-based and proactive, so the survey precedes any guessed plan verification. detail: docs/roadmap-detail/RM-063.md |
 | RM-064 | File-based phase checkpoints — multi-phase run resume | — | Later | self-improvement | 2 | 1 | 2 | waiting | A multi-phase unattended run persists a phase state machine (phase list, current phase, per-phase checkpoint) so a resumed session continues the sequence from the last checkpoint instead of re-planning. | RM-055 (its design pass is the gate) | planner landscape dossier 2026-10-16 (`.scratch/landscape-dossier-2026-10-16.md`); split from RM-062 (owner call 2026-10-16); MAF checkpoint/time-travel reference | Checkpoint semantics proper — split from RM-062, which ships restart-recovery. Still files, no external engine. detail: docs/roadmap-detail/RM-064.md |
-| RM-041 | Jev (System One) advisory eval content-failure triage — trigger-gated | — | Later | evaluation | 1 | 1 | 1 | waiting | Weekly-run content failures are classified by Jev when its triggers and gates (ADR + spend) fire. | — | jev-system-one-evaluation plan 2026-10-03; `reference/jev-system-one-evaluation.md` | trigger-gated T1–T3 with delete-clause D1–D4; fail-open. prev: 5 (priority-1-5-composite); detail: docs/roadmap-detail/RM-041.md. |
 
 ## Review (category: review)
 
@@ -174,10 +172,11 @@ None (threshold: null).
 
 ## Done
 
-Newest first; 33 closed of 73. The table carries the one-line
+Newest first; 34 closed of 73. The table carries the one-line
 
 | ID | Title | Outcome | Horizon | Category | Impact | Urgency | Score | Status | Success measure | Blocked-by | Sources | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| RM-041 | Jev (System One) advisory eval content-failure triage — trigger-gated | — | — | evaluation | — | — | — | done | Weekly-run content failures are classified by Jev when its triggers and gates (ADR + spend) fire. | — | model-liveness alarm run [41398955863](https://github.com/hierovision/ai-framework/actions/runs/41398955863) (zero live `jev-*` Zen IDs); jev-system-one-evaluation plan 2026-10-03 | closed 2026-11-07 by delete clause D1: zero live `jev-*` IDs in the Zen catalog, so the evaluation doc was removed — no trigger ever fired (no ADR, no spend, no `scripts/jev_decide.py`); the routing note keeps the endpoint. detail: docs/roadmap-detail/RM-041.md |
 | RM-073 | Consumer security hardening — Phase 1 framework propagation controls | — | — | self-improvement | — | — | — | done | The secret-bearing eval path is main-only (fork and same-repo PRs cannot reach the provider keys); redaction, the child-env allowlist, the auth-store read-root removal, pinned skill deps, and hash-pinned CI are verified. | — | owner directive 2026-10-25; Phase 0 closed 2026-11-06; plan `.opencode/plans/fix-consumer-security-exposure.md` (rev 2026-11-06); [PR #144](https://github.com/hierovision/ai-framework/pull/144) | delivered 2026-11-06 ([PR #144](https://github.com/hierovision/ai-framework/pull/144)): P1-1…P1-11 — main-only secret-bearing eval on the `eval` environment, pattern redaction, eval child-env allowlist, auth-store read-root removal, untrusted-content fence, pinned skill deps, hash-pinned CI, Dependabot + owner-run posture checker, install manifest, V1 plugin pin removed, consumer fleet record. Residuals (owner): move the provider keys to `eval` and delete the repo copies, prove a green main eval, write the host manifest post-merge. Phase 2 handoffs and Phase 3 sweep tooling remain. detail: docs/roadmap-detail/RM-073.md |
 | RM-071 | Standardized OpenCode upgrade process — one orchestrator, canary gate, prepared pin bump, drained apply | — | — | tooling | — | — | — | done | A new OpenCode release goes from `check` to a verified live switch through one orchestrator, with a canary gate, consistent pins, and automatic rollback; the 2.2.5 upgrade is the first end-to-end run. | — | owner directive 2026-11-02 (standardize the upgrade process); 2.2.5 canary evidence `.scratch/v2-canary-2.2.5/`; [PR #140](https://github.com/hierovision/ai-framework/pull/140) | delivered 2026-11-02: orchestrator + canary/apply/rollback/plan/pins/CI; 12/12 orchestrator tests; live 2.2.5 apply verified binary, service, 17 agents, and plugin loader; evidence `.scratch/opencode-v2/upgrade-2.2.5-verify.json`. **2026-11-02 correction:** ADR-0017 supersedes the custom versioned pipeline — supported yarn-global `@opencode/cli` + default `~/.config/opencode`, `stage_opencode_config.py`, thin canary/pin check retained. detail: docs/roadmap-detail/RM-071.md |
 | RM-070 | Attention milestones start one parent turn (bounded) | — | — | observability | — | — | — | done | A child in thrash/stall/needs-input/denied starts exactly one parent turn per condition, capped per child, while routine and terminal milestones stay non-prompting and the terminal wake remains the only terminal prompt. | RM-069 | owner challenge 2026-10-31; ADR-0015 (2026-10-31 amendment); RM-069 live observer | delivered 2026-10-31 ([PR #138](https://github.com/hierovision/ai-framework/pull/138)): bounded attention `wake` (4 kinds, cap 3, configurable), `resume:true` only for wakes, headless tool-input path, isolated thrash+needs-input drills. detail: docs/roadmap-detail/RM-070.md |
@@ -234,6 +233,7 @@ Resolved 2026-10-09 — Decision 5 (user call): **RM-011 — first review dated.
 
 ## Triage log
 
+- **2026-11-07** — RM-041 CLOSED by its own delete clause D1 (PR link added on this line at push). `python3 scripts/model-liveness-check.py` reports zero live `jev-*` IDs in the Zen catalog, so the trigger-gated Jev advisory evaluation is stale: the evaluation doc was deleted and the row moved Later→Done. No trigger ever fired — no ADR, no spend approval, no `scripts/jev_decide.py`. detail: docs/roadmap-detail/RM-041.md. Open 40 → 39 (34 done of 73).
 - **2026-11-06** — RM-073 CLOSED ([PR #144](https://github.com/hierovision/ai-framework/pull/144), `feat/rm-073-consumer-security-phase-1`): Phase 1 P1-1…P1-11 delivered — main-only secret-bearing eval on the `eval` environment, pattern redaction, eval child-env allowlist, auth-store read-root removal, untrusted-content fence, pinned/contained skill deps, hash-pinned CI, Dependabot + owner-run posture checker, install manifest, V1 plugin pin removed, consumer fleet record. Verification: the plan's full Phase 1 list green; quality-gates, pre-commit-check and dependency-audit green on the PR and `evals` correctly skipped there. Owner residuals: move `OPENCODE_API_KEY`/`DEEPSEEK_API_KEY` into the `eval` environment and delete the repo copies, prove a green main eval, write the live host manifest post-merge. Open 41 → 40 (33 done of 73).
 - **2026-11-06** — RM-073 added (Phase 1 of the consumer security plan; Phase 0 closed 2026-11-06): framework propagation controls (fork guard/eval environment, pattern redaction, eval env allowlist, auth-store read root, untrusted-content fence, pinned skill deps, hash-pinned CI, posture/dependabot, install manifest, V1 plugin removal, consumer fleet record). Now, score 9; detail: docs/roadmap-detail/RM-073.md. Open 40 → 41 (32 done of 73). **Corrected 2026-11-06:** the recorded counts were stale — the tables carried 32 done of 73 at this point.
 - **2026-11-06** — RM-072 added from the owner's report during a two-subagent session: 15+ `delegation-observer milestone` strip lines with no state/value. Now, score 4; detail: docs/roadmap-detail/RM-072.md. Open 39 → 40 (31 done of 71).
