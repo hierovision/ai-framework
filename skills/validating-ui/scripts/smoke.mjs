@@ -139,9 +139,15 @@ export async function runSmoke(opts) {
           executablePath: process.env.CAPTURE_CHROMIUM_EXECUTABLE || undefined,
           headless: true,
         });
-    const ctxOpts = { viewport: { width: vw, height: vh } };
+    const ctxOpts = { viewport: { width: vw, height: vh }, baseURL: target };
     if (authFixture) ctxOpts.storageState = authFixture;
-    const context = await browser.createBrowserContext(ctxOpts);
+    // Real Playwright exposes `newContext` on Browser; the documented
+    // browserFactory contract (the fake chromium used by the self-check)
+    // exposes `createBrowserContext`. Accept either so the harness runs
+    // against a real browser and against the canned one.
+    const context = typeof browser.newContext === "function"
+      ? await browser.newContext(ctxOpts)
+      : await browser.createBrowserContext(ctxOpts);
     const page = await context.newPage();
 
     page.on("console", (msg) => {
@@ -155,7 +161,7 @@ export async function runSmoke(opts) {
     let journeyResult = {};
     try {
       const mod = await import(pathToFileURL(resolve(journey)).href);
-      journeyResult = (await mod.run(page)) || {};
+      journeyResult = (await mod.run(page, { target })) || {};
     } catch (e) {
       evidence.journey_error = String(e?.message || e);
     }
