@@ -161,7 +161,8 @@ handoff cites the screenshot for the human manual validation.
 
 - [references/evidence-schema.md](references/evidence-schema.md) —
   evidence.json schema, allowlist format + discipline, journey-module
-  contract (`run(page)`), harness CLI surface (local-override points).
+  contract (`run(page, { target })`, context baseURL = `--target`), harness
+  CLI surface (local-override points).
 - [references/stacks/vue-supabase.md](references/stacks/vue-supabase.md)
   — Vue dev-mode warn shapes as runtime defects, the v-for string-ref
   crash class + `stopAllPreviews` worked example, the leave-transition

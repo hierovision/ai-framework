@@ -70,7 +70,10 @@ via fixture, `await` on every action.
 
 ```js
 // <project>/.opencode/smoke/<plan-slug>.journey.mjs
-export async function run(page) {
+// run(page, { target }) — the harness sets the context baseURL to
+// --target, so relative goto() paths work; `target` is there for
+// journeys that need an absolute URL.
+export async function run(page, { target } = {}) {
   // navigate + act + assert the user-observable outcome
   await page.goto("/route-that-exercises-the-change");
   await page.getByRole("button", { name: "..." }).click();
