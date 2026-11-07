@@ -57,3 +57,18 @@ the owner is the only engineer on this repository and GitHub does not count
 the author's own approval. Compensating controls: required CI, secret scanning
 + push protection, Dependabot alerts + security updates, and CodeQL default
 setup. Review date: 2027-01-25, or when a second engineer is added.
+
+### Eval-fixture advisories (2026-11-07)
+
+`skills/auditing-supply-chain/evals/fixtures/**` intentionally contains
+vulnerable and malicious-looking packages (express, lodash, axios, and the
+`lodahs` typosquat shape). The fixtures are inert: npm manifests are stored as
+`package.json.fixture` / `package-lock.json.fixture`, so GitHub's dependency
+graph and Dependabot never parse them; the eval runner materializes them only
+inside a throwaway temp workspace, and nothing installs, resolves, or executes
+them. Dependabot alerts on these paths are dismissed as `tolerable_risk`; a
+future alert on a fixture path is the same exception. Do not auto-fix a
+fixture. Containment contract:
+`skills/auditing-supply-chain/evals/fixtures/README.md`; guard:
+`scripts/test_eval_workflows.py::test_supply_chain_fixture_manifests_are_inert`.
+

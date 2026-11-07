@@ -124,8 +124,13 @@ def validate(skill_dir):
                         cores.append(idx)
                 for f in e.get("files", []):
                     p = os.path.join(skill_dir, "evals", f)
-                    if not os.path.isfile(p):
-                        errors.append(f"evals.json files[] entry does not resolve: {f}")
+                    # Containment (2026-11-07): npm manifests in fixtures are
+                    # stored as `<name>.fixture` so GitHub never parses them;
+                    # the eval runner materializes the real name at run time.
+                    if not (os.path.isfile(p) or os.path.isfile(p + ".fixture")):
+                        errors.append(
+                            f"evals.json files[] entry does not resolve: {f} "
+                            f"(or {f}.fixture)")
                 # RM-003 pass 5 typed-assertion enforcement (AC12/AC17).
                 if "expect" in e:
                     if validate_expect is not None:
