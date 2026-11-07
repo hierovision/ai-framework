@@ -1,7 +1,7 @@
 ---
 slug: rm-076-phase-3-continuous-detection
 title: Make the known-consumer security sweep deterministic, dispositioned, and CI-gated
-status: draft
+status: approved
 created: 2026-11-07
 revised: [2026-11-07]
 related: [fix-consumer-security-exposure, RM-073, RM-075]
@@ -481,3 +481,4 @@ Inspect the run's four active audit gates and retired `pln` status, then downloa
 - 2026-11-07 — Reconciled original contracts: immutable sweep findings join a separate disposition register; dry-run permits only explicit snapshot output; no-status-delta replaces an impossible empty-status assertion on a dirty implementation branch; handoff closure remains dependent on RM-075; admin posture stays owner-run while CI uses local-only checks.
 - 2026-11-07 — Security review of the cross-repo credential: it is an environment secret on a `main`-restricted environment, never repo-level (this repository is public), with the 90-day PAT expiry and rotation recorded when created; the GitHub App remains the acceptable alternative.
 - 2026-11-07 — UX consult skipped: no user-facing UI. No matching Vue/Next stack reference applies; generic Python/GitHub Actions planning is recorded in Open Question 8.
+- 2026-11-07 — Owner approved the plan with all recommended defaults (RM-075/RM-076 design pass); status `draft` → `approved`.
