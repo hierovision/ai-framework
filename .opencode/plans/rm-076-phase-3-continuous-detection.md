@@ -482,3 +482,59 @@ Inspect the run's four active audit gates and retired `pln` status, then downloa
 - 2026-11-07 — Security review of the cross-repo credential: it is an environment secret on a `main`-restricted environment, never repo-level (this repository is public), with the 90-day PAT expiry and rotation recorded when created; the GitHub App remains the acceptable alternative.
 - 2026-11-07 — UX consult skipped: no user-facing UI. No matching Vue/Next stack reference applies; generic Python/GitHub Actions planning is recorded in Open Question 8.
 - 2026-11-07 — Owner approved the plan with all recommended defaults (RM-075/RM-076 design pass); status `draft` → `approved`.
+- 2026-11-07 — Implemented P3-1…P3-9 on `feat/rm-076-phase-3-continuous-detection`
+  from `origin/main` at `b0e00d8`: inventory, deterministic offline sweep,
+  sanctioned fetcher, register/handoff checkers, three posture modes, four
+  sanitized `docs/security/` files, `security.yml`, CI wiring, fixtures, and
+  six hermetic test modules. Full Verification exits 0 (six modules, default
+  register, fixture register+sweep, determinism `cmp`/`sha256sum`, local
+  posture, yamllint, eval-workflow suite, roadmap verbatim, `git diff --check`);
+  dry-run status-delta `cmp` and the socket/sanitizer canaries pass.
+- 2026-11-07 — P3-10 conditional branch taken: the row stays **open** and no
+  `docs/ROADMAP.md` counter/horizon edit is made. RM-075's five real briefs
+  are absent (`check_security_handoffs.py` no-argument run exits 1 with
+  `BLOCKED`), and the owner-only environment secret, live posture runs, and
+  live `security.yml` dispatch are not performed. The detail file records all
+  four residuals; no brief was fabricated and the checker was not weakened.
+- 2026-11-07 — Mechanical deviations (feature unchanged): `--snapshot` was
+  added to the sweep so CI can consume the intake artifact's dated filename;
+  `--inventory`/`--register`/`--today` options make every mode testable and
+  explicit; `check_repo_posture.py` previously required `--repo`; it now keeps
+  the same live framework check and behavior when `--repo` is given, and the
+  new mutually exclusive mode group treats no mode named as that live
+  `hierovision/ai-framework` default; the fetcher's git-revision
+  probe requires the checkout's own `.git` so hermetic fixture directories
+  cannot inherit the surrounding worktree HEAD. The fixture register is
+  synthetic and is never the tracked register.
+- 2026-11-07 — Runtime UI validation skipped: no user-facing UI. No Vue/Next
+  stack reference applies (Open Question 8). Follow-ups: none beyond the
+  owner-only residuals recorded in `docs/roadmap-detail/RM-076.md`; record the
+  read-only credential's expiry/rotation there when it is created.
+- 2026-11-08 — PR #168 review fixes: the handoff `--force` scanner now splits
+  each fence logical line on `&&`/`||`/`;`/`|`, strips leading `VAR=value`
+  assignments and `sudo`/`env`-style wrappers, and joins backslash
+  continuations, so `cd app && npm audit fix --force`, `FOO=1 npm install
+  --force`, and the `;`/`|` forms fail; prose inside a fence still passes.
+  `check_security_register.load_sweep` applies the closed-schema unknown-field
+  check to each sweep finding. `test_fetch_advisories.py` asserts a dry run
+  leaves `git status --porcelain` unchanged in-module. All six modules,
+  yamllint, `check_roadmap_verbatim.py`, and `git diff --check` exit 0; the
+  no-argument handoff check still exits 1 `BLOCKED` by design (RM-075 inputs
+  remain absent).
+- 2026-11-08 — Incidental required-check fix (outside RM-076's file map):
+  `scripts/test_eval_report.py::test_lane_status_escalation` pinned its
+  in-process clock (`now=2026-10-12`) but its CLI round-trip omitted a time
+  override, so the CLI used the wall clock and dropped the seeded 2026-10-09
+  event from the 30-day window on 2026-11-08 (`quality-gates` red on PR #168,
+  unrelated to this feature). Added a `--now` (date or RFC 3339) seam to
+  `eval-report.py lane-status` and passed the test's pinned date. The 30-day
+  window and every assertion are unchanged — this removes wall-clock
+  nondeterminism rather than widening the net.
+- 2026-11-08 — Second PR #168 delta review: the `--force` scanner now also
+  reaches a command token after `(`/`{`/`$(` grouping, `if`/`then`/`do`/`done`
+  keywords, `eval`/`xargs` wrappers, `find … -exec`, `sudo` positionals
+  (`-u <user>`/`-g <group>`), and quote-splitting in the first token
+  (`np""m` → `npm`); ten focused cases added. `load_sweep` now applies the
+  closed-schema check to each `consumers[]` record (unknown field fails).
+  The dry-run git-status test now skips explicitly when git is unavailable
+  instead of passing on `None == None`. Prose inside a fence still passes.

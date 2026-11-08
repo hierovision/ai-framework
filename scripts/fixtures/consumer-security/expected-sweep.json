@@ -1,0 +1,145 @@
+{
+  "as_of": "2026-11-07T00:00:00Z",
+  "consumers": [
+    {
+      "audit_status": "audited",
+      "commit": "1111111111111111111111111111111111111111",
+      "repository": "hierovision/excel-daily-monitor",
+      "slug": "excel-daily-monitor",
+      "status": "active"
+    },
+    {
+      "audit_status": "audited",
+      "commit": "2222222222222222222222222222222222222222",
+      "repository": "hierovision/marvin-slack",
+      "slug": "marvin-slack",
+      "status": "active"
+    },
+    {
+      "audit_status": "decommission-only",
+      "commit": null,
+      "repository": "hierovision/pln",
+      "slug": "pln",
+      "status": "retired"
+    },
+    {
+      "audit_status": "audited",
+      "commit": "3333333333333333333333333333333333333333",
+      "repository": "hierovision/phasetimer",
+      "slug": "pt",
+      "status": "active"
+    },
+    {
+      "audit_status": "audited",
+      "commit": "4444444444444444444444444444444444444444",
+      "repository": "Stonegate-Software/paragon-learning-network",
+      "slug": "paragon-learning-network",
+      "status": "active"
+    }
+  ],
+  "findings": [
+    {
+      "advisory_id": "GHSA-paragon-medium",
+      "control_id": null,
+      "fixed": [
+        "3.1.2"
+      ],
+      "installed": "3.1.0",
+      "lockfile": "pnpm-lock.yaml",
+      "origin": "consumer-local",
+      "package": "example-next",
+      "repo": "paragon-learning-network",
+      "scope": "runtime",
+      "severity": "medium",
+      "sweep_id": "03075df9b9ae01e2a3527fc666e15eff45f803b14bf6c6dfb408f27de0380015"
+    },
+    {
+      "advisory_id": null,
+      "control_id": "consumer-local/unsafe-postmessage",
+      "fixed": [],
+      "installed": null,
+      "lockfile": null,
+      "origin": "consumer-local",
+      "package": null,
+      "repo": "pt",
+      "scope": "runtime",
+      "severity": "high",
+      "sweep_id": "22888a06abccd8ace92fcb66523868273bb8db1ad2862932ad2ea2eda9f1967b"
+    },
+    {
+      "advisory_id": "GHSA-pt-low",
+      "control_id": null,
+      "fixed": [
+        "1.0.1"
+      ],
+      "installed": "1.0.0",
+      "lockfile": "yarn.lock",
+      "origin": "framework-propagated",
+      "package": "example-shared",
+      "repo": "pt",
+      "scope": "runtime",
+      "severity": "low",
+      "sweep_id": "5f37501228b02b69f73f8ac1185021b2f8a4cfea48279c004a4de0a601390cf5"
+    },
+    {
+      "advisory_id": "GHSA-excel-critical",
+      "control_id": null,
+      "fixed": [
+        "1.2.4"
+      ],
+      "installed": "1.2.3",
+      "lockfile": "package-lock.json",
+      "origin": "consumer-local",
+      "package": "example-runtime",
+      "repo": "excel-daily-monitor",
+      "scope": "runtime",
+      "severity": "critical",
+      "sweep_id": "69ecb7b6bc2ffd8d28073858dc18d9c7427886d12bfc7227dda7530a1bc38f47"
+    },
+    {
+      "advisory_id": null,
+      "control_id": "consumer-local/legacy-unmaintained",
+      "fixed": [],
+      "installed": null,
+      "lockfile": null,
+      "origin": "consumer-local",
+      "package": null,
+      "repo": "pln",
+      "scope": "runtime",
+      "severity": "medium",
+      "sweep_id": "ae4df29c3a62a0756aa0fbc02181db0a6f250f34cabff06adbb8526bc904e204"
+    },
+    {
+      "advisory_id": "GHSA-pt-unknown",
+      "control_id": null,
+      "fixed": [],
+      "installed": "4.5.6",
+      "lockfile": "yarn.lock",
+      "origin": "consumer-local",
+      "package": "example-ui",
+      "repo": "pt",
+      "scope": "runtime",
+      "severity": "unknown",
+      "sweep_id": "b99b68daad81287be228eeaf1c547baeb262a574fa38f23a2b35239c9378f626"
+    },
+    {
+      "advisory_id": "GHSA-marvin-high",
+      "control_id": null,
+      "fixed": [],
+      "installed": "2.0.0",
+      "lockfile": "package-lock.json",
+      "origin": "framework-propagated",
+      "package": "example-slack",
+      "repo": "marvin-slack",
+      "scope": "runtime",
+      "severity": "high",
+      "sweep_id": "ba4d4d0b5d35596fd9a319c53ca832eb3de49f9aef65daf1da7dd6c248c78a96"
+    }
+  ],
+  "schema_version": 1,
+  "source": {
+    "controls_sha256": "17a72abd31f1baca265a083546c7b9d650e480bb0acd68582749c24e02e0604b",
+    "kind": "osv-snapshot",
+    "snapshot_sha256": "4a13e2f76d92f2c2800b6285d92fbe2b2bee5bb36ee3d0723a3b7d00eaf3292d"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "results": [
+    {
+      "vulns": []
+    },
+    {
+      "vulns": [
+        {
+          "id": "GHSA-excel-critical",
+          "aliases": ["CVE-2026-0001"],
+          "database_specific": {"severity": "CRITICAL"},
+          "affected": [
+            {
+              "package": {"ecosystem": "npm", "name": "example-runtime"},
+              "ranges": [
+                {"type": "SEMVER", "events": [{"fixed": "1.2.4"}]}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "vulns": [
+        {
+          "id": "GHSA-marvin-high",
+          "database_specific": {"severity": "high"},
+          "affected": [
+            {
+              "package": {"ecosystem": "npm", "name": "example-slack"},
+              "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

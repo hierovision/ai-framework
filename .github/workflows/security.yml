@@ -1,0 +1,212 @@
+# Consumer security sweep (RM-076 P3-6/P3-8) — weekly + manual dispatch only.
+#
+# Trust boundary (reference/consumer-repos.md, docs/security/README.md):
+#   - Runs only on `schedule` and `workflow_dispatch`. There is NO
+#     `pull_request` trigger and no provider/eval secret is referenced, so a
+#     PR cannot influence or read this workflow.
+#   - Cross-repo reads use CONSUMER_SECURITY_READ_TOKEN, an ENVIRONMENT secret
+#     on the `consumer-security` environment (main-restricted). It is never a
+#     repository-level secret: this repository is public, so a repo secret is
+#     readable by any workflow that reaches a job. The token is a 90-day
+#     fine-grained PAT restricted to the four active consumers with
+#     Contents: Read only.
+#   - Intake fails closed when the credential is missing; the run never
+#     degrades to a silently partial fleet report.
+#   - Consumer content is parsed read-only. No consumer script, package
+#     manager, install, audit, or lifecycle hook runs; no PR or issue is
+#     created; no repository-admin API is called.
+#   - Posture in CI is `check_repo_posture.py --local` only (tracked config,
+#     no gh, no socket). Live posture is owner-run.
+#   - Artifacts are the closed-schema sanitized files only and retain 30 days.
+name: Consumer security sweep
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+# Least-privilege: read the repository; artifacts are the only write.
+permissions:
+  contents: read
+
+concurrency:
+  group: consumer-security-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AUDIT_DIR: .scratch/consumer-security-sweep/audit
+  ARTIFACT_DIR: .scratch/consumer-security-sweep/artifacts
+
+jobs:
+  # One shared, sanctioned OSV snapshot for all downstream jobs.
+  intake:
+    # The environment (not the repository) holds the read-only PAT, so its
+    # main-only branch policy applies to the secret-bearing job.
+    environment: consumer-security
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Fail closed on a missing read credential
+        env:
+          CONSUMER_SECURITY_READ_TOKEN: ${{ secrets.CONSUMER_SECURITY_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CONSUMER_SECURITY_READ_TOKEN}" ]; then
+            echo "::error::CONSUMER_SECURITY_READ_TOKEN is not configured on the consumer-security environment"
+            exit 1
+          fi
+
+      - name: Checkout framework tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+        with:
+          persist-credentials: false
+
+      # Read-only, default-branch checkouts into isolated scratch directories.
+      # No step runs a command inside them.
+      - name: Checkout excel-daily-monitor (read-only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+        with:
+          repository: hierovision/excel-daily-monitor
+          token: ${{ secrets.CONSUMER_SECURITY_READ_TOKEN }}
+          path: .scratch/consumer-security-sweep/audit/excel-daily-monitor
+          persist-credentials: false
+
+      - name: Checkout marvin-slack (read-only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+        with:
+          repository: hierovision/marvin-slack
+          token: ${{ secrets.CONSUMER_SECURITY_READ_TOKEN }}
+          path: .scratch/consumer-security-sweep/audit/marvin-slack
+          persist-credentials: false
+
+      - name: Checkout pt/phasetimer (read-only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+        with:
+          repository: hierovision/phasetimer
+          token: ${{ secrets.CONSUMER_SECURITY_READ_TOKEN }}
+          path: .scratch/consumer-security-sweep/audit/pt
+          persist-credentials: false
+
+      - name: Checkout paragon-learning-network (read-only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+        with:
+          repository: Stonegate-Software/paragon-learning-network
+          token: ${{ secrets.CONSUMER_SECURITY_READ_TOKEN }}
+          path: .scratch/consumer-security-sweep/audit/paragon-learning-network
+          persist-credentials: false
+
+      - name: Collect the sanctioned OSV snapshot
+        run: |
+          set -euo pipefail
+          mkdir -p "${ARTIFACT_DIR}"
+          python3 scripts/fetch_advisories.py --dry-run \
+            --from-audit "${AUDIT_DIR}" \
+            --out "${ARTIFACT_DIR}/advisories-$(date -u +%F).json"
+
+      - name: Upload sanitized advisory snapshot
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (node24)
+        with:
+          name: consumer-security-intake-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: error
+          path: .scratch/consumer-security-sweep/artifacts/advisories-*.json
+
+  # Four active-consumer gates, each consuming the identical snapshot. A
+  # retired (pln) consumer is decommission-only and has no audit leg.
+  audit:
+    needs: intake
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        slug:
+          - excel-daily-monitor
+          - marvin-slack
+          - pt
+          - paragon-learning-network
+    steps:
+      - name: Checkout framework tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+        with:
+          persist-credentials: false
+
+      - name: Download the shared intake snapshot
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2 (node24)
+        with:
+          name: consumer-security-intake-${{ github.run_id }}
+          path: .scratch/consumer-security-sweep/artifacts
+
+      - name: Per-repo audit gate (offline, threshold)
+        env:
+          SLUG: ${{ matrix.slug }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${ARTIFACT_DIR}"
+          SNAPSHOT="$(ls "${ARTIFACT_DIR}"/advisories-*.json)"
+          OUT="${ARTIFACT_DIR}/sweep-${SLUG}-$(date -u +%F).json"
+          python3 scripts/consumer_security_sweep.py \
+            --snapshot "${SNAPSHOT}" \
+            --controls docs/security/controls.json \
+            --consumer "${SLUG}" \
+            --out "${OUT}" \
+            --markdown-out "${ARTIFACT_DIR}/sweep-${SLUG}-$(date -u +%F).md" \
+            --check --fail-on high,critical
+          python3 scripts/check_security_register.py --sweep "${OUT}"
+
+      - name: Upload sanitized per-repo report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (node24)
+        with:
+          name: consumer-security-${{ matrix.slug }}-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            .scratch/consumer-security-sweep/artifacts/sweep-${{ matrix.slug }}-*.json
+            .scratch/consumer-security-sweep/artifacts/sweep-${{ matrix.slug }}-*.md
+
+  # One fleet report over the same snapshot: all five consumer statuses,
+  # retired pln as decommission-only, plus the local-only posture subset.
+  fleet:
+    needs: [intake, audit]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout framework tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+        with:
+          persist-credentials: false
+
+      - name: Download the shared intake snapshot
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2 (node24)
+        with:
+          name: consumer-security-intake-${{ github.run_id }}
+          path: .scratch/consumer-security-sweep/artifacts
+
+      - name: Fleet gate and report
+        run: |
+          set -euo pipefail
+          SNAPSHOT="$(ls "${ARTIFACT_DIR}"/advisories-*.json)"
+          OUT="${ARTIFACT_DIR}/sweep-$(date -u +%F).json"
+          python3 scripts/consumer_security_sweep.py \
+            --snapshot "${SNAPSHOT}" \
+            --controls docs/security/controls.json \
+            --out "${OUT}" \
+            --markdown-out "${ARTIFACT_DIR}/sweep-$(date -u +%F).md" \
+            --check --fail-on high,critical
+          python3 scripts/check_security_register.py --sweep "${OUT}"
+
+      # The only posture mode CI may run: tracked configuration, no gh,
+      # no socket. Live settings are reported SKIP — owner-run.
+      - name: Local posture subset
+        run: python3 scripts/check_repo_posture.py --local
+
+      - name: Upload sanitized fleet report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (node24)
+        with:
+          name: consumer-security-fleet-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            .scratch/consumer-security-sweep/artifacts/sweep-*.json
+            .scratch/consumer-security-sweep/artifacts/sweep-*.md
