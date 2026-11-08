@@ -13,6 +13,8 @@ type Status = Delegate["status"];
 export interface DelegateRow {
   sessionID: string;
   parentID: string;
+  /** RM-074: resolved display root; null when the chain is unresolved. */
+  rootID: string | null;
   via: string;
   agent: string;
   task: string;
@@ -31,6 +33,8 @@ export interface DelegateRow {
   warning: string | null;
   needsInput: string | null;
   terminal: string | null;
+  /** RM-074: the exact terminal timestamp, or null while not terminal. */
+  terminalAt: number | null;
 }
 
 const UNKNOWN_DURATION = "—";
@@ -52,6 +56,7 @@ export function projectDelegate(delegate: Delegate, now: number = Date.now()): D
   return {
     sessionID: delegate.sessionID,
     parentID: delegate.orchestratorID,
+    rootID: delegate.rootID ?? null,
     via: delegate.via,
     agent: delegate.agent,
     task: delegate.task,
@@ -71,6 +76,7 @@ export function projectDelegate(delegate: Delegate, now: number = Date.now()): D
       ? `${delegate.needsInput.kind}: ${delegate.needsInput.detail}`
       : null,
     terminal: delegate.terminal ? delegate.terminal.outcome : null,
+    terminalAt: delegate.terminal ? delegate.terminal.at : null,
   };
 }
 
@@ -97,6 +103,51 @@ export function staleCount(rows: DelegateRow[]): number {
 }
 
 /**
+ * RM-074: the one sidebar/footer eligibility projection. A stale row is
+ * collapsed history — it never renders in the strip or the footer; only the
+ * panel keeps it (through `panelHistoryLine`).
+ */
+export function eligibleRows(rows: DelegateRow[]): DelegateRow[] {
+  const list = rows ?? [];
+  return list.filter((row) => !row.stale);
+}
+
+/** The panel-only history accounting line; null when nothing is hidden. */
+export function panelHistoryLine(rows: DelegateRow[]): string | null {
+  const stale = staleCount(rows);
+  return stale > 0 ? `${stale} stale delegates hidden (alt+g to inspect)` : null;
+}
+
+/** A lone root still gets a legible label rather than a one-character prefix. */
+const MIN_ROOT_LABEL = 6;
+
+/**
+ * RM-074: the shortest root prefix unique among the listed roots, lengthening
+ * on a collision (with a small readability floor). Keys are root ids; an
+ * unresolved row uses the literal `unresolved`.
+ */
+export function rootLabels(rows: DelegateRow[]): Map<string, string> {
+  const roots = [...new Set((rows ?? []).map((row) => row.rootID ?? "unresolved"))];
+  const labels = new Map<string, string>();
+  for (const root of roots) {
+    // The unresolved sentinel is a label, not a root id: render it whole so the
+    // row and the toast say exactly the same thing.
+    if (root === "unresolved") {
+      labels.set(root, root);
+      continue;
+    }
+    let length = Math.min(MIN_ROOT_LABEL, root.length);
+    while (length < root.length && roots.some((other) =>
+      other !== root && other !== "unresolved"
+      && other.slice(0, length) === root.slice(0, length))) {
+      length += 1;
+    }
+    labels.set(root, root.slice(0, length));
+  }
+  return labels;
+}
+
+/**
  * The rows an owner may act on. Stale rows are collapsed history: they are
  * not selection targets for focus/steer/interrupt.
  */
@@ -117,9 +168,8 @@ export function formatDuration(ms: number): string {
 }
 
 export function footerStatus(rows: DelegateRow[]): string {
-  const live = (rows ?? []).filter((row) => !row.stale);
-  const stale = staleCount(rows);
-  if (!live.length) return stale ? `${stale} stale delegates hidden` : "";
+  const live = eligibleRows(rows);
+  if (!live.length) return "";
   const counts = new Map<Status, number>();
   for (const row of live) counts.set(row.status, (counts.get(row.status) ?? 0) + 1);
   const parts = [...counts.entries()]
@@ -129,21 +179,20 @@ export function footerStatus(rows: DelegateRow[]): string {
 }
 
 /**
- * One compact line per live delegate, clipped so the sidebar never reflows,
- * plus at most one collapsed line for the historical rows. A stale row is
- * never rendered as running.
+ * One compact line per eligible delegate, clipped so the sidebar never
+ * reflows. Each line names the owning root's unique prefix (RM-074); stale
+ * rows never render and the history count lives only in the panel.
  */
 export function sidebarLines(rows: DelegateRow[], max: number = 8): string[] {
-  const live = (rows ?? []).filter((row) => !row.stale);
-  const stale = staleCount(rows);
-  const lines = live.slice(0, max).map((row) => {
+  const live = eligibleRows(rows).slice(0, max);
+  const labels = rootLabels(live);
+  return live.map((row) => {
+    const label = labels.get(row.rootID ?? "unresolved") ?? "unresolved";
     const mark = row.status === "waiting" || row.status === "warning" || row.status === "failed" ? "!" : "·";
     const detail = row.needsInput ?? row.phase;
-    const line = `${mark} ${row.agent} ${row.status}: ${detail} · ${row.elapsed} · q${row.quiet}`;
+    const line = `${mark} [${label}] ${row.agent} ${row.status}: ${detail} · ${row.elapsed} · q${row.quiet}`;
     return line.length <= 64 ? line : `${line.slice(0, 61)}...`;
   });
-  if (stale > 0) lines.push(`${stale} stale delegates hidden`);
-  return lines;
 }
 
 // --- live status map (the only liveness source for discovered rows) --------

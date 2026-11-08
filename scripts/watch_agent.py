@@ -63,6 +63,11 @@ DENY_BASH = [
 DEFAULT_CALL_SECONDS = 300
 DEFAULT_STALL_SECONDS = 240
 DEFAULT_LOOP_REPEATS = 3
+# RM-074: re-editing one file is normal iteration, so the edit/write class has
+# its own, higher repeat cap; every other tool keeps DEFAULT_LOOP_REPEATS. This
+# is the single owner of that number — supervision_contract.py publishes it and
+# the delegation observer reads it from the generated JSON.
+EDIT_WRITE_LOOP_REPEATS = 8
 # inside an open assistant step the vendor publishes nothing until the block
 # ends (probed 2026-10-25: DB parts and the tee are block-granular), so the
 # stall window stretches to this generation budget before STALLED may fire
@@ -297,7 +302,7 @@ def analyze_session(sess, parts, call_seconds, loop_repeats):
     loops = [
         (k, v)
         for k, v in targets.items()
-        if v >= (8 if k.startswith(("write:", "edit:")) else loop_repeats)
+        if v >= (EDIT_WRITE_LOOP_REPEATS if k.startswith(("write:", "edit:")) else loop_repeats)
     ]
     # Completion is inferred honestly (AC11/AC12): the terminal step-finish
     # marker after the final non-empty text, with no tool in flight. The

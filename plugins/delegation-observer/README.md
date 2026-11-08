@@ -46,10 +46,13 @@ Plugin options live under the plugin entry's options object:
 | `enabled` | `true` | disables both parts; the TUI shows the disabled banner |
 | `stallSeconds` | `240` | quiet window before `warning` |
 | `callSeconds` | `300` | quiet window for a tool call in flight |
-| `loopRepeats` | `3` | identical tool targets (one count per call id) that flag thrash |
+| `loopRepeats` | `3` | identical tool calls (full input fingerprint, one count per call id) that flag thrash for bash/read/grep and other tools |
+| `editWriteLoopRepeats` | `8` | identical edit/write calls that flag thrash (generated from `watch_agent.EDIT_WRITE_LOOP_REPEATS`) |
 | `generationSeconds` | `600` | quiet budget inside an open assistant step |
 | `milestoneMinIntervalSeconds` | `30` | routine synthetic-milestone cap per delegate |
 | `staleGraceSeconds` | `600` | history window: a discovered row older than this collapses as stale |
+| `terminalGraceSeconds` | `300` | how long an observed **completed** row stays in the sidebar after `terminal.at` |
+| `failedTerminalGraceSeconds` | `3600` | the same window for an observed **terminal failure** |
 | `attentionWake` | `true` | `thrash`/`stall`/`needs-input`/`denied` start one parent turn (RM-070) |
 | `maxAttentionWakes` | `3` | attention turns per child per observer process |
 | `healthFile` | `<location>/.scratch/delegation-observer/health.json` | shared degradation record |
@@ -57,6 +60,8 @@ Plugin options live under the plugin entry's options object:
 | `DELEGATION_OBSERVER_ENABLED` (env, TUI) | — | `0/false/no/off` disables the TUI part |
 | `DELEGATION_OBSERVER_STALL_SECONDS` (env, TUI) | — | interactive threshold |
 | `DELEGATION_OBSERVER_STALE_GRACE_SECONDS` (env, TUI) | — | history window (positive seconds) |
+| `DELEGATION_OBSERVER_TERMINAL_GRACE_SECONDS` (env, TUI) | — | completed display window (positive seconds) |
+| `DELEGATION_OBSERVER_FAILED_TERMINAL_GRACE_SECONDS` (env, TUI) | — | terminal-failure display window (positive seconds) |
 | `DELEGATION_OBSERVER_ATTENTION_WAKE` (env) | — | `0/false/no/off` disables attention wakes |
 | `DELEGATION_OBSERVER_MAX_ATTENTION_WAKES` (env) | — | positive integer cap |
 | `DELEGATION_OBSERVER_HEALTH_FILE` (env, TUI) | — | must match the server's `healthFile` |
@@ -70,10 +75,13 @@ host forwards them. The observer TUI writes a presence marker
 The **server** part reads only the two RM-070 attention env keys
 (`DELEGATION_OBSERVER_ATTENTION_WAKE`,
 `DELEGATION_OBSERVER_MAX_ATTENTION_WAKES`). `DELEGATION_OBSERVER_ENABLED`,
-`DELEGATION_OBSERVER_STALL_SECONDS`, `DELEGATION_OBSERVER_STALE_GRACE_SECONDS`,
+`DELEGATION_OBSERVER_STALL_SECONDS`,
+`DELEGATION_OBSERVER_STALE_GRACE_SECONDS`,
+`DELEGATION_OBSERVER_TERMINAL_GRACE_SECONDS`,
+`DELEGATION_OBSERVER_FAILED_TERMINAL_GRACE_SECONDS`,
 `DELEGATION_OBSERVER_HEALTH_FILE` and `DELEGATION_OBSERVER_STATUS_FILE` remain
-the TUI channel: the server's thresholds and enabled flag are not
-env-overridable (ADR-0015 Decision 10; the shared supervision contract).
+the TUI channel: the server's thresholds, display windows and enabled flag are
+not env-overridable (ADR-0015 Decision 10; the shared supervision contract).
 
 **Sentinel companion.** `plugins/delegation-sentinel/` is an always-loadable
 TUI-only fallback: it renders one line when this plugin is absent, failed,
@@ -81,13 +89,15 @@ disabled, disconnected, or its TUI is not running. It never shows delegate
 detail.
 
 The **watchdog thresholds** (`stallSeconds`, `callSeconds`, `loopRepeats`,
-`generationSeconds`, `milestoneMinIntervalSeconds`) are the shared supervision
-contract (`scripts/supervision_contract.json`, generated from `watch_agent.py` /
-`observe_completion.py`); `state.test.ts` fails if the TypeScript side drifts.
-`staleGraceSeconds` is **not** part of that contract: it is an observer-owned
-display window with no Python owner, so it lives here and in the plugin only.
-The status panel prints the effective stall/call/loop/generation thresholds
-and the effective stale grace.
+`editWriteLoopRepeats`, `generationSeconds`, `milestoneMinIntervalSeconds`) are
+the shared supervision contract (`scripts/supervision_contract.json`, generated
+from `watch_agent.py` / `observe_completion.py`); `state.test.ts` fails if the
+TypeScript side drifts. `editWriteLoopRepeats` is published by
+`watch_agent.EDIT_WRITE_LOOP_REPEATS`; never hand-edit the generated JSON.
+`staleGraceSeconds`, `terminalGraceSeconds` and `failedTerminalGraceSeconds`
+are **not** part of that contract: they are observer-owned display windows with
+no Python owner, so they live here and in the plugin only. The status panel
+prints the effective thresholds and display windows.
 
 ## Liveness is evidence, not discovery
 
@@ -106,14 +116,24 @@ milestone, and keeps that outcome even when the live map says running.
 live map and later events cannot revive it; `session.unarchived` is the only
 way back from archived, but it does not by itself return a store-terminal row
 to the live strip (that row stays collapsed history). A completion you watched
-happen (`session.execution.*`) stays visible; one that only exists in the
-store is history.
+happen (`session.execution.*`) stays visible until its display window ends: an
+observed completion ages out at `terminalGraceSeconds` (300 s) after
+`terminal.at`, an observed terminal failure at `failedTerminalGraceSeconds`
+(3600 s). Both are TUI display settings, not supervision thresholds, and the
+row carries the exact `terminalAt` it was classified from. A store-terminal row
+that was never observed here is history immediately; a clock-classified
+`failed` row with no `terminal` event is still actionable and never ages
+through these windows.
 
-A row that is archived, terminal in the store but unobserved here, or
-(discovered) older than `staleGraceSeconds` is **stale**: it never reads
-`running`, never emits a synthetic milestone, is never clock-classified, is
-excluded from the focus/steer/interrupt picker, and collapses into one
-`N stale delegates hidden` line. The first real event promotes a discovered
+A row that is archived, terminal in the store but unobserved here, past its
+terminal display window, or (discovered) older than `staleGraceSeconds` is
+**stale**: it never reads `running`, never emits a synthetic milestone, is never
+clock-classified, is excluded from the focus/steer/interrupt picker, and never
+renders in the sidebar or footer. The sidebar is a projection of *current
+signals* only (capped at eight delegate rows); the `N stale delegates hidden
+(alt+g to inspect)` accounting line lives only in the `session.panel`, and a
+stale-only state renders no heading, no lines and no footer count. The first
+real event promotes a discovered
 row *and* resets the observation clock to that event's observation time, so an
 old store timestamp can never be read as quiet time; from there the documented
 stall/thrash/needs-input semantics take over.
@@ -132,6 +152,67 @@ disappears from an otherwise available map. Observed rows are untouched; their
 own event clock owns them. Recovery re-promotes a discovered row as soon as the
 map answers again.
 
+## Root scope and labels
+
+`session.list()` is directory-wide, so a row or notice can belong to a root
+other than the session that renders it. Bootstrap (server and TUI) indexes the
+whole list once and resolves every delegate's display `rootID` through the
+`parentID`/`parent_id` chain, following a run-vehicle title marker when a child
+has no parent. The walk is bounded and cycle-safe; a cycle or a missing parent
+labels the row **unresolved** and never guesses another root.
+
+`orchestratorID` (the immediate association) still drives wake routing, the
+trusted-root gate and the same-directory gate — `rootID` is presentation
+metadata only and never bypasses them. Sidebar lines carry the shortest root
+prefix unique among the listed roots (lengthened on a collision, with a
+six-character readability floor); the panel uses the full root id; toast and
+attention titles and message bodies name the full owning root, so root B's
+milestone is never labelled root A. The server's synthetic wake text is
+unchanged.
+
+## Progress-aware thrash
+
+A loop is counted over a canonical fingerprint of the **complete tool input**
+plus the resolved tool name and target, not over the target alone. Object keys
+are sorted before fingerprinting, so semantically identical input is stable and
+JSON key order can neither create nor hide a loop; the call-id guard still
+counts one call once across re-delivery. A changed edit payload starts a new
+sequence (six — even eight — distinct edits to one file are progress), while
+identical calls accumulate. The condition key remains `thrash:<target>`, so
+RM-070 dedupe still sees exactly one wake condition per target and the input
+fingerprint is classification, never an extra condition. A successful tool
+status is not by itself progress.
+
+Edit/write calls flag at `editWriteLoopRepeats` (8, owned by
+`scripts/watch_agent.py` via the generated supervision contract); bash, shell,
+read, grep and every other tool keep `loopRepeats` (3).
+
+## Durable attention claims
+
+The reducer dedupes a condition only for the lifetime of one instance, so a
+rebuilt observer could re-deliver the same attention condition. Before sending
+a wake-eligible synthetic (`thrash`/`stall`/`needs-input`/`denied`, after the
+trusted-root and same-directory gates), the server creates one exclusive claim
+file per (child, condition) under
+`<location>/.scratch/delegation-observer/attention-claims/` (or beside an
+explicit `healthFile`; `claimsDirectory` is the hermetic test seam). The file is
+created with `wx`, so a racing observer cannot also win; its JSON records the
+child, root, condition, wake flag, observer pid, location and timestamp for
+post-hoc evidence. An existing claim suppresses the duplicate synthetic and
+writes a structured `attention dedupe skipped` log. A rejected send removes its
+new claim so a later observer can retry. Untrusted or out-of-location
+milestones never create a claim; routine, retry and terminal delivery never use
+the ledger.
+
+The claim is written **before** the send: the remaining crash window (die after
+claiming, before sending) makes this **at-most-once** delivery, not
+transactional exactly-once. `attentionWakes` / `maxAttentionWakes` stay
+per-observer-process and are not persisted or reinterpreted. A location-less
+host with no injected directory keeps in-process dedupe only and logs
+`durable attention dedupe unavailable`; a claim-directory I/O failure falls
+back the same way. Claim files are never pruned — that needs separate
+operational design.
+
 ## Milestones
 
 | Kind | Class | When | Parent turn |
@@ -142,7 +223,7 @@ map answers again.
 | needs-input | attention | `permission.asked` / `form.created` (session id at `data.form.sessionID`) | **one wake** |
 | denied | attention | `permission.replied` with `reply:"reject"` — a warning, never a resume | **one wake** |
 | stall | attention | quiet beyond the applicable window (busy is never stalled) | **one wake** |
-| thrash | attention | identical tool target ≥ `loopRepeats` (one count per call id) | **one wake** |
+| thrash | attention | identical tool input ≥ `loopRepeats` (other tools) / `editWriteLoopRepeats` (edit/write), one count per call id | **one wake** |
 | retry | attention | vendor `retry` status, deduped per attempt | no (strip alert only) |
 | terminal | exactly once | `session.execution.succeeded/failed/interrupted` | no (the RM-058 wake prompts) |
 
@@ -241,10 +322,10 @@ server build).
 ## Tests
 
 ```
-node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 131 tests
-node ../delegation-sentinel/sentinel.test.ts           # 5 tests
+node --test state.test.ts tui.test.ts server.test.ts model.test.ts   # 153 tests
+node ../delegation-sentinel/sentinel.test.ts           # 6 tests
 tsc -p . --noEmit
-node mutation-check.mjs                                # 47 break/restore proofs
+node mutation-check.mjs                                # 54 break/restore proofs
 ```
 
 `mutation-check.mjs` is the checked-in evidence behind every liveness guard:
