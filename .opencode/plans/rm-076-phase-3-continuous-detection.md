@@ -521,3 +521,12 @@ Inspect the run's four active audit gates and retired `pln` status, then downloa
   yamllint, `check_roadmap_verbatim.py`, and `git diff --check` exit 0; the
   no-argument handoff check still exits 1 `BLOCKED` by design (RM-075 inputs
   remain absent).
+- 2026-11-08 — Incidental required-check fix (outside RM-076's file map):
+  `scripts/test_eval_report.py::test_lane_status_escalation` pinned its
+  in-process clock (`now=2026-10-12`) but its CLI round-trip omitted a time
+  override, so the CLI used the wall clock and dropped the seeded 2026-10-09
+  event from the 30-day window on 2026-11-08 (`quality-gates` red on PR #168,
+  unrelated to this feature). Added a `--now` (date or RFC 3339) seam to
+  `eval-report.py lane-status` and passed the test's pinned date. The 30-day
+  window and every assertion are unchanged — this removes wall-clock
+  nondeterminism rather than widening the net.
