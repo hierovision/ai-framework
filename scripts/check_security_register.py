@@ -52,6 +52,9 @@ def _iso_date(value, where):
     return value
 
 
+SWEEP_FINDING_KEYS = set(sweep.FINDING_ID_KEYS) | {"sweep_id", "fixed"}
+
+
 def load_sweep(path):
     with open(path, "rb") as fh:
         raw = fh.read()
@@ -69,9 +72,7 @@ def load_sweep(path):
         where = f"sweep.findings[{index}]"
         if not isinstance(finding, dict):
             raise sweep.SchemaError(f"{where}: expected an object")
-        missing = sorted(set(sweep.FINDING_ID_KEYS) - set(finding))
-        if missing:
-            raise sweep.SchemaError(f"{where}: missing field(s) {missing}")
+        sweep._closed(finding, SWEEP_FINDING_KEYS, where)
         computed = sweep.sweep_id(finding)
         if finding.get("sweep_id") != computed:
             raise sweep.SchemaError(f"{where}: sweep_id does not match its fields")

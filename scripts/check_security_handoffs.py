@@ -47,6 +47,9 @@ SUPPRESSION_COLUMNS = ("ID", "Owner", "Date", "Review on", "Rationale")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 COMMAND_RE = re.compile(
     r"^(?:sudo\s+)?(?:npm|npx|yarn|pnpm|git|gh|node|python3?|bash|sh|audit)\b")
+COMMAND_SEPARATOR_RE = re.compile(r"\|\||&&|;|\|")
+ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*\s+")
+WRAPPER_RE = re.compile(r"^(?:sudo|env|command|nohup|time|exec)\s+(?:-\S+\s+)*")
 N_A_CONTROL = "N/A — control-only"
 N_A_RETIRED = "N/A — decommissioned"
 
@@ -123,16 +126,58 @@ def _has_content(section):
     return False
 
 
+def _logical_lines(block):
+    """Join backslash continuations; drop blank lines and shell comments."""
+    lines, current = [], ""
+    for raw in block.splitlines():
+        line = raw.rstrip()
+        if line.endswith("\\"):
+            current += line[:-1].rstrip() + " "
+            continue
+        candidate = (current + line).strip()
+        current = ""
+        if candidate and not candidate.startswith("#"):
+            lines.append(candidate)
+    if current.strip():
+        lines.append(current.strip())
+    return lines
+
+
+def _strip_command_prefixes(segment):
+    """Strip leading VAR=value assignments and wrappers (sudo/env/...)."""
+    while True:
+        assignment = ENV_ASSIGNMENT_RE.match(segment)
+        if assignment:
+            segment = segment[assignment.end():].lstrip()
+            continue
+        wrapper = WRAPPER_RE.match(segment)
+        if wrapper:
+            segment = segment[wrapper.end():].lstrip()
+            continue
+        return segment
+
+
+def _line_has_executable_force(line):
+    """True when a command segment on this logical line carries --force."""
+    for segment in COMMAND_SEPARATOR_RE.split(line):
+        segment = _strip_command_prefixes(segment.strip())
+        if "--force" not in segment:
+            continue
+        if COMMAND_RE.match(segment):
+            return True
+    return False
+
+
 def _executable_force(section, include_inline=True):
     for block in _fenced_blocks(section):
         if "--force" not in block:
             continue
-        if any(COMMAND_RE.match(line.strip())
-               for line in block.splitlines() if line.strip()):
+        if any(_line_has_executable_force(line)
+               for line in _logical_lines(block)):
             return True
     if include_inline:
         for span in _inline_spans(section):
-            if "--force" in span and COMMAND_RE.match(span.strip()):
+            if "--force" in span and _line_has_executable_force(span.strip()):
                 return True
     return False
 

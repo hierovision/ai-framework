@@ -499,8 +499,10 @@ Inspect the run's four active audit gates and retired `pln` status, then downloa
 - 2026-11-07 — Mechanical deviations (feature unchanged): `--snapshot` was
   added to the sweep so CI can consume the intake artifact's dated filename;
   `--inventory`/`--register`/`--today` options make every mode testable and
-  explicit; `check_repo_posture.py` treats "no mode named" as the original
-  live `--repo hierovision/ai-framework` default; the fetcher's git-revision
+  explicit; `check_repo_posture.py` previously required `--repo`; it now keeps
+  the same live framework check and behavior when `--repo` is given, and the
+  new mutually exclusive mode group treats no mode named as that live
+  `hierovision/ai-framework` default; the fetcher's git-revision
   probe requires the checkout's own `.git` so hermetic fixture directories
   cannot inherit the surrounding worktree HEAD. The fixture register is
   synthetic and is never the tracked register.
@@ -508,3 +510,14 @@ Inspect the run's four active audit gates and retired `pln` status, then downloa
   stack reference applies (Open Question 8). Follow-ups: none beyond the
   owner-only residuals recorded in `docs/roadmap-detail/RM-076.md`; record the
   read-only credential's expiry/rotation there when it is created.
+- 2026-11-08 — PR #168 review fixes: the handoff `--force` scanner now splits
+  each fence logical line on `&&`/`||`/`;`/`|`, strips leading `VAR=value`
+  assignments and `sudo`/`env`-style wrappers, and joins backslash
+  continuations, so `cd app && npm audit fix --force`, `FOO=1 npm install
+  --force`, and the `;`/`|` forms fail; prose inside a fence still passes.
+  `check_security_register.load_sweep` applies the closed-schema unknown-field
+  check to each sweep finding. `test_fetch_advisories.py` asserts a dry run
+  leaves `git status --porcelain` unchanged in-module. All six modules,
+  yamllint, `check_roadmap_verbatim.py`, and `git diff --check` exit 0; the
+  no-argument handoff check still exits 1 `BLOCKED` by design (RM-075 inputs
+  remain absent).

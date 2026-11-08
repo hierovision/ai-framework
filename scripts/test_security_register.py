@@ -11,7 +11,9 @@ rejections.
 import copy
 import json
 import os
+import shutil
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -24,11 +26,17 @@ FIXTURES = os.path.join(HERE, "fixtures", "consumer-security")
 SWEEP_FILE = os.path.join(FIXTURES, "expected-sweep.json")
 REGISTER_FILE = os.path.join(FIXTURES, "register.json")
 REAL_REGISTER = os.path.join(REPO, "docs", "security", "register.json")
+SCRATCH = os.path.join(REPO, ".scratch", "test-tmp")
 
 
 def load(path):
     with open(path, encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def tempdir():
+    os.makedirs(SCRATCH, exist_ok=True)
+    return tempfile.mkdtemp(dir=SCRATCH)
 
 
 def base_register():
@@ -70,6 +78,24 @@ def test_unknown_field_is_rejected():
     register = base_register()
     register["findings"][0]["extra"] = "nope"
     assert_fails(register, "unknown field(s) ['extra']")
+
+
+def test_unknown_sweep_finding_field_is_rejected():
+    document = load(SWEEP_FILE)
+    document["findings"][0]["extra"] = "nope"
+    root = tempdir()
+    try:
+        path = os.path.join(root, "sweep.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(document, fh)
+        try:
+            checker.load_sweep(path)
+        except sweep.SchemaError as exc:
+            assert "unknown field(s) ['extra']" in str(exc), str(exc)
+        else:
+            raise AssertionError("unknown sweep finding field was accepted")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_unknown_register_field_is_rejected():
@@ -204,6 +230,7 @@ def main():
         test_valid_fixture_and_tracked_register,
         test_every_required_field_is_enforced,
         test_unknown_field_is_rejected,
+        test_unknown_sweep_finding_field_is_rejected,
         test_unknown_register_field_is_rejected,
         test_duplicate_sweep_id_is_rejected,
         test_missing_coverage_is_rejected,

@@ -183,6 +183,31 @@ def test_executable_force_in_fence_fails():
     assert any("executable --force" in failure for failure in failures)
 
 
+def test_wrapped_executable_force_fails():
+    cases = {
+        "cd": "cd app && npm audit fix --force",
+        "env-assignment": "FOO=1 npm install --force",
+        "semicolon": "npm ci; npm audit fix --force",
+        "pipe": "npm run build | npm audit fix --force",
+        "or": "npm ci || yarn upgrade --force",
+        "sudo": "sudo env FOO=1 npm install --force",
+        "continuation": "npm audit fix \\\n  --force",
+    }
+    for label, command in cases.items():
+        text = body("pt", "hierovision/phasetimer").replace(
+            "npm ci\nnpm test", command)
+        failures = run_over({"handoff-pt.md": text})
+        assert any("executable --force" in failure for failure in failures), \
+            f"{label}: {command!r} was not flagged"
+
+
+def test_prose_force_inside_fence_is_allowed():
+    text = body("pt", "hierovision/phasetimer").replace(
+        "npm ci\nnpm test",
+        "npm ci\nnpm test\nNever use --force here; it is forbidden.")
+    assert run_over({"handoff-pt.md": text}) == []
+
+
 def test_executable_inline_force_fails():
     text = body("pt", "hierovision/phasetimer").replace(
         "- Apply the referenced upgrade and re-run the verification commands.",
@@ -222,6 +247,8 @@ def main():
         test_missing_verification_and_owner_actions_fail,
         test_missing_suppressions_and_guardrails_fail,
         test_executable_force_in_fence_fails,
+        test_wrapped_executable_force_fails,
+        test_prose_force_inside_fence_is_allowed,
         test_executable_inline_force_fails,
         test_undated_suppression_fails,
         test_cli_exit_codes,

@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import socket
+import subprocess
 import sys
 import tempfile
 import unittest.mock as mock
@@ -278,6 +279,16 @@ def test_socket_guard_and_negative_control():
         shutil.rmtree(temp, ignore_errors=True)
 
 
+def git_status():
+    """Porcelain status of the repository, or None when git is unavailable."""
+    try:
+        proc = subprocess.run(["git", "-C", REPO, "status", "--porcelain"],
+                              capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
 def _hashes(root):
     digests = {}
     for dirpath, _, filenames in os.walk(root):
@@ -310,6 +321,27 @@ def test_cli_writes_only_the_explicit_output():
         assert snapshot["as_of"] == "2026-11-07T00:00:00Z"
         assert not [name for name in os.listdir(temp)
                     if name.startswith(".snapshot-")]
+    finally:
+        shutil.rmtree(temp, ignore_errors=True)
+
+
+def test_dry_run_leaves_git_status_unchanged():
+    before = git_status()
+    temp = tempdir()
+    try:
+        audit = os.path.join(temp, "audit")
+        build_audit_tree(audit)
+        consumers = sweep.load_inventory()
+        count = len(static_queries(consumers, audit))
+        osv_path = os.path.join(temp, "osv.json")
+        write(osv_path, json.dumps(osv_response(count)))
+        out = os.path.join(temp, "out", "snapshot.json")
+        rc = fetch.main(["--from-audit", audit, "--out", out, "--dry-run",
+                         "--osv-json", osv_path,
+                         "--as-of", "2026-11-07T00:00:00Z"])
+        assert rc == 0
+        after = git_status()
+        assert before == after, "dry run changed git-visible status"
     finally:
         shutil.rmtree(temp, ignore_errors=True)
 
@@ -377,6 +409,7 @@ def main():
         test_osv_fixture_normalizes_allowlisted_fields,
         test_socket_guard_and_negative_control,
         test_cli_writes_only_the_explicit_output,
+        test_dry_run_leaves_git_status_unchanged,
         test_atomic_write_failure_leaves_no_temp,
         test_framework_propagation_requires_exact_version,
         test_no_package_manager_invocation_in_source,
