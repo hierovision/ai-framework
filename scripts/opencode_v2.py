@@ -44,7 +44,7 @@ import urllib.parse
 import urllib.request
 
 DEFAULT_DB = os.path.expanduser("~/.local/share/opencode/opencode.db")
-VERSION_PIN = "2.2.5"
+VERSION_PIN = "2.2.6"
 
 # Tool vocabulary (V1 -> V2). Consumer evals may still emit V1 names; callers
 # that accept aliases log them (see run_behavioral_eval).

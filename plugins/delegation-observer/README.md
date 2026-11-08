@@ -274,7 +274,7 @@ against 2.2.5 + OpenTUI 0.8.1, 2026-11-02)
 ## Install / apply (owner step — deliberately not performed here)
 
 1. From the merged branch: `npm install` in this directory. `@opencode/plugin`
-   2.2.5, `solid-js` 1.9.12 and `@opentui/core`/`solid` 0.8.1 are declared as
+   2.2.6, `solid-js` 1.9.12 and `@opentui/core`/`solid` 0.8.3 are declared as
    exact **peer** dependencies (the host provides the versions; npm
    materializes them locally so the loader and typecheck resolve). The
    `typecheck` script (`tsc -p . --noEmit`) is the type-level proof against
