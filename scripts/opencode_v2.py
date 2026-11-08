@@ -7,9 +7,9 @@ instead of re-deriving V1 facts. Contracts kept above this layer: dispatch CLI,
 heartbeat lines, run-log shape, exit codes, eval predicates.
 
 Facts encoded here (validated live against opencode 2.1.4, 2026-10-27;
-revalidated for 2.2.5 by the canary, 2026-11-02):
+revalidated for 2.2.6 by the canary, 2026-11-08):
 
-  * binary/version probe — `opencode --version` prints `opencode v2.2.5`.
+  * binary/version probe — `opencode --version` prints `opencode v2.2.6`.
   * service discovery — `opencode service status|start` prints the URL; the
     service itself requires the `service.json` password, so typed calls go
     through `opencode api <method> <path>` (which authenticates) and fall back
@@ -44,7 +44,7 @@ import urllib.parse
 import urllib.request
 
 DEFAULT_DB = os.path.expanduser("~/.local/share/opencode/opencode.db")
-VERSION_PIN = "2.2.5"
+VERSION_PIN = "2.2.6"
 
 # Tool vocabulary (V1 -> V2). Consumer evals may still emit V1 names; callers
 # that accept aliases log them (see run_behavioral_eval).

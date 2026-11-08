@@ -1,6 +1,6 @@
 {
   "name": "delegation-observer",
-  "version": "2.2.5",
+  "version": "2.2.6",
   "private": true,
   "type": "module",
   "description": "V2 delegation observer: event-driven delegate status, synthetic parent milestones, owner controls",
@@ -9,9 +9,9 @@
     "typecheck": "tsc -p . --noEmit"
   },
   "peerDependencies": {
-    "@opencode/plugin": "2.2.5",
-    "@opentui/core": "0.8.1",
-    "@opentui/solid": "0.8.1",
+    "@opencode/plugin": "2.2.6",
+    "@opentui/core": "0.8.3",
+    "@opentui/solid": "0.8.3",
     "solid-js": "^1.9.12"
   },
   "devDependencies": {

@@ -3,8 +3,8 @@
 Single home for the OpenCode V2 facts this library relies on. The vendor API
 changes; re-verify against the linked docs before relying on any line.
 **Behavioral facts validated 2026-10-26/27 against opencode `2.1.4`; the
-`2.2.5` upgrade passed the canary on 2026-11-02** (evidence under
-`.scratch/v2-canary-2.2.5/`). Notes that cite `2.1.4` are the original probes;
+`2.2.6` upgrade passed the canary on 2026-11-02** (evidence under
+`.scratch/v2-canary-2.2.6/`). Notes that cite `2.1.4` are the original probes;
 the canary revalidated version, service, model catalog, stability, config/
 plugin load, and migration, not every line.
 
@@ -14,9 +14,9 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
 
 ## Binary, package, version
 
-- Package: `@opencode/cli@2.2.5` (never the legacy V1 package, never `latest`).
-- `opencode --version` prints `opencode v2.2.5` (the exact string is
-  `opencode v2.2.5`).
+- Package: `@opencode/cli@2.2.6` (never the legacy V1 package, never `latest`).
+- `opencode --version` prints `opencode v2.2.6` (the exact string is
+  `opencode v2.2.6`).
 - `opencode run` flags: `--agent`, `--model/-m` (`provider/model#variant`),
   `--session/-s`, `--continue/-c`, `--fork`, `--format <default|json>`,
   `--file/-f`, `--title`, `--thinking`, `--auto`, `--standalone`,
@@ -31,12 +31,12 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
 
 ## Install and config root
 
-- Package: `@opencode/cli@2.2.5` (never the legacy V1 package, never `latest`).
-- `opencode --version` prints `opencode v2.2.5`.
+- Package: `@opencode/cli@2.2.6` (never the legacy V1 package, never `latest`).
+- `opencode --version` prints `opencode v2.2.6`.
 - Supported upgrade: `opencode upgrade <target> --method
   <curl|npm|pnpm|bun|yarn|vp|brew|winget>`; this machine uses yarn-global.
   For the **same-version** migration use `yarn global add
-  @opencode/cli@2.2.5`: `opencode upgrade 2.2.5` reports "already installed"
+  @opencode/cli@2.2.6`: `opencode upgrade 2.2.6` reports "already installed"
   and skips, so the official package install is the migration step.
 - Config root: `~/.config/opencode` (or `XDG_CONFIG_HOME`). The reviewed
   config is staged by `scripts/stage_opencode_config.py --backup`, which
@@ -47,7 +47,7 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
 - The versioned wrapper/cutover is retired (ADR-0017; ADR-0014 is the
   historical one-time cutover record). If yarn refuses the existing custom
   `~/.yarn/bin/opencode` link during the migration, remove that one symlink
-  first; `yarn global add @opencode/cli@2.2.5` recreates it.
+  first; `yarn global add @opencode/cli@2.2.6` recreates it.
 
 ## Version upgrades (supported)
 
@@ -202,7 +202,7 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
 
 ## Plugins
 
-- `@opencode/plugin@2.2.5` is the matching runtime package (the legacy V1
+- `@opencode/plugin@2.2.6` is the matching runtime package (the legacy V1
   plugin package is not a V2 contract). 2.2.x requires OpenTUI 0.7 (2.2.0) and
   0.8 (2.2.3+); this library pins `@opentui/core`/`solid` 0.8.1.
 - Shape: `Plugin.define({ id, async setup(ctx) { … return cleanup } })`;

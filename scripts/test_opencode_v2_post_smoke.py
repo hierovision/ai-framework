@@ -21,6 +21,7 @@ SCRIPT = os.path.join(HERE, "opencode_v2_post_smoke.py")
 sys.path.insert(0, HERE)
 
 import scratch_cleanup  # noqa: E402
+import opencode_v2 as v2  # noqa: E402
 
 
 def _tmp(prefix):
@@ -68,14 +69,18 @@ def _config_root(path):
     return os.path.join(path, ".scratch", "versioned", "config")
 
 
-def _fake_bin(root, version="opencode v2.2.5"):
+def _fake_bin(root, version=None):
     """Stub the V2 CLI: --version plus a standalone loader log on `run`.
+
+    The stubbed version tracks `VERSION_PIN` so a pin bump cannot silently
+    leave this fixture asserting the previous version.
 
     STUB_LOADER selects the loader evidence shape: pass (default), absent,
     failed, wrong, or untagged (right id, marker without this probe's token).
     All shapes exit non-zero after the plugin phase because the probe uses an
     unavailable model; only the captured stderr is asserted.
     """
+    version = version or f"opencode v{v2.VERSION_PIN}"
     d = os.path.join(root, "bin")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "opencode")
