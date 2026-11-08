@@ -81,6 +81,16 @@ def _today():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+def _parse_now(value):
+    """Parse --now (date or RFC 3339) to an aware UTC datetime."""
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def per_skill_runs(logs_dir):
     """Per-skill list of eval records (the per-run scores)."""
     out = {}
@@ -624,6 +634,9 @@ def main(argv=None):
     ls.add_argument("--print", action="store_true")
     ls.add_argument("--window-days", type=int, default=30,
                     help="Look-back window in days (default 30, matches retention).")
+    ls.add_argument("--now", default=None,
+                    help="Evaluation time as YYYY-MM-DD or RFC 3339 (default: now); "
+                         "deterministic test seam for the escalation window.")
 
     sp = sub.add_parser("suite-projection", parents=[common],
                         help="Project suite tokens/cost/wall-time from measured probes (RM-021).")
@@ -660,7 +673,8 @@ def main(argv=None):
             status = green_run_status(reason=args.reason, lane=args.lane)
         _emit(status, args.out, args.print)
     elif args.cmd == "lane-status":
-        _emit(lane_status(logs_dir, window_days=args.window_days),
+        _emit(lane_status(logs_dir, window_days=args.window_days,
+                          now=_parse_now(args.now)),
               args.out, args.print)
     elif args.cmd == "quota-projection":
         _emit(quota_projection(skills_root), args.out, args.print)

@@ -1040,8 +1040,12 @@ def test_lane_status_escalation():
         finally:
             shutil.rmtree(d3)
         # CLI round-trip.
+        # Pin the evaluation time: an unpinned CLI run used the wall clock, so
+        # the seeded 2026-10-09 event fell out of the 30-day window once the
+        # date advanced (first red 2026-11-08).
         r = subprocess.run([sys.executable, os.path.join(HERE, "eval-report.py"),
-                            "lane-status", "--logs-dir", d, "--print"],
+                            "lane-status", "--logs-dir", d, "--print",
+                            "--now", "2026-10-12"],
                            capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
         payload = json.loads(r.stdout)

@@ -119,6 +119,20 @@ jobs:
           # F8 — the evidence is checked in, not a claim).
           node plugins/delegation-observer/mutation-check.mjs
 
+      # RM-076 consumer-security suites: the deterministic offline sweep,
+      # sanctioned advisory intake, register/handoff contracts, posture local
+      # mode (no gh/socket), and the scheduled-workflow shape. The default
+      # register check needs no sweep and no real handoff briefs.
+      - name: Consumer-security suites (hermetic, no network)
+        run: |
+          python3 scripts/test_consumer_security_sweep.py
+          python3 scripts/test_fetch_advisories.py
+          python3 scripts/test_security_register.py
+          python3 scripts/test_security_handoffs.py
+          python3 scripts/test_repo_posture.py
+          python3 scripts/test_security_workflows.py
+          python3 scripts/check_security_register.py
+
       - name: Offline eval verifiers
         run: |
           node skills/managing-github-issues/evals/fixtures/verify.mjs

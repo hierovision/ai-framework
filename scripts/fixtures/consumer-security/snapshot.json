@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "as_of": "2026-11-07T00:00:00Z",
+  "source": "https://api.osv.dev/v1/querybatch",
+  "revisions": [
+    {
+      "repo": "excel-daily-monitor",
+      "commit": "1111111111111111111111111111111111111111"
+    },
+    {
+      "repo": "marvin-slack",
+      "commit": "2222222222222222222222222222222222222222"
+    },
+    {
+      "repo": "paragon-learning-network",
+      "commit": "4444444444444444444444444444444444444444"
+    },
+    {
+      "repo": "pt",
+      "commit": "3333333333333333333333333333333333333333"
+    }
+  ],
+  "queries": [
+    {
+      "query_index": 0,
+      "repo": "excel-daily-monitor",
+      "ecosystem": "npm",
+      "package": "example-dev",
+      "installed": "0.9.0",
+      "scope": "dev",
+      "origin": "consumer-local",
+      "lockfile": "package-lock.json",
+      "query": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "example-dev"
+        },
+        "version": "0.9.0"
+      }
+    },
+    {
+      "query_index": 1,
+      "repo": "excel-daily-monitor",
+      "ecosystem": "npm",
+      "package": "example-runtime",
+      "installed": "1.2.3",
+      "scope": "runtime",
+      "origin": "consumer-local",
+      "lockfile": "package-lock.json",
+      "query": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "example-runtime"
+        },
+        "version": "1.2.3"
+      }
+    },
+    {
+      "query_index": 2,
+      "repo": "marvin-slack",
+      "ecosystem": "npm",
+      "package": "example-slack",
+      "installed": "2.0.0",
+      "scope": "runtime",
+      "origin": "framework-propagated",
+      "lockfile": "package-lock.json",
+      "query": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "example-slack"
+        },
+        "version": "2.0.0"
+      }
+    },
+    {
+      "query_index": 3,
+      "repo": "paragon-learning-network",
+      "ecosystem": "npm",
+      "package": "example-next",
+      "installed": "3.1.0",
+      "scope": "runtime",
+      "origin": "consumer-local",
+      "lockfile": "pnpm-lock.yaml",
+      "query": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "example-next"
+        },
+        "version": "3.1.0"
+      }
+    },
+    {
+      "query_index": 4,
+      "repo": "pt",
+      "ecosystem": "npm",
+      "package": "example-shared",
+      "installed": "1.0.0",
+      "scope": "runtime",
+      "origin": "framework-propagated",
+      "lockfile": "yarn.lock",
+      "query": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "example-shared"
+        },
+        "version": "1.0.0"
+      }
+    },
+    {
+      "query_index": 5,
+      "repo": "pt",
+      "ecosystem": "npm",
+      "package": "example-ui",
+      "installed": "4.5.6",
+      "scope": "runtime",
+      "origin": "consumer-local",
+      "lockfile": "yarn.lock",
+      "query": {
+        "package": {
+          "ecosystem": "npm",
+          "name": "example-ui"
+        },
+        "version": "4.5.6"
+      }
+    }
+  ],
+  "results": [
+    {
+      "query_index": 0,
+      "advisories": []
+    },
+    {
+      "query_index": 1,
+      "advisories": [
+        {
+          "id": "GHSA-excel-critical",
+          "aliases": ["CVE-2026-0001"],
+          "severity": "critical",
+          "fixed": ["1.2.4"]
+        }
+      ]
+    },
+    {
+      "query_index": 2,
+      "advisories": [
+        {
+          "id": "GHSA-marvin-high",
+          "aliases": [],
+          "severity": "high",
+          "fixed": []
+        }
+      ]
+    },
+    {
+      "query_index": 3,
+      "advisories": [
+        {
+          "id": "GHSA-paragon-medium",
+          "aliases": [],
+          "severity": "medium",
+          "fixed": ["3.1.2"]
+        }
+      ]
+    },
+    {
+      "query_index": 4,
+      "advisories": [
+        {
+          "id": "GHSA-pt-low",
+          "aliases": [],
+          "severity": "low",
+          "fixed": ["1.0.1"]
+        }
+      ]
+    },
+    {
+      "query_index": 5,
+      "advisories": [
+        {
+          "id": "GHSA-pt-unknown",
+          "aliases": [],
+          "severity": "unknown",
+          "fixed": []
+        }
+      ]
+    }
+  ]
+}

@@ -27,15 +27,20 @@ report is triaged.
 - **Consumer fleet (known).** This library's propagation controls reach five
   known consumer repos: `excel-daily-monitor`, `marvin-slack`, `pln`
   (retired/archived 2026-10-25), `pt`/`phasetimer`, and
-  `paragon-learning-network`. An exposure that traces to a framework control
+  `paragon-learning-network`. The authoritative enumeration is
+  `reference/consumer-repos.md`. An exposure that traces to a framework control
   (`install.sh`, the eval harness, a skill script, redaction, or a dependency
   pin) is in scope here; repo-local findings are fixed in that consumer's own
   repo. **Sweep cadence:** a dated sweep on every framework release that
-  changes a propagation control, and at least quarterly. The 2026-10-25 sweep
-  and Phase 0 containment record live with the consumer-security plan; Phase 3
-  turns the next sweep into a repeatable CI-gated operation. Unknown public
-  consumers cannot be enumerated — the Phase 1 framework controls are what
-  protect them.
+  changes a propagation control, and at least quarterly. The weekly
+  `security.yml` sweep (Monday 07:00 UTC) already exceeds that minimum;
+  release-impacting propagation-control changes still require an owner
+  `workflow_dispatch` run. The 2026-10-25 sweep and Phase 0 containment record
+  live with the consumer-security plan; the runbook, closed schemas, disposition
+  register, and current controls live in `docs/security/` (`README.md`,
+  `register.json`, `controls.json`,
+  `consumer-exposure-2026-10-25.md`). Unknown public consumers cannot be
+  enumerated — the Phase 1 framework controls are what protect them.
 
 ## Not in scope
 
