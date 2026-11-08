@@ -16,7 +16,7 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
 
 - Package: `@opencode/cli@2.2.6` (never the legacy V1 package, never `latest`).
 - `opencode --version` prints `opencode v2.2.6` (the exact string is
-  `opencode v2.2.5`).
+  `opencode v2.2.6`).
 - `opencode run` flags: `--agent`, `--model/-m` (`provider/model#variant`),
   `--session/-s`, `--continue/-c`, `--fork`, `--format <default|json>`,
   `--file/-f`, `--title`, `--thinking`, `--auto`, `--standalone`,
@@ -36,7 +36,7 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
 - Supported upgrade: `opencode upgrade <target> --method
   <curl|npm|pnpm|bun|yarn|vp|brew|winget>`; this machine uses yarn-global.
   For the **same-version** migration use `yarn global add
-  @opencode/cli@2.2.5`: `opencode upgrade 2.2.5` reports "already installed"
+  @opencode/cli@2.2.6`: `opencode upgrade 2.2.6` reports "already installed"
   and skips, so the official package install is the migration step.
 - Config root: `~/.config/opencode` (or `XDG_CONFIG_HOME`). The reviewed
   config is staged by `scripts/stage_opencode_config.py --backup`, which
@@ -47,7 +47,7 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
 - The versioned wrapper/cutover is retired (ADR-0017; ADR-0014 is the
   historical one-time cutover record). If yarn refuses the existing custom
   `~/.yarn/bin/opencode` link during the migration, remove that one symlink
-  first; `yarn global add @opencode/cli@2.2.5` recreates it.
+  first; `yarn global add @opencode/cli@2.2.6` recreates it.
 
 ## Version upgrades (supported)
 

@@ -9,11 +9,11 @@ backs up the old V1 tree first.
 Order (owner-run, from a normal terminal, TUI closed and service stopped):
 
   python3 scripts/stage_opencode_config.py --backup
-  yarn global add @opencode/cli@2.2.5   # same-version official install
+  yarn global add @opencode/cli@2.2.6   # same-version official install
   opencode debug paths config           # ~/.config/opencode
-  opencode --version                    # 2.2.5
+  opencode --version                    # 2.2.6
 
-`opencode upgrade 2.2.5 --method yarn` skips when 2.2.5 is already the
+`opencode upgrade 2.2.6 --method yarn` skips when 2.2.6 is already the
 running version, so the same-version migration uses the official yarn
 install directly. Later versions use `opencode upgrade <target> --method yarn`.
 

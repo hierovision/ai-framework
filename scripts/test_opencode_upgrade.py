@@ -22,6 +22,8 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
+import opencode_v2 as v2  # noqa: E402
+
 import opencode_upgrade as upgrade  # noqa: E402
 import scratch_cleanup  # noqa: E402
 
@@ -39,7 +41,8 @@ def _write(path, text):
         fh.write(text)
 
 
-def _evidence(repo, version="2.2.5", residual=0, omit=()):
+def _evidence(repo, version=None, residual=0, omit=()):
+    version = version or v2.VERSION_PIN
     root = os.path.join(repo, ".scratch", "v2-canary-" + version)
     for name, filename in (("C1", "C1.txt"), ("C2", "C2.txt"),
                            ("C3", "C3-real.txt"), ("C4", "C4.txt"),
@@ -52,7 +55,8 @@ def _evidence(repo, version="2.2.5", residual=0, omit=()):
            f"source_sessions_not_migrated={residual}\n")
 
 
-def _fixture(repo, version="2.2.5", opentui="0.8.1"):
+def _fixture(repo, version=None, opentui="0.8.1"):
+    version = version or v2.VERSION_PIN
     _write(os.path.join(repo, "scripts", "opencode_v2.py"),
            f'VERSION_PIN = "{version}"\n')
     _write(os.path.join(repo, "README.md"), (
@@ -114,11 +118,11 @@ def test_check_pins_clean_and_stale():
     root = _tmp("upgrade-pins-")
     try:
         _fixture(root)
-        results = upgrade.check_seams(root, "2.2.5", "0.8.1")
+        results = upgrade.check_seams(root, v2.VERSION_PIN, "0.8.1")
         assert all(ok for _path, ok, _detail in results), results
         _write(os.path.join(root, "scripts", "opencode_v2.py"),
                'VERSION_PIN = "2.2.4"\n')
-        results = upgrade.check_seams(root, "2.2.5", "0.8.1")
+        results = upgrade.check_seams(root, v2.VERSION_PIN, "0.8.1")
         assert any(not ok and path.endswith("opencode_v2.py")
                    for path, ok, _detail in results), results
     finally:
@@ -153,7 +157,7 @@ def test_prepare_dry_run_and_update():
             assert upgrade.prepare(args) == 0
         text = open(os.path.join(root, "README.md")).read()
         assert "OpenCode V2 `2.3.0`" in text, text
-        assert "2.2.5" not in text, text
+        assert v2.VERSION_PIN not in text, text
         results = upgrade.check_seams(root, "2.3.0", "0.8.2")
         assert all(ok for _path, ok, _detail in results), results
         assert "version pin 2.3.0" in open(os.path.join(
@@ -186,7 +190,7 @@ def test_plan_matrix_and_breaking_notes():
         data = json.loads(out.getvalue())
         assert data["target"] == "2.3.0"
         matrix = {row[0]: row for row in data["matrix"]}
-        assert matrix["CLI"][1:] == ["2.2.5", "2.3.0"]
+        assert matrix["CLI"][1:] == [v2.VERSION_PIN, "2.3.0"]
         assert matrix["@opentui/core"][2] == "0.8.2"
         assert data["breaking"][0][0] == "2.3.0"
         assert "change A" in data["breaking"][0][1]
@@ -207,16 +211,16 @@ def test_status_supported_topology():
         bin_dir = os.path.join(root, "bin")
         _write(os.path.join(bin_dir, "opencode"), (
             "#!/bin/sh\n"
-            "if [ \"$1\" = \"--version\" ]; then echo 'opencode v2.2.5'; exit 0; fi\n"
+            f"if [ \"$1\" = \"--version\" ]; then echo 'opencode v{v2.VERSION_PIN}'; exit 0; fi\n"
             "if [ \"$1\" = \"debug\" ]; then echo \"$TEST_CONFIG\"; exit 0; fi\n"
             "exit 1\n"))
         os.chmod(os.path.join(bin_dir, "opencode"), 0o755)
         os.environ["PATH"] = bin_dir + os.pathsep + real_path
         os.environ["TEST_CONFIG"] = config
-        upgrade.write_state(root, "2.2.5", "canaried")
+        upgrade.write_state(root, v2.VERSION_PIN, "canaried")
         payload = upgrade.status_payload(_args(root, home=home))
-        assert payload["pinned"] == "2.2.5"
-        assert payload["live"] == "2.2.5"
+        assert payload["pinned"] == v2.VERSION_PIN
+        assert payload["live"] == v2.VERSION_PIN
         assert payload["install"]["supported"] is True
         assert payload["install"]["config_root"] == config
         assert payload["next"] == "up to date", payload["next"]
@@ -245,7 +249,7 @@ def test_check_pr_requires_canary():
         _fixture(root)
         with contextlib.redirect_stdout(io.StringIO()):
             assert upgrade.check(_args(root, pr=True)) == 0
-        _write(os.path.join(root, ".scratch", "v2-canary-2.2.5", "C4.txt"),
+        _write(os.path.join(root, ".scratch", f"v2-canary-{v2.VERSION_PIN}", "C4.txt"),
                "C4=FAIL\n")
         assert upgrade.check(_args(root, pr=True)) == 1
     finally:
@@ -322,14 +326,14 @@ def test_canary_cmd_exact_args():
         v1 = os.path.join(root, "v1", "opencode")
         _write(v1, "#!/bin/sh\necho 1.19.4\n")
         os.chmod(v1, 0o755)
-        args = _args(root, to="2.2.5", v1_bin=v1, default_bin="/tmp/live")
-        argv = upgrade.canary_cmd(args, "2.2.5")
+        args = _args(root, to=v2.VERSION_PIN, v1_bin=v1, default_bin="/tmp/live")
+        argv = upgrade.canary_cmd(args, v2.VERSION_PIN)
         assert "--all" in argv and "--version" in argv, argv
-        assert argv[argv.index("--version") + 1] == "2.2.5"
-        assert argv[argv.index("--default-version") + 1] == "2.2.5"
+        assert argv[argv.index("--version") + 1] == v2.VERSION_PIN
+        assert argv[argv.index("--default-version") + 1] == v2.VERSION_PIN
         assert argv[argv.index("--default-bin") + 1] == "/tmp/live"
         assert "--skip-install" in argv
-        assert "v2-canary-2.2.5" in " ".join(argv)
+        assert f"v2-canary-{v2.VERSION_PIN}" in " ".join(argv)
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
