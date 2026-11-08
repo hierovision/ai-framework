@@ -530,3 +530,11 @@ Inspect the run's four active audit gates and retired `pln` status, then downloa
   `eval-report.py lane-status` and passed the test's pinned date. The 30-day
   window and every assertion are unchanged — this removes wall-clock
   nondeterminism rather than widening the net.
+- 2026-11-08 — Second PR #168 delta review: the `--force` scanner now also
+  reaches a command token after `(`/`{`/`$(` grouping, `if`/`then`/`do`/`done`
+  keywords, `eval`/`xargs` wrappers, `find … -exec`, `sudo` positionals
+  (`-u <user>`/`-g <group>`), and quote-splitting in the first token
+  (`np""m` → `npm`); ten focused cases added. `load_sweep` now applies the
+  closed-schema check to each `consumers[]` record (unknown field fails).
+  The dry-run git-status test now skips explicitly when git is unavailable
+  instead of passing on `None == None`. Prose inside a fence still passes.

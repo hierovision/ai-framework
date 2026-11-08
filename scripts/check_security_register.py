@@ -53,6 +53,7 @@ def _iso_date(value, where):
 
 
 SWEEP_FINDING_KEYS = set(sweep.FINDING_ID_KEYS) | {"sweep_id", "fixed"}
+SWEEP_CONSUMER_KEYS = {"slug", "repository", "status", "audit_status", "commit"}
 
 
 def load_sweep(path):
@@ -67,6 +68,12 @@ def load_sweep(path):
         raise sweep.SchemaError("sweep: schema_version must be 1")
     if not sweep.TIMESTAMP_RE.match(report["as_of"]):
         raise sweep.SchemaError("sweep: as_of must be UTC RFC 3339 with Z")
+    consumers = report["consumers"]
+    if not isinstance(consumers, list):
+        raise sweep.SchemaError("sweep.consumers must be a list")
+    for index, record in enumerate(consumers):
+        sweep._closed(record, SWEEP_CONSUMER_KEYS,
+                      f"sweep.consumers[{index}]")
     findings = {}
     for index, finding in enumerate(report["findings"]):
         where = f"sweep.findings[{index}]"

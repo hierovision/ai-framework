@@ -49,7 +49,12 @@ COMMAND_RE = re.compile(
     r"^(?:sudo\s+)?(?:npm|npx|yarn|pnpm|git|gh|node|python3?|bash|sh|audit)\b")
 COMMAND_SEPARATOR_RE = re.compile(r"\|\||&&|;|\|")
 ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*\s+")
-WRAPPER_RE = re.compile(r"^(?:sudo|env|command|nohup|time|exec)\s+(?:-\S+\s+)*")
+WRAPPER_RE = re.compile(
+    r"^(?:env|command|nohup|time|exec|eval|xargs)\b\s*(?:-\S+\s+)*")
+SHELL_KEYWORD_RE = re.compile(
+    r"^(?:if|then|elif|else|do|done|while|until)\b\s*")
+FIND_EXEC_RE = re.compile(r"(?:^|\s)-exec(?:dir)?\s+")
+SUDO_ARG_FLAGS = {"-u", "-g", "-p", "-C", "-h", "-U", "-r", "-t", "-D"}
 N_A_CONTROL = "N/A — control-only"
 N_A_RETIRED = "N/A — decommissioned"
 
@@ -143,18 +148,63 @@ def _logical_lines(block):
     return lines
 
 
+def _strip_sudo(segment):
+    """Strip `sudo` plus its positionals (`-u <user>`, `-g <group>`, ...)."""
+    tokens = segment[len("sudo"):].lstrip().split()
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in SUDO_ARG_FLAGS:
+            index += 2
+        elif token.startswith("-"):
+            index += 1
+        else:
+            break
+    return " ".join(tokens[index:])
+
+
 def _strip_command_prefixes(segment):
-    """Strip leading VAR=value assignments and wrappers (sudo/env/...)."""
+    """Reach the command token after assignments, wrappers, and shell forms."""
     while True:
+        segment = segment.lstrip()
+        if not segment:
+            return segment
         assignment = ENV_ASSIGNMENT_RE.match(segment)
         if assignment:
-            segment = segment[assignment.end():].lstrip()
+            segment = segment[assignment.end():]
             continue
+        if re.match(r"^sudo\b", segment):
+            segment = _strip_sudo(segment)
+            continue
+        if segment.startswith("$("):
+            segment = segment[2:]
+            continue
+        if segment.startswith(("(", "{")):
+            segment = segment[1:]
+            continue
+        if segment.split(None, 1)[0] == "find":
+            found = FIND_EXEC_RE.search(segment)
+            if found:
+                segment = segment[found.end():]
+                continue
         wrapper = WRAPPER_RE.match(segment)
         if wrapper:
-            segment = segment[wrapper.end():].lstrip()
+            segment = segment[wrapper.end():]
+            continue
+        keyword = SHELL_KEYWORD_RE.match(segment)
+        if keyword:
+            segment = segment[keyword.end():]
             continue
         return segment
+
+
+def _dequote_first_token(segment):
+    """Undo quote-splitting in the command token (`np""m` -> `npm`)."""
+    parts = segment.split(None, 1)
+    if not parts:
+        return segment
+    first = parts[0].replace('"', "").replace("'", "")
+    return first if len(parts) == 1 else f"{first} {parts[1]}"
 
 
 def _line_has_executable_force(line):
@@ -163,7 +213,7 @@ def _line_has_executable_force(line):
         segment = _strip_command_prefixes(segment.strip())
         if "--force" not in segment:
             continue
-        if COMMAND_RE.match(segment):
+        if COMMAND_RE.match(_dequote_first_token(segment)):
             return True
     return False
 

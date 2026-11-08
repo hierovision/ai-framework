@@ -98,6 +98,24 @@ def test_unknown_sweep_finding_field_is_rejected():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_unknown_sweep_consumer_field_is_rejected():
+    document = load(SWEEP_FILE)
+    document["consumers"][0]["extra"] = "nope"
+    root = tempdir()
+    try:
+        path = os.path.join(root, "sweep.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(document, fh)
+        try:
+            checker.load_sweep(path)
+        except sweep.SchemaError as exc:
+            assert "unknown field(s) ['extra']" in str(exc), str(exc)
+        else:
+            raise AssertionError("unknown sweep consumer field was accepted")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_unknown_register_field_is_rejected():
     register = base_register()
     register["generated_by"] = "a tool"
@@ -231,6 +249,7 @@ def main():
         test_every_required_field_is_enforced,
         test_unknown_field_is_rejected,
         test_unknown_sweep_finding_field_is_rejected,
+        test_unknown_sweep_consumer_field_is_rejected,
         test_unknown_register_field_is_rejected,
         test_duplicate_sweep_id_is_rejected,
         test_missing_coverage_is_rejected,

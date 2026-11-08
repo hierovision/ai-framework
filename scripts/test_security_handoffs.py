@@ -201,6 +201,27 @@ def test_wrapped_executable_force_fails():
             f"{label}: {command!r} was not flagged"
 
 
+def test_shell_wrapper_executable_force_fails():
+    cases = {
+        "subshell": "(npm install --force)",
+        "brace-group": "{ npm install --force; }",
+        "command-substitution": "$(npm install --force)",
+        "eval": "eval npm install --force",
+        "xargs": "printf x | xargs npm audit fix --force",
+        "find-exec": "find . -exec npm install --force +",
+        "if": "if npm audit fix --force; then echo done; fi",
+        "for-do": "for d in a b; do npm install --force; done",
+        "sudo-positional": "sudo -u root npm install --force",
+        "quote-split": 'np""m install --force',
+    }
+    for label, command in cases.items():
+        text = body("pt", "hierovision/phasetimer").replace(
+            "npm ci\nnpm test", command)
+        failures = run_over({"handoff-pt.md": text})
+        assert any("executable --force" in failure for failure in failures), \
+            f"{label}: {command!r} was not flagged"
+
+
 def test_prose_force_inside_fence_is_allowed():
     text = body("pt", "hierovision/phasetimer").replace(
         "npm ci\nnpm test",
@@ -248,6 +269,7 @@ def main():
         test_missing_suppressions_and_guardrails_fail,
         test_executable_force_in_fence_fails,
         test_wrapped_executable_force_fails,
+        test_shell_wrapper_executable_force_fails,
         test_prose_force_inside_fence_is_allowed,
         test_executable_inline_force_fails,
         test_undated_suppression_fails,

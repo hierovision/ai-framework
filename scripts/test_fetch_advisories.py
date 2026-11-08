@@ -79,6 +79,10 @@ packages:
 """
 
 
+class Skipped(Exception):
+    """An explicit, reported skip; never a silent pass."""
+
+
 def tempdir():
     os.makedirs(SCRATCH, exist_ok=True)
     return tempfile.mkdtemp(dir=SCRATCH)
@@ -327,6 +331,8 @@ def test_cli_writes_only_the_explicit_output():
 
 def test_dry_run_leaves_git_status_unchanged():
     before = git_status()
+    if before is None:
+        raise Skipped("git is unavailable; cannot assert a status delta")
     temp = tempdir()
     try:
         audit = os.path.join(temp, "audit")
@@ -341,6 +347,7 @@ def test_dry_run_leaves_git_status_unchanged():
                          "--as-of", "2026-11-07T00:00:00Z"])
         assert rc == 0
         after = git_status()
+        assert after is not None, "git status became unavailable during the run"
         assert before == after, "dry run changed git-visible status"
     finally:
         shutil.rmtree(temp, ignore_errors=True)
@@ -419,6 +426,8 @@ def main():
         try:
             test()
             print(f"PASS  {test.__name__}")
+        except Skipped as exc:
+            print(f"SKIP  {test.__name__}: {exc}")
         except AssertionError as exc:
             failed += 1
             print(f"FAIL  {test.__name__}: {exc}")
