@@ -644,14 +644,24 @@ def rollback_plan(link, previous_default, backup, method):
             "cannot reinstall it")
         return {"kind": "v1", "previous_default": prev,
                 "commands": commands, "guidance": guidance}
-    previous_version = prev.get("version")
-    command = (f"{link} upgrade {previous_version or '<previous>'} "
-               f"--method {method}")
-    guidance = (f"previous default was V2: {command}; restore the DB/config "
-                f"backup at {backup}")
-    return {"kind": "v2", "previous_default": prev,
-            "commands": [command] if previous_version else [],
-            "guidance": guidance}
+    if prev.get("kind") == "v2":
+        previous_version = prev.get("version")
+        command = (f"{link} upgrade {previous_version or '<previous>'} "
+                   f"--method {method}")
+        guidance = (f"previous default was V2: {command}; restore the "
+                    f"DB/config backup at {backup}")
+        return {"kind": "v2", "previous_default": prev,
+                "commands": [command] if previous_version else [],
+                "guidance": guidance}
+    return {
+        "kind": "unknown",
+        "previous_default": prev,
+        "commands": [],
+        "guidance": (
+            "previous default is missing or unclassifiable; no automatic "
+            f"package rollback is available — restore the default link and the "
+            f"config/DB backup at {backup} manually"),
+    }
 
 
 def rollback_lines(rollback):
@@ -659,6 +669,19 @@ def rollback_lines(rollback):
     lines = [rollback.get("guidance", "")]
     lines.extend(rollback.get("commands") or [])
     return [line for line in lines if line]
+
+
+def artifact_verified(data):
+    """Normalize an artifact's result; None when it is not an artifact."""
+    if not isinstance(data, dict):
+        return None
+    if "verified" in data:
+        return data.get("verified") is True
+    checks = data.get("checks") or {}
+    checks_ok = (isinstance(checks, dict) and bool(checks)
+                 and all(isinstance(row, dict) and row.get("ok") is True
+                         for row in checks.values()))
+    return checks_ok and data.get("rolled_back") is False
 
 
 def last_verify_verified(repo, target):
@@ -671,15 +694,34 @@ def last_verify_verified(repo, target):
     """
     data = read_json(os.path.join(repo, ".scratch", "opencode-v2",
                                   f"upgrade-{target}-verify.json"))
-    if not isinstance(data, dict):
+    return artifact_verified(data)
+
+
+def archive_failed_artifact(path):
+    """Preserve a non-verified existing artifact before it is overwritten.
+
+    A verified predecessor is left in place (never mislabeled as failed). The
+    archive keeps the exact bytes under `.failed-<UTC stamp>`.
+    """
+    if not os.path.isfile(path):
         return None
-    if "verified" in data:
-        return bool(data.get("verified"))
-    checks = data.get("checks") or {}
-    checks_ok = (isinstance(checks, dict) and bool(checks)
-                 and all(isinstance(row, dict) and row.get("ok") is True
-                         for row in checks.values()))
-    return checks_ok and data.get("rolled_back") is False
+    if artifact_verified(read_json(path)) is True:
+        return None
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y%m%dT%H%M%SZ")
+    archive = f"{path}.failed-{stamp}"
+    suffix = 1
+    while os.path.exists(archive):
+        archive = f"{path}.failed-{stamp}-{suffix}"
+        suffix += 1
+    os.replace(path, archive)
+    return archive
+
+
+def write_apply_artifact(path, payload):
+    """Archive a prior failed artifact, then write the new apply evidence."""
+    archive_failed_artifact(path)
+    return write_json(path, payload)
 
 
 def topology(home, link):
@@ -1541,7 +1583,7 @@ def apply_supported(args, target):
         if rc != 0:
             payload = apply_artifact(args, target, home, link, backup,
                                      previous_default, "official-install", [])
-            write_json(artifact, payload)
+            write_apply_artifact(artifact, payload)
             write_state(args.repo, target, "prepared",
                         {"artifact": artifact, "verified": False}, force=True)
             print(f"error: official upgrade exited {rc}", file=sys.stderr)
@@ -1554,7 +1596,7 @@ def apply_supported(args, target):
         payload = apply_artifact(args, target, home, link, backup,
                                  previous_default, shadow["failure_stage"], [])
         payload["shadow"] = shadow
-        write_json(artifact, payload)
+        write_apply_artifact(artifact, payload)
         write_state(args.repo, target, "prepared",
                     {"artifact": artifact, "verified": False}, force=True)
         print(f"error: shadow repair failed at {shadow['failure_stage']}",
@@ -1572,7 +1614,7 @@ def apply_supported(args, target):
                              previous_default, failed[0] if failed else None,
                              checks, verified=verified)
     payload["shadow"] = shadow
-    write_json(artifact, payload)
+    write_apply_artifact(artifact, payload)
     for name, ok, detail in checks:
         print(f"verify {name}: {'PASS' if ok else 'FAIL'} {detail}")
     if verified:
@@ -1652,7 +1694,9 @@ def upgrade(args):
         write_state(args.repo, target, "prepared")
         if args.apply:
             return apply_supported(args, target)
-        print(f"shadow repair needed: {repair_command(target)}")
+        label = ("verification needed" if shadow["shadow_ok"]
+                 else "shadow repair needed")
+        print(f"{label}: {repair_command(target)}")
         return 0
     if args.dry_run:
         rc = plan(argparse.Namespace(

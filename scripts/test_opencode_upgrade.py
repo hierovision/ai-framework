@@ -10,6 +10,7 @@ Run: python3 scripts/test_opencode_upgrade.py
 """
 import argparse
 import contextlib
+import glob
 import io
 import json
 import os
@@ -525,6 +526,20 @@ def test_apply_v1_default_failure_has_v1_rollback():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_rollback_plan_unknown_previous():
+    link = "/tmp/nowhere/.yarn/bin/opencode"
+    backup = "/tmp/nowhere/backup"
+    missing = {"path": link, "target": None, "resolved": None,
+               "version": None, "kind": None, "exists": False}
+    plan = upgrade.rollback_plan(link, missing, backup, "yarn")
+    assert plan["kind"] == "unknown"
+    assert plan["commands"] == []
+    assert "missing or unclassifiable" in plan["guidance"]
+    assert "V1" not in plan["guidance"]
+    assert "V2" not in plan["guidance"]
+    assert "upgrade " not in plan["guidance"]
+
+
 def test_apply_dry_run_text_truthful():
     target = v2.VERSION_PIN
     real_live = upgrade.stage_config.live_processes
@@ -621,6 +636,26 @@ def test_upgrade_without_apply_prints_repair_for_v1_default():
         assert "shadow repair needed" not in out.getvalue()
     finally:
         shutil.rmtree(migrate_root, ignore_errors=True)
+
+    verify_root = _tmp("upgrade-noapply-verify-")
+    try:
+        fixture = _shadow_home(verify_root, target, default_version=target,
+                               package_version=target)
+        _write(_artifact(verify_root, target), json.dumps({
+            "version": target, "verified": False, "rolled_back": False}) + "\n")
+        args = _args(verify_root, to=target, home=fixture["home"])
+        out = io.StringIO()
+        with _path_front(fixture["yarn_bin"]), \
+                contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.upgrade(args)
+        assert rc == 0, out.getvalue()
+        assert ("verification needed: python3 scripts/opencode_upgrade.py "
+                f"upgrade --to {target} --apply --drain-acknowledged"
+                ) in out.getvalue(), out.getvalue()
+        assert "shadow repair needed" not in out.getvalue()
+    finally:
+        shutil.rmtree(verify_root, ignore_errors=True)
 
 
 def test_apply_failure_is_not_reported_as_rolled_back():
@@ -829,7 +864,10 @@ def test_upgrade_docs_describe_supported_shadow():
                        (adr, "ADR-0017")):
         assert "opencode2" in text, name
         assert "shadow" in text, name
-        assert "upgrade --to" in text and "--apply" in text, name
+        assert "upgrade --to <pin>" in text, name
+        assert "--apply" in text, name
+    assert "upgrade --to 2.2.6" not in readme
+    assert "verify.json.failed-" in readme
     assert "both packages publish" in reference or "dual-bin" in reference
     assert "2026-11-09" in adr
     assert "not an automatic rollback" in adr or "no automatic" in adr
@@ -990,6 +1028,7 @@ def test_upgrade_reverifies_after_legacy_failed_artifact():
             "at": "2026-11-09T12:20:49Z",
         }
         _write(_artifact(root, target), json.dumps(legacy) + "\n")
+        legacy_bytes = open(_artifact(root, target), "rb").read()
         assert upgrade.last_verify_verified(root, target) is False
         args = _args(root, to=target, home=fixture["home"], apply=True,
                      skip_canary=True, drain_acknowledged=True)
@@ -1006,6 +1045,14 @@ def test_upgrade_reverifies_after_legacy_failed_artifact():
         assert data["verified"] is True
         assert data["rolled_back"] is False
         assert upgrade.read_state(root)["stage"] == "applied"
+        artifact = _artifact(root, target)
+        archives = sorted(glob.glob(artifact + ".failed-*"))
+        assert len(archives) == 1, archives
+        assert open(archives[0], "rb").read() == legacy_bytes
+        # A verified predecessor is never mislabeled as failed.
+        assert upgrade.archive_failed_artifact(artifact) is None
+        assert sorted(glob.glob(artifact + ".failed-*")) == archives
+        assert os.path.isfile(artifact)
     finally:
         _restore_apply(real)
         shutil.rmtree(root, ignore_errors=True)

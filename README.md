@@ -33,11 +33,13 @@ seam.
 The yarn-global install retains the V1 `opencode-ai` package, so **both
 packages publish an `opencode` bin**: Yarn links the V2 binary as `opencode2`
 and may leave the default `opencode` pointing at V1. Run
-`python3 scripts/opencode_upgrade.py upgrade --to 2.2.6 --apply
---drain-acknowledged` from a normal terminal with all sessions closed; it
-reuses the installed V2 package (no Yarn reinstall), atomically repairs the
-default `opencode` shadow to that package binary, and verifies
-`opencode --version` + `opencode debug paths config` before the smoke. A
+`python3 scripts/opencode_upgrade.py upgrade --to <pin> --apply
+--drain-acknowledged` (with the pinned version) from a normal terminal with all
+sessions closed; it reuses the installed V2 package (no Yarn reinstall),
+atomically repairs the default `opencode` shadow to that package binary, and
+verifies `opencode --version` + `opencode debug paths config` before the smoke.
+A pre-existing unverified `upgrade-<pin>-verify.json` is preserved as
+`upgrade-<pin>-verify.json.failed-<UTC stamp>` before new evidence is written. A
 failed verification records `verified: false` with the exact manual rollback
 command — it is not an automatic rollback (ADR-0017).
 
