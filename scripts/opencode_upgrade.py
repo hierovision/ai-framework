@@ -133,6 +133,7 @@ def state_path(repo):
 
 
 STAGE_ORDER = ("checked", "planned", "canaried", "prepared", "applied")
+RESUMABLE_STAGES = ("checked", "planned", "canaried", "prepared")
 
 
 def read_state(repo):
@@ -606,6 +607,60 @@ def repair_command(target):
             + " --apply --drain-acknowledged")
 
 
+def link_state(link):
+    """Complete on-disk state of a default `opencode` link."""
+    exists = os.path.lexists(link)
+    raw = os.readlink(link) if os.path.islink(link) else None
+    resolved = os.path.realpath(link) if exists else None
+    version = version_of(link) if exists else None
+    kind = None
+    if version:
+        kind = "v1" if version_key(version)[0] <= 1 else "v2"
+    elif resolved and "opencode-ai" in resolved:
+        kind = "v1"
+    return {"path": link, "target": raw, "resolved": resolved,
+            "version": version, "kind": kind, "exists": exists}
+
+
+def rollback_plan(link, previous_default, backup, method):
+    """Truthful rollback guidance for the pre-repair default.
+
+    A V2 previous default is reinstalled with the supported upgrade command.
+    A V1 previous default is restored by recreating the original link and
+    restoring the V1 config/DB backup; V1 lives in `opencode-ai`, so a V2
+    `opencode upgrade` for that version does not exist.
+    """
+    prev = previous_default or {}
+    if prev.get("kind") == "v1":
+        restore = prev.get("resolved") or prev.get("target")
+        commands = []
+        if restore and os.path.abspath(restore) != os.path.abspath(link):
+            commands.append(
+                f"ln -sfn {shlex.quote(restore)} {shlex.quote(link)}")
+        guidance = (
+            f"previous default was V1 ({prev.get('version')}): restore the "
+            f"original link and the V1 config/DB backup at {backup}; the "
+            "retained V1 package is opencode-ai, so a V2 `opencode upgrade` "
+            "cannot reinstall it")
+        return {"kind": "v1", "previous_default": prev,
+                "commands": commands, "guidance": guidance}
+    previous_version = prev.get("version")
+    command = (f"{link} upgrade {previous_version or '<previous>'} "
+               f"--method {method}")
+    guidance = (f"previous default was V2: {command}; restore the DB/config "
+                f"backup at {backup}")
+    return {"kind": "v2", "previous_default": prev,
+            "commands": [command] if previous_version else [],
+            "guidance": guidance}
+
+
+def rollback_lines(rollback):
+    """Flatten rollback guidance plus its exact commands for printing."""
+    lines = [rollback.get("guidance", "")]
+    lines.extend(rollback.get("commands") or [])
+    return [line for line in lines if line]
+
+
 def last_verify_verified(repo, target):
     """Read the last verify result, normalizing legacy artifacts.
 
@@ -691,7 +746,7 @@ def status_payload(args):
         next_command = ("python3 scripts/opencode_upgrade.py upgrade "
                         "--to " + latest)
     elif (state.get("target") and state.get("target") != pinned
-          and state.get("stage") not in (None, "applied")):
+          and state.get("stage") in RESUMABLE_STAGES):
         next_command = ("python3 scripts/opencode_upgrade.py upgrade --to "
                         + state["target"] + " --resume")
     return {
@@ -1416,15 +1471,11 @@ def post_upgrade_smoke(args, target, command=None):
     return checks
 
 
-def failure_payload(args, target, home, link, backup, previous, stage, checks,
-                    verified=False):
-    """Truthful apply artifact: no restore happened, so `rolled_back` is false."""
-    link_info = {
-        "path": link,
-        "target": os.readlink(link) if os.path.islink(link) else None,
-        "version": version_of(link) if os.path.lexists(link) else None,
-    }
-    payload = {
+def apply_artifact(args, target, home, link, backup, previous_default, stage,
+                   checks, verified=False):
+    """Build the apply evidence artifact (success or failure)."""
+    current_link = link_state(link)
+    return {
         "version": target,
         "verified": verified,
         "rolled_back": False,
@@ -1433,13 +1484,13 @@ def failure_payload(args, target, home, link, backup, previous, stage, checks,
                    for name, ok, detail in checks},
         "backup": backup,
         "target_package": target_package_info(home, target),
-        "default_link": link_info,
-        "default_version": link_info["version"],
+        "default_link": current_link,
+        "default_version": current_link["version"],
+        "previous_default": previous_default,
+        "rollback": rollback_plan(link, previous_default, backup,
+                                  args.method),
         "at": now_iso(),
     }
-    payload["rollback"] = (
-        f"{link} upgrade {previous or '<previous>'} --method {args.method}")
-    return payload
 
 
 def apply_supported(args, target):
@@ -1464,14 +1515,20 @@ def apply_supported(args, target):
         return 2
     home = os.path.abspath(args.home or os.path.expanduser("~"))
     link = args.link or os.path.join(home, ".yarn", "bin", "opencode")
-    previous = version_of(link) if os.path.lexists(link) else None
+    previous_default = link_state(link)
     if getattr(args, "stop_service", False):
         stopped = run([link, "service", "stop"], timeout=60)
         print(f"service stop: {stopped.returncode}")
     if getattr(args, "dry_run", False):
+        resolved, _evidence = resolve_target_binary(home, target)
         print("would back up the DB and ~/.config/opencode under "
               ".scratch/opencode-v2/")
-        print(f"would repair {link} to the installed {target} V2 package")
+        if resolved:
+            print(f"would repair {link} to the installed {target} V2 package "
+                  f"at {resolved}")
+        else:
+            print(f"would install {target} via the official command, then "
+                  f"repair {link} to the V2 package")
         return 0
     backup, db = pre_upgrade_backup(args, target)
     artifact = os.path.join(args.repo, ".scratch", "opencode-v2",
@@ -1482,19 +1539,20 @@ def apply_supported(args, target):
         print(f"installing {target} via the official command", file=sys.stderr)
         rc = official_upgrade(args, target)
         if rc != 0:
-            payload = failure_payload(args, target, home, link, backup,
-                                      previous, "official-install", [])
+            payload = apply_artifact(args, target, home, link, backup,
+                                     previous_default, "official-install", [])
             write_json(artifact, payload)
             write_state(args.repo, target, "prepared",
                         {"artifact": artifact, "verified": False}, force=True)
             print(f"error: official upgrade exited {rc}", file=sys.stderr)
-            print(f"rollback: {payload['rollback']}", file=sys.stderr)
+            for line in rollback_lines(payload["rollback"]):
+                print(f"rollback: {line}", file=sys.stderr)
             return rc
 
     shadow = prepare_shadow(home, link, target)
     if shadow["failure_stage"]:
-        payload = failure_payload(args, target, home, link, backup, previous,
-                                  shadow["failure_stage"], [])
+        payload = apply_artifact(args, target, home, link, backup,
+                                 previous_default, shadow["failure_stage"], [])
         payload["shadow"] = shadow
         write_json(artifact, payload)
         write_state(args.repo, target, "prepared",
@@ -1503,15 +1561,16 @@ def apply_supported(args, target):
               file=sys.stderr)
         print(f"link: {link}; target package: "
               f"{payload['target_package']['path']}", file=sys.stderr)
-        print(f"rollback: {payload['rollback']}", file=sys.stderr)
+        for line in rollback_lines(payload["rollback"]):
+            print(f"rollback: {line}", file=sys.stderr)
         return 1
 
     checks = post_upgrade_smoke(args, target, command=link)
     failed = [name for name, ok, _detail in checks if not ok]
     verified = not failed
-    payload = failure_payload(args, target, home, link, backup, previous,
-                              failed[0] if failed else None, checks,
-                              verified=verified)
+    payload = apply_artifact(args, target, home, link, backup,
+                             previous_default, failed[0] if failed else None,
+                             checks, verified=verified)
     payload["shadow"] = shadow
     write_json(artifact, payload)
     for name, ok, detail in checks:
@@ -1523,7 +1582,8 @@ def apply_supported(args, target):
     write_state(args.repo, target, "prepared",
                 {"artifact": artifact, "verified": False}, force=True)
     print("error: post-upgrade smoke failed", file=sys.stderr)
-    print(f"rollback: {payload['rollback']}", file=sys.stderr)
+    for line in rollback_lines(payload["rollback"]):
+        print(f"rollback: {line}", file=sys.stderr)
     print(f"restore DB: {db}; config: {backup}/config", file=sys.stderr)
     return 1
 
@@ -1567,14 +1627,6 @@ def upgrade(args):
     install = topology(home, link)
     shadow = None
     if not install["supported"]:
-        if not args.apply:
-            print("error: this is not the supported install layout; migrate "
-                  "first:", file=sys.stderr)
-            print("  python3 scripts/stage_opencode_config.py --backup",
-                  file=sys.stderr)
-            print(f"  opencode upgrade {v2.VERSION_PIN} --method yarn",
-                  file=sys.stderr)
-            return 2
         shadow = shadow_state(home, link, target)
         if not (shadow["target_installed"] and shadow["supported_config"]):
             print("error: this is not the supported install layout; migrate "
@@ -1584,6 +1636,9 @@ def upgrade(args):
             print(f"  opencode upgrade {v2.VERSION_PIN} --method yarn",
                   file=sys.stderr)
             return 2
+        if not args.apply:
+            print(f"shadow repair needed: {repair_command(target)}")
+            return 0
     live = version_of(install["command"]) if install["command"] else None
     if target == v2.VERSION_PIN and not args.force:
         if shadow is None:

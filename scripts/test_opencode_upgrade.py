@@ -168,16 +168,25 @@ def _shadow_home(root, target, *, default_version="1.19.4",
 
 
 def _v1_only_home(root, default_version="1.19.4"):
-    """Fake HOME before the V2 package exists: only the V1 default link."""
+    """Fake HOME before the V2 package exists: only the V1 package + link."""
     home = os.path.join(root, "home")
     yarn_bin = os.path.join(home, ".yarn", "bin")
     link = os.path.join(yarn_bin, "opencode")
-    _stub_binary(link, default_version)
+    v1_dir = os.path.join(home, ".config", "yarn", "global", "node_modules",
+                          "opencode-ai")
+    v1_bin = os.path.join(v1_dir, "bin", "opencode.exe")
+    _stub_binary(v1_bin, default_version)
+    _write(os.path.join(v1_dir, "package.json"), json.dumps({
+        "name": "opencode-ai", "version": default_version}) + "\n")
+    os.makedirs(yarn_bin, exist_ok=True)
+    if os.path.lexists(link):
+        os.unlink(link)
+    os.symlink(v1_bin, link)
     config = os.path.join(home, ".config", "opencode")
     os.makedirs(config, exist_ok=True)
     package_dir = os.path.join(home, ".config", "yarn", "global",
                                "node_modules", "@opencode", "cli")
-    return {"home": home, "link": link,
+    return {"home": home, "link": link, "v1_bin": v1_bin,
             "link2": os.path.join(yarn_bin, "opencode2"), "config": config,
             "package_dir": package_dir,
             "package_bin": os.path.join(package_dir, "bin", "opencode.exe"),
@@ -186,7 +195,7 @@ def _v1_only_home(root, default_version="1.19.4"):
 
 def _yarn_relink_stub(fixture, target, calls):
     """Official-install stub: installs V2, then Yarn links opencode2 to V2 but
-    rewrites the default `opencode` to V1 (the observed dual-bin behavior)."""
+    leaves the default `opencode` on the retained V1 package."""
     def install(_args, _target):
         calls.append("install")
         _stub_binary(fixture["package_bin"], target, fixture["config"])
@@ -195,7 +204,13 @@ def _yarn_relink_stub(fixture, target, calls):
         if os.path.lexists(fixture["link2"]):
             os.unlink(fixture["link2"])
         os.symlink(fixture["package_bin"], fixture["link2"])
-        _stub_binary(fixture["link"], "1.19.4")
+        v1_bin = fixture.get("v1_bin") or os.path.join(
+            fixture["home"], ".config", "yarn", "global", "node_modules",
+            "opencode-ai", "bin", "opencode.exe")
+        _stub_binary(v1_bin, "1.19.4")
+        if os.path.lexists(fixture["link"]):
+            os.unlink(fixture["link"])
+        os.symlink(v1_bin, fixture["link"])
         return 0
     return install
 
@@ -464,6 +479,86 @@ def test_apply_reuses_installed_target_and_repairs_default():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_apply_v1_default_failure_has_v1_rollback():
+    root = _tmp("upgrade-v1-rollback-")
+    target = v2.VERSION_PIN
+    fixture = _v1_only_home(root)
+    calls = []
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    real = _patch_apply(backup, _smoke_recorder(calls, ok=False),
+                        _yarn_relink_stub(fixture, target, calls))
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.apply_supported(args, target)
+        assert rc == 1, out.getvalue()
+        data = json.load(open(_artifact(root, target)))
+        assert data["verified"] is False
+        assert data["rolled_back"] is False
+        assert data["failure_stage"] == "binary"
+        prev = data["previous_default"]
+        assert prev["path"] == fixture["link"]
+        assert prev["target"] == fixture["v1_bin"]
+        assert prev["resolved"] == os.path.realpath(fixture["v1_bin"])
+        assert prev["version"] == "1.19.4"
+        assert prev["kind"] == "v1"
+        rollback = data["rollback"]
+        assert rollback["kind"] == "v1"
+        assert rollback["previous_default"] == prev
+        assert any(fixture["v1_bin"] in command
+                   for command in rollback["commands"]), rollback["commands"]
+        assert "1.19.4" in rollback["guidance"]
+        assert "opencode-ai" in rollback["guidance"]
+        assert "upgrade 1.19.4 --method yarn" not in json.dumps(data)
+        assert "rollback: " in out.getvalue()
+        v2_plan = upgrade.rollback_plan(
+            fixture["link"], {"version": target, "kind": "v2"}, backup, "yarn")
+        assert v2_plan["kind"] == "v2"
+        assert v2_plan["commands"] == [
+            f"{fixture['link']} upgrade {target} --method yarn"]
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_dry_run_text_truthful():
+    target = v2.VERSION_PIN
+    real_live = upgrade.stage_config.live_processes
+    upgrade.stage_config.live_processes = lambda: []
+    absent_root = _tmp("upgrade-dryrun-absent-")
+    present_root = _tmp("upgrade-dryrun-present-")
+    try:
+        absent = _v1_only_home(absent_root)
+        args = _args(absent_root, to=target, home=absent["home"],
+                     skip_canary=True, drain_acknowledged=True, dry_run=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            assert upgrade.apply_supported(args, target) == 0
+        text = out.getvalue()
+        assert f"would install {target} via the official command" in text, text
+        assert f"to the installed {target} V2 package" not in text, text
+
+        present = _shadow_home(present_root, target, package_version=target)
+        args = _args(present_root, to=target, home=present["home"],
+                     skip_canary=True, drain_acknowledged=True, dry_run=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            assert upgrade.apply_supported(args, target) == 0
+        text = out.getvalue()
+        assert (f"would repair {present['link']} to the installed {target} "
+                "V2 package") in text, text
+    finally:
+        upgrade.stage_config.live_processes = real_live
+        shutil.rmtree(absent_root, ignore_errors=True)
+        shutil.rmtree(present_root, ignore_errors=True)
+
+
 def test_upgrade_repairs_when_default_is_v1():
     root = _tmp("upgrade-e2e-")
     target = v2.VERSION_PIN
@@ -490,6 +585,42 @@ def test_upgrade_repairs_when_default_is_v1():
     finally:
         _restore_apply(real)
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_upgrade_without_apply_prints_repair_for_v1_default():
+    target = v2.VERSION_PIN
+    repair_root = _tmp("upgrade-noapply-repair-")
+    try:
+        fixture = _shadow_home(repair_root, target, package_version=target)
+        args = _args(repair_root, to=target, home=fixture["home"])
+        out = io.StringIO()
+        with _path_front(fixture["yarn_bin"]), \
+                contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.upgrade(args)
+        assert rc == 0, out.getvalue()
+        assert ("shadow repair needed: python3 scripts/opencode_upgrade.py "
+                f"upgrade --to {target} --apply --drain-acknowledged"
+                ) in out.getvalue(), out.getvalue()
+        assert "stage_opencode_config.py" not in out.getvalue()
+    finally:
+        shutil.rmtree(repair_root, ignore_errors=True)
+
+    migrate_root = _tmp("upgrade-noapply-migrate-")
+    try:
+        fixture = _shadow_home(migrate_root, target, write_binary=False,
+                               package_version=None, opencode2=False)
+        args = _args(migrate_root, to=target, home=fixture["home"])
+        out = io.StringIO()
+        with _path_front(fixture["yarn_bin"]), \
+                contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.upgrade(args)
+        assert rc == 2, out.getvalue()
+        assert "stage_opencode_config.py" in out.getvalue()
+        assert "shadow repair needed" not in out.getvalue()
+    finally:
+        shutil.rmtree(migrate_root, ignore_errors=True)
 
 
 def test_apply_failure_is_not_reported_as_rolled_back():
@@ -520,6 +651,29 @@ def test_apply_failure_is_not_reported_as_rolled_back():
         assert data["backup"] == backup
         assert upgrade.read_state(root)["stage"] == "prepared"
         assert "rollback:" in out.getvalue()
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_failed_reapply_regresses_applied_to_prepared():
+    root = _tmp("upgrade-force-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    real = _patch_apply(backup, lambda a, t, command=None: [
+        ("binary", False, "forced failure")])
+    try:
+        upgrade.write_state(root, target, "applied")
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = upgrade.apply_supported(args, target)
+        assert rc == 1
+        assert upgrade.read_state(root)["stage"] == "prepared"
     finally:
         _restore_apply(real)
         shutil.rmtree(root, ignore_errors=True)
@@ -640,6 +794,11 @@ def test_status_names_recorded_target_for_resume():
             payload = upgrade.status_payload(_args(root, home=fixture["home"]))
         assert payload["next"] == (
             "python3 scripts/opencode_upgrade.py upgrade --to 2.3.0 --resume")
+        # A legacy rolled-back stage is not resumable.
+        upgrade.write_state(root, "2.3.0", "rolled-back")
+        with _path_front(fixture["yarn_bin"]):
+            payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["next"] == "up to date", payload["next"]
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
