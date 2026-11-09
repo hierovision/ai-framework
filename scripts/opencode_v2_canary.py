@@ -401,10 +401,14 @@ def import_current_auth(args, db):
     env.update(scratch_env(args.scratch_root))
     env["OPENCODE_DB"] = db
     env["OPENCODE_LOG_LEVEL"] = "ERROR"
-    proc = subprocess.run(
-        [args.opencode_bin, "auth", "import", "--standalone"],
-        input=json.dumps(payload), capture_output=True, text=True, env=env,
-        timeout=120)
+    try:
+        proc = subprocess.run(
+            [args.opencode_bin, "auth", "import", "--standalone"],
+            input=json.dumps(payload), capture_output=True, text=True, env=env,
+            timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, (f"auth import probe failed: {type(exc).__name__}: "
+                       f"{exc}")
     if proc.returncode == 0:
         # A migrated V1 DB may already carry an older, expired credential for
         # the same integration. Make the freshly imported "default" the only
@@ -425,8 +429,17 @@ def gate_c3(args):
     db = os.path.join(root, "c3-real.db")
     v2.assert_scratch_db(db, root)
     ok_auth, detail = import_current_auth(args, db)
-    proc = v2_run(args, {"OPENCODE_DB": db}, ["models", "--standalone"],
-                  timeout=120)
+    try:
+        proc = v2_run(args, {"OPENCODE_DB": db}, ["models", "--standalone"],
+                      timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        text = "\n".join([
+            f"date={now_date()}",
+            f"models_probe_error={type(exc).__name__}: {exc}",
+            "C3=FAIL",
+        ])
+        evidence(root, "C3-real.txt", text)
+        return False, text
     expected = sorted(set(agent_bindings().values()))
     catalog = proc.stdout or ""
     missing = [b for b in expected if b not in catalog]
@@ -465,9 +478,10 @@ def gate_c4(args):
                           ["run", "--standalone", "--model",
                            "opencode-go/deepseek-v4.1-flash", "--format", "json",
                            "Reply OK"], timeout=180)
-        except subprocess.TimeoutExpired:
+        except (OSError, subprocess.SubprocessError) as exc:
             ok = False
-            timings.append("timeout")
+            timings.append(f"error:{type(exc).__name__}")
+            texts.append(f"{type(exc).__name__}: {exc}")
             break
         elapsed = time.monotonic() - started
         timings.append(f"{elapsed:.2f}")
@@ -615,16 +629,22 @@ def gate_c8(args):
     root = args.scratch_root
     patterns = ("todowrite", "lsp", "websearch")
     hits = {}
-    for pattern in patterns:
-        proc = subprocess.run(
-            ["grep", "-R", "-l", "-i", "--exclude-dir=node_modules",
-             "--exclude-dir=__pycache__", pattern, "skills", "agents",
-             "scripts", "reference", ".github"],
-            cwd=REPO, capture_output=True, text=True)
-        files = [f for f in (proc.stdout or "").splitlines()
-                 if ".opencode/plans" not in f
-                 and "opencode_v2_canary.py" not in f]
-        hits[pattern] = files
+    try:
+        for pattern in patterns:
+            proc = subprocess.run(
+                ["grep", "-R", "-l", "-i", "--exclude-dir=node_modules",
+                 "--exclude-dir=__pycache__", pattern, "skills", "agents",
+                 "scripts", "reference", ".github"],
+                cwd=REPO, capture_output=True, text=True, timeout=120)
+            files = [f for f in (proc.stdout or "").splitlines()
+                     if ".opencode/plans" not in f
+                     and "opencode_v2_canary.py" not in f]
+            hits[pattern] = files
+    except (OSError, subprocess.SubprocessError) as exc:
+        text = (f"date={now_date()}\n"
+                f"C8=FAIL (probe error: {type(exc).__name__}: {exc})")
+        evidence(root, "C8.txt", text)
+        return False, text
     ok = all(not files for files in hits.values())
     text = "\n".join([
         f"date={now_date()}",
@@ -679,10 +699,11 @@ def gate_migration(args):
                        "opencode-go/deepseek-v4.1-flash", "--format", "json",
                        "Reply OK"], timeout=MIGRATION_TIMEOUT)
         elapsed = time.monotonic() - started
-    except subprocess.TimeoutExpired:
+    except (OSError, subprocess.SubprocessError) as exc:
         evidence(root, "migration-rehearsal.txt",
-                 f"date={now_date()}\nmigration=TIMEOUT>{MIGRATION_TIMEOUT}s")
-        return False, "migration timeout"
+                 f"date={now_date()}\nmigration=ERROR "
+                 f"{type(exc).__name__}: {exc}")
+        return False, f"migration probe failed: {exc}"
     target_ids = read_ids(copy, "session_v2")
     run_ids = set(re.findall(r'"sessionID"\s*:\s*"([^"]+)"',
                              proc.stdout or ""))

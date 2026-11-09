@@ -149,6 +149,8 @@ def check_agents_live(binary, framework):
     apply smoke.
     """
     expected = agent_ids(os.path.join(framework, "agents"))
+    if not expected:
+        return False, "framework agent corpus is empty"
     live, detail = live_agent_ids(binary)
     if live is None:
         return False, detail
@@ -287,7 +289,7 @@ def loader_evidence(root, binary, plugin_dir):
 
 
 def check_plugin(manifest=None, framework=None, config_root=None,
-                 binary="opencode"):
+                 binary=None):
     """AC41/N1: the versioned config wires the plugin, runtime evidence proves
     its behavior, and V2's actual loader log proves it loaded.
 
@@ -295,6 +297,7 @@ def check_plugin(manifest=None, framework=None, config_root=None,
     local directories, and a bare `plugins/...` spec is an npm package spec in
     V2. The loader probe runs the real CLI with the versioned config.
     """
+    binary = binary or default_bin_path()
     root = os.path.abspath(_versioned_root(manifest, config_root))
     cfg_path = os.path.join(root, "opencode", "opencode.jsonc")
     plugin_dir = os.path.join(root, "opencode", "plugins",
@@ -321,13 +324,15 @@ def check_plugin(manifest=None, framework=None, config_root=None,
     probe = os.path.join(plugin_dir, "runtime-probe.mjs")
     if not os.path.isfile(probe):
         return False, f"runtime probe missing: {probe}"
-    node = subprocess.run(["node", probe], capture_output=True, text=True,
-                          timeout=60)
+    node = run(["node", probe], timeout=60)
+    if node.returncode != 0:
+        return False, (f"runtime probe failed: "
+                       f"{(node.stderr or '').strip()[:200]}")
     try:
         evidence = json.loads((node.stdout or "").strip().splitlines()[-1])
     except (IndexError, ValueError):
         return False, f"runtime probe emitted no JSON: {node.stderr[:200]}"
-    if node.returncode != 0 or not evidence.get("startup_marker") \
+    if not evidence.get("startup_marker") \
             or not evidence.get("subscription_aborted"):
         return False, f"runtime probe failed: {evidence}"
     source = evidence.get("source") or ""

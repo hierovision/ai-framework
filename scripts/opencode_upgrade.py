@@ -225,6 +225,12 @@ def completed_stages(state):
 
 
 def write_state(repo, target, stage, detail=None, force=False):
+    """Record a stage, preserving its first record unless `force` updates it.
+
+    The stage never regresses on a re-run; `updated` always reflects the latest
+    write, while the per-stage `at`/`detail` record stays at its first value
+    unless `force=True` asks for an explicit update.
+    """
     path = state_path(repo)
     with file_lock(path):
         state = read_state(repo)
@@ -236,8 +242,9 @@ def write_state(repo, target, stage, detail=None, force=False):
                 and order.index(stage) < order.index(current)):
             stage = current  # never regress applied -> canaried on a re-run
         state["stage"] = stage
-        state.setdefault("stages", {})[stage] = {
-            "at": now_iso(), "detail": detail or "ok"}
+        stages = state.setdefault("stages", {})
+        if force or stage not in stages:
+            stages[stage] = {"at": now_iso(), "detail": detail or "ok"}
         state["updated"] = now_iso()
         return write_json(path, state)
 
@@ -543,7 +550,10 @@ def latest_version(repo=REPO, refresh=False, offline=False):
             return cached
     if offline:
         return None
-    proc = run(["npm", "view", "@opencode/cli", "version"], timeout=60)
+    try:
+        proc = run(["npm", "view", "@opencode/cli", "version"], timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
     if proc.returncode != 0:
         return None
     latest = parse_version(proc.stdout)
@@ -555,8 +565,11 @@ def latest_version(repo=REPO, refresh=False, offline=False):
 
 
 def plugin_peers(version, repo=REPO):
-    proc = run(["npm", "view", "@opencode/plugin@" + version,
-                "peerDependencies", "--json"], timeout=60)
+    try:
+        proc = run(["npm", "view", "@opencode/plugin@" + version,
+                    "peerDependencies", "--json"], timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
     if proc.returncode != 0:
         return None
     try:
@@ -606,7 +619,10 @@ def resolve_opentui(version, override=None, peers=None):
     exact = re.fullmatch(r"\d+\.\d+\.\d+", spec)
     if exact:
         return spec
-    proc = run(["npm", "view", "@opentui/core", "version"], timeout=60)
+    try:
+        proc = run(["npm", "view", "@opentui/core", "version"], timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return current_opentui()
     latest = parse_version(proc.stdout) if proc.returncode == 0 else None
     return latest or current_opentui()
 
@@ -1362,6 +1378,27 @@ def lockfile_delta(repo, paths):
     return "\n".join(rows)
 
 
+def prepare_failure_artifact(repo, target, stage, exc, completed, restored,
+                             lockfiles=None):
+    """Durable record of a prepare failure after mutation began."""
+    path = os.path.join(repo, ".scratch", "opencode-v2",
+                        f"prepare-{target}-failure.json")
+    payload = {
+        "target": target,
+        "stage": stage,
+        "exception": f"{type(exc).__name__}: {exc}",
+        "completed": completed,
+        "restored": restored,
+        "lockfiles": lockfiles or [],
+        "guidance": ("restore the listed files (for example "
+                     "`git checkout -- <path>`) or the pre-prepare tree; "
+                     "state remains at its prior completed stage"),
+        "at": now_iso(),
+    }
+    write_json(path, payload)
+    return path
+
+
 def prepare(args):
     target = args.to or v2.VERSION_PIN
     peers = read_json(args.plugin_json) if args.plugin_json else \
@@ -1387,53 +1424,95 @@ def prepare(args):
               + "; run `opencode_upgrade.py canary --to " + target
               + "` first (or pass --allow-pending-canary)", file=sys.stderr)
         return 2
-    for seams, path, old, new in changes:
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(new)
-    for rel, has_cli, has_tui in PLUGIN_JSONS:
-        path = os.path.join(args.repo, rel)
-        data = read_json(path)
-        if not isinstance(data, dict):
-            print(f"error: missing {rel}", file=sys.stderr)
-            return 2
-        data["version"] = target
-        if has_cli:
-            for key in ("dependencies", "peerDependencies"):
-                if isinstance(data.get(key), dict) \
-                        and "@opencode/plugin" in data[key]:
-                    data[key]["@opencode/plugin"] = target
-        if has_tui:
-            peers = data.get("peerDependencies")
-            if isinstance(peers, dict):
-                peers["@opentui/core"] = opentui
-                peers["@opentui/solid"] = opentui
-        write_json(path, data)
+    completed = []
+    originals = {}
     lock_paths = []
-    for name in PLUGIN_DIRS:
-        directory = os.path.join(args.repo, "plugins", name)
-        lock = os.path.join(directory, "package-lock.json")
-        if os.path.isfile(lock):
-            lock_paths.append(os.path.relpath(lock, args.repo))
-        proc = run(["npm", "install", "--no-audit", "--no-fund", "--silent"],
-                   cwd=directory, timeout=300)
-        if proc.returncode != 0:
-            print(f"error: npm install failed in {directory}: "
-                  f"{(proc.stderr or '')[-300:]}", file=sys.stderr)
-            return 2
-    append_adr_amendment(args.repo, target, opentui, summary or {},
-                         pending=pending)
-    results = check_seams(args.repo, target, opentui)
-    failed = [row for row in results if not row[1]]
-    print(f"prepared {target} (OpenTUI {opentui}); "
-          f"{len(changes)} seam(s), {len(failed)} failure(s)")
-    if lock_paths:
-        print("lockfile delta:")
-        print(lockfile_delta(args.repo, lock_paths))
-    for path, ok, detail in failed:
-        print(f"  {path}: FAIL {detail}")
-    if failed:
+    stage = "seams"
+    try:
+        for seams, path, old, new in changes:
+            originals.setdefault(path, old)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(new)
+            completed.append({"action": "seam",
+                              "path": os.path.relpath(path, args.repo)})
+        stage = "plugin-json"
+        for rel, has_cli, has_tui in PLUGIN_JSONS:
+            path = os.path.join(args.repo, rel)
+            data = read_json(path)
+            if not isinstance(data, dict):
+                raise RuntimeError(f"missing {rel}")
+            originals.setdefault(path, open(path, encoding="utf-8").read())
+            data["version"] = target
+            if has_cli:
+                for key in ("dependencies", "peerDependencies"):
+                    if isinstance(data.get(key), dict) \
+                            and "@opencode/plugin" in data[key]:
+                        data[key]["@opencode/plugin"] = target
+            if has_tui:
+                peers = data.get("peerDependencies")
+                if isinstance(peers, dict):
+                    peers["@opentui/core"] = opentui
+                    peers["@opentui/solid"] = opentui
+            write_json(path, data)
+            completed.append({"action": "plugin-json", "path": rel})
+        stage = "npm-install"
+        for name in PLUGIN_DIRS:
+            directory = os.path.join(args.repo, "plugins", name)
+            lock = os.path.join(directory, "package-lock.json")
+            if os.path.isfile(lock):
+                lock_paths.append(os.path.relpath(lock, args.repo))
+            proc = run(["npm", "install", "--no-audit", "--no-fund",
+                        "--silent"], cwd=directory, timeout=300)
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"npm install failed in {directory}: "
+                    f"{(proc.stderr or '')[-300:]}")
+            completed.append({"action": "npm-install",
+                              "path": os.path.relpath(directory, args.repo)})
+        stage = "adr-amendment"
+        adr = adr_path(args.repo)
+        if os.path.isfile(adr):
+            originals.setdefault(adr, open(adr, encoding="utf-8").read())
+        append_adr_amendment(args.repo, target, opentui, summary or {},
+                             pending=pending)
+        completed.append({"action": "adr-amendment",
+                          "path": os.path.relpath(adr, args.repo)})
+        stage = "verify"
+        results = check_seams(args.repo, target, opentui)
+        failed = [row for row in results if not row[1]]
+        stage = "lockfile-delta"
+        delta = lockfile_delta(args.repo, lock_paths) if lock_paths else ""
+        print(f"prepared {target} (OpenTUI {opentui}); "
+              f"{len(changes)} seam(s), {len(failed)} failure(s)")
+        if delta:
+            print("lockfile delta:")
+            print(delta)
+        for path, ok, detail in failed:
+            print(f"  {path}: FAIL {detail}")
+        if failed:
+            raise RuntimeError("seam verification failed: " + ", ".join(
+                path for path, _ok, _detail in failed))
+        stage = "state"
+        write_state(args.repo, target, "prepared")
+    except (OSError, subprocess.SubprocessError, RuntimeError,
+            ValueError) as exc:
+        restored = []
+        for path, original in originals.items():
+            try:
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(original)
+                restored.append(os.path.relpath(path, args.repo))
+            except OSError:
+                pass
+        artifact = prepare_failure_artifact(
+            args.repo, target, stage, exc, completed, restored,
+            lockfiles=lock_paths)
+        print(f"error: prepare failed at {stage}: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        print(f"prepare failure artifact: {artifact}", file=sys.stderr)
+        print("state preserved at its prior completed stage; restore guidance "
+              "is in the artifact", file=sys.stderr)
         return 1
-    write_state(args.repo, target, "prepared")
     if args.open_pr:
         return open_pr(args, target, opentui, summary or {})
     print(f"next: opencode upgrade {target} --method yarn")
@@ -1792,10 +1871,23 @@ def pre_upgrade_backup(args, target):
         sqlite_backup(source_db, db)
     else:
         db = None  # first install: no DB existed, so cite no backup path
-    config = os.path.join(home, ".config", "opencode")
-    if os.path.isdir(config):
-        shutil.copytree(config, os.path.join(root, "config"), symlinks=True,
-                        ignore=shutil.ignore_patterns("node_modules"))
+    source_config = os.path.join(home, ".config", "opencode")
+    target_config = os.path.join(root, "config")
+    config = None
+    config_error = None
+    if os.path.isdir(source_config):
+        try:
+            shutil.copytree(source_config, target_config, symlinks=True,
+                            ignore=shutil.ignore_patterns("node_modules"))
+            config = target_config
+        except OSError as exc:
+            config_error = f"{type(exc).__name__}: {exc}"
+    write_json(os.path.join(root, "backup.json"), {
+        "db": db if db and os.path.isfile(db) else None,
+        "config": config,
+        "config_error": config_error,
+        "at": now_iso(),
+    })
     return root, db
 
 
@@ -1852,9 +1944,14 @@ def apply_artifact(args, target, home, link, backup, previous_default, stage,
                    checks, verified=False, db=None):
     """Build the apply evidence artifact (success or failure)."""
     current_link = link_state(link)
-    config_backup = (os.path.join(backup, "config")
-                     if backup and os.path.isdir(os.path.join(backup, "config"))
-                     else None)
+    backup_meta = (read_json(os.path.join(backup, "backup.json"), {})
+                   if backup else {}) or {}
+    config_backup = backup_meta.get("config")
+    if not config_backup:
+        config_backup = (os.path.join(backup, "config")
+                         if backup and os.path.isdir(
+                             os.path.join(backup, "config")) else None)
+    database_backup = backup_meta.get("db") or db
     return {
         "version": target,
         "verified": verified,
@@ -1863,8 +1960,10 @@ def apply_artifact(args, target, home, link, backup, previous_default, stage,
         "checks": {name: {"ok": ok, "detail": detail}
                    for name, ok, detail in checks},
         "backup": backup,
+        "backup_metadata": backup_meta or None,
         "config_backup": config_backup,
-        "database_backup": db,
+        "config_backup_error": backup_meta.get("config_error"),
+        "database_backup": database_backup,
         "database_source": db_source_path(home) if home else None,
         "target_package": target_package_info(home, target),
         "default_link": current_link,
@@ -1872,7 +1971,8 @@ def apply_artifact(args, target, home, link, backup, previous_default, stage,
         "previous_default": previous_default,
         "rollback": rollback_plan(link, previous_default, backup,
                                   args.method, home=home,
-                                  config_backup=config_backup, db=db),
+                                  config_backup=config_backup,
+                                  db=database_backup),
         "at": now_iso(),
     }
 

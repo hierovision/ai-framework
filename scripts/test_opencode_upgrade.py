@@ -2163,6 +2163,203 @@ def test_apply_paths_use_explicit_link_not_path():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def _prepare_peers(root):
+    return _json_file(root, {
+        "@opencode/plugin": "2.3.0",
+        "@opentui/core": ">=0.8.0",
+        "@opentui/solid": ">=0.8.0",
+        "solid-js": ">=1.9.0"}, "peers.json")
+
+
+def _prepare_originals(root):
+    return {
+        "readme": open(os.path.join(root, "README.md")).read(),
+        "adapter": open(os.path.join(root, "scripts",
+                                     "opencode_v2.py")).read(),
+        "plugin": open(os.path.join(root, "plugins", "delegation-observer",
+                                    "package.json")).read(),
+        "adr": open(os.path.join(root, "docs", "ADRs",
+                                 "ADR-0014-opencode-v2-upgrade.md")).read(),
+    }
+
+
+def _assert_prepare_restored(root, originals):
+    assert open(os.path.join(root, "README.md")).read() == originals["readme"]
+    assert open(os.path.join(root, "scripts",
+                             "opencode_v2.py")).read() == originals["adapter"]
+    assert open(os.path.join(root, "plugins", "delegation-observer",
+                             "package.json")).read() == originals["plugin"]
+    assert open(os.path.join(root, "docs", "ADRs",
+                             "ADR-0014-opencode-v2-upgrade.md")).read() == \
+        originals["adr"]
+
+
+def test_prepare_npm_timeout_writes_failure_artifact_and_restores():
+    root = _tmp("upgrade-prepare-timeout-")
+    real_run = upgrade.run
+    try:
+        _fixture(root)
+        _evidence(root, "2.3.0")
+        peers = _prepare_peers(root)
+        originals = _prepare_originals(root)
+
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 300)
+
+        upgrade.run = timeout
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.prepare(_args(root, to="2.3.0", opentui="0.8.2",
+                                         plugin_json=peers)) == 1
+        artifact = os.path.join(root, ".scratch", "opencode-v2",
+                                "prepare-2.3.0-failure.json")
+        data = json.load(open(artifact))
+        assert data["stage"] == "npm-install"
+        assert "TimeoutExpired" in data["exception"]
+        assert data["restored"], data
+        assert data["completed"], data
+        _assert_prepare_restored(root, originals)
+        assert not os.path.isfile(upgrade.state_path(root)) or \
+            upgrade.read_state(root).get("stage") != "prepared"
+    finally:
+        upgrade.run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prepare_adr_failure_restores_written_files():
+    root = _tmp("upgrade-prepare-adr-")
+    real_run = upgrade.run
+    real_adr = upgrade.append_adr_amendment
+    try:
+        _fixture(root)
+        _evidence(root, "2.3.0")
+        peers = _prepare_peers(root)
+        originals = _prepare_originals(root)
+        upgrade.run = lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 0, "", "")
+
+        def fail(*args, **kwargs):
+            raise OSError("adr write failed")
+
+        upgrade.append_adr_amendment = fail
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.prepare(_args(root, to="2.3.0", opentui="0.8.2",
+                                         plugin_json=peers)) == 1
+        artifact = os.path.join(root, ".scratch", "opencode-v2",
+                                "prepare-2.3.0-failure.json")
+        data = json.load(open(artifact))
+        assert data["stage"] == "adr-amendment"
+        assert "OSError" in data["exception"]
+        assert data["restored"], data
+        _assert_prepare_restored(root, originals)
+    finally:
+        upgrade.run = real_run
+        upgrade.append_adr_amendment = real_adr
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prepare_failure_preserves_prior_state():
+    root = _tmp("upgrade-prepare-state-")
+    real_run = upgrade.run
+    try:
+        _fixture(root)
+        _evidence(root, "2.3.0")
+        peers = _prepare_peers(root)
+        upgrade.write_state(root, "2.3.0", "planned")
+
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 300)
+
+        upgrade.run = timeout
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.prepare(_args(root, to="2.3.0", opentui="0.8.2",
+                                         plugin_json=peers)) == 1
+        assert upgrade.read_state(root)["stage"] == "planned"
+    finally:
+        upgrade.run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_pre_upgrade_backup_config_failure_reports_db():
+    root = _tmp("upgrade-backup-config-")
+    real_copytree = upgrade.shutil.copytree
+    try:
+        home = os.path.join(root, "home")
+        _make_db(os.path.join(home, ".local", "share", "opencode",
+                              "opencode.db"))
+        os.makedirs(os.path.join(home, ".config", "opencode"))
+        _write(os.path.join(home, ".config", "opencode", "opencode.jsonc"),
+               "{}\n")
+
+        def fail(*args, **kwargs):
+            raise OSError("copy failed")
+
+        upgrade.shutil.copytree = fail
+        backup, db = upgrade.pre_upgrade_backup(
+            _args(root, home=home), v2.VERSION_PIN)
+        assert db and os.path.isfile(db)
+        meta = json.load(open(os.path.join(backup, "backup.json")))
+        assert meta["db"] == db
+        assert meta["config"] is None
+        assert "OSError" in meta["config_error"]
+    finally:
+        upgrade.shutil.copytree = real_copytree
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_pre_upgrade_backup_missing_db_reports_none():
+    root = _tmp("upgrade-backup-nodb-")
+    try:
+        home = os.path.join(root, "home")
+        os.makedirs(home)
+        backup, db = upgrade.pre_upgrade_backup(
+            _args(root, home=home), v2.VERSION_PIN)
+        assert db is None
+        meta = json.load(open(os.path.join(backup, "backup.json")))
+        assert meta["db"] is None
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_write_state_preserves_first_same_stage_record():
+    root = _tmp("upgrade-state-record-")
+    try:
+        upgrade.write_state(root, v2.VERSION_PIN, "planned", {"n": 1})
+        first = upgrade.read_state(root)["stages"]["planned"]
+        upgrade.write_state(root, v2.VERSION_PIN, "planned", {"n": 2})
+        assert upgrade.read_state(root)["stages"]["planned"] == first
+        upgrade.write_state(root, v2.VERSION_PIN, "planned", {"n": 3},
+                            force=True)
+        assert upgrade.read_state(root)["stages"]["planned"]["detail"] == {
+            "n": 3}
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_registry_probe_timeout_returns_none():
+    root = _tmp("upgrade-registry-timeout-")
+    real_run = upgrade.run
+    try:
+        _fixture(root)
+
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 60)
+
+        upgrade.run = timeout
+        assert upgrade.latest_version(root, refresh=True) is None
+        assert upgrade.plugin_peers("2.3.0") is None
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            assert upgrade.check(_args(root, remote=True)) == 2
+        assert "registry" in out.getvalue()
+    finally:
+        upgrade.run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

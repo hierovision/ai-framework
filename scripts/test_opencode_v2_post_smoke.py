@@ -538,6 +538,84 @@ def test_d7_probe_timeout_is_named_failure():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_check_plugin_runtime_probe_timeout_is_named():
+    root = _tmp("postsmoke-plugin-timeout-")
+    real_run = post_smoke.subprocess.run
+    try:
+        fw = _framework(root)
+
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 60)
+
+        post_smoke.subprocess.run = timeout
+        ok, detail = post_smoke.check_plugin(config_root=_config_root(fw))
+        assert ok is False
+        assert "runtime probe failed" in detail
+        assert "TimeoutExpired" in detail
+    finally:
+        post_smoke.subprocess.run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_check_agents_live_empty_corpus_fails():
+    root = _tmp("postsmoke-empty-agents-")
+    try:
+        framework = os.path.join(root, "empty")
+        os.makedirs(os.path.join(framework, "agents"))
+        ok, detail = post_smoke.check_agents_live("x", framework)
+        assert ok is False
+        assert "framework agent corpus is empty" in detail
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_check_plugin_defaults_to_explicit_link():
+    root = _tmp("postsmoke-plugin-link-")
+    real_run = post_smoke.subprocess.run
+    real_loader = post_smoke.loader_evidence
+    real_home = os.environ.get("HOME")
+    real_path = os.environ.get("PATH", "")
+    captured = {}
+    try:
+        fw = _framework(root)
+        config_root = _config_root(fw)
+        probe = os.path.join(config_root, "opencode", "plugins",
+                             "auto-compact-at-threshold", "runtime-probe.mjs")
+        payload = json.dumps({
+            "startup_marker": True,
+            "subscription_aborted": True,
+            "plugin_id": "auto-compact-at-threshold",
+            "source": "file://" + os.path.realpath(probe),
+        })
+        post_smoke.subprocess.run = lambda argv, **kwargs: \
+            subprocess.CompletedProcess(argv, 0, payload, "")
+
+        def capture(root_, binary, plugin_dir):
+            captured["binary"] = binary
+            return True, "ok"
+
+        post_smoke.loader_evidence = capture
+        fake_home = os.path.join(root, "home")
+        path_dir = os.path.join(root, "pathbin")
+        _stub(path_dir, "opencode", "1.19.4")
+        os.environ["HOME"] = fake_home
+        os.environ["PATH"] = path_dir + os.pathsep + real_path
+        ok, detail = post_smoke.check_plugin(config_root=config_root)
+        assert ok is True, detail
+        assert captured["binary"] == os.path.join(
+            fake_home, ".yarn", "bin", "opencode")
+        assert captured["binary"] != os.path.join(path_dir, "opencode")
+    finally:
+        post_smoke.subprocess.run = real_run
+        post_smoke.loader_evidence = real_loader
+        if real_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = real_home
+        os.environ["PATH"] = real_path
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

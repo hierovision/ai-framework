@@ -559,6 +559,130 @@ def test_usage_example_documents_v1_default():
     assert "--v1-prefix" in doc
 
 
+def test_import_current_auth_timeout_is_named():
+    root = _tmp("canary-auth-timeout-")
+    real_run = canary.subprocess.run
+    real_home = os.environ.get("HOME")
+    try:
+        fake_home = os.path.join(root, "home")
+        auth = os.path.join(fake_home, ".local", "share", "opencode",
+                            "auth.json")
+        os.makedirs(os.path.dirname(auth))
+        with open(auth, "w", encoding="utf-8") as fh:
+            json.dump({"opencode-go": {"type": "api", "key": "k"}}, fh)
+        os.environ["HOME"] = fake_home
+
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 120)
+
+        canary.subprocess.run = timeout
+        args = argparse.Namespace(opencode_bin="x", scratch_root=root)
+        ok, detail = canary.import_current_auth(
+            args, os.path.join(root, "c3.db"))
+        assert ok is False
+        assert "auth import probe failed" in detail
+        assert "TimeoutExpired" in detail
+    finally:
+        canary.subprocess.run = real_run
+        if real_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = real_home
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_gate_c3_probe_timeout_is_named():
+    root = _tmp("canary-c3-timeout-")
+    real_assert = canary.v2.assert_scratch_db
+    real_auth = canary.import_current_auth
+    real_run = canary.v2_run
+    try:
+        canary.v2.assert_scratch_db = lambda *args, **kwargs: None
+        canary.import_current_auth = lambda *args, **kwargs: (True, "ok")
+
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 120)
+
+        canary.v2_run = timeout
+        ok, text = canary.gate_c3(argparse.Namespace(
+            scratch_root=root, opencode_bin="x", version=v2.VERSION_PIN))
+        assert ok is False
+        assert "models_probe_error=TimeoutExpired" in text
+        assert "C3=FAIL" in text
+    finally:
+        canary.v2.assert_scratch_db = real_assert
+        canary.import_current_auth = real_auth
+        canary.v2_run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_gate_c4_probe_timeout_is_named():
+    root = _tmp("canary-c4-timeout-")
+    real_assert = canary.v2.assert_scratch_db
+    real_auth = canary.import_current_auth
+    real_run = canary.v2_run
+    try:
+        canary.v2.assert_scratch_db = lambda *args, **kwargs: None
+        canary.import_current_auth = lambda *args, **kwargs: (True, "ok")
+
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 180)
+
+        canary.v2_run = timeout
+        ok, text = canary.gate_c4(argparse.Namespace(
+            scratch_root=root, opencode_bin="x", version=v2.VERSION_PIN))
+        assert ok is False
+        assert "error:TimeoutExpired" in text
+        assert "C4=FAIL" in text
+    finally:
+        canary.v2.assert_scratch_db = real_assert
+        canary.import_current_auth = real_auth
+        canary.v2_run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_gate_migration_probe_timeout_is_named():
+    root = _tmp("canary-migration-timeout-")
+    real_auth = canary.import_current_auth
+    real_run = canary.v2_run
+    try:
+        source = _source_db(root)
+        canary.import_current_auth = lambda *args, **kwargs: (True, "ok")
+
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 900)
+
+        canary.v2_run = timeout
+        ok, detail = canary.gate_migration(argparse.Namespace(
+            scratch_root=root, source_db=source, opencode_bin="x",
+            version=v2.VERSION_PIN))
+        assert ok is False
+        assert "migration probe failed" in detail
+        text = open(os.path.join(root, "migration-rehearsal.txt")).read()
+        assert "migration=ERROR TimeoutExpired" in text
+    finally:
+        canary.import_current_auth = real_auth
+        canary.v2_run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_gate_c8_probe_timeout_is_named():
+    root = _tmp("canary-c8-timeout-")
+    real_run = canary.subprocess.run
+    try:
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 120)
+
+        canary.subprocess.run = timeout
+        ok, text = canary.gate_c8(argparse.Namespace(scratch_root=root))
+        assert ok is False
+        assert "probe error" in text
+        assert "C8=FAIL" in text
+    finally:
+        canary.subprocess.run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
