@@ -2119,6 +2119,50 @@ def test_topology_does_not_read_large_binary():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_apply_paths_use_explicit_link_not_path():
+    root = _tmp("upgrade-command-link-")
+    target = v2.VERSION_PIN
+    home = os.path.join(root, "home")
+    link = os.path.join(home, ".yarn", "bin", "opencode")
+    _stub_binary(link, target)
+    path_dir = os.path.join(root, "pathbin")
+    _stub_binary(os.path.join(path_dir, "opencode"), "1.19.4")
+    real_path = os.environ.get("PATH", "")
+    real_run = upgrade.run
+    real_agents = upgrade.post_smoke.check_agents_live
+    real_plugin = upgrade.post_smoke.check_plugin
+    real_observer = upgrade.observer_plugin
+    recorded = []
+    os.environ["PATH"] = path_dir + os.pathsep + real_path
+    upgrade.run = lambda argv, **kwargs: recorded.append(list(argv)) or \
+        subprocess.CompletedProcess(argv, 0, "", "")
+    upgrade.post_smoke.check_agents_live = lambda binary, framework: (
+        recorded.append(["agents", binary]) or (True, "ok"))
+    upgrade.post_smoke.check_plugin = lambda **kwargs: (
+        recorded.append(["plugin", kwargs.get("binary")]) or (True, "ok"))
+    upgrade.observer_plugin = lambda command: (
+        recorded.append(["observer", command]) or (None, "tui=True"))
+    try:
+        args = _args(root, home=home, link=link)
+        upgrade.official_upgrade(args, target)
+        assert recorded and recorded[0][0] == link, recorded
+        recorded.clear()
+        upgrade.post_upgrade_smoke(args, target)
+        commands = [
+            row[1] if row[0] in ("agents", "plugin", "observer") else row[0]
+            for row in recorded if isinstance(row, list)
+        ]
+        assert commands, recorded
+        assert all(command == link for command in commands), commands
+    finally:
+        os.environ["PATH"] = real_path
+        upgrade.run = real_run
+        upgrade.post_smoke.check_agents_live = real_agents
+        upgrade.post_smoke.check_plugin = real_plugin
+        upgrade.observer_plugin = real_observer
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

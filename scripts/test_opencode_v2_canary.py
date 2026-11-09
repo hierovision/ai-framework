@@ -552,6 +552,13 @@ def test_default_bin_path_is_explicit_link():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_usage_example_documents_v1_default():
+    doc = canary.__doc__ or ""
+    assert "--default-version 1.19.4" in doc
+    assert "--default-bin" in doc
+    assert "--v1-prefix" in doc
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

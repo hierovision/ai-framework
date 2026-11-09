@@ -25,6 +25,7 @@ the V1 rollback binary as the C1 "default":
     --prefix .scratch/v2-<version>-prefix \
     --opencode-bin .scratch/v2-<version>-prefix/bin/opencode \
     --default-bin ~/.config/yarn/global/node_modules/opencode-ai/bin/opencode.exe \
+    --default-version 1.19.4 \
     --v1-prefix .scratch/v1-prefix \
     --scratch-root .scratch/v2-canary-<version>
 """

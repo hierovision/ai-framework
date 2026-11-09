@@ -31,14 +31,15 @@ import uuid
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+
+import opencode_v2 as v2  # noqa: E402
 
 
 def default_bin_path():
     """The supported default command: the explicit yarn link, never PATH."""
     return os.path.join(os.path.expanduser("~"), ".yarn", "bin", "opencode")
-sys.path.insert(0, HERE)
 
-import opencode_v2 as v2  # noqa: E402
 
 AGENTS_DIR = os.path.join(REPO, "agents")
 DEFAULT_ARTIFACT = os.path.join(REPO, ".scratch", "opencode-v2",
@@ -60,8 +61,7 @@ def sha256(path):
 
 
 def git_sha(path):
-    proc = subprocess.run(["git", "-C", path, "rev-parse", "HEAD"],
-                          capture_output=True, text=True)
+    proc = run(["git", "-C", path, "rev-parse", "HEAD"], timeout=30)
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
@@ -380,14 +380,13 @@ def drills(framework, consumer, evidence_path=None):
                         f"D1-D6 evidence missing: {path}"))
     # D7: model doctor + consumer bindings (offline / read-only).
     doctor = os.path.join(REPO, "scripts", "model-liveness-check.py")
-    p1 = subprocess.run([sys.executable, doctor], capture_output=True,
-                        text=True) if os.path.isfile(doctor) else None
+    p1 = run([sys.executable, doctor], timeout=120) \
+        if os.path.isfile(doctor) else None
     results.append(("D7-model-doctor", bool(p1 and p1.returncode == 0),
                     (p1.stdout or p1.stderr or "missing").strip()[:200]
                     if p1 else "model-liveness-check.py missing"))
-    p2 = subprocess.run([sys.executable, os.path.join(
-        REPO, "scripts", "check-consumer-bindings.py"), framework],
-        capture_output=True, text=True)
+    p2 = run([sys.executable, os.path.join(
+        REPO, "scripts", "check-consumer-bindings.py"), framework], timeout=120)
     results.append(("D7-consumer", p2.returncode == 0,
                     (p2.stdout or p2.stderr or "").strip()[-200:]))
     return results

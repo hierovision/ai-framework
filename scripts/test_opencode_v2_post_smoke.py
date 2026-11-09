@@ -504,6 +504,40 @@ def test_default_bin_path_is_explicit_link():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_git_sha_spawn_error_returns_none():
+    real_run = post_smoke.subprocess.run
+
+    def error(*args, **kwargs):
+        raise OSError("spawn failed")
+
+    post_smoke.subprocess.run = error
+    try:
+        assert post_smoke.git_sha(REPO) is None
+    finally:
+        post_smoke.subprocess.run = real_run
+
+
+def test_d7_probe_timeout_is_named_failure():
+    root = _tmp("postsmoke-drills-")
+    real_run = post_smoke.subprocess.run
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 120)
+
+    post_smoke.subprocess.run = timeout
+    try:
+        results = post_smoke.drills(
+            REPO, None, evidence_path=os.path.join(root, "missing.json"))
+        by_name = {name: (ok, detail) for name, ok, detail in results}
+        assert by_name["D7-model-doctor"][0] is False
+        assert "TimeoutExpired" in by_name["D7-model-doctor"][1]
+        assert by_name["D7-consumer"][0] is False
+        assert "timed out" in by_name["D7-consumer"][1]
+    finally:
+        post_smoke.subprocess.run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

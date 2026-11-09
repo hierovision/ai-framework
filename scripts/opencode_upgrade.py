@@ -1801,7 +1801,7 @@ def pre_upgrade_backup(args, target):
 
 def official_upgrade(args, target, command=None):
     """Run the official upgrade through the explicit default link."""
-    command = command or shutil.which("opencode") or "opencode"
+    command = command or default_bin_path(args)
     proc = run([command, "upgrade", target, "--method", args.method],
                timeout=900, stream=True)
     return proc.returncode
@@ -1820,7 +1820,7 @@ def api_version(stdout, target):
 def post_upgrade_smoke(args, target, command=None):
     """Post-apply verification against an explicit, repaired executable."""
     home = os.path.abspath(args.home or os.path.expanduser("~"))
-    command = command or shutil.which("opencode") or "opencode"
+    command = command or default_bin_path(args)
     expected = os.path.join(home, ".config", "opencode")
     checks = []
     live = version_of(command)
