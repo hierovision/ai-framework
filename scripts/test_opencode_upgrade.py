@@ -56,8 +56,14 @@ def _evidence(repo, version=None, residual=0, omit=()):
         if name in omit:
             continue
         _write(os.path.join(root, filename), f"{name}=PASS\n")
-    _write(os.path.join(root, "migration-rehearsal.txt"),
-           f"source_sessions_not_migrated={residual}\n")
+    _write(os.path.join(root, "migration-rehearsal.txt"), "\n".join([
+        f"source_sessions_not_migrated={residual}",
+        "target_only_ids=0",
+        "zero_migration=False",
+        "target_integrity_check=ok",
+        "source_untouched=True",
+        "migration=PASS" if residual == 0 else "migration=FAIL",
+    ]) + "\n")
 
 
 def _fixture(repo, version=None, opentui="0.8.1"):
@@ -902,6 +908,8 @@ def test_upgrade_docs_describe_supported_shadow():
     assert "not an automatic rollback" in adr or "no automatic" in adr
     assert "rolls back link + DB" not in adr14
     assert "opencode_upgrade.py apply" not in adr14
+    assert "~/.scratch/opencode-v2" not in readme
+    assert '"$PWD"/.scratch/opencode-v2' in readme
 
 
 def test_prune_keeps_versions():
@@ -1310,11 +1318,18 @@ def test_canary_residual_acceptance():
                                ("C5", "C5.txt"), ("C6", "C6.txt"),
                                ("C7", "C7.txt"), ("C8", "C8.txt")):
             _write(os.path.join(ev, filename), f"{name}=PASS\n")
-        _write(os.path.join(ev, "migration-rehearsal.txt"),
-               "source_sessions_not_migrated=3\n")
+        _write(os.path.join(ev, "migration-rehearsal.txt"), "\n".join([
+            "source_sessions_not_migrated=3",
+            "target_only_ids=0",
+            "zero_migration=False",
+            "target_integrity_check=ok",
+            "source_untouched=True",
+            "migration=PASS with fidelity residual 3",
+        ]) + "\n")
         summary = upgrade.canary_summary(root, target)
         assert summary["ok"] is False
         assert summary["residual"] == 3
+        assert summary["migration"]["verdict"] == "PASS"
         assert summary["residual_accepted"] is False
         _write(os.path.join(root, "docs",
                             "opencode-v2-migration-classification.json"),
@@ -1323,6 +1338,40 @@ def test_canary_residual_acceptance():
         summary = upgrade.canary_summary(root, target)
         assert summary["ok"] is True
         assert summary["residual_accepted"] is True
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_canary_summary_migration_failures_block():
+    root = _tmp("upgrade-migration-block-")
+    target = v2.VERSION_PIN
+    ev = os.path.join(root, ".scratch", "v2-canary-" + target)
+    try:
+        for name, filename in (("C1", "C1.txt"), ("C2", "C2.txt"),
+                               ("C3", "C3-real.txt"), ("C4", "C4.txt"),
+                               ("C5", "C5.txt"), ("C6", "C6.txt"),
+                               ("C7", "C7.txt"), ("C8", "C8.txt")):
+            _write(os.path.join(ev, filename), f"{name}=PASS\n")
+
+        def migration(verdict, residual, target_only, zero, integrity,
+                      untouched="True"):
+            _write(os.path.join(ev, "migration-rehearsal.txt"), "\n".join([
+                f"source_sessions_not_migrated={residual}",
+                f"target_only_ids={target_only}",
+                f"zero_migration={zero}",
+                f"target_integrity_check={integrity}",
+                f"source_untouched={untouched}",
+                f"migration={verdict}",
+            ]) + "\n")
+
+        migration("FAIL", 0, 2, "False", "ok")
+        assert upgrade.canary_summary(root, target)["ok"] is False
+        migration("FAIL", 0, 0, "False", "corrupt")
+        assert upgrade.canary_summary(root, target)["ok"] is False
+        migration("PASS", 0, 0, "True", "ok")
+        assert upgrade.canary_summary(root, target)["ok"] is False
+        migration("PASS", 0, 0, "False", "ok")
+        assert upgrade.canary_summary(root, target)["ok"] is True
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -1689,6 +1738,76 @@ def test_doctor_survives_spawn_timeout():
     finally:
         upgrade.run = real_run
         upgrade.observer_plugin = real_observer
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_cli_dry_run_and_consent_do_not_write_state():
+    root = _tmp("upgrade-cli-purity-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    before = open(fixture["link"], "rb").read()
+    real_backup = upgrade.pre_upgrade_backup
+    real_smoke = upgrade.post_upgrade_smoke
+    upgrade.pre_upgrade_backup = lambda a, t: (
+        os.path.join(root, "backup"), None)
+    upgrade.post_upgrade_smoke = lambda a, t, command=None: [
+        ("binary", True, "ok")]
+    try:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.main([
+                "upgrade", "--to", target, "--apply", "--dry-run",
+                "--skip-canary", "--drain-acknowledged",
+                "--home", fixture["home"], "--repo", root,
+            ])
+        assert rc == 0, out.getvalue()
+        assert not os.path.isfile(upgrade.state_path(root))
+        assert not os.path.exists(_artifact(root, target))
+        assert open(fixture["link"], "rb").read() == before
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.main([
+                "upgrade", "--to", target, "--apply", "--skip-canary",
+                "--home", fixture["home"], "--repo", root,
+            ])
+        assert rc == 2, out.getvalue()
+        assert not os.path.isfile(upgrade.state_path(root))
+        assert not os.path.exists(_artifact(root, target))
+    finally:
+        upgrade.pre_upgrade_backup = real_backup
+        upgrade.post_upgrade_smoke = real_smoke
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_cli_successful_apply_records_state():
+    root = _tmp("upgrade-cli-state-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    real = (upgrade.pre_upgrade_backup, upgrade.post_upgrade_smoke,
+            upgrade.stage_config.live_processes)
+    upgrade.pre_upgrade_backup = lambda a, t: (
+        os.path.join(root, "backup"), None)
+    upgrade.post_upgrade_smoke = lambda a, t, command=None: [
+        ("binary", True, "ok")]
+    upgrade.stage_config.live_processes = lambda: []
+    try:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.main([
+                "upgrade", "--to", target, "--apply", "--skip-canary",
+                "--drain-acknowledged", "--home", fixture["home"],
+                "--repo", root,
+            ])
+        assert rc == 0, out.getvalue()
+        assert upgrade.read_state(root)["stage"] == "applied"
+        assert json.load(open(_artifact(root, target)))["verified"] is True
+    finally:
+        (upgrade.pre_upgrade_backup, upgrade.post_upgrade_smoke,
+         upgrade.stage_config.live_processes) = real
         shutil.rmtree(root, ignore_errors=True)
 
 

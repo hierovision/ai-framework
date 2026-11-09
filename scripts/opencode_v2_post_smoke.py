@@ -38,8 +38,6 @@ import opencode_v2 as v2  # noqa: E402
 AGENTS_DIR = os.path.join(REPO, "agents")
 DEFAULT_ARTIFACT = os.path.join(REPO, ".scratch", "opencode-v2",
                                 "post-smoke.json")
-EXPECTED_AGENTS = 17
-EXPECTED_CONSUMER_AGENTS = 10
 PLUGIN_REL = "./plugins/auto-compact-at-threshold"
 PLUGIN_BARE = "plugins/auto-compact-at-threshold"
 LOADER_MARKER = "auto-compact-at-threshold initialized"
@@ -71,6 +69,15 @@ def run(argv, cwd=None, env=None, timeout=180):
         return subprocess.CompletedProcess(argv, 1, "", f"{type(exc).__name__}: {exc}")
 
 
+def parsed_version(text):
+    """Exact version parse (accepts `opencode vX`, `vX`, or bare `X`)."""
+    for line in reversed((text or "").strip().splitlines()):
+        match = re.fullmatch(r"(?:opencode )?v?(\d+\.\d+\.\d+)", line.strip())
+        if match:
+            return match.group(1)
+    return None
+
+
 def check_version(binary):
     """Exact `opencode v<x.y.z>` parse, never a substring match."""
     try:
@@ -93,13 +100,48 @@ def agent_files(root):
     return sorted(f for f in os.listdir(root) if f.endswith(".md"))
 
 
-def check_agents(framework, consumer):
-    fw = len(agent_files(os.path.join(framework, "agents")))
-    cs = len(agent_files(os.path.join(consumer, ".opencode", "agents"))) \
-        if consumer else 0
-    ok = fw == EXPECTED_AGENTS and (consumer is None
-                                    or cs == EXPECTED_CONSUMER_AGENTS)
-    return ok, f"framework={fw} consumer={cs}"
+def agent_ids(root):
+    return {name[:-3] for name in agent_files(root)}
+
+
+def live_agent_ids(binary):
+    proc = run([binary, "api", "GET", "/api/agent"], timeout=60)
+    if proc.returncode != 0:
+        return None, f"agent api unavailable: {proc.stderr or proc.returncode}"
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except ValueError:
+        return None, "agent api returned non-JSON"
+    rows = data.get("data") if isinstance(data, dict) else data
+    live = {(row.get("id") or row.get("name"))
+            for row in rows or [] if isinstance(row, dict)}
+    live.discard(None)
+    return live, f"live={len(live)}"
+
+
+def check_agents(framework, consumer, binary=None):
+    """Derive expected IDs from the corpus; verify them live when possible.
+
+    The live API may include built-ins and newly added agents; only missing
+    expected framework/consumer IDs fail. Without a binary the check is a
+    corpus presence check (no fixed count).
+    """
+    expected = agent_ids(os.path.join(framework, "agents"))
+    consumer_expected = (agent_ids(os.path.join(consumer, ".opencode",
+                                                "agents"))
+                         if consumer else set())
+    if not expected:
+        return False, "framework agent corpus is empty"
+    if binary:
+        live, detail = live_agent_ids(binary)
+        if live is None:
+            return False, detail
+        expected_all = expected | consumer_expected
+        missing = sorted(expected_all - live)
+        return (not missing,
+                f"{detail} expected={len(expected_all)} missing={missing}")
+    return True, (f"framework={len(expected)} "
+                  f"consumer={len(consumer_expected)} (corpus only)")
 
 
 def check_agents_live(binary, framework):
@@ -109,22 +151,13 @@ def check_agents_live(binary, framework):
     a failure. This replaces the hardcoded repo file-count check for the
     apply smoke.
     """
-    expected = {name[:-3] for name in agent_files(
-        os.path.join(framework, "agents"))}
-    proc = run([binary, "api", "GET", "/api/agent"], timeout=60)
-    if proc.returncode != 0:
-        return False, f"agent api unavailable: {proc.stderr or proc.returncode}"
-    try:
-        data = json.loads(proc.stdout or "{}")
-    except ValueError:
-        return False, "agent api returned non-JSON"
-    rows = data.get("data") if isinstance(data, dict) else data
-    live = {(row.get("id") or row.get("name"))
-            for row in rows or [] if isinstance(row, dict)}
-    live.discard(None)
+    expected = agent_ids(os.path.join(framework, "agents"))
+    live, detail = live_agent_ids(binary)
+    if live is None:
+        return False, detail
     missing = sorted(expected - live)
     return (not missing,
-            f"live={len(live)} expected={len(expected)} missing={missing}")
+            f"{detail} expected={len(expected)} missing={missing}")
 
 
 def check_config(framework, consumer):
@@ -376,7 +409,7 @@ def pre_merge(args):
     binary = args.default_bin
     ok, detail = check_version(binary)
     checks.append(("default-is-v2", ok, detail))
-    ok, detail = check_agents(args.framework, args.consumer)
+    ok, detail = check_agents(args.framework, args.consumer, args.default_bin)
     checks.append(("agents-load", ok, detail))
     ok, detail = check_config(args.framework, args.consumer)
     checks.append(("config", ok, detail))
@@ -457,7 +490,9 @@ def rollback_check(args):
     checks = []
     binary = args.default_bin
     proc = subprocess.run([binary, "--version"], capture_output=True, text=True)
-    checks.append(("v1-version", "1.19.4" in proc.stdout, proc.stdout.strip()))
+    checks.append(("v1-version",
+                   parsed_version(proc.stdout) == "1.19.4",
+                   proc.stdout.strip()))
     backup = (manifest.get("backup") or {}).get("path")
     if backup and os.path.isfile(backup):
         import sqlite3

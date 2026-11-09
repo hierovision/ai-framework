@@ -85,10 +85,15 @@ def _fake_bin(root, version=None):
     d = os.path.join(root, "bin")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "opencode")
+    agent_rows = ",".join(f'{{"id":"agent-{i}"}}' for i in range(17))
     with open(path, "w") as fh:
         fh.write(f"""#!/bin/sh
 if [ "$1" = "--version" ]; then
   echo '{version}'
+  exit 0
+fi
+if [ "$1" = "api" ] && [ "$2" = "GET" ] && [ "$3" = "/api/agent" ]; then
+  echo '{{"data":[{agent_rows},{{"id":"builtin"}}]}}'
   exit 0
 fi
 if [ "$1" = "run" ]; then
@@ -376,6 +381,70 @@ def test_run_spawn_error_returns_completed_process():
     assert hasattr(result, "returncode")
     assert result.returncode != 0
     assert "FileNotFoundError" in (result.stderr or "")
+
+
+def test_check_agents_corpus_derived_live():
+    root = _tmp("postsmoke-agents-corpus-")
+    try:
+        fw = os.path.join(root, "framework")
+        os.makedirs(os.path.join(fw, "agents"))
+        for name in ("alpha", "beta"):
+            with open(os.path.join(fw, "agents", name + ".md"), "w") as fh:
+                fh.write("---\ndescription: d\nmodel: m\npermissions: []\n---\n")
+        cs = os.path.join(root, "consumer")
+        os.makedirs(os.path.join(cs, ".opencode", "agents"))
+        with open(os.path.join(cs, ".opencode", "agents", "gamma.md"),
+                  "w") as fh:
+            fh.write("---\ndescription: d\nmodel: m\npermissions: []\n---\n")
+        live = _stub(root, "live", json.dumps({"data": [
+            {"id": "alpha"}, {"id": "beta"}, {"id": "gamma"},
+            {"id": "builtin"}]}))
+        ok, detail = post_smoke.check_agents(fw, cs, live)
+        assert ok is True, detail
+        assert "missing=[]" in detail
+        missing = _stub(root, "missing", json.dumps({"data": [
+            {"id": "alpha"}, {"id": "builtin"}]}))
+        ok, detail = post_smoke.check_agents(fw, cs, missing)
+        assert ok is False
+        assert "beta" in detail and "gamma" in detail
+        ok, detail = post_smoke.check_agents(fw, cs)
+        assert ok is True
+        assert "framework=2" in detail and "consumer=1" in detail
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_rollback_check_rejects_v1_superstring():
+    root = _tmp("smoke-rollback-super-")
+    try:
+        binary = _fake_bin(root, version="1.19.40")
+        backup = os.path.join(root, "final.db")
+        con = sqlite3.connect(backup)
+        con.execute("CREATE TABLE session (id TEXT)")
+        con.commit()
+        con.close()
+        snapshot = os.path.join(root, "snapshot")
+        os.makedirs(snapshot)
+        with open(os.path.join(snapshot, "a.md"), "w") as fh:
+            fh.write("agent\n")
+        import hashlib
+        digest = hashlib.sha256(b"agent\n").hexdigest()
+        with open(os.path.join(snapshot, "hashes.json"), "w") as fh:
+            json.dump({"a.md": digest}, fh)
+        agents = os.path.join(root, "agents")
+        os.makedirs(agents)
+        with open(os.path.join(agents, "a.md"), "w") as fh:
+            fh.write("agent\n")
+        manifest = os.path.join(root, "manifest.json")
+        with open(manifest, "w") as fh:
+            json.dump({"backup": {"path": backup}}, fh)
+        r = _run(["--rollback-check", "--manifest", manifest,
+                  "--default-bin", binary, "--agent-snapshot", snapshot,
+                  "--agents-dir", agents])
+        assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+        assert "v1-version: FAIL" in r.stdout
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def main():

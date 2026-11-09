@@ -47,9 +47,10 @@ rollback (ADR-0017).
 For a V1 previous default, rollback uses the actual
 `~/.config/opencode.v1-backup-*` tree, not the V2-era pre-apply snapshot.
 SQLite backups are written mode 0600. Existing backups created before this fix
-may still be group/world-readable; the owner runs once after merge:
+may still be group/world-readable; the owner runs once from the repo root after
+merge:
 `chmod 600 ~/.config/opencode.v1-backup-*/opencode.db
-~/.scratch/opencode-v2/pre-upgrade-*/opencode.db 2>/dev/null`.
+"$PWD"/.scratch/opencode-v2/pre-upgrade-*/opencode.db 2>/dev/null`.
 
 Re-run after adding new skills or agents. `git pull` alone updates the
 content of already-linked skills/agents. Agent files are validated on

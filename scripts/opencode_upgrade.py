@@ -427,8 +427,25 @@ def residual_accepted(repo, version, residual):
     return v2.migration_residual_accepted(repo, scratch, version, residual)
 
 
+def _evidence_field(text, name, cast=str):
+    match = re.search(rf"^{re.escape(name)}=(.+)$", text, re.MULTILINE)
+    if not match:
+        return None
+    value = match.group(1).strip()
+    try:
+        return cast(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def canary_summary(repo=REPO, version=None):
-    """Read the canary evidence; None when no evidence exists."""
+    """Read the canary evidence; None when no evidence exists.
+
+    `ok` requires every C1-C8 gate plus a measured migration verdict: PASS, an
+    intact target, an untouched source, no zero migration, no phantom target
+    IDs, and an accepted residual (a positive residual needs the dated shared
+    classification record).
+    """
     version = version or v2.VERSION_PIN
     root = os.path.join(repo, ".scratch", "v2-canary-" + version)
     if not os.path.isdir(root):
@@ -444,17 +461,39 @@ def canary_summary(repo=REPO, version=None):
                 path, encoding="utf-8").read() else "FAIL"
         else:
             gates[name] = "MISSING"
-    migration = os.path.join(root, "migration-rehearsal.txt")
-    residual = None
-    if os.path.isfile(migration):
-        match = re.search(r"^source_sessions_not_migrated=(\d+)$",
-                          open(migration, encoding="utf-8").read(),
-                          re.MULTILINE)
-        residual = int(match.group(1)) if match else None
+    migration_path = os.path.join(root, "migration-rehearsal.txt")
+    migration = {"verdict": None, "residual": None, "target_only": None,
+                 "zero_migration": None, "integrity": None,
+                 "source_untouched": None}
+    if os.path.isfile(migration_path):
+        text = open(migration_path, encoding="utf-8").read()
+        verdict = re.search(r"^migration=(PASS|FAIL)\b", text, re.MULTILINE)
+        migration["verdict"] = verdict.group(1) if verdict else None
+        migration["residual"] = _evidence_field(
+            text, "source_sessions_not_migrated", int)
+        migration["target_only"] = _evidence_field(
+            text, "target_only_ids", int)
+        zero = _evidence_field(text, "zero_migration")
+        migration["zero_migration"] = (
+            zero == "True" if zero in ("True", "False") else None)
+        migration["integrity"] = _evidence_field(
+            text, "target_integrity_check")
+        untouched = _evidence_field(text, "source_untouched")
+        migration["source_untouched"] = (
+            untouched == "True" if untouched in ("True", "False") else None)
+    residual = migration["residual"]
     accepted = residual_accepted(repo, version, residual)
+    migration_ok = (
+        migration["verdict"] == "PASS"
+        and migration["integrity"] == "ok"
+        and migration["source_untouched"] is True
+        and migration["zero_migration"] is False
+        and migration["target_only"] == 0
+        and (residual == 0 or accepted)
+    )
     return {"root": root, "gates": gates, "residual": residual,
-            "residual_accepted": accepted,
-            "ok": all(v == "PASS" for v in gates.values()) and accepted}
+            "residual_accepted": accepted, "migration": migration,
+            "ok": all(v == "PASS" for v in gates.values()) and migration_ok}
 
 
 # --- registry / release intelligence ----------------------------------------
@@ -983,7 +1022,9 @@ def print_status(payload, json_mode=False):
     canary = payload["canary"]
     if canary:
         gates = " ".join(f"{k}={v}" for k, v in canary["gates"].items())
-        print(f"last canary:   {gates} residual={canary['residual']}")
+        print(f"last canary:   {gates} "
+              f"migration={canary['migration']['verdict']} "
+              f"residual={canary['residual']}")
     else:
         print("last canary:   none")
     if payload["last_apply"]:
@@ -1830,6 +1871,7 @@ def apply_supported(args, target):
             print("close the TUI and run `opencode service stop`, then retry "
                   "(or --force).", file=sys.stderr)
             return 2
+        write_state(args.repo, target, "prepared")
         stage = "backup"
         backup, db = pre_upgrade_backup(args, target)
         stage = "install"
@@ -1952,7 +1994,6 @@ def upgrade(args):
             print(f"already current: {target}")
             return 0
         if args.apply:
-            write_state(args.repo, target, "prepared")
             return apply_supported(args, target)
         label = ("verification needed" if shadow["shadow_ok"]
                  else "shadow repair needed")

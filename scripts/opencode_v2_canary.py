@@ -61,9 +61,9 @@ def now_date():
 
 
 def exact_version(text):
-    """Exact `opencode v<x.y.z>` parse (never a substring match)."""
+    """Exact version parse (accepts `opencode vX`, `vX`, or bare `X`)."""
     for line in reversed((text or "").strip().splitlines()):
-        match = re.fullmatch(r"opencode v(\d+\.\d+\.\d+)", line.strip())
+        match = re.fullmatch(r"(?:opencode )?v?(\d+\.\d+\.\d+)", line.strip())
         if match:
             return match.group(1)
     return None
@@ -512,7 +512,8 @@ def gate_c6(args):
         return False, str(exc)
     ids = re.findall(r"ses_[A-Za-z0-9]+", proc.stdout or "")
     known = [i for i in ids if i in source_ids]
-    ok = "1.19.4" in ver.stdout and proc.returncode == 0 and bool(known)
+    ok = (exact_version(ver.stdout) == "1.19.4"
+          and proc.returncode == 0 and bool(known))
     lines += [f"session_list_exit={proc.returncode}",
               f"session_ids={known[:3]}",
               f"C6={'PASS' if ok else 'FAIL'}"]
