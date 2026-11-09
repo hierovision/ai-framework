@@ -612,20 +612,28 @@ def gate_c8(args):
     return ok, text
 
 
-def migration_membership(src_ids, migrated):
-    """Non-vacuous partition check for the migration rehearsal.
+def migration_membership(src_ids, target_ids, run_ids=()):
+    """Measured migration membership (never a vacuous set identity).
 
-    Every source session ID must be either present in the target or recorded
-    missing; an empty source is not a pass. Target-only IDs (the rehearsal run's
-    own new sessions) are reported but do not fail the check.
+    The rehearsal run creates its own target session(s); `run_ids` removes them
+    before the phantom check. Structural validity requires a non-empty source,
+    at least one migrated source row (zero migration fails even with source
+    rows), and no phantom target IDs. Missing source rows are reported for the
+    residual-acceptance decision.
     """
     src = set(src_ids)
-    tgt = set(migrated)
-    migrated_from_source = tgt & src
-    missing = src - tgt
-    target_only = tgt - src
-    ok = bool(src) and len(migrated_from_source) + len(missing) == len(src)
-    return ok, missing, target_only
+    raw_target = set(target_ids)
+    run = raw_target & set(run_ids)
+    target = raw_target - run
+    migrated = target & src
+    missing = src - target
+    phantom = target - src
+    zero_migration = bool(src) and not migrated
+    ok = bool(src) and not zero_migration and not phantom
+    return {"ok": ok, "source": len(src), "target": len(raw_target),
+            "run": len(run), "migrated": len(migrated),
+            "missing": missing, "phantom": phantom,
+            "zero_migration": zero_migration}
 
 
 def gate_migration(args):
@@ -650,30 +658,37 @@ def gate_migration(args):
         evidence(root, "migration-rehearsal.txt",
                  f"date={now_date()}\nmigration=TIMEOUT>{MIGRATION_TIMEOUT}s")
         return False, "migration timeout"
-    migrated = read_ids(copy, "session_v2")
-    membership_ok, missing, target_only = migration_membership(src_ids,
-                                                               migrated)
-    missing = sorted(missing)
+    target_ids = read_ids(copy, "session_v2")
+    run_ids = set(re.findall(r'"sessionID"\s*:\s*"([^"]+)"',
+                             proc.stdout or ""))
+    member = migration_membership(src_ids, target_ids, run_ids)
+    missing = sorted(member["missing"])
+    phantom = sorted(member["phantom"])
+    residual_accepted = v2.migration_residual_accepted(
+        REPO, root, args.version, len(missing))
     untouched = sha256(source) == source_hash
     check = integrity(copy)
     ok = (ok_auth and proc.returncode == 0 and untouched and check == "ok"
-          and membership_ok)
+          and member["ok"] and (not missing or residual_accepted))
     text = "\n".join([
         f"date={now_date()}",
         f"source={source}",
         f"source_sha256={source_hash}",
-        f"source_session_rows={len(src_ids)}",
+        f"source_session_rows={member['source']}",
         f"copy={copy}",
         f"copy_initial_sha256={copy_initial}",
         f"migration_exit={proc.returncode}",
         f"migration_stderr={(proc.stderr or '').strip()[:400]}",
         f"migration_elapsed_seconds={elapsed:.2f}",
         f"session_v2_after_auth_import={rows_after_auth}",
-        f"session_v2_rows={len(migrated)}",
-        f"preexisting_sessions_migrated={len(set(src_ids) & migrated)}",
+        f"target_session_rows={member['target']}",
+        f"run_created_ids={member['run']}",
+        f"migrated_source_rows={member['migrated']}",
         f"source_sessions_not_migrated={len(missing)}",
-        f"migrated_ids_present_in_source={membership_ok}",
-        f"target_only_ids={len(target_only)}",
+        f"target_only_ids={len(phantom)}",
+        f"zero_migration={member['zero_migration']}",
+        f"migrated_ids_subset_of_source={not phantom}",
+        f"residual_accepted={residual_accepted}",
         f"target_integrity_check={check}",
         f"source_backup_sha256_after={sha256(source)}",
         f"source_untouched={untouched}",
@@ -683,6 +698,8 @@ def gate_migration(args):
     evidence(root, "migration-rehearsal.txt", text)
     write_text(os.path.join(root, "migration-residual-ids.json"),
                json.dumps(missing, indent=2))
+    write_text(os.path.join(root, "migration-phantom-ids.json"),
+               json.dumps(phantom, indent=2))
     return ok, text
 
 

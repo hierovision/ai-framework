@@ -423,26 +423,8 @@ def check_adr_amendment(repo=REPO, version=None):
 
 def residual_accepted(repo, version, residual):
     """Accept a non-zero migration residual only with a dated record."""
-    if residual == 0:
-        return True
-    if residual is None:
-        return False
-    candidates = (
-        os.path.join(repo, "docs", "opencode-v2-migration-classification.json"),
-        os.path.join(repo, ".scratch", "v2-canary-" + version,
-                     "migration-residual-acceptance.json"),
-    )
-    for path in candidates:
-        data = read_json(path)
-        if not isinstance(data, dict):
-            continue
-        if data.get("version") not in (None, version):
-            continue
-        if data.get("residual") != residual:
-            continue
-        if data.get("owner") and data.get("date"):
-            return True
-    return False
+    scratch = os.path.join(repo, ".scratch", "v2-canary-" + version)
+    return v2.migration_residual_accepted(repo, scratch, version, residual)
 
 
 def canary_summary(repo=REPO, version=None):
@@ -752,17 +734,31 @@ def find_v1_backup(home):
     return {"root": root, "db": db if os.path.isfile(db) else None}
 
 
-def rollback_plan(link, previous_default, backup, method, home=None):
+def rollback_plan(link, previous_default, backup, method, home=None,
+                  config_backup=None, db=None):
     """Truthful rollback guidance for the pre-repair default.
 
     A V2 previous default is reinstalled with the supported upgrade command.
     A V1 previous default is restored by recreating the original link and using
-    the actual `~/.config/opencode.v1-backup-*` tree; the pre-apply snapshot is
-    a V2-era config/DB copy, not a V1 backup. A missing/unclassifiable previous
-    default gets an explicit unknown branch.
+    the actual `~/.config/opencode.v1-backup-*` tree. The pre-apply snapshot is
+    cited only for the copies that were actually created. A missing/
+    unclassifiable previous default gets an explicit unknown branch.
     """
     prev = previous_default or {}
-    pre = backup or "no pre-upgrade snapshot (apply failed before backup)"
+    copies = []
+    if config_backup:
+        copies.append(f"config: {config_backup}")
+    if db:
+        copies.append(f"DB: {db}")
+    if backup and copies:
+        snapshot = f"the pre-apply snapshot at {backup} ({', '.join(copies)})"
+        pre_desc = f"the pre-apply snapshot at {backup} is the V2-era config/DB"
+    elif backup:
+        snapshot = f"the pre-apply snapshot at {backup} (no config/DB copy)"
+        pre_desc = f"the pre-apply snapshot at {backup} contains no config/DB copy"
+    else:
+        snapshot = "no pre-upgrade snapshot was created"
+        pre_desc = "no pre-upgrade snapshot was created"
     if prev.get("kind") == "v1":
         restore = prev.get("resolved") or prev.get("target")
         commands = []
@@ -775,39 +771,40 @@ def rollback_plan(link, previous_default, backup, method, home=None):
             guidance = (
                 f"previous default was V1 ({prev.get('version')}): restore "
                 f"the original link and the actual V1 config backup at "
-                f"{v1['root']} (DB: {db_text}); the pre-apply snapshot at "
-                f"{pre} is the V2-era config/DB, not a V1 backup; the retained "
-                "V1 package is opencode-ai, so a V2 `opencode upgrade` cannot "
-                "reinstall it")
+                f"{v1['root']} (DB: {db_text}); {pre_desc}, not a V1 backup; "
+                "the retained V1 package is opencode-ai, so a V2 "
+                "`opencode upgrade` cannot reinstall it")
         else:
             guidance = (
                 f"previous default was V1 ({prev.get('version')}): no V1 "
                 f"config/DB backup was found under "
-                f"~/.config/opencode.v1-backup-*; the pre-apply snapshot at "
-                f"{pre} is the V2-era config/DB (a first install has no older "
-                "V1 backup). Restore the original link and reinstall/restore "
-                "the retained V1 package manually; a V2 `opencode upgrade` "
-                "cannot reinstall it")
+                f"~/.config/opencode.v1-backup-*; {pre_desc} (a first install "
+                "has no older V1 backup). Restore the original link and "
+                "reinstall/restore the retained V1 package manually; a V2 "
+                "`opencode upgrade` cannot reinstall it")
         return {"kind": "v1", "previous_default": prev, "v1_backup": v1,
                 "commands": commands, "guidance": guidance}
     if prev.get("kind") == "v2":
         previous_version = prev.get("version")
         command = (f"{link} upgrade {previous_version or '<previous>'} "
                    f"--method {method}")
-        guidance = (f"previous default was V2: {command}; restore the V2-era "
-                    f"DB/config pre-apply snapshot at {pre}")
+        guidance = (f"previous default was V2: {command}; restore {snapshot}")
         return {"kind": "v2", "previous_default": prev,
                 "commands": [command] if previous_version else [],
                 "guidance": guidance}
-    return {
-        "kind": "unknown",
-        "previous_default": prev,
-        "commands": [],
-        "guidance": (
+    if backup:
+        guidance = (
             "previous default is missing or unclassifiable; no automatic "
-            "package rollback is available — restore the default link and the "
-            f"config/DB backup at {pre} manually"),
-    }
+            f"package rollback is available — restore the default link and "
+            f"{snapshot} manually")
+    else:
+        guidance = (
+            "previous default is missing or unclassifiable; no automatic "
+            "package rollback is available — restore the default link and "
+            "the config/DB backup manually; no pre-upgrade snapshot was "
+            "created")
+    return {"kind": "unknown", "previous_default": prev,
+            "commands": [], "guidance": guidance}
 
 
 def rollback_lines(rollback):
@@ -1049,11 +1046,19 @@ def doctor(args):
             detail = f"{db}: {exc}"
     checks.append(("db-integrity", ok, detail))
     if install["command"]:
-        proc = run([install["command"], "service", "status"], timeout=30)
-        status = (proc.stdout or "").strip()
-        checks.append(("service", proc.returncode == 0, status[:120]))
-        _row, observer = observer_plugin(install["command"])
-        checks.append(("observer", "tui=True" in observer, observer))
+        try:
+            proc = run([install["command"], "service", "status"], timeout=30)
+            status = (proc.stdout or "").strip()
+            checks.append(("service", proc.returncode == 0, status[:120]))
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            checks.append(("service", False,
+                           f"{type(exc).__name__}: {exc}"))
+        try:
+            _row, observer = observer_plugin(install["command"])
+            checks.append(("observer", "tui=True" in observer, observer))
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            checks.append(("observer", False,
+                           f"{type(exc).__name__}: {exc}"))
     else:
         checks.append(("service", False, "no command"))
         checks.append(("observer", False, "no command"))
@@ -1151,6 +1156,11 @@ def plan(args):
         ("solid-js", current.get("solid-js", "?"),
          peers.get("solid-js") or "?"),
     ]
+    peer_specs = {
+        "@opentui/core": peers.get("@opentui/core"),
+        "@opentui/solid": peers.get("@opentui/solid"),
+        "solid-js": peers.get("solid-js"),
+    }
     releases = (read_json(args.releases_file) if args.releases_file
                 else fetch_releases())
     notes = breaking_notes(releases, v2.VERSION_PIN, target)
@@ -1164,7 +1174,8 @@ def plan(args):
     print(f"target: {target}  (pinned {v2.VERSION_PIN})")
     print("\ncompatibility:")
     for name, old, new in rows:
-        action = ("none" if str(old) == str(new) or satisfies(old, new)
+        compare = peer_specs.get(name) or new
+        action = ("none" if str(old) == str(new) or satisfies(old, compare)
                   else "bump")
         print(f"  {name:<18} {old!s:<10} -> {new!s:<10} {action}")
     if notes:
@@ -1240,16 +1251,14 @@ def lockfile_delta(repo, paths):
     """Summarize the target entries and transitive churn in lockfiles."""
     rows = []
     for path in paths:
-        full = os.path.join(repo, path)
         old_text = run(["git", "-C", repo, "show", f"HEAD:{path}"], timeout=30)
         if old_text.returncode != 0:
             continue
-        old = read_json(full) or {}
         try:
             old = json.loads(old_text.stdout)
         except ValueError:
             continue
-        new = read_json(full) or {}
+        new = read_json(os.path.join(repo, path)) or {}
         old_pkgs = old.get("packages") or {}
         new_pkgs = new.get("packages") or {}
         changed = sum(1 for key in set(old_pkgs) | set(new_pkgs)
@@ -1716,6 +1725,9 @@ def apply_artifact(args, target, home, link, backup, previous_default, stage,
                    checks, verified=False, db=None):
     """Build the apply evidence artifact (success or failure)."""
     current_link = link_state(link)
+    config_backup = (os.path.join(backup, "config")
+                     if backup and os.path.isdir(os.path.join(backup, "config"))
+                     else None)
     return {
         "version": target,
         "verified": verified,
@@ -1724,6 +1736,7 @@ def apply_artifact(args, target, home, link, backup, previous_default, stage,
         "checks": {name: {"ok": ok, "detail": detail}
                    for name, ok, detail in checks},
         "backup": backup,
+        "config_backup": config_backup,
         "database_backup": db,
         "database_source": db_source_path(home) if home else None,
         "target_package": target_package_info(home, target),
@@ -1731,7 +1744,8 @@ def apply_artifact(args, target, home, link, backup, previous_default, stage,
         "default_version": current_link["version"],
         "previous_default": previous_default,
         "rollback": rollback_plan(link, previous_default, backup,
-                                  args.method, home=home),
+                                  args.method, home=home,
+                                  config_backup=config_backup, db=db),
         "at": now_iso(),
     }
 
@@ -1759,16 +1773,20 @@ def apply_supported(args, target):
     previous_default = link_state(link)
     if getattr(args, "dry_run", False):
         resolved, _evidence = resolve_target_binary(home, target)
-        print("would back up the DB and ~/.config/opencode under "
-              ".scratch/opencode-v2/")
+        artifact = os.path.join(args.repo, ".scratch", "opencode-v2",
+                                f"upgrade-{target}-verify.json")
+        print("would back up any existing DB/config under .scratch/opencode-v2/")
         if getattr(args, "stop_service", False):
             print("would stop the service before the drain check")
         if resolved:
-            print(f"would repair {link} to the installed {target} V2 package "
-                  f"at {resolved}")
+            print(f"would reuse the installed {target} V2 package at "
+                  f"{resolved} and repair {link}")
         else:
             print(f"would install {target} via the official command, then "
                   f"repair {link} to the V2 package")
+        print("would run the post-upgrade smoke (binary, config root, API, "
+              "agents, plugin loader, observer)")
+        print(f"would write {artifact} and update upgrade-state.json")
         return 0
     artifact = os.path.join(args.repo, ".scratch", "opencode-v2",
                             f"upgrade-{target}-verify.json")
@@ -1778,12 +1796,12 @@ def apply_supported(args, target):
 
     def restore_text():
         parts = []
-        if backup:
+        if backup and os.path.isdir(os.path.join(backup, "config")):
             parts.append(f"config: {backup}/config")
         if db:
             parts.append(f"DB: {db}")
         if not parts:
-            return "no pre-upgrade snapshot was created"
+            return "no config/DB pre-upgrade snapshot was created"
         return "restore " + "; ".join(parts)
 
     def record_failure(failure_stage, checks, extra=None):
@@ -1947,9 +1965,21 @@ def upgrade(args):
             opentui=args.opentui, force=False, json=False))
         if rc != 0:
             return rc
-        print(f"would back up the DB/config under .scratch/opencode-v2/")
-        print(f"would run: {install['command']} upgrade {target} "
-              f"--method {args.method}")
+        resolved, _evidence = resolve_target_binary(home, target)
+        artifact = os.path.join(args.repo, ".scratch", "opencode-v2",
+                                f"upgrade-{target}-verify.json")
+        print("would back up any existing DB/config under .scratch/opencode-v2/")
+        if getattr(args, "stop_service", False):
+            print("would stop the service before the drain check")
+        if resolved:
+            print(f"would reuse the installed {target} V2 package at {resolved}")
+        else:
+            print(f"would run: {install['command']} upgrade {target} "
+                  f"--method {args.method}")
+        print(f"would repair the default {link} shadow to the V2 package")
+        print("would run the post-upgrade smoke (binary, config root, API, "
+              "agents, plugin loader, observer)")
+        print(f"would write {artifact} and update upgrade-state.json")
         return 0
     state = read_state(args.repo)
     stages_done = (completed_stages(state)

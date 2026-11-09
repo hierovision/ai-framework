@@ -145,6 +145,33 @@ def sqlite_backup(source, dest):
     return dest
 
 
+def migration_residual_accepted(repo, scratch_root, version, residual):
+    """A positive migration residual needs a dated classification record."""
+    if residual == 0:
+        return True
+    if residual is None:
+        return False
+    candidates = (
+        os.path.join(repo, "docs", "opencode-v2-migration-classification.json"),
+        os.path.join(scratch_root, "migration-residual-acceptance.json"),
+    )
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("version") not in (None, version):
+            continue
+        if data.get("residual") != residual:
+            continue
+        if data.get("owner") and data.get("date"):
+            return True
+    return False
+
+
 def connect(path=None):
     """Read-only connection, or None when the DB is absent/unreadable."""
     path = path or db_path()

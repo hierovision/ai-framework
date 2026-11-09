@@ -14,6 +14,7 @@ import glob
 import io
 import json
 import os
+import re
 import shutil
 import sqlite3
 import stat
@@ -553,7 +554,7 @@ def test_rollback_plan_v1_without_backup_is_truthful():
         assert plan["kind"] == "v1"
         assert plan["v1_backup"] is None
         assert "no V1 config/DB backup" in plan["guidance"]
-        assert "V2-era" in plan["guidance"]
+        assert "contains no config/DB copy" in plan["guidance"]
         assert "upgrade 1.19.4 --method yarn" not in plan["guidance"]
     finally:
         shutil.rmtree(root, ignore_errors=True)
@@ -575,7 +576,8 @@ def test_apply_dry_run_text_truthful():
             assert upgrade.apply_supported(args, target) == 0
         text = out.getvalue()
         assert f"would install {target} via the official command" in text, text
-        assert f"to the installed {target} V2 package" not in text, text
+        assert "would run the post-upgrade smoke" in text, text
+        assert f"would write {_artifact(absent_root, target)}" in text, text
 
         present = _shadow_home(present_root, target, package_version=target)
         args = _args(present_root, to=target, home=present["home"],
@@ -585,8 +587,10 @@ def test_apply_dry_run_text_truthful():
                 contextlib.redirect_stderr(out):
             assert upgrade.apply_supported(args, target) == 0
         text = out.getvalue()
-        assert (f"would repair {present['link']} to the installed {target} "
-                "V2 package") in text, text
+        assert (f"would reuse the installed {target} V2 package") in text, text
+        assert f"and repair {present['link']}" in text, text
+        assert "would run the post-upgrade smoke" in text, text
+        assert f"would write {_artifact(present_root, target)}" in text, text
     finally:
         upgrade.stage_config.live_processes = real_live
         shutil.rmtree(absent_root, ignore_errors=True)
@@ -889,7 +893,7 @@ def test_upgrade_docs_describe_supported_shadow():
         assert "upgrade --to <pin>" in text, name
         assert "--apply" in text, name
         assert "rolls back link + DB" not in text, name
-    assert f"upgrade --to {v2.VERSION_PIN}" not in readme
+    assert not re.search(r"upgrade --to \d+\.\d+\.\d+", readme)
     assert "verify.json.failed-" in readme
     assert "verify.json.previous-" in readme
     assert "both packages publish" in reference or "dual-bin" in reference
@@ -1566,6 +1570,125 @@ def test_diagnostics_do_not_write_state():
             upgrade.upgrade(_args(root, to=target, home=fixture["home"]))
         assert not os.path.isfile(upgrade.state_path(root))
     finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_plan_range_action_uses_peer_spec():
+    root = _tmp("upgrade-plan-range-")
+    try:
+        _fixture(root)
+        peers = _json_file(root, {
+            "@opencode/plugin": "2.3.0",
+            "@opentui/core": ">=0.8.0",
+            "@opentui/solid": ">=0.8.0",
+            "solid-js": ">=1.9.0"}, "peers.json")
+        releases = _json_file(root, [], "releases.json")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            assert upgrade.plan(_args(root, to="2.3.0", opentui="0.8.2",
+                                    plugin_json=peers,
+                                    releases_file=releases)) == 0
+        text = out.getvalue()
+        core = next(line for line in text.splitlines()
+                    if "@opentui/core" in line)
+        assert core.rstrip().endswith("none"), core
+        solid = next(line for line in text.splitlines() if "solid-js" in line)
+        assert solid.rstrip().endswith("none"), solid
+        cli = next(line for line in text.splitlines()
+                   if line.strip().startswith("CLI"))
+        assert cli.rstrip().endswith("bump"), cli
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_upgrade_dry_run_lists_all_actions():
+    root = _tmp("upgrade-dryrun-upgrade-")
+    target = "2.3.0"
+    fixture = _shadow_home(root, v2.VERSION_PIN,
+                           default_version=v2.VERSION_PIN,
+                           package_version=v2.VERSION_PIN)
+    real_plan = upgrade.plan
+    upgrade.plan = lambda args: 0
+    try:
+        args = _args(root, to=target, home=fixture["home"], dry_run=True,
+                     stop_service=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            assert upgrade.upgrade(args) == 0
+        text = out.getvalue()
+        assert "would back up any existing DB/config" in text, text
+        assert "would stop the service before the drain check" in text, text
+        assert (f"would run: {fixture['link']} upgrade {target} --method yarn"
+                ) in text, text
+        assert (f"would repair the default {fixture['link']} shadow"
+                ) in text, text
+        assert "would run the post-upgrade smoke" in text, text
+        assert f"would write {_artifact(root, target)}" in text, text
+    finally:
+        upgrade.plan = real_plan
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_pre_upgrade_backup_absent_config_not_cited():
+    root = _tmp("upgrade-noconfig-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    _make_db(os.path.join(fixture["home"], ".local", "share", "opencode",
+                          "opencode.db"))
+    shutil.rmtree(fixture["config"])
+    real = (upgrade.official_upgrade, upgrade.post_upgrade_smoke,
+            upgrade.stage_config.live_processes)
+    upgrade.official_upgrade = lambda a, t, command=None: 0
+    upgrade.post_upgrade_smoke = lambda a, t, command=None: [
+        ("binary", False, "forced failure")]
+    upgrade.stage_config.live_processes = lambda: []
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            assert upgrade.apply_supported(args, target) == 1
+        data = json.load(open(_artifact(root, target)))
+        assert data["config_backup"] is None, data["config_backup"]
+        assert data["database_backup"] and os.path.isfile(
+            data["database_backup"])
+        assert os.path.join(data["backup"], "config") not in data[
+            "rollback"]["guidance"]
+        restore_tail = out.getvalue().split("restore:")[-1]
+        assert "config:" not in restore_tail
+        assert "DB:" in restore_tail
+    finally:
+        (upgrade.official_upgrade, upgrade.post_upgrade_smoke,
+         upgrade.stage_config.live_processes) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_doctor_survives_spawn_timeout():
+    root = _tmp("upgrade-doctor-timeout-")
+    fixture = _shadow_home(root, v2.VERSION_PIN,
+                           default_version=v2.VERSION_PIN,
+                           package_version=v2.VERSION_PIN)
+    real_run = upgrade.run
+    real_observer = upgrade.observer_plugin
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(["opencode"], 30)
+
+    upgrade.run = timeout
+    upgrade.observer_plugin = timeout
+    try:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            assert upgrade.doctor(_args(root, home=fixture["home"])) == 1
+        text = out.getvalue()
+        assert "service: FAIL TimeoutExpired" in text, text
+        assert "observer: FAIL TimeoutExpired" in text, text
+    finally:
+        upgrade.run = real_run
+        upgrade.observer_plugin = real_observer
         shutil.rmtree(root, ignore_errors=True)
 
 

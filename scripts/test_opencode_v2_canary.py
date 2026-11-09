@@ -245,7 +245,7 @@ def test_c4_fresh_db_ten_runs():
 
 
 def test_migration_reports_residual():
-    """AC34/AC9: an incomplete backfill is reported, never called lossless."""
+    """AC34/AC9: an incomplete backfill fails unless a dated acceptance exists."""
     root = _tmp("canary-migration-")
     try:
         home = os.path.join(root, "home")
@@ -261,15 +261,74 @@ def test_migration_reports_residual():
                         "--source-db", src, "--opencode-bin", binary],
                  {"HOME": home, "V2_TEST_MIGRATE": "1",
                   "V2_TEST_SKIP_IDS": skip, "V2_TEST_ALLOW_NO_C5": "1"})
-        assert r.returncode == 0, (r.stdout, r.stderr)
+        assert r.returncode == 1, (r.stdout, r.stderr)
         text = open(os.path.join(out, "migration-rehearsal.txt")).read()
+        assert "source_session_rows=12" in text, text
+        assert "migrated_source_rows=10" in text, text
         assert "source_sessions_not_migrated=2" in text, text
-        assert "migrated_ids_present_in_source=True" in text, text
-        assert "target_only_ids=" in text, text
+        assert "target_only_ids=0" in text, text
+        assert "migrated_ids_subset_of_source=True" in text, text
+        assert "residual_accepted=False" in text, text
+        assert "migration=FAIL" in text, text
         assert "requires classification or owner acceptance" in text, text
         assert "source_untouched=True" in text, text
         rehearsal = os.path.join(out, "migration-rehearsal.db")
         assert stat.S_IMODE(os.stat(rehearsal).st_mode) == 0o600
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_migration_residual_acceptance_passes():
+    root = _tmp("canary-migration-accept-")
+    try:
+        home = os.path.join(root, "home")
+        os.makedirs(os.path.join(home, ".local", "share", "opencode"))
+        with open(os.path.join(home, ".local", "share", "opencode",
+                               "auth.json"), "w") as fh:
+            json.dump({"opencode-go": {"type": "api", "key": "k"}}, fh)
+        binary = _fake_bin(root)
+        src = _source_db(root)
+        out = os.path.join(root, "ev")
+        os.makedirs(out, exist_ok=True)
+        with open(os.path.join(out, "migration-residual-acceptance.json"),
+                  "w", encoding="utf-8") as fh:
+            json.dump({"version": v2.VERSION_PIN, "residual": 2,
+                       "owner": "owner", "date": "2026-11-09"}, fh)
+        skip = json.dumps(["ses_010", "ses_011"])
+        r = _run(root, ["--gate", "migration", "--scratch-root", out,
+                        "--source-db", src, "--opencode-bin", binary],
+                 {"HOME": home, "V2_TEST_MIGRATE": "1",
+                  "V2_TEST_SKIP_IDS": skip, "V2_TEST_ALLOW_NO_C5": "1"})
+        assert r.returncode == 0, (r.stdout, r.stderr)
+        text = open(os.path.join(out, "migration-rehearsal.txt")).read()
+        assert "source_sessions_not_migrated=2" in text, text
+        assert "residual_accepted=True" in text, text
+        assert "migration=PASS" in text, text
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_migration_zero_rows_fails():
+    root = _tmp("canary-migration-zero-")
+    try:
+        home = os.path.join(root, "home")
+        os.makedirs(os.path.join(home, ".local", "share", "opencode"))
+        with open(os.path.join(home, ".local", "share", "opencode",
+                               "auth.json"), "w") as fh:
+            json.dump({"opencode-go": {"type": "api", "key": "k"}}, fh)
+        binary = _fake_bin(root)
+        src = _source_db(root)
+        out = os.path.join(root, "ev")
+        r = _run(root, ["--gate", "migration", "--scratch-root", out,
+                        "--source-db", src, "--opencode-bin", binary],
+                 {"HOME": home, "V2_TEST_ALLOW_NO_C5": "1"})
+        assert r.returncode == 1, (r.stdout, r.stderr)
+        text = open(os.path.join(out, "migration-rehearsal.txt")).read()
+        assert "source_session_rows=12" in text, text
+        assert "migrated_source_rows=0" in text, text
+        assert "zero_migration=True" in text, text
+        assert "source_sessions_not_migrated=12" in text, text
+        assert "migration=FAIL" in text, text
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -290,16 +349,27 @@ def _agent_bindings():
 
 
 def test_migration_membership_non_vacuous():
-    assert canary.migration_membership(set(), set())[0] is False
-    ok, missing, target_only = canary.migration_membership(
-        {"ses_1", "ses_2"}, {"ses_1", "ses_2", "ses_new"})
-    assert ok is True
-    assert missing == set()
-    assert target_only == {"ses_new"}
-    ok, missing, _target_only = canary.migration_membership(
-        {"ses_1", "ses_2"}, {"ses_1"})
-    assert ok is True
-    assert missing == {"ses_2"}
+    empty = canary.migration_membership(set(), set())
+    assert empty["ok"] is False
+    assert empty["zero_migration"] is False
+    zero = canary.migration_membership({"ses_1", "ses_2"}, set())
+    assert zero["ok"] is False
+    assert zero["zero_migration"] is True
+    full = canary.migration_membership(
+        {"ses_1", "ses_2"}, {"ses_1", "ses_2", "ses_run"},
+        run_ids={"ses_run"})
+    assert full["ok"] is True
+    assert full["migrated"] == 2
+    assert full["missing"] == set()
+    assert full["phantom"] == set()
+    assert full["run"] == 1
+    partial = canary.migration_membership({"ses_1", "ses_2"}, {"ses_1"})
+    assert partial["ok"] is True
+    assert partial["missing"] == {"ses_2"}
+    phantom = canary.migration_membership(
+        {"ses_1"}, {"ses_1", "ses_phantom"})
+    assert phantom["ok"] is False
+    assert phantom["phantom"] == {"ses_phantom"}
 
 
 def test_exact_version_helpers():
