@@ -9,6 +9,7 @@ PR body. The live `opencode upgrade` itself is owner-run.
 Run: python3 scripts/test_opencode_upgrade.py
 """
 import argparse
+import builtins
 import contextlib
 import glob
 import io
@@ -589,6 +590,16 @@ def test_apply_dry_run_text_truthful():
         assert f"would install {target} via the official command" in text, text
         assert "would run the post-upgrade smoke" in text, text
         assert f"would write {_artifact(absent_root, target)}" in text, text
+        absent_order = [
+            "would check the drain gate",
+            "would back up any existing DB/config",
+            f"would install {target} via the official command",
+            f"would repair the default {absent['link']} shadow",
+            "would run the post-upgrade smoke",
+            f"would write {_artifact(absent_root, target)}",
+        ]
+        positions = [text.index(item) for item in absent_order]
+        assert positions == sorted(positions), positions
 
         present = _shadow_home(present_root, target, package_version=target)
         args = _args(present_root, to=target, home=present["home"],
@@ -599,9 +610,19 @@ def test_apply_dry_run_text_truthful():
             assert upgrade.apply_supported(args, target) == 0
         text = out.getvalue()
         assert (f"would reuse the installed {target} V2 package") in text, text
-        assert f"and repair {present['link']}" in text, text
+        assert f"would repair the default {present['link']} shadow" in text, text
         assert "would run the post-upgrade smoke" in text, text
         assert f"would write {_artifact(present_root, target)}" in text, text
+        present_order = [
+            "would check the drain gate",
+            "would back up any existing DB/config",
+            f"would reuse the installed {target} V2 package",
+            f"would repair the default {present['link']} shadow",
+            "would run the post-upgrade smoke",
+            f"would write {_artifact(present_root, target)}",
+        ]
+        positions = [text.index(item) for item in present_order]
+        assert positions == sorted(positions), positions
     finally:
         upgrade.stage_config.live_processes = real_live
         shutil.rmtree(absent_root, ignore_errors=True)
@@ -641,6 +662,7 @@ def test_upgrade_without_apply_prints_repair_for_v1_default():
     repair_root = _tmp("upgrade-noapply-repair-")
     try:
         fixture = _shadow_home(repair_root, target, package_version=target)
+        _evidence(repair_root, target)
         args = _args(repair_root, to=target, home=fixture["home"])
         out = io.StringIO()
         with _path_front(fixture["yarn_bin"]), \
@@ -675,6 +697,7 @@ def test_upgrade_without_apply_prints_repair_for_v1_default():
     try:
         fixture = _shadow_home(verify_root, target, default_version=target,
                                package_version=target)
+        _evidence(verify_root, target)
         _write(_artifact(verify_root, target), json.dumps({
             "version": target, "verified": False, "rolled_back": False}) + "\n")
         args = _args(verify_root, to=target, home=fixture["home"])
@@ -819,6 +842,7 @@ def test_status_detects_shadow_mismatch_and_next_repair():
     root = _tmp("upgrade-status-shadow-")
     target = v2.VERSION_PIN
     fixture = _shadow_home(root, target, package_version=target)
+    _evidence(root, target)
     try:
         with _path_front(fixture["yarn_bin"]):
             payload = upgrade.status_payload(_args(root, home=fixture["home"]))
@@ -857,6 +881,7 @@ def test_status_names_recorded_target_for_resume():
     target = v2.VERSION_PIN
     fixture = _shadow_home(root, target, default_version=target,
                            package_version=target)
+    _evidence(root, target)
     try:
         upgrade.write_state(root, "2.3.0", "canaried")
         with _path_front(fixture["yarn_bin"]):
@@ -1381,7 +1406,7 @@ def test_canary_summary_migration_failures_block():
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_apply_missing_canary_message_surfaces_skip():
+def test_apply_missing_canary_names_prerequisite():
     root = _tmp("upgrade-nocanary-")
     target = v2.VERSION_PIN
     fixture = _shadow_home(root, target, package_version=target)
@@ -1392,8 +1417,11 @@ def test_apply_missing_canary_message_surfaces_skip():
         with contextlib.redirect_stdout(out), \
                 contextlib.redirect_stderr(out):
             assert upgrade.apply_supported(args, target) == 2
-        assert "no canary evidence" in out.getvalue()
-        assert "--skip-canary" in out.getvalue()
+        text = out.getvalue()
+        assert "no canary evidence" in text
+        assert f"canary --to {target}" in text
+        assert "--skip-canary" not in text
+        assert not os.path.isfile(upgrade.state_path(root))
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -1714,6 +1742,17 @@ def test_upgrade_dry_run_lists_all_actions():
                 ) in text, text
         assert "would run the post-upgrade smoke" in text, text
         assert f"would write {_artifact(root, target)}" in text, text
+        order = [
+            "would stop the service before the drain check",
+            "would check the drain gate",
+            "would back up any existing DB/config",
+            f"would run: {fixture['link']} upgrade {target} --method yarn",
+            f"would repair the default {fixture['link']} shadow",
+            "would run the post-upgrade smoke",
+            f"would write {_artifact(root, target)}",
+        ]
+        positions = [text.index(item) for item in order]
+        assert positions == sorted(positions), positions
     finally:
         upgrade.plan = real_plan
         shutil.rmtree(root, ignore_errors=True)
@@ -1848,6 +1887,165 @@ def test_cli_successful_apply_records_state():
     finally:
         (upgrade.pre_upgrade_backup, upgrade.post_upgrade_smoke,
          upgrade.stage_config.live_processes) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _legacy_canary(repo, version):
+    """The actual pre-hardening 2.2.6 migration evidence shape."""
+    ev = os.path.join(repo, ".scratch", "v2-canary-" + version)
+    for name, filename in (("C1", "C1.txt"), ("C2", "C2.txt"),
+                           ("C3", "C3-real.txt"), ("C4", "C4.txt"),
+                           ("C5", "C5.txt"), ("C6", "C6.txt"),
+                           ("C7", "C7.txt"), ("C8", "C8.txt")):
+        _write(os.path.join(ev, filename), f"{name}=PASS\n")
+    _write(os.path.join(ev, "migration-rehearsal.txt"), "\n".join([
+        "source_session_rows=12",
+        "source_sessions_not_migrated=0",
+        "target_integrity_check=ok",
+        "source_untouched=True",
+        "migration=PASS with fidelity residual 0 "
+        "(requires classification or owner acceptance)",
+    ]) + "\n")
+
+
+def test_canary_summary_legacy_evidence_fails_actionably():
+    root = _tmp("upgrade-legacy-canary-")
+    target = v2.VERSION_PIN
+    try:
+        _legacy_canary(root, target)
+        summary = upgrade.canary_summary(root, target)
+        assert summary["ok"] is False
+        assert summary["schema_complete"] is False
+        assert "zero_migration" in summary["missing_fields"]
+        assert "target_only_ids" in summary["missing_fields"]
+        assert f"canary --to {target}" in summary["reason"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_canary_summary_fresh_schema_passes():
+    root = _tmp("upgrade-fresh-canary-")
+    target = v2.VERSION_PIN
+    try:
+        _evidence(root, target)
+        summary = upgrade.canary_summary(root, target)
+        assert summary["ok"] is True
+        assert summary["schema_complete"] is True
+        assert summary["reason"] is None
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_refuses_legacy_canary_actionably():
+    root = _tmp("upgrade-legacy-apply-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    try:
+        _legacy_canary(root, target)
+        args = _args(root, to=target, home=fixture["home"],
+                     drain_acknowledged=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            assert upgrade.apply_supported(args, target) == 2
+        text = out.getvalue()
+        assert "zero_migration" in text and "target_only_ids" in text, text
+        assert f"canary --to {target}" in text, text
+        assert "--skip-canary" not in text, text
+        assert not os.path.isfile(upgrade.state_path(root))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_status_shows_canary_prerequisite_for_legacy_evidence():
+    root = _tmp("upgrade-legacy-status-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    try:
+        _legacy_canary(root, target)
+        payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["next"] == upgrade.canary_command(target)
+        assert payload["canary_blocker"] is True
+        assert "zero_migration" in (payload["canary_reason"] or "")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_upgrade_no_apply_shows_canary_prerequisite():
+    root = _tmp("upgrade-legacy-guidance-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    try:
+        _legacy_canary(root, target)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            assert upgrade.upgrade(_args(root, to=target,
+                                         home=fixture["home"])) == 0
+        text = out.getvalue()
+        assert "canary prerequisite" in text, text
+        assert f"canary --to {target}" in text, text
+        assert "shadow repair needed" not in text, text
+        assert not os.path.isfile(upgrade.state_path(root))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_canary_cmd_uses_explicit_link_not_path():
+    root = _tmp("upgrade-canary-link-")
+    target = v2.VERSION_PIN
+    home = os.path.join(root, "home")
+    link = os.path.join(home, ".yarn", "bin", "opencode")
+    path_dir = os.path.join(root, "pathbin")
+    _stub_binary(os.path.join(path_dir, "opencode"), "1.19.4")
+    real_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = path_dir + os.pathsep + real_path
+    try:
+        args = _args(root, home=home, link=link,
+                     v1_bin=os.path.join(root, "v1"))
+        argv = upgrade.canary_cmd(args, target)
+        default_bin = argv[argv.index("--default-bin") + 1]
+        assert default_bin == link
+        args.link = None
+        argv = upgrade.canary_cmd(args, target)
+        default_bin = argv[argv.index("--default-bin") + 1]
+        assert default_bin == os.path.join(home, ".yarn", "bin", "opencode")
+    finally:
+        os.environ["PATH"] = real_path
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_topology_does_not_read_large_binary():
+    root = _tmp("upgrade-large-binary-")
+    home = os.path.join(root, "home")
+    link = os.path.join(home, ".yarn", "bin", "opencode")
+    config = os.path.join(home, ".config", "opencode")
+    os.makedirs(config)
+    big = os.path.join(root, "big-opencode")
+    with open(big, "wb") as fh:
+        fh.truncate(200 * 1024 * 1024)
+    os.chmod(big, 0o755)
+    os.makedirs(os.path.dirname(link), exist_ok=True)
+    os.symlink(big, link)
+    real_run = upgrade.run
+    real_open = builtins.open
+    upgrade.run = lambda argv, **kwargs: subprocess.CompletedProcess(
+        argv, 0, config, "")
+
+    def guarded(path, *args, **kwargs):
+        if os.path.abspath(str(path)) == os.path.abspath(big):
+            raise AssertionError("topology read the executable")
+        return real_open(path, *args, **kwargs)
+
+    builtins.open = guarded
+    try:
+        install = upgrade.topology(home, link)
+        assert install["command"] == link
+        assert install["supported"] is True
+        assert install["wrapper"] is None
+    finally:
+        builtins.open = real_open
+        upgrade.run = real_run
         shutil.rmtree(root, ignore_errors=True)
 
 

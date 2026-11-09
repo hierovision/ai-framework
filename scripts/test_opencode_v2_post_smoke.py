@@ -453,6 +453,32 @@ def test_rollback_check_rejects_v1_superstring():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_rollback_check_handles_spawn_error():
+    root = _tmp("smoke-rollback-spawn-")
+    try:
+        snapshot = os.path.join(root, "snapshot")
+        os.makedirs(snapshot)
+        agents = os.path.join(root, "agents")
+        os.makedirs(agents)
+        manifest = os.path.join(root, "manifest.json")
+        with open(manifest, "w") as fh:
+            json.dump({"backup": {"path": os.path.join(root, "missing.db")}},
+                      fh)
+        r = _run(["--rollback-check", "--manifest", manifest,
+                  "--default-bin", "/definitely/not/opencode",
+                  "--agent-snapshot", snapshot, "--agents-dir", agents])
+        assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+        assert "v1-version: FAIL FileNotFoundError" in r.stdout
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_check_version_spawn_error_is_named():
+    ok, detail = post_smoke.check_version("/definitely/not/opencode")
+    assert ok is False
+    assert "FileNotFoundError" in detail
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

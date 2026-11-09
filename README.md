@@ -32,8 +32,11 @@ seam.
 
 The yarn-global install retains the V1 `opencode-ai` package, so **both
 packages publish an `opencode` bin**: Yarn links the V2 binary as `opencode2`
-and may leave the default `opencode` pointing at V1. Run
-`python3 scripts/opencode_upgrade.py upgrade --to <pin> --apply
+and may leave the default `opencode` pointing at V1. The supported sequence is
+**canary -> apply -> verify**. First generate fresh hardened canary evidence
+for the pin: `python3 scripts/opencode_upgrade.py canary --to <pin>`. Legacy
+evidence without `zero_migration`/`target_only_ids` is refused; regenerate it.
+Then run `python3 scripts/opencode_upgrade.py upgrade --to <pin> --apply
 --drain-acknowledged` (with the pinned version) from a normal terminal with all
 sessions closed; it reuses the installed V2 package (no Yarn reinstall),
 atomically repairs the default `opencode` shadow to that package binary, and

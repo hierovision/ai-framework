@@ -280,30 +280,42 @@ def gate_c1(args):
     prefix = args.prefix
     lines = [f"date={now_date()}"]
     if not args.skip_install:
-        proc = subprocess.run(
-            ["npm", "install", "--global", "--prefix", prefix,
-             f"@opencode/cli@{args.version}"],
-            capture_output=True, text=True)
+        try:
+            proc = subprocess.run(
+                ["npm", "install", "--global", "--prefix", prefix,
+                 f"@opencode/cli@{args.version}"],
+                capture_output=True, text=True, timeout=600)
+        except (OSError, subprocess.SubprocessError) as exc:
+            lines.append(f"install_error={type(exc).__name__}: {exc}")
+            evidence(root, "C1.txt", "\n".join(lines + ["C1=FAIL"]))
+            return False, f"install probe failed: {exc}"
         lines.append(f"install_exit={proc.returncode}")
         if proc.returncode != 0:
             evidence(root, "C1.txt", "\n".join(lines + ["C1=FAIL"]))
-            return False, proc.stderr[-400:]
+            return False, (proc.stderr or "")[-400:]
     binary = os.path.join(prefix, "bin", "opencode2")
     if not os.path.isfile(binary):
         binary = os.path.join(prefix, "bin", "opencode")
     if not os.path.isfile(binary):
         evidence(root, "C1.txt", "\n".join(lines + ["C1=FAIL"]))
         return False, "isolated binary missing"
-    iso = subprocess.run([binary, "--version"], capture_output=True, text=True)
-    default = subprocess.run([args.default_bin, "--version"],
-                             capture_output=True, text=True)
-    ok = (exact_version(iso.stdout) == args.version
+    try:
+        iso = subprocess.run([binary, "--version"], capture_output=True,
+                             text=True, timeout=30)
+        default = subprocess.run([args.default_bin, "--version"],
+                                 capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        lines.append(f"version_probe_error={type(exc).__name__}: {exc}")
+        evidence(root, "C1.txt", "\n".join(lines + ["C1=FAIL"]))
+        return False, f"version probe failed: {exc}"
+    ok = (iso.returncode == 0 and default.returncode == 0
+          and exact_version(iso.stdout) == args.version
           and exact_version(default.stdout) == args.default_version)
     lines += [
         f"isolated_command={binary} --version",
-        f"isolated_output={iso.stdout.strip()}",
+        f"isolated_output={(iso.stdout or '').strip()}",
         f"default_command={args.default_bin} --version",
-        f"default_output={default.stdout.strip()}",
+        f"default_output={(default.stdout or '').strip()}",
         f"C1={'PASS' if ok else 'FAIL'}",
     ]
     evidence(root, "C1.txt", "\n".join(lines))
@@ -318,9 +330,9 @@ def gate_c2(args):
         start = v2_run(args, {}, ["service", "start"], timeout=60)
         status = v2_run(args, {}, ["service", "status"], timeout=60)
         api = v2_run(args, {}, ["api", "GET", "/api/info"], timeout=60)
-    except subprocess.TimeoutExpired:
-        evidence(root, "C2.txt", "C2=FAIL timeout")
-        return False, "timeout"
+    except (OSError, subprocess.SubprocessError) as exc:
+        evidence(root, "C2.txt", f"C2=FAIL {type(exc).__name__}: {exc}")
+        return False, str(exc)
     ok = status.returncode == 0 and api.returncode == 0 and \
         api_version(api.stdout) == args.version
     text = "\n".join([

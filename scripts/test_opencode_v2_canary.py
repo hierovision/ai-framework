@@ -425,6 +425,56 @@ def test_c7_asserts_markers():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_c1_probe_timeout_is_named_failure():
+    root = _tmp("canary-c1-timeout-")
+    real_run = canary.subprocess.run
+    try:
+        prefix = os.path.join(root, "prefix")
+        os.makedirs(os.path.join(prefix, "bin"))
+        with open(os.path.join(prefix, "bin", "opencode2"), "w") as fh:
+            fh.write("#!/bin/sh\n")
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 30)
+        canary.subprocess.run = timeout
+        args = argparse.Namespace(
+            scratch_root=root, prefix=prefix, skip_install=True,
+            version=v2.VERSION_PIN,
+            default_bin=os.path.join(root, "default"),
+            default_version=v2.VERSION_PIN)
+        ok, detail = canary.gate_c1(args)
+        assert ok is False
+        assert "version probe failed" in detail
+        text = open(os.path.join(root, "C1.txt")).read()
+        assert "version_probe_error=TimeoutExpired" in text
+        assert "C1=FAIL" in text
+    finally:
+        canary.subprocess.run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_c1_install_timeout_is_named_failure():
+    root = _tmp("canary-c1-install-timeout-")
+    real_run = canary.subprocess.run
+    try:
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 600)
+        canary.subprocess.run = timeout
+        args = argparse.Namespace(
+            scratch_root=root, prefix=os.path.join(root, "prefix"),
+            skip_install=False, version=v2.VERSION_PIN,
+            default_bin=os.path.join(root, "default"),
+            default_version=v2.VERSION_PIN)
+        ok, detail = canary.gate_c1(args)
+        assert ok is False
+        assert "install probe failed" in detail
+        text = open(os.path.join(root, "C1.txt")).read()
+        assert "install_error=TimeoutExpired" in text
+        assert "C1=FAIL" in text
+    finally:
+        canary.subprocess.run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

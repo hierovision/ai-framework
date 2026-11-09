@@ -491,8 +491,38 @@ def canary_summary(repo=REPO, version=None):
         and migration["target_only"] == 0
         and (residual == 0 or accepted)
     )
+    required = (
+        ("migration verdict", migration["verdict"]),
+        ("zero_migration", migration["zero_migration"]),
+        ("target_only_ids", migration["target_only"]),
+        ("target_integrity_check", migration["integrity"]),
+        ("source_untouched", migration["source_untouched"]),
+        ("source_sessions_not_migrated", migration["residual"]),
+    )
+    missing_fields = [name for name, value in required if value is None]
+    failing_gates = [name for name, value in gates.items()
+                     if value != "PASS"]
+    if missing_fields:
+        reason = (
+            "legacy/incomplete canary evidence (missing: "
+            + ", ".join(missing_fields) + "); run `" + canary_command(version)
+            + "` to regenerate fresh hardened evidence")
+    elif failing_gates:
+        reason = ("canary gates failing (" + ", ".join(failing_gates)
+                  + "); run `" + canary_command(version) + "`")
+    elif not migration_ok:
+        reason = (
+            "migration evidence failing (verdict="
+            f"{migration['verdict']}, residual={residual}, "
+            f"target_only={migration['target_only']}, "
+            f"zero_migration={migration['zero_migration']}); run `"
+            + canary_command(version) + "`")
+    else:
+        reason = None
     return {"root": root, "gates": gates, "residual": residual,
             "residual_accepted": accepted, "migration": migration,
+            "schema_complete": not missing_fields,
+            "missing_fields": missing_fields, "reason": reason,
             "ok": all(v == "PASS" for v in gates.values()) and migration_ok}
 
 
@@ -740,6 +770,26 @@ def repair_command(target):
             + " --apply --drain-acknowledged")
 
 
+def canary_command(target):
+    return ("python3 scripts/opencode_upgrade.py canary --to " + target)
+
+
+def print_canary_prerequisite(repo, target):
+    """Print the canary prerequisite when evidence is absent/failing/legacy.
+
+    Returns True when the caller should stop at the canary step, False when
+    evidence is fresh and passing.
+    """
+    summary = canary_summary(repo, target)
+    if summary is not None and summary["ok"]:
+        return False
+    reason = (summary or {}).get("reason") or (
+        "no canary evidence at .scratch/v2-canary-" + target + "/")
+    print(f"canary prerequisite: {reason}")
+    print(f"run: {canary_command(target)}")
+    return True
+
+
 def link_state(link):
     """Complete on-disk state of a default `opencode` link."""
     exists = os.path.lexists(link)
@@ -908,29 +958,22 @@ def topology(home, link):
 
     The link (not `PATH`) is authoritative: apply repairs and smokes this exact
     path, so status/doctor must diagnose the same binary even when `PATH`
-    points elsewhere.
+    points elsewhere. The retired-wrapper scan is removed: it read the entire
+    200-259MB executable, and the supported install is never a wrapper.
     """
     command = link
     exists = os.path.lexists(command)
     resolved = os.path.realpath(command) if exists else None
-    wrapper = None
-    wrapped_config = None
-    if resolved and os.path.isfile(resolved):
-        text = open(resolved, encoding="utf-8", errors="replace").read()
-        match = re.search(r'XDG_CONFIG_HOME="([^"]+)"', text)
-        if match:
-            wrapper = resolved
-            wrapped_config = match.group(1)
     config_path = None
     if exists:
         try:
             probe = run([command, "debug", "paths", "config"], timeout=30)
             config_path = ((probe.stdout or "").strip()
-                           if probe.returncode == 0 else None) or wrapped_config
+                           if probe.returncode == 0 else None)
         except (OSError, subprocess.TimeoutExpired):
-            config_path = wrapped_config
+            config_path = None
     expected = os.path.join(home, ".config", "opencode")
-    supported = (wrapper is None and config_path is not None
+    supported = (config_path is not None
                  and os.path.realpath(config_path) == os.path.realpath(expected))
     v1_path = os.path.join(home, ".config", "yarn", "global", "node_modules",
                            "opencode-ai", "package.json")
@@ -940,7 +983,7 @@ def topology(home, link):
         "resolved": resolved,
         "link": link,
         "link_target": os.readlink(link) if os.path.islink(link) else None,
-        "wrapper": wrapper,
+        "wrapper": None,
         "config_root": config_path,
         "supported": supported,
         "expected_config": expected,
@@ -966,12 +1009,18 @@ def status_payload(args):
     repair_needed = (bool(shadow["target_installed"])
                      and shadow["supported_config"]
                      and not shadow["shadow_ok"])
-    if repair_needed:
-        next_command = repair_command(pinned)
-    elif not install["supported"]:
+    canary_blocker = canary is None or not canary["ok"]
+    apply_next = (repair_needed
+                  or (bool(shadow["target_installed"])
+                      and install["supported"] and live == pinned))
+    if not install["supported"] and not repair_needed:
         next_command = ("migrate: python3 scripts/stage_opencode_config.py "
                         "--backup; opencode upgrade " + pinned
                         + " --method yarn")
+    elif canary_blocker and apply_next:
+        next_command = canary_command(pinned)
+    elif repair_needed:
+        next_command = repair_command(pinned)
     elif live != pinned:
         next_command = f"opencode upgrade {pinned} --method yarn"
     elif latest and version_key(latest) > version_key(pinned):
@@ -991,6 +1040,8 @@ def status_payload(args):
         "shadow_ok": shadow["shadow_ok"],
         "shadow": shadow,
         "canary": canary,
+        "canary_blocker": canary_blocker,
+        "canary_reason": (canary or {}).get("reason"),
         "last_apply": verify or None,
         "state": state or None,
         "next": next_command,
@@ -1020,6 +1071,8 @@ def print_status(payload, json_mode=False):
         print(f"last canary:   {gates} "
               f"migration={canary['migration']['verdict']} "
               f"residual={canary['residual']}")
+        if canary.get("reason"):
+            print(f"canary:        {canary['reason']}")
     else:
         print("last canary:   none")
     if payload["last_apply"]:
@@ -1122,8 +1175,9 @@ def check(args):
                 "adr": [{"path": path, "ok": pass_, "detail": detail}
                         for path, pass_, detail in adr]}, indent=2))
         elif not ok:
-            print(f"FAIL: canary evidence for {v2.VERSION_PIN} "
-                  "is missing or failing")
+            reason = ((summary or {}).get("reason")
+                      or "canary evidence is missing or failing")
+            print(f"FAIL: canary evidence for {v2.VERSION_PIN}: {reason}")
         else:
             print(f"PASS: canary evidence for {v2.VERSION_PIN} "
                   f"residual={summary['residual']}")
@@ -1532,9 +1586,11 @@ def canary_cmd(args, target):
             os.unlink(link)
         os.symlink(v1_bin, link)
     root = os.path.join(args.repo, ".scratch", "v2-canary-" + target)
+    home = os.path.abspath(getattr(args, "home", None)
+                           or os.path.expanduser("~"))
     default_bin = (getattr(args, "default_bin", None)
                    or getattr(args, "link", None)
-                   or shutil.which("opencode") or "opencode")
+                   or os.path.join(home, ".yarn", "bin", "opencode"))
     return [sys.executable, os.path.join(HERE, "opencode_v2_canary.py"),
             "--all", "--version", target,
             "--default-version", v2.VERSION_PIN,
@@ -1794,15 +1850,14 @@ def apply_supported(args, target):
         summary = canary_summary(args.repo, target)
         if summary is None:
             print("error: no canary evidence at .scratch/v2-canary-"
-                  + target + "/; run `opencode_upgrade.py canary --to "
-                  + target + "` first, or pass --skip-canary", file=sys.stderr)
+                  + target + "/; fresh hardened canary evidence is required. "
+                  "Run `" + canary_command(target) + "` before apply.",
+                  file=sys.stderr)
             return 2
         if not summary["ok"]:
-            gates = " ".join(f"{k}={v}" for k, v in summary["gates"].items())
-            print("error: canary evidence for " + target + " is not passing ("
-                  + gates + "; migration residual " + str(summary["residual"])
-                  + "); run `opencode_upgrade.py canary --to " + target
-                  + "` or pass --skip-canary", file=sys.stderr)
+            print("error: canary prerequisite not met for " + target + ": "
+                  + (summary.get("reason") or "canary evidence is not passing"),
+                  file=sys.stderr)
             return 2
     home = os.path.abspath(args.home or os.path.expanduser("~"))
     link = args.link or os.path.join(home, ".yarn", "bin", "opencode")
@@ -1811,15 +1866,16 @@ def apply_supported(args, target):
         resolved, _evidence = resolve_target_binary(home, target)
         artifact = os.path.join(args.repo, ".scratch", "opencode-v2",
                                 f"upgrade-{target}-verify.json")
-        print("would back up any existing DB/config under .scratch/opencode-v2/")
         if getattr(args, "stop_service", False):
             print("would stop the service before the drain check")
+        print("would check the drain gate (no OpenCode/supervision processes)")
+        print("would back up any existing DB/config under .scratch/opencode-v2/")
         if resolved:
             print(f"would reuse the installed {target} V2 package at "
-                  f"{resolved} and repair {link}")
+                  f"{resolved}")
         else:
-            print(f"would install {target} via the official command, then "
-                  f"repair {link} to the V2 package")
+            print(f"would install {target} via the official command")
+        print(f"would repair the default {link} shadow to the V2 package")
         print("would run the post-upgrade smoke (binary, config root, API, "
               "agents, plugin loader, observer)")
         print(f"would write {artifact} and update upgrade-state.json")
@@ -1976,7 +2032,8 @@ def upgrade(args):
                   file=sys.stderr)
             return 2
         if not args.apply:
-            print(f"shadow repair needed: {repair_command(target)}")
+            if not print_canary_prerequisite(args.repo, target):
+                print(f"shadow repair needed: {repair_command(target)}")
             return 0
     live = version_of(install["command"]) if install["command"] else None
     if target == v2.VERSION_PIN and not args.force:
@@ -1990,9 +2047,10 @@ def upgrade(args):
             return 0
         if args.apply:
             return apply_supported(args, target)
-        label = ("verification needed" if shadow["shadow_ok"]
-                 else "shadow repair needed")
-        print(f"{label}: {repair_command(target)}")
+        if not print_canary_prerequisite(args.repo, target):
+            label = ("verification needed" if shadow["shadow_ok"]
+                     else "shadow repair needed")
+            print(f"{label}: {repair_command(target)}")
         return 0
     if args.dry_run:
         rc = plan(argparse.Namespace(
@@ -2004,9 +2062,10 @@ def upgrade(args):
         resolved, _evidence = resolve_target_binary(home, target)
         artifact = os.path.join(args.repo, ".scratch", "opencode-v2",
                                 f"upgrade-{target}-verify.json")
-        print("would back up any existing DB/config under .scratch/opencode-v2/")
         if getattr(args, "stop_service", False):
             print("would stop the service before the drain check")
+        print("would check the drain gate (no OpenCode/supervision processes)")
+        print("would back up any existing DB/config under .scratch/opencode-v2/")
         if resolved:
             print(f"would reuse the installed {target} V2 package at {resolved}")
         else:

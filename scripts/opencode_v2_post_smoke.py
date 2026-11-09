@@ -481,10 +481,16 @@ def rollback_check(args):
         manifest = json.load(fh)
     checks = []
     binary = args.default_bin
-    proc = subprocess.run([binary, "--version"], capture_output=True, text=True)
-    checks.append(("v1-version",
-                   parsed_version(proc.stdout) == "1.19.4",
-                   proc.stdout.strip()))
+    try:
+        proc = subprocess.run([binary, "--version"], capture_output=True,
+                              text=True, timeout=30)
+        version_ok = (proc.returncode == 0
+                      and parsed_version(proc.stdout) == "1.19.4")
+        version_detail = (proc.stdout or "").strip()
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        version_ok = False
+        version_detail = f"{type(exc).__name__}: {exc}"
+    checks.append(("v1-version", version_ok, version_detail))
     backup = (manifest.get("backup") or {}).get("path")
     if backup and os.path.isfile(backup):
         import sqlite3

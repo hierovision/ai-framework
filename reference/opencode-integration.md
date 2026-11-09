@@ -66,7 +66,10 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
 - `canary --to X` — installs into `.scratch/v2-<version>-prefix`, runs C1–C8
   + migration, typechecks/tests the three plugins against the target
   `@opencode/plugin`/OpenTUI, runs a debug-TUI setup smoke, and stops its
-  scratch services. Evidence: `.scratch/v2-canary-<version>/`.
+  scratch services. Evidence: `.scratch/v2-canary-<version>/`. Apply requires
+  **fresh hardened** evidence (`zero_migration`, `target_only_ids`, and the
+  measured migration verdict); legacy/incomplete evidence is refused with the
+  exact `canary --to <pin>` command.
 - `prepare --to X` — bumps `VERSION_PIN`, the docs/reference/README and
   plugin peer/README roots, refreshes lockfiles, and appends the dated ADR
   amendment. `--dry-run` writes nothing; `--open-pr` opens the PR.
