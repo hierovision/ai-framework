@@ -718,6 +718,45 @@ def test_ci_pin_is_derived_from_adapter():
         assert 'OPENCODE_VERSION: "' not in text, rel
 
 
+def test_upgrade_reverifies_after_failed_apply():
+    root = _tmp("upgrade-reverify-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    calls = []
+    real = _patch_apply(backup, _smoke_recorder(calls),
+                        lambda a, t: calls.append("install") or 0)
+    try:
+        _write(_artifact(root, target), json.dumps({
+            "version": target, "verified": False, "rolled_back": False}) + "\n")
+        args = _args(root, to=target, home=fixture["home"], apply=True,
+                     skip_canary=True, drain_acknowledged=True)
+        out = io.StringIO()
+        with _path_front(fixture["yarn_bin"]), \
+                contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.upgrade(args)
+        assert rc == 0, out.getvalue()
+        assert "already current" not in out.getvalue()
+        smoke = [row for row in calls if isinstance(row, dict)]
+        assert len(smoke) == 1, calls
+        assert json.load(open(_artifact(root, target)))["verified"] is True
+        assert upgrade.read_state(root)["stage"] == "applied"
+        calls.clear()
+        out2 = io.StringIO()
+        with _path_front(fixture["yarn_bin"]), \
+                contextlib.redirect_stdout(out2), \
+                contextlib.redirect_stderr(out2):
+            assert upgrade.upgrade(args) == 0
+        assert "already current" in out2.getvalue()
+        assert not [row for row in calls if isinstance(row, dict)], calls
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
