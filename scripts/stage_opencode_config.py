@@ -20,14 +20,15 @@ install directly. Later versions use `opencode upgrade <target> --method yarn`.
 The script copies the versioned config's `opencode.jsonc`, `cli.json`,
 `service.json`, and plugins; it links the repo agents/skills/reference through
 `install.sh`. The old root is moved to
-`~/.config/opencode.v1-backup-<timestamp>`; nothing is deleted.
+`~/.config/opencode.v1-backup-<timestamp>` and any SQLite DB copy is written
+with mode 0600; nothing is deleted. `--backup` is accepted for compatibility
+because backup is already the default behavior.
 """
 import argparse
 import datetime
 import json
 import os
 import shutil
-import sqlite3
 import subprocess
 import sys
 
@@ -60,22 +61,8 @@ def default_source(home):
 
 
 def sqlite_backup(source, dest):
-    src = sqlite3.connect(f"file:{source}?mode=ro", uri=True, timeout=30)
-    try:
-        os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
-        for leftover in (dest, dest + "-wal", dest + "-shm"):
-            try:
-                os.remove(leftover)
-            except FileNotFoundError:
-                pass
-        dst = sqlite3.connect(dest, timeout=30)
-        try:
-            src.backup(dst)
-        finally:
-            dst.close()
-    finally:
-        src.close()
-    return dest
+    """Delegate to the shared 0600-preserving backup helper."""
+    return v2.sqlite_backup(source, dest)
 
 
 def live_processes():
@@ -202,7 +189,8 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--backup", action="store_true",
-                    help="back up the V1 config/DB first (default)")
+                    help="accepted for compatibility; backup is already the "
+                         "default behavior (no-op flag)")
     args = ap.parse_args(argv)
     return stage(args)
 

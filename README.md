@@ -38,10 +38,18 @@ and may leave the default `opencode` pointing at V1. Run
 sessions closed; it reuses the installed V2 package (no Yarn reinstall),
 atomically repairs the default `opencode` shadow to that package binary, and
 verifies `opencode --version` + `opencode debug paths config` before the smoke.
-A pre-existing unverified `upgrade-<pin>-verify.json` is preserved as
-`upgrade-<pin>-verify.json.failed-<UTC stamp>` before new evidence is written. A
-failed verification records `verified: false` with the exact manual rollback
-command — it is not an automatic rollback (ADR-0017).
+A predecessor `upgrade-<pin>-verify.json` is preserved before new evidence is
+written: an unverified one as
+`upgrade-<pin>-verify.json.failed-<UTC stamp>`, a verified one as
+`upgrade-<pin>-verify.json.previous-<UTC stamp>`. A failed verification records
+`verified: false` with the exact manual rollback guidance — never an automatic
+rollback (ADR-0017).
+For a V1 previous default, rollback uses the actual
+`~/.config/opencode.v1-backup-*` tree, not the V2-era pre-apply snapshot.
+SQLite backups are written mode 0600. Existing backups created before this fix
+may still be group/world-readable; the owner runs once after merge:
+`chmod 600 ~/.config/opencode.v1-backup-*/opencode.db
+~/.scratch/opencode-v2/pre-upgrade-*/opencode.db 2>/dev/null`.
 
 Re-run after adding new skills or agents. `git pull` alone updates the
 content of already-linked skills/agents. Agent files are validated on

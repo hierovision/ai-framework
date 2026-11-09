@@ -22,6 +22,7 @@ sys.path.insert(0, HERE)
 
 import scratch_cleanup  # noqa: E402
 import opencode_v2 as v2  # noqa: E402
+import opencode_v2_post_smoke as post_smoke  # noqa: E402
 
 
 def _tmp(prefix):
@@ -320,6 +321,61 @@ def test_rollback_check_verifies_db_and_agents():
         assert "v1-agent-hashes: PASS" in r.stdout
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def _stub(root, name, output):
+    path = os.path.join(root, "bin", name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\nprintf '%s\\n' " + json.dumps(output) + "\n")
+    os.chmod(path, 0o755)
+    return path
+
+
+def test_check_agents_live_tolerates_extras_and_flags_missing():
+    root = _tmp("postsmoke-agents-live-")
+    try:
+        expected = sorted(name[:-3] for name in os.listdir(
+            os.path.join(REPO, "agents")) if name.endswith(".md"))
+        ids = expected + ["builtin", "new-agent"]
+        binary = _stub(root, "opencode",
+                       json.dumps({"data": [{"id": i} for i in ids]}))
+        ok, detail = post_smoke.check_agents_live(binary, REPO)
+        assert ok is True, detail
+        assert "missing=[]" in detail
+        missing = expected[0]
+        ids = expected[1:] + ["builtin"]
+        binary = _stub(root, "opencode2",
+                       json.dumps({"data": [{"id": i} for i in ids]}))
+        ok, detail = post_smoke.check_agents_live(binary, REPO)
+        assert ok is False
+        assert missing in detail
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_check_version_is_exact():
+    root = _tmp("postsmoke-version-")
+    try:
+        long_version = _stub(root, "long", f"opencode v{v2.VERSION_PIN}0")
+        ok, detail = post_smoke.check_version(long_version)
+        assert ok is False, detail
+        assert detail != v2.VERSION_PIN
+        exact = _stub(root, "exact", f"opencode v{v2.VERSION_PIN}")
+        ok, detail = post_smoke.check_version(exact)
+        assert ok is True, detail
+        assert detail == v2.VERSION_PIN
+        prerelease = _stub(root, "rc", f"opencode v{v2.VERSION_PIN}-rc")
+        assert post_smoke.check_version(prerelease)[0] is False
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_run_spawn_error_returns_completed_process():
+    result = post_smoke.run(["definitely-not-a-real-binary-xyz"])
+    assert hasattr(result, "returncode")
+    assert result.returncode != 0
+    assert "FileNotFoundError" in (result.stderr or "")
 
 
 def main():

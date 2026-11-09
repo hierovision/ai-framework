@@ -8,10 +8,12 @@ instead of claiming lossless migration.
 
 Run: python3 scripts/test_opencode_v2_canary.py
 """
+import argparse
 import json
 import os
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -24,6 +26,7 @@ sys.path.insert(0, HERE)
 import scratch_cleanup  # noqa: E402
 
 import opencode_v2 as v2  # noqa: E402
+import opencode_v2_canary as canary  # noqa: E402
 
 FAKE_OPENCODE = r'''#!/usr/bin/env python3
 import json
@@ -261,8 +264,12 @@ def test_migration_reports_residual():
         assert r.returncode == 0, (r.stdout, r.stderr)
         text = open(os.path.join(out, "migration-rehearsal.txt")).read()
         assert "source_sessions_not_migrated=2" in text, text
+        assert "migrated_ids_present_in_source=True" in text, text
+        assert "target_only_ids=" in text, text
         assert "requires classification or owner acceptance" in text, text
         assert "source_untouched=True" in text, text
+        rehearsal = os.path.join(out, "migration-rehearsal.db")
+        assert stat.S_IMODE(os.stat(rehearsal).st_mode) == 0o600
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -280,6 +287,65 @@ def _agent_bindings():
         if m:
             bindings[name] = m.group(1)
     return bindings
+
+
+def test_migration_membership_non_vacuous():
+    assert canary.migration_membership(set(), set())[0] is False
+    ok, missing, target_only = canary.migration_membership(
+        {"ses_1", "ses_2"}, {"ses_1", "ses_2", "ses_new"})
+    assert ok is True
+    assert missing == set()
+    assert target_only == {"ses_new"}
+    ok, missing, _target_only = canary.migration_membership(
+        {"ses_1", "ses_2"}, {"ses_1"})
+    assert ok is True
+    assert missing == {"ses_2"}
+
+
+def test_exact_version_helpers():
+    assert canary.exact_version("opencode v2.2.6") == "2.2.6"
+    assert canary.exact_version("opencode v2.2.60") == "2.2.60"
+    assert canary.exact_version("opencode v2.2.6-rc") is None
+    assert canary.api_version('{"version":"2.2.60"}') == "2.2.60"
+    assert canary.api_version('{"version":"2.2.6"}') == "2.2.6"
+
+
+def test_c7_asserts_markers():
+    root = _tmp("canary-c7-")
+    real_run = canary.v2_run
+    real_assert = canary.v2.assert_scratch_db
+    real_port = canary.free_port
+    canary.v2.assert_scratch_db = lambda *args, **kwargs: None
+    canary.free_port = lambda: 12345
+    try:
+        def respond(plugin_marker=True):
+            def fake(_args, _env, argv, timeout=180):
+                if argv[:2] == ["debug", "config"]:
+                    return subprocess.CompletedProcess(
+                        argv, 0, "canary-marker", "")
+                if argv[:2] == ["plugin", "list"]:
+                    stdout = "canary-plugin" if plugin_marker else ""
+                    return subprocess.CompletedProcess(argv, 0, stdout, "")
+                if argv[:3] == ["api", "GET", "/api/agent"]:
+                    return subprocess.CompletedProcess(
+                        argv, 0, "canary-marker", "")
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            return fake
+        canary.v2_run = respond(True)
+        ok, text = canary.gate_c7(argparse.Namespace(scratch_root=root))
+        assert ok is True, text
+        assert "marker_plugin_present=True" in text
+        assert "C7=PASS" in text
+        canary.v2_run = respond(False)
+        ok, text = canary.gate_c7(argparse.Namespace(scratch_root=root))
+        assert ok is False, text
+        assert "marker_plugin_present=False" in text
+        assert "C7=FAIL" in text
+    finally:
+        canary.v2_run = real_run
+        canary.v2.assert_scratch_db = real_assert
+        canary.free_port = real_port
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def main():

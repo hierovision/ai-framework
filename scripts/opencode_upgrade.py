@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OpenCode upgrade orchestrator — one entry point, canary-gated, reversible.
+"""OpenCode upgrade orchestrator — one entry point, canary-gated, truthful.
 
 The adapter (`opencode_v2.py`) owns the pinned version; this script owns the
 upgrade workflow around it:
@@ -7,28 +7,28 @@ upgrade workflow around it:
   status    topology + pinned/live/latest + last canary/apply + next command
   doctor    read-only health check of the live install
   check     offline pin seams (--pins-only), registry drift (--remote), or the
-            commit-visible canary gate (--pr)
+            local/manual canary gate (--pr; not CI-enforced)
   plan      target compatibility matrix + breaking-change notes; no writes
   prepare   bump every seam, plugin peer/lockfile roots, and the ADR amendment
   canary    install the candidate in scratch + full canary + plugin typechecks
-  apply     drained supported upgrade: resolve V2, repair the default shadow,
-            post-switch verification; no automatic rollback
-  rollback  manual restore of the previous package and pre-upgrade DB
   prune     remove old scratch prefixes/canary/compat dirs (--keep N)
-  upgrade   check -> plan -> canary -> prepare (stop before apply)
+  upgrade   check -> plan -> canary -> prepare; with --apply it runs the drained
+            supported upgrade (resolve V2, repair the default shadow, verify)
 
-The only human-gated step is `apply`: it needs a TTY, a drained process set,
-and `--drain-acknowledged`-equivalent consent. It resolves the installed V2
-target and atomically repairs the default `opencode` shadow before the smoke.
-A failed verification leaves the target and repaired default in place, records
-`verified: false`, and prints the manual rollback command (ADR-0017).
+`upgrade --apply --drain-acknowledged` is the only mutating apply step. It does
+not require or check a TTY. It resolves the installed V2 target and atomically
+repairs the default `opencode` shadow before the smoke. A failed verification
+leaves the target and repaired default in place, records `verified: false`, and
+prints the manual rollback guidance (ADR-0017); there is no automatic rollback.
 
 All writes are under the repo or `$HOME/.local/lib/opencode`; scratch lives in
 `.scratch/opencode-v2/`. Secrets are never printed (auth is read by the
 canary, not this script).
 """
 import argparse
+import contextlib
 import datetime
+import fcntl
 import glob
 import json
 import os
@@ -50,18 +50,14 @@ import opencode_v2 as v2  # noqa: E402
 import opencode_v2_post_smoke as post_smoke  # noqa: E402
 import stage_opencode_config as stage_config  # noqa: E402
 
-STATE_DIR = os.path.join(REPO, ".scratch", "opencode-v2")
-STATE_FILE = os.path.join(STATE_DIR, "upgrade-state.json")
-CACHE_FILE = os.path.join(STATE_DIR, "version-cache.json")
-DEFAULT_PREFIX = os.path.join(REPO, ".scratch", "v2-prefix")
-V1_BIN = os.path.expanduser(
-    "~/.config/yarn/global/node_modules/opencode-ai/bin/opencode.exe")
 RELEASES_URL = ("https://api.github.com/repos/anomalyco/opencode/"
                 "releases?per_page=100")
 CACHE_TTL = 3600
 PLUGIN_DIRS = ("auto-compact-at-threshold", "delegation-observer",
                "delegation-sentinel")
 TUI_PLUGINS = ("delegation-observer", "delegation-sentinel")
+V1_BIN = os.path.expanduser(
+    "~/.config/yarn/global/node_modules/opencode-ai/bin/opencode.exe")
 
 
 # --- small helpers -----------------------------------------------------------
@@ -84,11 +80,48 @@ def read_json(path, default=None):
 
 
 def write_json(path, payload):
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, indent=2)
-        fh.write("\n")
+    """Atomically write JSON: temp file in the target dir + os.replace."""
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    tmp = f"{path}.tmp.{os.getpid()}.{time.time_ns()}"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
     return path
+
+
+@contextlib.contextmanager
+def file_lock(path, timeout=10):
+    """Bounded exclusive lock for state/artifact read-modify-write cycles."""
+    lock_path = path + ".lock"
+    os.makedirs(os.path.dirname(os.path.abspath(lock_path)), exist_ok=True)
+    fh = open(lock_path, "a+")
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"timed out waiting for {lock_path}")
+                time.sleep(0.05)
+        yield
+    finally:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+        finally:
+            fh.close()
 
 
 def run(argv, cwd=None, env=None, timeout=120, stream=False):
@@ -103,17 +136,59 @@ def version_key(value):
     return tuple(int(p) for p in re.findall(r"\d+", value)[:3])
 
 
+def _caret_bounds(version):
+    major, minor, patch = (int(p) for p in version.split("."))
+    if major > 0:
+        return version, f"{major + 1}.0.0"
+    if minor > 0:
+        return version, f"0.{minor + 1}.0"
+    return version, f"0.0.{patch + 1}"
+
+
+def _tilde_bounds(version):
+    major, minor, _patch = (int(p) for p in version.split("."))
+    return version, f"{major}.{minor + 1}.0"
+
+
 def satisfies(current, spec):
-    """True when `current` meets a simple exact/`>=`/`*` peer range."""
+    """True when `current` meets an exact, `>=`, caret, tilde, or x-range spec.
+
+    Unknown or open-ended specs are conservatively treated as unsatisfied so a
+    real bump is not mislabeled `none`.
+    """
     spec = (spec or "").strip()
     if not spec or spec == "*":
         return True
+    if re.fullmatch(r"\d+\.\d+\.\d+", spec):
+        return current == spec
     match = re.fullmatch(r">=\s*(\d+\.\d+\.\d+)", spec)
     if match:
         return version_key(current) >= version_key(match.group(1))
-    if re.fullmatch(r"\d+\.\d+\.\d+", spec):
-        return current == spec
-    return True
+    match = re.fullmatch(r"\^(\d+\.\d+\.\d+)", spec)
+    if match:
+        low, high = _caret_bounds(match.group(1))
+        return version_key(low) <= version_key(current) < version_key(high)
+    match = re.fullmatch(r"~(\d+\.\d+\.\d+)", spec)
+    if match:
+        low, high = _tilde_bounds(match.group(1))
+        return version_key(low) <= version_key(current) < version_key(high)
+    match = re.fullmatch(r"(\d+)\.(?:x|\*)(?:\.(?:x|\*))?", spec)
+    if match:
+        major = int(match.group(1))
+        return version_key(current)[0] == major
+    parts = spec.split()
+    if len(parts) == 2 and all(re.fullmatch(r"(?:>=|<)\s*\d+\.\d+\.\d+",
+                                            part) for part in parts):
+        lower = [p for p in parts if p.startswith(">=")]
+        upper = [p for p in parts if p.startswith("<")]
+        if not lower or not upper:
+            return False
+        low = version_key(re.fullmatch(r">=\s*(\d+\.\d+\.\d+)",
+                                       lower[0]).group(1))
+        high = version_key(re.fullmatch(r"<\s*(\d+\.\d+\.\d+)",
+                                        upper[0]).group(1))
+        return low <= version_key(current) < high
+    return False
 
 
 def parse_version(text):
@@ -132,8 +207,8 @@ def state_path(repo):
     return os.path.join(repo, ".scratch", "opencode-v2", "upgrade-state.json")
 
 
-STAGE_ORDER = ("checked", "planned", "canaried", "prepared", "applied")
-RESUMABLE_STAGES = ("checked", "planned", "canaried", "prepared")
+STAGE_ORDER = ("planned", "canaried", "prepared", "applied")
+RESUMABLE_STAGES = ("planned", "canaried", "prepared")
 
 
 def read_state(repo):
@@ -150,19 +225,21 @@ def completed_stages(state):
 
 
 def write_state(repo, target, stage, detail=None, force=False):
-    state = read_state(repo)
-    if state.get("target") != target:
-        state = {"target": target, "stages": {}}
-    order = list(STAGE_ORDER)
-    current = state.get("stage")
-    if (not force and current in order and stage in order
-            and order.index(stage) < order.index(current)):
-        stage = current  # never regress applied -> canaried on a re-run
-    state["stage"] = stage
-    state.setdefault("stages", {})[stage] = {
-        "at": now_iso(), "detail": detail or "ok"}
-    state["updated"] = now_iso()
-    return write_json(state_path(repo), state)
+    path = state_path(repo)
+    with file_lock(path):
+        state = read_state(repo)
+        if state.get("target") != target:
+            state = {"target": target, "stages": {}}
+        order = list(STAGE_ORDER)
+        current = state.get("stage")
+        if (not force and current in order and stage in order
+                and order.index(stage) < order.index(current)):
+            stage = current  # never regress applied -> canaried on a re-run
+        state["stage"] = stage
+        state.setdefault("stages", {})[stage] = {
+            "at": now_iso(), "detail": detail or "ok"}
+        state["updated"] = now_iso()
+        return write_json(path, state)
 
 
 # --- version seams -----------------------------------------------------------
@@ -344,6 +421,30 @@ def check_adr_amendment(repo=REPO, version=None):
     return [(rel, True, version)]
 
 
+def residual_accepted(repo, version, residual):
+    """Accept a non-zero migration residual only with a dated record."""
+    if residual == 0:
+        return True
+    if residual is None:
+        return False
+    candidates = (
+        os.path.join(repo, "docs", "opencode-v2-migration-classification.json"),
+        os.path.join(repo, ".scratch", "v2-canary-" + version,
+                     "migration-residual-acceptance.json"),
+    )
+    for path in candidates:
+        data = read_json(path)
+        if not isinstance(data, dict):
+            continue
+        if data.get("version") not in (None, version):
+            continue
+        if data.get("residual") != residual:
+            continue
+        if data.get("owner") and data.get("date"):
+            return True
+    return False
+
+
 def canary_summary(repo=REPO, version=None):
     """Read the canary evidence; None when no evidence exists."""
     version = version or v2.VERSION_PIN
@@ -368,9 +469,10 @@ def canary_summary(repo=REPO, version=None):
                           open(migration, encoding="utf-8").read(),
                           re.MULTILINE)
         residual = int(match.group(1)) if match else None
+    accepted = residual_accepted(repo, version, residual)
     return {"root": root, "gates": gates, "residual": residual,
-            "ok": all(v == "PASS" for v in gates.values())
-            and residual == 0}
+            "residual_accepted": accepted,
+            "ok": all(v == "PASS" for v in gates.values()) and accepted}
 
 
 # --- registry / release intelligence ----------------------------------------
@@ -467,15 +569,30 @@ def live_paths(args):
 
 
 def version_of(binary):
-    proc = run([binary, "--version"], timeout=30)
-    return parse_version(proc.stdout) if proc.returncode == 0 else None
+    """Exact `opencode v<x.y.z>` parse; timeouts/spawn errors yield None."""
+    try:
+        proc = run([binary, "--version"], timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    lines = (proc.stdout or "").strip().splitlines()
+    for line in reversed(lines):
+        match = re.fullmatch(r"opencode v(\d+\.\d+\.\d+)", line.strip())
+        if match:
+            return match.group(1)
+    return None
 
 
 YARN_LINK_NAME = "opencode2"
 
 
 def config_root_of(binary):
-    proc = run([binary, "debug", "paths", "config"], timeout=30)
+    """Exact config-root probe; timeouts/spawn errors yield None."""
+    try:
+        proc = run([binary, "debug", "paths", "config"], timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
     return (proc.stdout or "").strip() if proc.returncode == 0 else None
 
 
@@ -622,34 +739,63 @@ def link_state(link):
             "version": version, "kind": kind, "exists": exists}
 
 
-def rollback_plan(link, previous_default, backup, method):
+def find_v1_backup(home):
+    """Newest actual V1 config backup (`~/.config/opencode.v1-backup-*`)."""
+    if not home:
+        return None
+    backups = sorted(glob.glob(os.path.join(
+        home, ".config", "opencode.v1-backup-*")))
+    if not backups:
+        return None
+    root = backups[-1]
+    db = os.path.join(root, "opencode.db")
+    return {"root": root, "db": db if os.path.isfile(db) else None}
+
+
+def rollback_plan(link, previous_default, backup, method, home=None):
     """Truthful rollback guidance for the pre-repair default.
 
     A V2 previous default is reinstalled with the supported upgrade command.
-    A V1 previous default is restored by recreating the original link and
-    restoring the V1 config/DB backup; V1 lives in `opencode-ai`, so a V2
-    `opencode upgrade` for that version does not exist.
+    A V1 previous default is restored by recreating the original link and using
+    the actual `~/.config/opencode.v1-backup-*` tree; the pre-apply snapshot is
+    a V2-era config/DB copy, not a V1 backup. A missing/unclassifiable previous
+    default gets an explicit unknown branch.
     """
     prev = previous_default or {}
+    pre = backup or "no pre-upgrade snapshot (apply failed before backup)"
     if prev.get("kind") == "v1":
         restore = prev.get("resolved") or prev.get("target")
         commands = []
         if restore and os.path.abspath(restore) != os.path.abspath(link):
             commands.append(
                 f"ln -sfn {shlex.quote(restore)} {shlex.quote(link)}")
-        guidance = (
-            f"previous default was V1 ({prev.get('version')}): restore the "
-            f"original link and the V1 config/DB backup at {backup}; the "
-            "retained V1 package is opencode-ai, so a V2 `opencode upgrade` "
-            "cannot reinstall it")
-        return {"kind": "v1", "previous_default": prev,
+        v1 = find_v1_backup(home)
+        if v1:
+            db_text = v1["db"] or "no DB copy recorded in that backup"
+            guidance = (
+                f"previous default was V1 ({prev.get('version')}): restore "
+                f"the original link and the actual V1 config backup at "
+                f"{v1['root']} (DB: {db_text}); the pre-apply snapshot at "
+                f"{pre} is the V2-era config/DB, not a V1 backup; the retained "
+                "V1 package is opencode-ai, so a V2 `opencode upgrade` cannot "
+                "reinstall it")
+        else:
+            guidance = (
+                f"previous default was V1 ({prev.get('version')}): no V1 "
+                f"config/DB backup was found under "
+                f"~/.config/opencode.v1-backup-*; the pre-apply snapshot at "
+                f"{pre} is the V2-era config/DB (a first install has no older "
+                "V1 backup). Restore the original link and reinstall/restore "
+                "the retained V1 package manually; a V2 `opencode upgrade` "
+                "cannot reinstall it")
+        return {"kind": "v1", "previous_default": prev, "v1_backup": v1,
                 "commands": commands, "guidance": guidance}
     if prev.get("kind") == "v2":
         previous_version = prev.get("version")
         command = (f"{link} upgrade {previous_version or '<previous>'} "
                    f"--method {method}")
-        guidance = (f"previous default was V2: {command}; restore the "
-                    f"DB/config backup at {backup}")
+        guidance = (f"previous default was V2: {command}; restore the V2-era "
+                    f"DB/config pre-apply snapshot at {pre}")
         return {"kind": "v2", "previous_default": prev,
                 "commands": [command] if previous_version else [],
                 "guidance": guidance}
@@ -659,8 +805,8 @@ def rollback_plan(link, previous_default, backup, method):
         "commands": [],
         "guidance": (
             "previous default is missing or unclassifiable; no automatic "
-            f"package rollback is available — restore the default link and the "
-            f"config/DB backup at {backup} manually"),
+            "package rollback is available — restore the default link and the "
+            f"config/DB backup at {pre} manually"),
     }
 
 
@@ -697,48 +843,61 @@ def last_verify_verified(repo, target):
     return artifact_verified(data)
 
 
-def archive_failed_artifact(path):
-    """Preserve a non-verified existing artifact before it is overwritten.
+def archive_artifact(path):
+    """Preserve any predecessor before it is overwritten.
 
-    A verified predecessor is left in place (never mislabeled as failed). The
-    archive keeps the exact bytes under `.failed-<UTC stamp>`.
+    Unverified predecessors keep the `.failed-<UTC stamp>` name; verified
+    predecessors use the neutral `.previous-<UTC stamp>` name. The archive keeps
+    the exact bytes.
     """
     if not os.path.isfile(path):
         return None
-    if artifact_verified(read_json(path)) is True:
-        return None
+    verified = artifact_verified(read_json(path)) is True
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime(
         "%Y%m%dT%H%M%SZ")
-    archive = f"{path}.failed-{stamp}"
-    suffix = 1
+    suffix = ".previous-" if verified else ".failed-"
+    archive = f"{path}{suffix}{stamp}"
+    n = 1
     while os.path.exists(archive):
-        archive = f"{path}.failed-{stamp}-{suffix}"
-        suffix += 1
+        archive = f"{path}{suffix}{stamp}-{n}"
+        n += 1
     os.replace(path, archive)
     return archive
 
 
 def write_apply_artifact(path, payload):
-    """Archive a prior failed artifact, then write the new apply evidence."""
-    archive_failed_artifact(path)
-    return write_json(path, payload)
+    """Archive a predecessor artifact, then write the new apply evidence."""
+    with file_lock(path):
+        archive_artifact(path)
+        return write_json(path, payload)
 
 
 def topology(home, link):
-    """The supported install: `opencode` in PATH + ~/.config/opencode."""
-    command = shutil.which("opencode") or link
-    resolved = os.path.realpath(command)
+    """The supported install: the explicit default link + ~/.config/opencode.
+
+    The link (not `PATH`) is authoritative: apply repairs and smokes this exact
+    path, so status/doctor must diagnose the same binary even when `PATH`
+    points elsewhere.
+    """
+    command = link
+    exists = os.path.lexists(command)
+    resolved = os.path.realpath(command) if exists else None
     wrapper = None
     wrapped_config = None
-    if os.path.isfile(resolved):
+    if resolved and os.path.isfile(resolved):
         text = open(resolved, encoding="utf-8", errors="replace").read()
         match = re.search(r'XDG_CONFIG_HOME="([^"]+)"', text)
         if match:
             wrapper = resolved
             wrapped_config = match.group(1)
-    probe = run([command, "debug", "paths", "config"], timeout=30)
-    config_path = ((probe.stdout or "").strip()
-                   if probe.returncode == 0 else None) or wrapped_config
+    config_path = None
+    if exists:
+        try:
+            probe = run([command, "debug", "paths", "config"], timeout=30)
+            config_path = ((probe.stdout or "").strip()
+                           if probe.returncode == 0 else None) or wrapped_config
+        except (OSError, subprocess.TimeoutExpired):
+            config_path = wrapped_config
     expected = os.path.join(home, ".config", "opencode")
     supported = (wrapper is None and config_path is not None
                  and os.path.realpath(config_path) == os.path.realpath(expected))
@@ -878,8 +1037,7 @@ def doctor(args):
     live = version_of(install["command"]) if install["command"] else None
     checks.append(("version", live == v2.VERSION_PIN,
                    f"live={live} pinned={v2.VERSION_PIN}"))
-    db = (os.path.join(home, ".local", "share", "opencode", "opencode.db")
-          if args.home else v2.DEFAULT_DB)
+    db = db_source_path(home)
     ok = False
     detail = db
     if os.path.isfile(db):
@@ -1067,9 +1225,12 @@ def append_adr_amendment(repo, version, opentui, summary, pending=False):
         f"\n**{now_date()} amendment — version pin {version}.** The pin moves "
         f"to `{version}`; `@opencode/plugin` is `{version}` and OpenTUI is "
         f"`{opentui}`. {line} (evidence `.scratch/v2-canary-{version}/`). "
-        "The live switch is owner-run with `scripts/opencode_upgrade.py "
-        "apply` (drained TTY), which verifies the binary, service, agents, "
-        "and plugin loader and rolls back link + DB on failure.\n")
+        "The live switch is owner-run with `python3 scripts/opencode_upgrade.py "
+        f"upgrade --to {version} --apply --drain-acknowledged`; it verifies "
+        "the binary, config root, service, agents, and plugin loader. A failed "
+        "verification leaves the repaired install in place and records "
+        "`verified: false` with manual rollback guidance — there is no "
+        "automatic rollback.\n")
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(block)
     return True
@@ -1118,6 +1279,15 @@ def prepare(args):
         print(f"would pin {target} (OpenTUI {opentui})")
         print("\n".join(plan_lines) or "  (no seam changes)")
         return 0
+    summary = canary_summary(args.repo, target)
+    pending = summary is None
+    if (summary is None or not summary["ok"]) \
+            and not args.allow_pending_canary:
+        state = "missing" if summary is None else "not passing"
+        print("error: canary evidence " + state + " for " + target
+              + "; run `opencode_upgrade.py canary --to " + target
+              + "` first (or pass --allow-pending-canary)", file=sys.stderr)
+        return 2
     for seams, path, old, new in changes:
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(new)
@@ -1151,13 +1321,6 @@ def prepare(args):
             print(f"error: npm install failed in {directory}: "
                   f"{(proc.stderr or '')[-300:]}", file=sys.stderr)
             return 2
-    summary = canary_summary(args.repo, target)
-    pending = summary is None
-    if pending and not args.allow_pending_canary:
-        print("error: canary evidence missing; run "
-              "`opencode_upgrade.py canary --to " + target + "` first "
-              "(or pass --allow-pending-canary)", file=sys.stderr)
-        return 2
     append_adr_amendment(args.repo, target, opentui, summary or {},
                          pending=pending)
     results = check_seams(args.repo, target, opentui)
@@ -1324,8 +1487,9 @@ def canary_cmd(args, target):
             os.unlink(link)
         os.symlink(v1_bin, link)
     root = os.path.join(args.repo, ".scratch", "v2-canary-" + target)
-    default_bin = getattr(args, "default_bin", None) or \
-        shutil.which("opencode") or "opencode"
+    default_bin = (getattr(args, "default_bin", None)
+                   or getattr(args, "link", None)
+                   or shutil.which("opencode") or "opencode")
     return [sys.executable, os.path.join(HERE, "opencode_v2_canary.py"),
             "--all", "--version", target,
             "--default-version", v2.VERSION_PIN,
@@ -1347,7 +1511,8 @@ def tui_smoke(args, target, opentui):
     The 2.2.5 migration exposed a class of failure the typecheck missed: the
     TUI entrypoint was discovered but its setup/registration behavior differed.
     This runs the real candidate with the scratch plugin corpus and asserts
-    the loader's `stage=setup` completion lines.
+    the loader's `stage=setup` completion lines. A missing/broken `script`
+    (util-linux) is a named canary failure, not an exception.
     """
     root = os.path.join(args.repo, ".scratch", "plugin-compat-" + target)
     config = os.path.join(root, "opencode")
@@ -1361,6 +1526,26 @@ def tui_smoke(args, target, opentui):
     log_path = os.path.join(args.repo, ".scratch", "v2-canary-" + target,
                             "tui-smoke.log")
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    evidence = os.path.join(args.repo, ".scratch", "v2-canary-" + target,
+                            "tui-smoke.txt")
+
+    def emit(text, reason=None):
+        detail = "\n".join([
+            f"date={now_date()}",
+            f"target={target}",
+            f"opentui={opentui}",
+            f"tui_binary={binary}",
+            f"tui_setup={'PASS' if reason is None and tui_setup_ok(text) else 'FAIL'}",
+            f"observer_setup={'PASS' if reason is None and 'stage=setup plugin=delegation-observer' in text else 'FAIL'}",
+            f"sentinel_setup={'PASS' if reason is None and 'stage=setup plugin=delegation-sentinel' in text else 'FAIL'}",
+        ] + ([f"reason={reason}"] if reason else []))
+        with open(evidence, "w", encoding="utf-8") as fh:
+            fh.write(detail + "\n")
+        return reason is None and tui_setup_ok(text), detail
+
+    script_bin = shutil.which("script")
+    if not script_bin:
+        return emit("", reason="script-not-available")
     env = dict(os.environ)
     env.update({
         "XDG_CONFIG_HOME": root,
@@ -1369,10 +1554,13 @@ def tui_smoke(args, target, opentui):
     })
     command = " ".join(shlex.quote(part) for part in [
         binary, "--standalone", "--log-level", "debug", "--print-logs"])
-    proc = subprocess.Popen(["script", "-qec", command, log_path],
-                            env=env, start_new_session=True,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
+    try:
+        proc = subprocess.Popen([script_bin, "-qec", command, log_path],
+                                env=env, start_new_session=True,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        return emit("", reason=f"script-spawn-error: {exc}")
     try:
         proc.wait(timeout=getattr(args, "tui_timeout", 20))
     except subprocess.TimeoutExpired:
@@ -1384,21 +1572,7 @@ def tui_smoke(args, target, opentui):
     text = ""
     if os.path.isfile(log_path):
         text = open(log_path, encoding="utf-8", errors="replace").read()
-    ok = tui_setup_ok(text)
-    detail = "\n".join([
-        f"date={now_date()}",
-        f"target={target}",
-        f"opentui={opentui}",
-        f"tui_binary={binary}",
-        f"tui_setup={'PASS' if ok else 'FAIL'}",
-        f"observer_setup={'PASS' if 'stage=setup plugin=delegation-observer' in text else 'FAIL'}",
-        f"sentinel_setup={'PASS' if 'stage=setup plugin=delegation-sentinel' in text else 'FAIL'}",
-    ])
-    evidence = os.path.join(args.repo, ".scratch", "v2-canary-" + target,
-                            "tui-smoke.txt")
-    with open(evidence, "w", encoding="utf-8") as fh:
-        fh.write(detail + "\n")
-    return ok, detail
+    return emit(text)
 
 
 def canary(args):
@@ -1406,28 +1580,45 @@ def canary(args):
     prefix = args.prefix or os.path.join(
         args.repo, ".scratch", "v2-" + target + "-prefix")
     if not args.skip_install:
-        install = run(["npm", "install", "--global", "--prefix", prefix,
-                       "@opencode/cli@" + target], timeout=600)
+        try:
+            install = run(["npm", "install", "--global", "--prefix", prefix,
+                           "@opencode/cli@" + target], timeout=600)
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"error: install spawn failed: {exc}", file=sys.stderr)
+            return 2
         if install.returncode != 0:
             print(f"error: install failed: {(install.stderr or '')[-400:]}",
                   file=sys.stderr)
             return 2
     argv = canary_cmd(args, target)
     print("canary: " + " ".join(argv))
-    proc = run(argv, cwd=args.repo, timeout=1800, stream=True)
+    try:
+        proc = run(argv, cwd=args.repo, timeout=1800, stream=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"canary: FAIL — canary probe error: {exc}", file=sys.stderr)
+        return 1
     if proc.returncode != 0:
         print("canary: FAIL", file=sys.stderr)
         return proc.returncode
     peers = read_json(args.plugin_json) if args.plugin_json else \
         plugin_peers(target, args.repo)
     opentui = resolve_opentui(target, args.opentui, peers or {})
-    ok, detail = plugin_compat(args, target, opentui)
+    try:
+        ok, detail = plugin_compat(args, target, opentui)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"canary: FAIL — plugin compatibility probe error: {exc}",
+              file=sys.stderr)
+        return 1
     print(detail)
     if not ok:
         print("canary: FAIL — manual plugin migration required",
               file=sys.stderr)
         return 1
-    tui_ok, tui_detail = tui_smoke(args, target, opentui)
+    try:
+        tui_ok, tui_detail = tui_smoke(args, target, opentui)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"canary: FAIL — TUI probe error: {exc}", file=sys.stderr)
+        return 1
     print(tui_detail)
     if not tui_ok:
         print("canary: FAIL — TUI plugin setup is incomplete",
@@ -1443,22 +1634,13 @@ def canary(args):
 # --- supported upgrade: backup / official command / post-smoke ---------------
 
 def sqlite_backup(source, dest):
-    src = sqlite3.connect(f"file:{source}?mode=ro", uri=True, timeout=30)
-    try:
-        os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
-        for leftover in (dest, dest + "-wal", dest + "-shm"):
-            try:
-                os.remove(leftover)
-            except FileNotFoundError:
-                pass
-        dst = sqlite3.connect(dest, timeout=30)
-        try:
-            src.backup(dst)
-        finally:
-            dst.close()
-    finally:
-        src.close()
-    return dest
+    """Delegate to the shared 0600-preserving backup helper."""
+    return v2.sqlite_backup(source, dest)
+
+
+def db_source_path(home):
+    """The DB the apply snapshots: env override first, then the explicit HOME."""
+    return v2.db_path_for_home(home)
 
 
 def pre_upgrade_backup(args, target):
@@ -1468,9 +1650,12 @@ def pre_upgrade_backup(args, target):
     root = os.path.join(args.repo, ".scratch", "opencode-v2",
                         "pre-upgrade-" + stamp)
     os.makedirs(root, exist_ok=True)
+    source_db = db_source_path(home)
     db = os.path.join(root, "opencode.db")
-    if os.path.isfile(v2.DEFAULT_DB):
-        sqlite_backup(v2.DEFAULT_DB, db)
+    if os.path.isfile(source_db):
+        sqlite_backup(source_db, db)
+    else:
+        db = None  # first install: no DB existed, so cite no backup path
     config = os.path.join(home, ".config", "opencode")
     if os.path.isdir(config):
         shutil.copytree(config, os.path.join(root, "config"), symlinks=True,
@@ -1478,11 +1663,22 @@ def pre_upgrade_backup(args, target):
     return root, db
 
 
-def official_upgrade(args, target):
-    command = shutil.which("opencode") or "opencode"
+def official_upgrade(args, target, command=None):
+    """Run the official upgrade through the explicit default link."""
+    command = command or shutil.which("opencode") or "opencode"
     proc = run([command, "upgrade", target, "--method", args.method],
                timeout=900, stream=True)
     return proc.returncode
+
+
+def api_version(stdout, target):
+    """True only when the API payload's version equals `target` exactly."""
+    try:
+        data = json.loads(stdout or "{}")
+    except ValueError:
+        return False, "api returned non-JSON"
+    version = data.get("version") if isinstance(data, dict) else None
+    return version == target, f"version={version}"
 
 
 def post_upgrade_smoke(args, target, command=None):
@@ -1499,10 +1695,13 @@ def post_upgrade_smoke(args, target, command=None):
                    and os.path.realpath(config_root) == os.path.realpath(
                        expected),
                    f"{config_root} (expected {expected})"))
-    info = run([command, "api", "GET", "/api/info"], timeout=60)
-    checks.append(("api", info.returncode == 0 and target in (info.stdout or ""),
-                   (info.stdout or "").strip()[:200]))
-    agents = post_smoke.check_agents(REPO, None)
+    try:
+        info = run([command, "api", "GET", "/api/info"], timeout=60)
+        api_ok, api_detail = api_version(info.stdout, target)
+        checks.append(("api", api_ok and info.returncode == 0, api_detail))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        checks.append(("api", False, f"{type(exc).__name__}: {exc}"))
+    agents = post_smoke.check_agents_live(command, REPO)
     checks.append(("agents", agents[0], agents[1]))
     plugin = post_smoke.check_plugin(framework=REPO,
                                      config_root=os.path.dirname(expected),
@@ -1514,7 +1713,7 @@ def post_upgrade_smoke(args, target, command=None):
 
 
 def apply_artifact(args, target, home, link, backup, previous_default, stage,
-                   checks, verified=False):
+                   checks, verified=False, db=None):
     """Build the apply evidence artifact (success or failure)."""
     current_link = link_state(link)
     return {
@@ -1525,12 +1724,14 @@ def apply_artifact(args, target, home, link, backup, previous_default, stage,
         "checks": {name: {"ok": ok, "detail": detail}
                    for name, ok, detail in checks},
         "backup": backup,
+        "database_backup": db,
+        "database_source": db_source_path(home) if home else None,
         "target_package": target_package_info(home, target),
         "default_link": current_link,
         "default_version": current_link["version"],
         "previous_default": previous_default,
         "rollback": rollback_plan(link, previous_default, backup,
-                                  args.method),
+                                  args.method, home=home),
         "at": now_iso(),
     }
 
@@ -1541,30 +1742,27 @@ def apply_supported(args, target):
         return 2
     if not getattr(args, "skip_canary", False):
         summary = canary_summary(args.repo, target)
-        if not summary or not summary["ok"]:
-            print("error: passing canary evidence missing for " + target
-                  + "; run `opencode_upgrade.py canary --to " + target
-                  + "` first (or --skip-canary)", file=sys.stderr)
+        if summary is None:
+            print("error: no canary evidence at .scratch/v2-canary-"
+                  + target + "/; run `opencode_upgrade.py canary --to "
+                  + target + "` first, or pass --skip-canary", file=sys.stderr)
             return 2
-    running = stage_config.live_processes()
-    if running and not getattr(args, "force", False):
-        print("error: OpenCode/supervision processes are running:",
-              file=sys.stderr)
-        for line in running[:10]:
-            print("  " + line, file=sys.stderr)
-        print("close the TUI and run `opencode service stop`, then retry "
-              "(or --force).", file=sys.stderr)
-        return 2
+        if not summary["ok"]:
+            gates = " ".join(f"{k}={v}" for k, v in summary["gates"].items())
+            print("error: canary evidence for " + target + " is not passing ("
+                  + gates + "; migration residual " + str(summary["residual"])
+                  + "); run `opencode_upgrade.py canary --to " + target
+                  + "` or pass --skip-canary", file=sys.stderr)
+            return 2
     home = os.path.abspath(args.home or os.path.expanduser("~"))
     link = args.link or os.path.join(home, ".yarn", "bin", "opencode")
     previous_default = link_state(link)
-    if getattr(args, "stop_service", False):
-        stopped = run([link, "service", "stop"], timeout=60)
-        print(f"service stop: {stopped.returncode}")
     if getattr(args, "dry_run", False):
         resolved, _evidence = resolve_target_binary(home, target)
         print("would back up the DB and ~/.config/opencode under "
               ".scratch/opencode-v2/")
+        if getattr(args, "stop_service", False):
+            print("would stop the service before the drain check")
         if resolved:
             print(f"would repair {link} to the installed {target} V2 package "
                   f"at {resolved}")
@@ -1572,62 +1770,106 @@ def apply_supported(args, target):
             print(f"would install {target} via the official command, then "
                   f"repair {link} to the V2 package")
         return 0
-    backup, db = pre_upgrade_backup(args, target)
     artifact = os.path.join(args.repo, ".scratch", "opencode-v2",
                             f"upgrade-{target}-verify.json")
+    backup = None
+    db = None
+    stage = "preflight"
 
-    resolved, _evidence = resolve_target_binary(home, target)
-    if resolved is None:
-        print(f"installing {target} via the official command", file=sys.stderr)
-        rc = official_upgrade(args, target)
-        if rc != 0:
-            payload = apply_artifact(args, target, home, link, backup,
-                                     previous_default, "official-install", [])
-            write_apply_artifact(artifact, payload)
-            write_state(args.repo, target, "prepared",
-                        {"artifact": artifact, "verified": False}, force=True)
-            print(f"error: official upgrade exited {rc}", file=sys.stderr)
-            for line in rollback_lines(payload["rollback"]):
-                print(f"rollback: {line}", file=sys.stderr)
-            return rc
+    def restore_text():
+        parts = []
+        if backup:
+            parts.append(f"config: {backup}/config")
+        if db:
+            parts.append(f"DB: {db}")
+        if not parts:
+            return "no pre-upgrade snapshot was created"
+        return "restore " + "; ".join(parts)
 
-    shadow = prepare_shadow(home, link, target)
-    if shadow["failure_stage"]:
+    def record_failure(failure_stage, checks, extra=None):
         payload = apply_artifact(args, target, home, link, backup,
-                                 previous_default, shadow["failure_stage"], [])
-        payload["shadow"] = shadow
+                                 previous_default, failure_stage, checks,
+                                 verified=False, db=db)
+        if extra:
+            payload.update(extra)
         write_apply_artifact(artifact, payload)
         write_state(args.repo, target, "prepared",
                     {"artifact": artifact, "verified": False}, force=True)
-        print(f"error: shadow repair failed at {shadow['failure_stage']}",
-              file=sys.stderr)
-        print(f"link: {link}; target package: "
-              f"{payload['target_package']['path']}", file=sys.stderr)
+        return payload
+
+    try:
+        if getattr(args, "stop_service", False):
+            stage = "stop-service"
+            stopped = run([link, "service", "stop"], timeout=60)
+            print(f"service stop: {stopped.returncode}")
+        stage = "drain"
+        running = stage_config.live_processes()
+        if running and not getattr(args, "force", False):
+            print("error: OpenCode/supervision processes are running:",
+                  file=sys.stderr)
+            for line in running[:10]:
+                print("  " + line, file=sys.stderr)
+            print("close the TUI and run `opencode service stop`, then retry "
+                  "(or --force).", file=sys.stderr)
+            return 2
+        stage = "backup"
+        backup, db = pre_upgrade_backup(args, target)
+        stage = "install"
+        resolved, _evidence = resolve_target_binary(home, target)
+        if resolved is None:
+            print(f"installing {target} via the official command",
+                  file=sys.stderr)
+            rc = official_upgrade(args, target, link)
+            if rc != 0:
+                payload = record_failure("official-install", [])
+                print(f"error: official upgrade exited {rc}", file=sys.stderr)
+                for line in rollback_lines(payload["rollback"]):
+                    print(f"rollback: {line}", file=sys.stderr)
+                return rc
+        stage = "shadow"
+        shadow = prepare_shadow(home, link, target)
+        if shadow["failure_stage"]:
+            payload = record_failure(shadow["failure_stage"], [],
+                                     extra={"shadow": shadow})
+            print(f"error: shadow repair failed at {shadow['failure_stage']}",
+                  file=sys.stderr)
+            print(f"link: {link}; target package: "
+                  f"{payload['target_package']['path']}", file=sys.stderr)
+            for line in rollback_lines(payload["rollback"]):
+                print(f"rollback: {line}", file=sys.stderr)
+            return 1
+        stage = "smoke"
+        checks = post_upgrade_smoke(args, target, command=link)
+        failed = [name for name, ok, _detail in checks if not ok]
+        verified = not failed
+        payload = apply_artifact(args, target, home, link, backup,
+                                 previous_default, failed[0] if failed else None,
+                                 checks, verified=verified, db=db)
+        payload["shadow"] = shadow
+        write_apply_artifact(artifact, payload)
+        for name, ok, detail in checks:
+            print(f"verify {name}: {'PASS' if ok else 'FAIL'} {detail}")
+        if verified:
+            write_state(args.repo, target, "applied", {"artifact": artifact})
+            print(f"UPGRADE OK {target} evidence={artifact}")
+            return 0
+        write_state(args.repo, target, "prepared",
+                    {"artifact": artifact, "verified": False}, force=True)
+        print("error: post-upgrade smoke failed", file=sys.stderr)
         for line in rollback_lines(payload["rollback"]):
             print(f"rollback: {line}", file=sys.stderr)
+        print(f"restore: {restore_text()}", file=sys.stderr)
         return 1
-
-    checks = post_upgrade_smoke(args, target, command=link)
-    failed = [name for name, ok, _detail in checks if not ok]
-    verified = not failed
-    payload = apply_artifact(args, target, home, link, backup,
-                             previous_default, failed[0] if failed else None,
-                             checks, verified=verified)
-    payload["shadow"] = shadow
-    write_apply_artifact(artifact, payload)
-    for name, ok, detail in checks:
-        print(f"verify {name}: {'PASS' if ok else 'FAIL'} {detail}")
-    if verified:
-        write_state(args.repo, target, "applied", {"artifact": artifact})
-        print(f"UPGRADE OK {target} evidence={artifact}")
-        return 0
-    write_state(args.repo, target, "prepared",
-                {"artifact": artifact, "verified": False}, force=True)
-    print("error: post-upgrade smoke failed", file=sys.stderr)
-    for line in rollback_lines(payload["rollback"]):
-        print(f"rollback: {line}", file=sys.stderr)
-    print(f"restore DB: {db}; config: {backup}/config", file=sys.stderr)
-    return 1
+    except (OSError, subprocess.SubprocessError, sqlite3.Error) as exc:
+        failure_stage = f"exception:{stage}"
+        payload = record_failure(failure_stage, [], extra={
+            "exception": f"{type(exc).__name__}: {exc}"})
+        print(f"error: apply aborted during {stage}: "
+              f"{type(exc).__name__}: {exc}", file=sys.stderr)
+        for line in rollback_lines(payload["rollback"]):
+            print(f"rollback: {line}", file=sys.stderr)
+        print(f"restore: {restore_text()}", file=sys.stderr)
+        return 1
 
 
 def scratch_dirs(repo):
@@ -1691,8 +1933,8 @@ def upgrade(args):
         if healthy and prior is not False:
             print(f"already current: {target}")
             return 0
-        write_state(args.repo, target, "prepared")
         if args.apply:
+            write_state(args.repo, target, "prepared")
             return apply_supported(args, target)
         label = ("verification needed" if shadow["shadow_ok"]
                  else "shadow repair needed")

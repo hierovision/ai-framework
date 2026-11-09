@@ -15,9 +15,12 @@ import io
 import json
 import os
 import shutil
+import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
+import threading
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
@@ -197,7 +200,7 @@ def _v1_only_home(root, default_version="1.19.4"):
 def _yarn_relink_stub(fixture, target, calls):
     """Official-install stub: installs V2, then Yarn links opencode2 to V2 but
     leaves the default `opencode` on the retained V1 package."""
-    def install(_args, _target):
+    def install(_args, _target, _command=None):
         calls.append("install")
         _stub_binary(fixture["package_bin"], target, fixture["config"])
         _write(os.path.join(fixture["package_dir"], "package.json"), json.dumps({
@@ -230,7 +233,7 @@ def _patch_apply(backup, smoke, install=None):
             upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes)
     upgrade.pre_upgrade_backup = lambda a, t: (
         backup, os.path.join(backup, "db"))
-    upgrade.official_upgrade = install or (lambda a, t: 0)
+    upgrade.official_upgrade = install or (lambda a, t, command=None: 0)
     upgrade.post_upgrade_smoke = smoke
     upgrade.stage_config.live_processes = lambda: []
     return real
@@ -343,22 +346,18 @@ def test_plan_matrix_and_breaking_notes():
 
 def test_status_supported_topology():
     root = _tmp("upgrade-status-")
-    real_path = os.environ.get("PATH", "")
-    real_test_config = os.environ.get("TEST_CONFIG")
     try:
         _fixture(root)
         home = os.path.join(root, "home")
         config = os.path.join(home, ".config", "opencode")
         os.makedirs(config)
-        bin_dir = os.path.join(root, "bin")
-        _write(os.path.join(bin_dir, "opencode"), (
+        link = os.path.join(home, ".yarn", "bin", "opencode")
+        _write(link, (
             "#!/bin/sh\n"
             f"if [ \"$1\" = \"--version\" ]; then echo 'opencode v{v2.VERSION_PIN}'; exit 0; fi\n"
-            "if [ \"$1\" = \"debug\" ]; then echo \"$TEST_CONFIG\"; exit 0; fi\n"
+            f"if [ \"$1\" = \"debug\" ]; then echo '{config}'; exit 0; fi\n"
             "exit 1\n"))
-        os.chmod(os.path.join(bin_dir, "opencode"), 0o755)
-        os.environ["PATH"] = bin_dir + os.pathsep + real_path
-        os.environ["TEST_CONFIG"] = config
+        os.chmod(link, 0o755)
         upgrade.write_state(root, v2.VERSION_PIN, "canaried")
         payload = upgrade.status_payload(_args(root, home=home))
         assert payload["pinned"] == v2.VERSION_PIN
@@ -367,11 +366,6 @@ def test_status_supported_topology():
         assert payload["install"]["config_root"] == config
         assert payload["next"] == "up to date", payload["next"]
     finally:
-        os.environ["PATH"] = real_path
-        if real_test_config is None:
-            os.environ.pop("TEST_CONFIG", None)
-        else:
-            os.environ["TEST_CONFIG"] = real_test_config
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -460,7 +454,7 @@ def test_apply_reuses_installed_target_and_repairs_default():
     backup = os.path.join(root, "backup")
     os.makedirs(backup)
     real = _patch_apply(backup, _smoke_recorder(calls),
-                        lambda a, t: calls.append("install") or 0)
+                        lambda a, t, command=None: calls.append("install") or 0)
     try:
         args = _args(root, to=target, home=fixture["home"], skip_canary=True,
                      drain_acknowledged=True)
@@ -484,6 +478,9 @@ def test_apply_v1_default_failure_has_v1_rollback():
     root = _tmp("upgrade-v1-rollback-")
     target = v2.VERSION_PIN
     fixture = _v1_only_home(root)
+    v1_backup = os.path.join(fixture["home"], ".config",
+                             "opencode.v1-backup-20261101T000000Z")
+    _write(os.path.join(v1_backup, "opencode.db"), "v1-db\n")
     calls = []
     backup = os.path.join(root, "backup")
     os.makedirs(backup)
@@ -514,6 +511,10 @@ def test_apply_v1_default_failure_has_v1_rollback():
                    for command in rollback["commands"]), rollback["commands"]
         assert "1.19.4" in rollback["guidance"]
         assert "opencode-ai" in rollback["guidance"]
+        assert rollback["v1_backup"]["root"] == v1_backup
+        assert v1_backup in rollback["guidance"]
+        assert os.path.join(v1_backup, "opencode.db") in rollback["guidance"]
+        assert "V2-era" in rollback["guidance"]
         assert "upgrade 1.19.4 --method yarn" not in json.dumps(data)
         assert "rollback: " in out.getvalue()
         v2_plan = upgrade.rollback_plan(
@@ -538,6 +539,24 @@ def test_rollback_plan_unknown_previous():
     assert "V1" not in plan["guidance"]
     assert "V2" not in plan["guidance"]
     assert "upgrade " not in plan["guidance"]
+
+
+def test_rollback_plan_v1_without_backup_is_truthful():
+    root = _tmp("upgrade-v1-nobackup-")
+    home = os.path.join(root, "home")
+    link = os.path.join(home, ".yarn", "bin", "opencode")
+    backup = os.path.join(root, "pre-upgrade")
+    try:
+        plan = upgrade.rollback_plan(
+            link, {"version": "1.19.4", "kind": "v1", "target": None,
+                   "resolved": None}, backup, "yarn", home=home)
+        assert plan["kind"] == "v1"
+        assert plan["v1_backup"] is None
+        assert "no V1 config/DB backup" in plan["guidance"]
+        assert "V2-era" in plan["guidance"]
+        assert "upgrade 1.19.4 --method yarn" not in plan["guidance"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_apply_dry_run_text_truthful():
@@ -582,7 +601,7 @@ def test_upgrade_repairs_when_default_is_v1():
     backup = os.path.join(root, "backup")
     os.makedirs(backup)
     real = _patch_apply(backup, _smoke_recorder(calls),
-                        lambda a, t: calls.append("install") or 0)
+                        lambda a, t, command=None: calls.append("install") or 0)
     try:
         args = _args(root, to=target, home=fixture["home"], apply=True,
                      skip_canary=True, drain_acknowledged=True)
@@ -728,7 +747,7 @@ def test_shadow_repair_refuses_missing_or_wrong_target():
         os.makedirs(backup)
         calls = []
         real = _patch_apply(backup, _smoke_recorder(calls),
-                            lambda a, t: calls.append("install") or 0)
+                            lambda a, t, command=None: calls.append("install") or 0)
         try:
             args = _args(root, to=target, home=fixture["home"],
                          skip_canary=True, drain_acknowledged=True)
@@ -763,7 +782,7 @@ def test_shadow_repair_requires_supported_config_root():
     os.makedirs(backup)
     calls = []
     real = _patch_apply(backup, _smoke_recorder(calls),
-                        lambda a, t: calls.append("install") or 0)
+                        lambda a, t, command=None: calls.append("install") or 0)
     try:
         args = _args(root, to=target, home=fixture["home"], skip_canary=True,
                      drain_acknowledged=True)
@@ -860,17 +879,25 @@ def test_upgrade_docs_describe_supported_shadow():
     adr = open(os.path.join(
         REPO, "docs", "ADRs",
         "ADR-0017-supported-opencode-upgrade.md"), encoding="utf-8").read()
+    adr14 = open(os.path.join(
+        REPO, "docs", "ADRs",
+        "ADR-0014-opencode-v2-upgrade.md"), encoding="utf-8").read()
     for text, name in ((readme, "README"), (reference, "reference"),
                        (adr, "ADR-0017")):
         assert "opencode2" in text, name
         assert "shadow" in text, name
         assert "upgrade --to <pin>" in text, name
         assert "--apply" in text, name
-    assert "upgrade --to 2.2.6" not in readme
+        assert "rolls back link + DB" not in text, name
+    assert f"upgrade --to {v2.VERSION_PIN}" not in readme
     assert "verify.json.failed-" in readme
+    assert "verify.json.previous-" in readme
     assert "both packages publish" in reference or "dual-bin" in reference
+    assert "local/manual" in reference and "CI runs only" in reference
     assert "2026-11-09" in adr
     assert "not an automatic rollback" in adr or "no automatic" in adr
+    assert "rolls back link + DB" not in adr14
+    assert "opencode_upgrade.py apply" not in adr14
 
 
 def test_prune_keeps_versions():
@@ -967,7 +994,7 @@ def test_upgrade_reverifies_after_failed_apply():
     os.makedirs(backup)
     calls = []
     real = _patch_apply(backup, _smoke_recorder(calls),
-                        lambda a, t: calls.append("install") or 0)
+                        lambda a, t, command=None: calls.append("install") or 0)
     try:
         _write(_artifact(root, target), json.dumps({
             "version": target, "verified": False, "rolled_back": False}) + "\n")
@@ -1006,7 +1033,7 @@ def test_upgrade_reverifies_after_legacy_failed_artifact():
     os.makedirs(backup)
     calls = []
     real = _patch_apply(backup, _smoke_recorder(calls),
-                        lambda a, t: calls.append("install") or 0)
+                        lambda a, t, command=None: calls.append("install") or 0)
     try:
         # Normalization: legacy artifacts have no `verified` field.
         passing = {"version": target, "rolled_back": False,
@@ -1049,12 +1076,496 @@ def test_upgrade_reverifies_after_legacy_failed_artifact():
         archives = sorted(glob.glob(artifact + ".failed-*"))
         assert len(archives) == 1, archives
         assert open(archives[0], "rb").read() == legacy_bytes
-        # A verified predecessor is never mislabeled as failed.
-        assert upgrade.archive_failed_artifact(artifact) is None
-        assert sorted(glob.glob(artifact + ".failed-*")) == archives
-        assert os.path.isfile(artifact)
+        # A verified predecessor is preserved under a neutral name.
+        verified_bytes = open(artifact, "rb").read()
+        previous = upgrade.archive_artifact(artifact)
+        assert previous is not None
+        assert ".previous-" in previous
+        assert open(previous, "rb").read() == verified_bytes
+        assert not os.path.isfile(artifact)
+        assert sorted(glob.glob(artifact + ".previous-*")) == [previous]
     finally:
         _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _make_db(path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE session (id TEXT PRIMARY KEY)")
+    con.execute("INSERT INTO session(id) VALUES ('ses_1')")
+    con.commit()
+    con.close()
+
+
+def test_apply_dry_run_is_side_effect_free():
+    root = _tmp("upgrade-dryrun-pure-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    calls = []
+    real = (upgrade.run, upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+            upgrade.prepare_shadow, upgrade.stage_config.live_processes)
+    before = open(fixture["link"], "rb").read()
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    upgrade.run = fake_run
+    upgrade.pre_upgrade_backup = lambda a, t: calls.append("backup") or (
+        os.path.join(root, "b"), None)
+    upgrade.official_upgrade = lambda a, t, command=None: calls.append(
+        "install") or 0
+    upgrade.prepare_shadow = lambda h, l, t: calls.append("shadow") or {
+        "failure_stage": None}
+    upgrade.stage_config.live_processes = lambda: calls.append("drain") or []
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True, dry_run=True, stop_service=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.apply_supported(args, target) == 0
+        for command in calls:
+            if isinstance(command, list):
+                assert not (command[1:3] == ["service", "stop"]), command
+        assert "backup" not in calls and "install" not in calls
+        assert "shadow" not in calls and "drain" not in calls
+        assert not os.path.isfile(upgrade.state_path(root))
+        assert open(fixture["link"], "rb").read() == before
+    finally:
+        (upgrade.run, upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+         upgrade.prepare_shadow,
+         upgrade.stage_config.live_processes) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_stops_service_before_drain_gate():
+    root = _tmp("upgrade-stop-order-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    order = []
+    stopped = {"done": False}
+    real = (upgrade.run, upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+            upgrade.stage_config.live_processes, upgrade.post_upgrade_smoke)
+
+    def fake_run(argv, **kwargs):
+        order.append("run:" + " ".join(argv))
+        if argv[1:3] == ["service", "stop"]:
+            stopped["done"] = True
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[1:4] == ["debug", "paths", "config"]:
+            return subprocess.CompletedProcess(argv, 0, fixture["config"], "")
+        if len(argv) > 1 and argv[1] == "--version":
+            return subprocess.CompletedProcess(
+                argv, 0, f"opencode v{v2.VERSION_PIN}", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def live():
+        order.append("drain")
+        return [] if stopped["done"] else ["opencode running"]
+
+    upgrade.run = fake_run
+    upgrade.stage_config.live_processes = live
+    upgrade.pre_upgrade_backup = lambda a, t: (
+        os.path.join(root, "backup"), None)
+    upgrade.official_upgrade = lambda a, t, command=None: 0
+    upgrade.post_upgrade_smoke = lambda a, t, command=None: [
+        ("binary", True, "ok")]
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True, stop_service=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.apply_supported(args, target) == 0, order
+        stop_idx = next(i for i, item in enumerate(order)
+                        if item.startswith("run:") and " service stop" in item)
+        drain_idx = order.index("drain")
+        assert stop_idx < drain_idx, order
+    finally:
+        (upgrade.run, upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+         upgrade.stage_config.live_processes,
+         upgrade.post_upgrade_smoke) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_sqlite_backups_are_0600():
+    root = _tmp("upgrade-dbperm-")
+    try:
+        src = os.path.join(root, "src.db")
+        _make_db(src)
+        dst = os.path.join(root, "dst.db")
+        upgrade.sqlite_backup(src, dst)
+        assert stat.S_IMODE(os.stat(dst).st_mode) == 0o600
+        home = os.path.join(root, "home")
+        home_db = os.path.join(home, ".local", "share", "opencode",
+                               "opencode.db")
+        _make_db(home_db)
+        backup, db = upgrade.pre_upgrade_backup(
+            _args(root, home=home, to=v2.VERSION_PIN), v2.VERSION_PIN)
+        assert db and os.path.isfile(db)
+        assert stat.S_IMODE(os.stat(db).st_mode) == 0o600
+        assert backup.startswith(os.path.join(root, ".scratch"))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_pre_upgrade_backup_uses_home_and_absent_db():
+    root = _tmp("upgrade-dbhome-")
+    try:
+        home = os.path.join(root, "home")
+        args = _args(root, home=home, to=v2.VERSION_PIN)
+        _backup, db = upgrade.pre_upgrade_backup(args, v2.VERSION_PIN)
+        assert db is None, db
+        home_db = os.path.join(home, ".local", "share", "opencode",
+                               "opencode.db")
+        _make_db(home_db)
+        assert upgrade.db_source_path(home) == home_db
+        _backup, db = upgrade.pre_upgrade_backup(args, v2.VERSION_PIN)
+        assert db and os.path.isfile(db), db
+        override = os.path.join(root, "override.db")
+        _make_db(override)
+        real_env = os.environ.get("OPENCODE_DB")
+        os.environ["OPENCODE_DB"] = override
+        try:
+            assert upgrade.db_source_path(home) == override
+        finally:
+            if real_env is None:
+                os.environ.pop("OPENCODE_DB", None)
+            else:
+                os.environ["OPENCODE_DB"] = real_env
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_timeout_writes_failure_artifact():
+    root = _tmp("upgrade-timeout-")
+    target = v2.VERSION_PIN
+    fixture = _v1_only_home(root)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    real = _patch_apply(backup, lambda a, t, command=None: [
+        ("binary", True, "ok")])
+    upgrade.pre_upgrade_backup = lambda a, t: (backup, None)
+
+    def timeout(_args, _target, command=None):
+        raise subprocess.TimeoutExpired(["opencode"], 900)
+
+    upgrade.official_upgrade = timeout
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.apply_supported(args, target) == 1
+        data = json.load(open(_artifact(root, target)))
+        assert data["verified"] is False
+        assert data["failure_stage"] == "exception:install", data
+        assert "TimeoutExpired" in data["exception"]
+        assert data["database_backup"] is None
+        assert upgrade.read_state(root)["stage"] == "prepared"
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_spawn_error_writes_failure_artifact():
+    root = _tmp("upgrade-spawn-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    real = _patch_apply(backup, lambda a, t, command=None: [
+        ("binary", True, "ok")])
+
+    def spawn_error(_args, _target, command=None):
+        raise FileNotFoundError("missing binary")
+
+    upgrade.post_upgrade_smoke = spawn_error
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.apply_supported(args, target) == 1
+        data = json.load(open(_artifact(root, target)))
+        assert data["failure_stage"] == "exception:smoke", data
+        assert "FileNotFoundError" in data["exception"]
+        assert upgrade.read_state(root)["stage"] == "prepared"
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_canary_residual_acceptance():
+    root = _tmp("upgrade-residual-")
+    target = v2.VERSION_PIN
+    ev = os.path.join(root, ".scratch", "v2-canary-" + target)
+    try:
+        for name, filename in (("C1", "C1.txt"), ("C2", "C2.txt"),
+                               ("C3", "C3-real.txt"), ("C4", "C4.txt"),
+                               ("C5", "C5.txt"), ("C6", "C6.txt"),
+                               ("C7", "C7.txt"), ("C8", "C8.txt")):
+            _write(os.path.join(ev, filename), f"{name}=PASS\n")
+        _write(os.path.join(ev, "migration-rehearsal.txt"),
+               "source_sessions_not_migrated=3\n")
+        summary = upgrade.canary_summary(root, target)
+        assert summary["ok"] is False
+        assert summary["residual"] == 3
+        assert summary["residual_accepted"] is False
+        _write(os.path.join(root, "docs",
+                            "opencode-v2-migration-classification.json"),
+               json.dumps({"version": target, "residual": 3,
+                           "owner": "owner", "date": "2026-11-09"}) + "\n")
+        summary = upgrade.canary_summary(root, target)
+        assert summary["ok"] is True
+        assert summary["residual_accepted"] is True
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_missing_canary_message_surfaces_skip():
+    root = _tmp("upgrade-nocanary-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    try:
+        args = _args(root, to=target, home=fixture["home"],
+                     drain_acknowledged=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            assert upgrade.apply_supported(args, target) == 2
+        assert "no canary evidence" in out.getvalue()
+        assert "--skip-canary" in out.getvalue()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_version_parsing_rejects_substrings():
+    root = _tmp("upgrade-versions-")
+    try:
+        long_version = os.path.join(root, "long")
+        _stub_binary(long_version, "2.2.60")
+        assert upgrade.version_of(long_version) == "2.2.60"
+        assert upgrade.version_of(long_version) != v2.VERSION_PIN
+        prerelease = os.path.join(root, "rc")
+        _stub_binary(prerelease, "2.2.6-rc")
+        assert upgrade.version_of(prerelease) is None
+        assert upgrade.api_version('{"version":"2.2.60"}',
+                                   v2.VERSION_PIN)[0] is False
+        assert upgrade.api_version('{"version":"2.2.6"}',
+                                   v2.VERSION_PIN)[0] is True
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prepare_gate_precedes_writes():
+    root = _tmp("upgrade-prepare-gate-")
+    try:
+        _fixture(root)
+        peers = _json_file(root, {
+            "@opencode/plugin": "2.3.0",
+            "@opentui/core": ">=0.8.0",
+            "@opentui/solid": ">=0.8.0",
+            "solid-js": ">=1.9.0"}, "peers.json")
+        before = {
+            "readme": open(os.path.join(root, "README.md")).read(),
+            "adapter": open(os.path.join(root, "scripts",
+                                         "opencode_v2.py")).read(),
+            "plugin": open(os.path.join(
+                root, "plugins", "delegation-observer",
+                "package.json")).read(),
+        }
+        args = _args(root, to="2.3.0", opentui="0.8.2", plugin_json=peers)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.prepare(args) == 2
+        assert open(os.path.join(root, "README.md")).read() == before["readme"]
+        assert open(os.path.join(root, "scripts",
+                                 "opencode_v2.py")).read() == before["adapter"]
+        assert open(os.path.join(
+            root, "plugins", "delegation-observer",
+            "package.json")).read() == before["plugin"]
+        assert "2.3.0" not in open(os.path.join(
+            root, "docs", "ADRs", "ADR-0014-opencode-v2-upgrade.md")).read()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prepare_allow_pending_canary_is_explicit_bypass():
+    root = _tmp("upgrade-prepare-bypass-")
+    real_run = upgrade.run
+    try:
+        _fixture(root)
+        peers = _json_file(root, {
+            "@opencode/plugin": "2.3.0",
+            "@opentui/core": ">=0.8.0",
+            "@opentui/solid": ">=0.8.0",
+            "solid-js": ">=1.9.0"}, "peers.json")
+        upgrade.run = lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 0 if argv[:2] == ["npm", "install"] else 1, "", "")
+        args = _args(root, to="2.3.0", opentui="0.8.2", plugin_json=peers,
+                     allow_pending_canary=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.prepare(args) == 0
+        assert "2.3.0" in open(os.path.join(root, "README.md")).read()
+    finally:
+        upgrade.run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_topology_uses_explicit_link_not_path():
+    root = _tmp("upgrade-path-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    path_dir = os.path.join(root, "pathbin")
+    _stub_binary(os.path.join(path_dir, "opencode"), "1.19.4")
+    real_path = os.environ.get("PATH", "")
+    real_run = upgrade.run
+    os.environ["PATH"] = path_dir + os.pathsep + real_path
+    try:
+        install = upgrade.topology(fixture["home"], fixture["link"])
+        assert install["command"] == fixture["link"]
+        assert install["supported"] is True
+        assert upgrade.version_of(install["command"]) == target
+        recorded = []
+        upgrade.run = lambda argv, **kwargs: recorded.append(list(argv)) or \
+            subprocess.CompletedProcess(argv, 0, "", "")
+        try:
+            upgrade.official_upgrade(_args(root, method="yarn"), target,
+                                     fixture["link"])
+        finally:
+            upgrade.run = real_run
+        assert recorded and recorded[0][0] == fixture["link"], recorded
+    finally:
+        os.environ["PATH"] = real_path
+        upgrade.run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_cli_docstring_truthful():
+    doc = upgrade.__doc__ or ""
+    assert "rollback  manual" not in doc
+    assert "apply     drained" not in doc
+    assert "upgrade --apply --drain-acknowledged" in doc
+    assert "not require or check a TTY" in doc
+    parser = upgrade.build_parser()
+    sub = next(action for action in parser._actions
+               if isinstance(action, argparse._SubParsersAction))
+    assert "rollback" not in sub.choices
+    assert "apply" not in sub.choices
+
+
+def test_satisfies_semver_ranges():
+    cases = [
+        ("0.8.1", "^0.8.0", True),
+        ("0.9.0", "^0.8.0", False),
+        ("1.2.5", "~1.2.3", True),
+        ("1.3.0", "~1.2.3", False),
+        ("1.9.0", ">=1.2.3 <2.0.0", True),
+        ("2.0.0", ">=1.2.3 <2.0.0", False),
+        ("1.5.0", "1.x", True),
+        ("2.0.0", "1.x", False),
+        ("1.0.0", "next", False),
+    ]
+    for current, spec, expected in cases:
+        assert upgrade.satisfies(current, spec) is expected, (current, spec)
+
+
+def test_state_contract_has_no_unused_stage():
+    assert upgrade.STAGE_ORDER == ("planned", "canaried", "prepared", "applied")
+    assert "checked" not in upgrade.STAGE_ORDER
+    assert upgrade.RESUMABLE_STAGES == ("planned", "canaried", "prepared")
+    root = _tmp("upgrade-stages-")
+    try:
+        for stage in upgrade.STAGE_ORDER:
+            upgrade.write_state(root, v2.VERSION_PIN, stage)
+        state = upgrade.read_state(root)
+        assert state["stage"] == "applied"
+        assert upgrade.completed_stages(state) == set(upgrade.STAGE_ORDER)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_write_json_atomic_under_concurrency():
+    root = _tmp("upgrade-atomic-")
+    path = os.path.join(root, "state.json")
+    payloads = [{"n": i, "blob": "x" * 10000} for i in range(4)]
+    upgrade.write_json(path, payloads[0])
+    errors = []
+
+    def writer(payload):
+        for _ in range(20):
+            upgrade.write_json(path, payload)
+
+    def reader():
+        for _ in range(200):
+            try:
+                json.load(open(path))
+            except ValueError as exc:  # torn JSON is the defect under test
+                errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(p,)) for p in payloads]
+    read_thread = threading.Thread(target=reader)
+    read_thread.start()
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    read_thread.join()
+    try:
+        assert not errors, errors
+        assert not glob.glob(path + ".tmp.*")
+        assert json.load(open(path)) in payloads
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_file_lock_is_bounded():
+    root = _tmp("upgrade-lock-")
+    path = os.path.join(root, "state.json")
+    try:
+        with upgrade.file_lock(path):
+            try:
+                with upgrade.file_lock(path, timeout=0.1):
+                    assert False, "second lock should time out"
+            except TimeoutError:
+                pass
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_tui_smoke_missing_script_is_named_failure():
+    root = _tmp("upgrade-tui-")
+    real_which = upgrade.shutil.which
+    upgrade.shutil.which = lambda name: None if name == "script" else real_which(name)
+    try:
+        ok, detail = upgrade.tui_smoke(
+            _args(root, prefix=os.path.join(root, "prefix")),
+            v2.VERSION_PIN, "0.8.1")
+        assert ok is False
+        assert "script-not-available" in detail
+        evidence = os.path.join(root, ".scratch", "v2-canary-" + v2.VERSION_PIN,
+                                "tui-smoke.txt")
+        assert os.path.isfile(evidence)
+    finally:
+        upgrade.shutil.which = real_which
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_diagnostics_do_not_write_state():
+    root = _tmp("upgrade-diag-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            upgrade.status_payload(_args(root, home=fixture["home"]))
+            upgrade.doctor(_args(root, home=fixture["home"]))
+            upgrade.upgrade(_args(root, to=target, home=fixture["home"]))
+        assert not os.path.isfile(upgrade.state_path(root))
+    finally:
         shutil.rmtree(root, ignore_errors=True)
 
 

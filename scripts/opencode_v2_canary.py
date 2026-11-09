@@ -60,6 +60,27 @@ def now_date():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
 
 
+def exact_version(text):
+    """Exact `opencode v<x.y.z>` parse (never a substring match)."""
+    for line in reversed((text or "").strip().splitlines()):
+        match = re.fullmatch(r"opencode v(\d+\.\d+\.\d+)", line.strip())
+        if match:
+            return match.group(1)
+    return None
+
+
+def api_version(text):
+    """Exact `version` field from an API payload (JSON first, then regex)."""
+    try:
+        data = json.loads(text or "{}")
+        if isinstance(data, dict) and data.get("version"):
+            return data["version"]
+    except ValueError:
+        pass
+    match = re.search(r'"version"\s*:\s*"([^"]+)"', text or "")
+    return match.group(1) if match else None
+
+
 def sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -81,19 +102,8 @@ def evidence(root, name, text):
 
 
 def sqlite_backup(source, dest):
-    """Consistent backup through Python sqlite3 (the sqlite3 CLI is absent)."""
-    src = sqlite3.connect(f"file:{source}?mode=ro", uri=True, timeout=30)
-    try:
-        os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
-        dst = sqlite3.connect(dest, timeout=30)
-        try:
-            src.backup(dst)
-        finally:
-            dst.close()
-    finally:
-        src.close()
-    os.chmod(dest, 0o600)
-    return dest
+    """Delegate to the shared 0600-preserving SQLite backup helper."""
+    return v2.sqlite_backup(source, dest)
 
 
 def integrity(path):
@@ -291,7 +301,8 @@ def gate_c1(args):
     iso = subprocess.run([binary, "--version"], capture_output=True, text=True)
     default = subprocess.run([args.default_bin, "--version"],
                              capture_output=True, text=True)
-    ok = args.version in iso.stdout and args.default_version in default.stdout
+    ok = (exact_version(iso.stdout) == args.version
+          and exact_version(default.stdout) == args.default_version)
     lines += [
         f"isolated_command={binary} --version",
         f"isolated_output={iso.stdout.strip()}",
@@ -315,7 +326,7 @@ def gate_c2(args):
         evidence(root, "C2.txt", "C2=FAIL timeout")
         return False, "timeout"
     ok = status.returncode == 0 and api.returncode == 0 and \
-        args.version in (api.stdout or "")
+        api_version(api.stdout) == args.version
     text = "\n".join([
         f"date={now_date()}",
         f"service_port={port}",
@@ -553,19 +564,25 @@ def gate_c7(args):
     except (OSError, subprocess.SubprocessError) as exc:
         evidence(root, "C7.txt", f"C7=FAIL ({exc})")
         return False, str(exc)
+    marker_agent = "canary-marker" in (cfg.stdout or "")
+    marker_agent_api = "canary-marker" in (agents.stdout or "")
+    marker_plugin = "canary-plugin" in (plugins.stdout or "")
+    ok = (cfg.returncode == 0 and plugins.returncode == 0
+          and agents.returncode == 0 and marker_agent and marker_agent_api
+          and marker_plugin)
     text = "\n".join([
         f"date={now_date()}",
         f"debug_config_exit={cfg.returncode}",
-        "marker_agent_present=" + str("canary-marker" in (cfg.stdout or "")),
+        f"marker_agent_present={marker_agent}",
         f"plugin_list_exit={plugins.returncode}",
-        "plugin_rows=" + str((plugins.stdout or "").strip()[:200]),
+        f"plugin_rows={(plugins.stdout or '').strip()[:200]}",
+        f"marker_plugin_present={marker_plugin}",
         f"agent_api_exit={agents.returncode}",
-        "agent_api_has_marker=" + str("canary-marker" in (agents.stdout or "")),
-        f"C7={'PASS' if cfg.returncode == 0 and plugins.returncode == 0 else 'FAIL'}",
+        f"agent_api_has_marker={marker_agent_api}",
+        f"C7={'PASS' if ok else 'FAIL'}",
         "global_config_audit=.scratch/v2-canary/global-config-audit.md",
     ])
     evidence(root, "C7.txt", text)
-    ok = cfg.returncode == 0 and plugins.returncode == 0
     return ok, text
 
 
@@ -595,6 +612,22 @@ def gate_c8(args):
     return ok, text
 
 
+def migration_membership(src_ids, migrated):
+    """Non-vacuous partition check for the migration rehearsal.
+
+    Every source session ID must be either present in the target or recorded
+    missing; an empty source is not a pass. Target-only IDs (the rehearsal run's
+    own new sessions) are reported but do not fail the check.
+    """
+    src = set(src_ids)
+    tgt = set(migrated)
+    migrated_from_source = tgt & src
+    missing = src - tgt
+    target_only = tgt - src
+    ok = bool(src) and len(migrated_from_source) + len(missing) == len(src)
+    return ok, missing, target_only
+
+
 def gate_migration(args):
     """Copy-only 900 s rehearsal: population, membership, integrity, hashes."""
     root = args.scratch_root
@@ -618,11 +651,13 @@ def gate_migration(args):
                  f"date={now_date()}\nmigration=TIMEOUT>{MIGRATION_TIMEOUT}s")
         return False, "migration timeout"
     migrated = read_ids(copy, "session_v2")
-    missing = sorted(set(src_ids) - set(migrated))
+    membership_ok, missing, target_only = migration_membership(src_ids,
+                                                               migrated)
+    missing = sorted(missing)
     untouched = sha256(source) == source_hash
     check = integrity(copy)
     ok = (ok_auth and proc.returncode == 0 and untouched and check == "ok"
-          and len(migrated & src_ids) > 0)
+          and membership_ok)
     text = "\n".join([
         f"date={now_date()}",
         f"source={source}",
@@ -637,7 +672,8 @@ def gate_migration(args):
         f"session_v2_rows={len(migrated)}",
         f"preexisting_sessions_migrated={len(set(src_ids) & migrated)}",
         f"source_sessions_not_migrated={len(missing)}",
-        f"migrated_ids_present_in_source={set(migrated) <= set(src_ids) | set(migrated)}",
+        f"migrated_ids_present_in_source={membership_ok}",
+        f"target_only_ids={len(target_only)}",
         f"target_integrity_check={check}",
         f"source_backup_sha256_after={sha256(source)}",
         f"source_untouched={untouched}",

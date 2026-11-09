@@ -116,6 +116,35 @@ def db_path():
     return DEFAULT_DB
 
 
+def db_path_for_home(home):
+    """DB source path for an explicit HOME, honoring the same env precedence."""
+    explicit = os.environ.get("OPENCODE_DB_PATH") or os.environ.get("OPENCODE_DB")
+    if explicit:
+        return os.path.expanduser(explicit)
+    return os.path.join(home, ".local", "share", "opencode", "opencode.db")
+
+
+def sqlite_backup(source, dest):
+    """Consistent, owner-only (0600) SQLite backup via Python sqlite3."""
+    src = sqlite3.connect(f"file:{source}?mode=ro", uri=True, timeout=30)
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+        for leftover in (dest, dest + "-wal", dest + "-shm"):
+            try:
+                os.remove(leftover)
+            except FileNotFoundError:
+                pass
+        dst = sqlite3.connect(dest, timeout=30)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    os.chmod(dest, 0o600)
+    return dest
+
+
 def connect(path=None):
     """Read-only connection, or None when the DB is absent/unreadable."""
     path = path or db_path()

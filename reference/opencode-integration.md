@@ -58,7 +58,9 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
   latest, last canary/verify, and the next command. `doctor` is read-only.
 - `check --pins-only` — offline consistency across every active pin seam; CI
   runs it. `check --remote` drives the weekly issue-first drift workflow.
-  `check --pr` requires the ADR amendment's canary record.
+  `check --pr` is a **local/manual** release gate (it requires the ADR
+  amendment's canary record); CI runs only `check --pins-only` and the
+  hermetic suite.
 - `plan --to X` — target plugin/OpenTUI/solid-js matrix and the breaking
   changes between the current and target releases; no writes.
 - `canary --to X` — installs into `.scratch/v2-<version>-prefix`, runs C1–C8
@@ -79,9 +81,11 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
 `OPENCODE_VERSION` from it, and `check --pins-only` enforces the remaining
 seams. Never hand-edit one seam.
 
-Rollback: `opencode upgrade <previous> --method yarn` plus the pre-upgrade
-DB/config backup. V1: reinstall the shadowed V1 bin and restore the V1
-config/DB backups.
+Rollback: for a V2 previous default, `opencode upgrade <previous> --method
+yarn` plus the pre-upgrade V2-era DB/config snapshot. For a V1 previous default,
+restore the original link and the actual `~/.config/opencode.v1-backup-*` tree
+(its `opencode.db` when present); the pre-apply snapshot is not a V1 backup.
+SQLite backups are mode 0600.
 
 The yarn-global topology installs two packages that each publish an `opencode`
 bin: the retained V1 `opencode-ai` package (1.19.4) and the V2
@@ -97,9 +101,15 @@ package is already installed and only the default link is wrong, the apply
 skips the official install and repairs/verifies without a Yarn reinstall. A
 failed verification leaves the target package and repaired default in place,
 records `verified: false` / `rolled_back: false` with the failing stage,
-link/package evidence, and the manual rollback command; ADR-0017 has no
-automatic link/DB rollback. `status`/`doctor` report the target package, the
-default version, `shadow_ok`, and the exact repair command.
+link/package evidence, and the manual rollback guidance; ADR-0017 has no
+automatic link/DB rollback. Every apply failure (including a command timeout or
+spawn error) writes that named artifact and leaves state `prepared`. A prior
+artifact is archived before overwrite: `.failed-<stamp>` for an unverified
+predecessor, `.previous-<stamp>` for a verified one. Rollback points at the
+actual `~/.config/opencode.v1-backup-*` tree for a V1 previous default (the
+pre-apply snapshot is V2-era); SQLite backups are written mode 0600.
+`status`/`doctor` report the target package, the default version, `shadow_ok`,
+and the exact repair command, and are read-only (no state writes).
 
 ## Service and typed API
 

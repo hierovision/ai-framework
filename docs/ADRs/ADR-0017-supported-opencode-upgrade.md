@@ -93,9 +93,14 @@ installed, the apply skips the official install and only repairs and verifies.
 Failed verification is **not an automatic rollback**. The target package and
 the repaired default stay in place; the artifact records `verified: false`,
 `rolled_back: false`, the failing stage, the target package version/path,
-default-link evidence, and the exact manual rollback command, while upgrade
-state stays `prepared`. The pre-upgrade package/config/DB backup plus that
-manual command remain the rollback.
+default-link evidence, and the exact manual rollback guidance, while upgrade
+state stays `prepared`. Every apply failure — including a command timeout or
+spawn error — writes that named artifact. A predecessor artifact is archived
+before overwrite (`.failed-<stamp>` unverified, `.previous-<stamp>` verified).
+For a V1 previous default the rollback points at the actual
+`~/.config/opencode.v1-backup-*` tree, not the V2-era pre-apply snapshot; SQLite
+backups are written mode 0600. The pre-upgrade package/config/DB snapshot plus
+that manual guidance remain the rollback.
 
 ## Sources
 

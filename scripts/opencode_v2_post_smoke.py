@@ -63,17 +63,28 @@ def git_sha(path):
 
 
 def run(argv, cwd=None, env=None, timeout=180):
+    """Run a command; timeouts/spawn errors yield a failed CompletedProcess."""
     try:
         return subprocess.run(argv, cwd=cwd, env=env, capture_output=True,
                               text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return None, str(exc)
+        return subprocess.CompletedProcess(argv, 1, "", f"{type(exc).__name__}: {exc}")
 
 
 def check_version(binary):
-    proc = subprocess.run([binary, "--version"], capture_output=True, text=True)
-    return proc.returncode == 0 and v2.VERSION_PIN in proc.stdout, \
-        proc.stdout.strip()
+    """Exact `opencode v<x.y.z>` parse, never a substring match."""
+    try:
+        proc = subprocess.run([binary, "--version"], capture_output=True,
+                              text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    lines = (proc.stdout or "").strip().splitlines()
+    for line in reversed(lines):
+        match = re.fullmatch(r"opencode v(\d+\.\d+\.\d+)", line.strip())
+        if match:
+            return proc.returncode == 0 and match.group(1) == v2.VERSION_PIN, \
+                match.group(1)
+    return False, (proc.stdout or "").strip()
 
 
 def agent_files(root):
@@ -89,6 +100,31 @@ def check_agents(framework, consumer):
     ok = fw == EXPECTED_AGENTS and (consumer is None
                                     or cs == EXPECTED_CONSUMER_AGENTS)
     return ok, f"framework={fw} consumer={cs}"
+
+
+def check_agents_live(binary, framework):
+    """Every expected framework agent ID is present in the live API.
+
+    Built-ins and newly added agents are tolerated; a missing framework ID is
+    a failure. This replaces the hardcoded repo file-count check for the
+    apply smoke.
+    """
+    expected = {name[:-3] for name in agent_files(
+        os.path.join(framework, "agents"))}
+    proc = run([binary, "api", "GET", "/api/agent"], timeout=60)
+    if proc.returncode != 0:
+        return False, f"agent api unavailable: {proc.stderr or proc.returncode}"
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except ValueError:
+        return False, "agent api returned non-JSON"
+    rows = data.get("data") if isinstance(data, dict) else data
+    live = {(row.get("id") or row.get("name"))
+            for row in rows or [] if isinstance(row, dict)}
+    live.discard(None)
+    missing = sorted(expected - live)
+    return (not missing,
+            f"live={len(live)} expected={len(expected)} missing={missing}")
 
 
 def check_config(framework, consumer):
