@@ -70,28 +70,20 @@ def run(argv, cwd=None, env=None, timeout=180):
 
 
 def parsed_version(text):
-    """Exact version parse (accepts `opencode vX`, `vX`, or bare `X`)."""
-    for line in reversed((text or "").strip().splitlines()):
-        match = re.fullmatch(r"(?:opencode )?v?(\d+\.\d+\.\d+)", line.strip())
-        if match:
-            return match.group(1)
-    return None
+    """Delegate to the shared exact version parser."""
+    return v2.parse_opencode_version(text)
 
 
 def check_version(binary):
-    """Exact `opencode v<x.y.z>` parse, never a substring match."""
+    """Exact version via the shared parser, compared to the pin."""
     try:
         proc = subprocess.run([binary, "--version"], capture_output=True,
                               text=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, f"{type(exc).__name__}: {exc}"
-    lines = (proc.stdout or "").strip().splitlines()
-    for line in reversed(lines):
-        match = re.fullmatch(r"opencode v(\d+\.\d+\.\d+)", line.strip())
-        if match:
-            return proc.returncode == 0 and match.group(1) == v2.VERSION_PIN, \
-                match.group(1)
-    return False, (proc.stdout or "").strip()
+    version = v2.parse_opencode_version(proc.stdout)
+    return proc.returncode == 0 and version == v2.VERSION_PIN, \
+        version or (proc.stdout or "").strip()
 
 
 def agent_files(root):

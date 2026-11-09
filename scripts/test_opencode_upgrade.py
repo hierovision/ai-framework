@@ -126,12 +126,17 @@ def _args(repo, **overrides):
 
 
 def _stub_binary(path, version, config_root=None):
-    """A tiny executable that answers `--version` and `debug paths config`."""
+    """A tiny executable that answers `--version` and `debug paths config`.
+
+    Models the real binaries: V1 (major 1) prints a bare `1.19.4`; V2 prints
+    `opencode v2.2.6`.
+    """
+    output = (version if version.split(".", 1)[0] == "1"
+              else f"opencode v{version}")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     lines = [
         "#!/bin/sh",
-        f'if [ "$1" = "--version" ]; then echo "opencode v{version}"; '
-        "exit 0; fi",
+        f'if [ "$1" = "--version" ]; then echo "{output}"; exit 0; fi',
     ]
     if config_root:
         lines.append(
@@ -1396,19 +1401,54 @@ def test_apply_missing_canary_message_surfaces_skip():
 def test_version_parsing_rejects_substrings():
     root = _tmp("upgrade-versions-")
     try:
+        # Real binaries: V1 prints bare 1.19.4; V2 prints opencode v2.2.6.
+        v1 = os.path.join(root, "v1")
+        _stub_binary(v1, "1.19.4")
+        assert upgrade.version_of(v1) == "1.19.4"
         long_version = os.path.join(root, "long")
         _stub_binary(long_version, "2.2.60")
         assert upgrade.version_of(long_version) == "2.2.60"
         assert upgrade.version_of(long_version) != v2.VERSION_PIN
+        v1_long = os.path.join(root, "v1long")
+        _stub_binary(v1_long, "1.19.40")
+        assert upgrade.version_of(v1_long) == "1.19.40"
+        assert upgrade.version_of(v1_long) != "1.19.4"
         prerelease = os.path.join(root, "rc")
         _stub_binary(prerelease, "2.2.6-rc")
         assert upgrade.version_of(prerelease) is None
+        cases = (
+            ("opencode v2.2.6", "2.2.6"),
+            ("v2.2.6", "2.2.6"),
+            ("2.2.6", "2.2.6"),
+            ("opencode v1.19.4", "1.19.4"),
+            ("v1.19.4", "1.19.4"),
+            ("1.19.4", "1.19.4"),
+            ("1.19.40", "1.19.40"),
+            ("opencode v2.2.6-rc", None),
+            ("build 2.2.6", None),
+            ("2.2", None),
+            ("", None),
+        )
+        for text, expected in cases:
+            assert v2.parse_opencode_version(text) == expected, (text, expected)
         assert upgrade.api_version('{"version":"2.2.60"}',
                                    v2.VERSION_PIN)[0] is False
         assert upgrade.api_version('{"version":"2.2.6"}',
                                    v2.VERSION_PIN)[0] is True
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_shared_version_parser_is_single_source():
+    import opencode_v2_canary as canary
+    import opencode_v2_post_smoke as post_smoke
+    samples = ("opencode v2.2.6", "v2.2.6", "2.2.6", "1.19.4",
+               "1.19.40", "opencode v2.2.6-rc", "build 2.2.6", "")
+    for text in samples:
+        expected = v2.parse_opencode_version(text)
+        assert upgrade.parse_version(text) == expected, text
+        assert canary.exact_version(text) == expected, text
+        assert post_smoke.parsed_version(text) == expected, text
 
 
 def test_prepare_gate_precedes_writes():

@@ -347,15 +347,28 @@ def list_agents(directory=None, server=None):
     return [a.get("id") for a in data if isinstance(a, dict) and a.get("id")]
 
 
+def parse_opencode_version(text):
+    """One exact version parser for every OpenCode probe.
+
+    Accepts `opencode vX.Y.Z`, `vX.Y.Z`, or a bare `X.Y.Z` on a line by itself.
+    A superstring like `1.19.40` parses as `1.19.40` (so an exact comparison to
+    `1.19.4` fails); prerelease suffixes and embedded text return None.
+    """
+    for line in reversed((text or "").strip().splitlines()):
+        match = re.fullmatch(r"(?:opencode\s+)?v?(\d+\.\d+\.\d+)",
+                             line.strip())
+        if match:
+            return match.group(1)
+    return None
+
+
 def version():
     try:
         proc = subprocess.run([binary(), "--version"], capture_output=True,
                               text=True, timeout=15)
     except (OSError, subprocess.SubprocessError):
         return None
-    text = (proc.stdout or "").strip()
-    m = re.search(r"(\d+\.\d+\.\d+)", text)
-    return m.group(1) if m else None
+    return parse_opencode_version(proc.stdout)
 
 
 # --- V2 storage readers ------------------------------------------------------

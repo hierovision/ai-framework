@@ -370,6 +370,12 @@ def test_check_version_is_exact():
         ok, detail = post_smoke.check_version(exact)
         assert ok is True, detail
         assert detail == v2.VERSION_PIN
+        bare = _stub(root, "bare", v2.VERSION_PIN)
+        assert post_smoke.check_version(bare)[0] is True
+        v_form = _stub(root, "vform", f"v{v2.VERSION_PIN}")
+        assert post_smoke.check_version(v_form)[0] is True
+        embedded = _stub(root, "embedded", f"build {v2.VERSION_PIN}")
+        assert post_smoke.check_version(embedded)[0] is False
         prerelease = _stub(root, "rc", f"opencode v{v2.VERSION_PIN}-rc")
         assert post_smoke.check_version(prerelease)[0] is False
     finally:

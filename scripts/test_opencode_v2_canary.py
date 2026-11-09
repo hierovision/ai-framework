@@ -374,11 +374,15 @@ def test_migration_membership_non_vacuous():
 
 def test_exact_version_helpers():
     assert canary.exact_version("opencode v2.2.6") == "2.2.6"
+    assert canary.exact_version("v2.2.6") == "2.2.6"
+    assert canary.exact_version("2.2.6") == "2.2.6"
     assert canary.exact_version("opencode v2.2.60") == "2.2.60"
     assert canary.exact_version("opencode v2.2.6-rc") is None
     assert canary.exact_version("1.19.4") == "1.19.4"
+    assert canary.exact_version("v1.19.4") == "1.19.4"
     assert canary.exact_version("1.19.40") == "1.19.40"
     assert canary.exact_version("1.19.40") != "1.19.4"
+    assert canary.exact_version("build 1.19.4") is None
     assert canary.api_version('{"version":"2.2.60"}') == "2.2.60"
     assert canary.api_version('{"version":"2.2.6"}') == "2.2.6"
 

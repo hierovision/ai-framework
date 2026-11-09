@@ -192,8 +192,8 @@ def satisfies(current, spec):
 
 
 def parse_version(text):
-    match = re.search(r"(\d+\.\d+\.\d+)", text or "")
-    return match.group(1) if match else None
+    """Delegate to the shared exact version parser."""
+    return v2.parse_opencode_version(text)
 
 
 def gh_env():
@@ -590,19 +590,14 @@ def live_paths(args):
 
 
 def version_of(binary):
-    """Exact `opencode v<x.y.z>` parse; timeouts/spawn errors yield None."""
+    """Exact version via the shared parser; timeouts/spawn errors yield None."""
     try:
         proc = run([binary, "--version"], timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if proc.returncode != 0:
         return None
-    lines = (proc.stdout or "").strip().splitlines()
-    for line in reversed(lines):
-        match = re.fullmatch(r"opencode v(\d+\.\d+\.\d+)", line.strip())
-        if match:
-            return match.group(1)
-    return None
+    return v2.parse_opencode_version(proc.stdout)
 
 
 YARN_LINK_NAME = "opencode2"

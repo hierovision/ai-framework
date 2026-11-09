@@ -61,12 +61,8 @@ def now_date():
 
 
 def exact_version(text):
-    """Exact version parse (accepts `opencode vX`, `vX`, or bare `X`)."""
-    for line in reversed((text or "").strip().splitlines()):
-        match = re.fullmatch(r"(?:opencode )?v?(\d+\.\d+\.\d+)", line.strip())
-        if match:
-            return match.group(1)
-    return None
+    """Delegate to the shared exact version parser."""
+    return v2.parse_opencode_version(text)
 
 
 def api_version(text):
