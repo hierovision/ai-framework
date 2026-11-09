@@ -489,8 +489,9 @@ def target_package(home):
 
 
 def target_package_info(home, target):
+    """Installed V2 package metadata; `version` is None when it is absent."""
     package_dir, package_bin, version = target_package(home)
-    return {"version": version or target, "path": package_dir,
+    return {"version": version, "requested": target, "path": package_dir,
             "binary": package_bin}
 
 
@@ -606,11 +607,24 @@ def repair_command(target):
 
 
 def last_verify_verified(repo, target):
+    """Read the last verify result, normalizing legacy artifacts.
+
+    Returns None when no artifact exists. A modern artifact's `verified` field
+    is authoritative. A legacy artifact (no `verified`) counts as verified only
+    when every recorded check passed and the run was not rolled back; a legacy
+    failed artifact stays unverified so the apply fast path re-runs the smoke.
+    """
     data = read_json(os.path.join(repo, ".scratch", "opencode-v2",
                                   f"upgrade-{target}-verify.json"))
     if not isinstance(data, dict):
         return None
-    return data.get("verified")
+    if "verified" in data:
+        return bool(data.get("verified"))
+    checks = data.get("checks") or {}
+    checks_ok = (isinstance(checks, dict) and bool(checks)
+                 and all(isinstance(row, dict) and row.get("ok") is True
+                         for row in checks.values()))
+    return checks_ok and data.get("rolled_back") is False
 
 
 def topology(home, link):
@@ -662,26 +676,24 @@ def status_payload(args):
         args.repo, ".scratch", "opencode-v2",
         f"upgrade-{pinned}-verify.json"), {}) or {}
     next_command = "up to date"
-    repair_needed = bool(shadow["target_installed"]) and not shadow["shadow_ok"]
+    repair_needed = (bool(shadow["target_installed"])
+                     and shadow["supported_config"]
+                     and not shadow["shadow_ok"])
     if repair_needed:
         next_command = repair_command(pinned)
     elif not install["supported"]:
-        if shadow["target_installed"] and shadow["supported_config"]:
-            next_command = repair_command(pinned)
-        else:
-            next_command = ("migrate: python3 scripts/stage_opencode_config.py "
-                            "--backup; opencode upgrade " + pinned
-                            + " --method yarn")
+        next_command = ("migrate: python3 scripts/stage_opencode_config.py "
+                        "--backup; opencode upgrade " + pinned
+                        + " --method yarn")
     elif live != pinned:
         next_command = f"opencode upgrade {pinned} --method yarn"
     elif latest and version_key(latest) > version_key(pinned):
         next_command = ("python3 scripts/opencode_upgrade.py upgrade "
                         "--to " + latest)
-    elif (state.get("stage") and state.get("stage") not in (
-            "applied", "rolled-back")
-          and state.get("target") != pinned):
-        next_command = ("python3 scripts/opencode_upgrade.py upgrade "
-                        "--resume")
+    elif (state.get("target") and state.get("target") != pinned
+          and state.get("stage") not in (None, "applied")):
+        next_command = ("python3 scripts/opencode_upgrade.py upgrade --to "
+                        + state["target"] + " --resume")
     return {
         "pinned": pinned,
         "live": live,

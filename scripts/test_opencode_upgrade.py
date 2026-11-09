@@ -133,7 +133,8 @@ def _stub_binary(path, version, config_root=None):
 
 def _shadow_home(root, target, *, default_version="1.19.4",
                  binary_version=None, package_version=None,
-                 write_binary=True, opencode2=True, config_root=None):
+                 write_binary=True, opencode2=True, config_root=None,
+                 default_config=None):
     """Fake HOME with the yarn-global V2 package, optional opencode2, and a
     default `opencode` link that reports `default_version`."""
     binary_version = binary_version or target
@@ -158,7 +159,9 @@ def _shadow_home(root, target, *, default_version="1.19.4",
         os.symlink(package_bin, link2)
     link = os.path.join(yarn_bin, "opencode")
     if default_version is not None:
-        _stub_binary(link, default_version)
+        if default_config is None and default_version == binary_version:
+            default_config = config
+        _stub_binary(link, default_version, default_config)
     return {"home": home, "link": link, "link2": link2, "config": config,
             "package_dir": package_dir, "package_bin": package_bin,
             "yarn_bin": yarn_bin}
@@ -549,6 +552,12 @@ def test_shadow_repair_refuses_missing_or_wrong_target():
             data = json.load(open(_artifact(root, target)))
             assert data["verified"] is False, case
             assert data["failure_stage"] == "target-binary", case
+            assert data["version"] == target, case
+            assert data["target_package"]["requested"] == target, case
+            if case == "missing":
+                assert data["target_package"]["version"] is None, case
+            else:
+                assert data["target_package"]["version"] == "2.2.5", case
         finally:
             _restore_apply(real)
             shutil.rmtree(root, ignore_errors=True)
@@ -597,6 +606,40 @@ def test_status_detects_shadow_mismatch_and_next_repair():
             "python3 scripts/opencode_upgrade.py upgrade --to " + target
             + " --apply --drain-acknowledged")
         assert "stage_opencode_config.py" not in payload["next"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_status_unsupported_config_uses_migration_guidance():
+    root = _tmp("upgrade-status-config-")
+    target = v2.VERSION_PIN
+    wrong_config = os.path.join(root, "elsewhere", "opencode")
+    os.makedirs(wrong_config)
+    fixture = _shadow_home(root, target, package_version=target,
+                           config_root=wrong_config)
+    try:
+        with _path_front(fixture["yarn_bin"]):
+            payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["target_installed"] == target
+        assert payload["shadow"]["supported_config"] is False
+        assert payload["shadow_ok"] is False
+        assert "stage_opencode_config.py" in payload["next"]
+        assert "upgrade --to" not in payload["next"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_status_names_recorded_target_for_resume():
+    root = _tmp("upgrade-status-resume-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    try:
+        upgrade.write_state(root, "2.3.0", "canaried")
+        with _path_front(fixture["yarn_bin"]):
+            payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["next"] == (
+            "python3 scripts/opencode_upgrade.py upgrade --to 2.3.0 --resume")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -752,6 +795,58 @@ def test_upgrade_reverifies_after_failed_apply():
             assert upgrade.upgrade(args) == 0
         assert "already current" in out2.getvalue()
         assert not [row for row in calls if isinstance(row, dict)], calls
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_upgrade_reverifies_after_legacy_failed_artifact():
+    root = _tmp("upgrade-legacy-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    calls = []
+    real = _patch_apply(backup, _smoke_recorder(calls),
+                        lambda a, t: calls.append("install") or 0)
+    try:
+        # Normalization: legacy artifacts have no `verified` field.
+        passing = {"version": target, "rolled_back": False,
+                   "checks": {"binary": {"ok": True, "detail": target}}}
+        _write(_artifact(root, target), json.dumps(passing) + "\n")
+        assert upgrade.last_verify_verified(root, target) is True
+        # The live 2.2.6 legacy failure shape (no `verified`, rolled_back true).
+        legacy = {
+            "version": target,
+            "checks": {
+                "binary": {"ok": False, "detail": "1.19.4"},
+                "api": {"ok": False, "detail": ""},
+                "agents": {"ok": True, "detail": "framework=17 consumer=0"},
+                "plugin": {"ok": False, "detail": "loader did not load"},
+                "observer": {"ok": False, "detail": "api unavailable"},
+            },
+            "backup": backup,
+            "rolled_back": True,
+            "at": "2026-11-09T12:20:49Z",
+        }
+        _write(_artifact(root, target), json.dumps(legacy) + "\n")
+        assert upgrade.last_verify_verified(root, target) is False
+        args = _args(root, to=target, home=fixture["home"], apply=True,
+                     skip_canary=True, drain_acknowledged=True)
+        out = io.StringIO()
+        with _path_front(fixture["yarn_bin"]), \
+                contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.upgrade(args)
+        assert rc == 0, out.getvalue()
+        assert "already current" not in out.getvalue()
+        smoke = [row for row in calls if isinstance(row, dict)]
+        assert len(smoke) == 1, calls
+        data = json.load(open(_artifact(root, target)))
+        assert data["verified"] is True
+        assert data["rolled_back"] is False
+        assert upgrade.read_state(root)["stage"] == "applied"
     finally:
         _restore_apply(real)
         shutil.rmtree(root, ignore_errors=True)
