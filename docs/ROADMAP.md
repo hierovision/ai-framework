@@ -1,7 +1,7 @@
 ---
 title: ai-framework Roadmap
 established: 2026-08-28
-last_triaged: 2026-11-07
+last_triaged: 2026-11-09
 rubric: impact-urgency   # switched from priority-1-5-composite on 2026-10-11 (RM-053 contract); prior scores preserved per row
 threshold: null   # no cut threshold in effect
 sources:
@@ -16,7 +16,7 @@ sources:
 
 # ai-framework Roadmap
 
-> Last triaged: 2026-11-07 · Rubric: impact-urgency (1–3 each; Score = Impact × Urgency) · Schema per skills/triaging-requirements/references/roadmap-format.md (merged 2026-10-11, PR #111)
+> Last triaged: 2026-11-09 · Rubric: impact-urgency (1–3 each; Score = Impact × Urgency) · Schema per skills/triaging-requirements/references/roadmap-format.md (merged 2026-10-11, PR #111)
 
 ## Summary
 
