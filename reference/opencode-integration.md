@@ -83,11 +83,23 @@ Rollback: `opencode upgrade <previous> --method yarn` plus the pre-upgrade
 DB/config backup. V1: reinstall the shadowed V1 bin and restore the V1
 config/DB backups.
 
-The wrapper at `$HOME/.yarn/bin/opencode` selects both binary and config via
-`XDG_CONFIG_HOME`; the upgrade preserves the current config root
-(`cli.json`, `service.json`, and other non-agent/plugin files) by copying it
-forward before staging the reviewed agents/plugins/config. The pre-upgrade
-DB backup in the manifest is the data rollback.
+The yarn-global topology installs two packages that each publish an `opencode`
+bin: the retained V1 `opencode-ai` package (1.19.4) and the V2
+`@opencode/cli@2.2.6`. Yarn links the V2 package as `opencode2` and may leave
+the default `opencode` on V1 — the dual-bin collision observed on 2026-11-09.
+`scripts/opencode_upgrade.py upgrade --to <pin> --apply --drain-acknowledged`
+resolves the installed V2 target (`~/.yarn/bin/opencode2` first, then
+`~/.config/yarn/global/node_modules/@opencode/cli/bin/opencode.exe`),
+atomically repairs `~/.yarn/bin/opencode` to that package binary (preferring a
+relative `opencode2` target), and verifies both `opencode --version` and
+`opencode debug paths config` before the post-upgrade smoke. When the target
+package is already installed and only the default link is wrong, the apply
+skips the official install and repairs/verifies without a Yarn reinstall. A
+failed verification leaves the target package and repaired default in place,
+records `verified: false` / `rolled_back: false` with the failing stage,
+link/package evidence, and the manual rollback command; ADR-0017 has no
+automatic link/DB rollback. `status`/`doctor` report the target package, the
+default version, `shadow_ok`, and the exact repair command.
 
 ## Service and typed API
 

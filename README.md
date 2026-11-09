@@ -30,6 +30,17 @@ staged with `python3 scripts/stage_opencode_config.py --backup`. The canary
 and pin check are the pre-merge gates; see ADR-0017. Never hand-edit a pin
 seam.
 
+The yarn-global install retains the V1 `opencode-ai` package, so **both
+packages publish an `opencode` bin**: Yarn links the V2 binary as `opencode2`
+and may leave the default `opencode` pointing at V1. Run
+`python3 scripts/opencode_upgrade.py upgrade --to 2.2.6 --apply
+--drain-acknowledged` from a normal terminal with all sessions closed; it
+reuses the installed V2 package (no Yarn reinstall), atomically repairs the
+default `opencode` shadow to that package binary, and verifies
+`opencode --version` + `opencode debug paths config` before the smoke. A
+failed verification records `verified: false` with the exact manual rollback
+command — it is not an automatic rollback (ADR-0017).
+
 Re-run after adding new skills or agents. `git pull` alone updates the
 content of already-linked skills/agents. Agent files are validated on
 install: the ID is **path-derived**, so a legacy `name:` frontmatter key is

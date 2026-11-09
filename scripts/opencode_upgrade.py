@@ -11,14 +11,17 @@ upgrade workflow around it:
   plan      target compatibility matrix + breaking-change notes; no writes
   prepare   bump every seam, plugin peer/lockfile roots, and the ADR amendment
   canary    install the candidate in scratch + full canary + plugin typechecks
-  apply     drained atomic switch + post-switch verification + auto-rollback
-  rollback  restore the previous wrapper link and pre-upgrade DB
+  apply     drained supported upgrade: resolve V2, repair the default shadow,
+            post-switch verification; no automatic rollback
+  rollback  manual restore of the previous package and pre-upgrade DB
   prune     remove old scratch prefixes/canary/compat dirs (--keep N)
   upgrade   check -> plan -> canary -> prepare (stop before apply)
 
 The only human-gated step is `apply`: it needs a TTY, a drained process set,
-and `--drain-acknowledged`-equivalent consent. A failure after the switch
-restores the previous link and the pre-upgrade DB and reports ROLLED BACK.
+and `--drain-acknowledged`-equivalent consent. It resolves the installed V2
+target and atomically repairs the default `opencode` shadow before the smoke.
+A failed verification leaves the target and repaired default in place, records
+`verified: false`, and prints the manual rollback command (ADR-0017).
 
 All writes are under the repo or `$HOME/.local/lib/opencode`; scratch lives in
 `.scratch/opencode-v2/`. Secrets are never printed (auth is read by the
@@ -145,14 +148,14 @@ def completed_stages(state):
     return done
 
 
-def write_state(repo, target, stage, detail=None):
+def write_state(repo, target, stage, detail=None, force=False):
     state = read_state(repo)
     if state.get("target") != target:
         state = {"target": target, "stages": {}}
     order = list(STAGE_ORDER)
     current = state.get("stage")
-    if current in order and stage in order \
-            and order.index(stage) < order.index(current):
+    if (not force and current in order and stage in order
+            and order.index(stage) < order.index(current)):
         stage = current  # never regress applied -> canaried on a re-run
     state["stage"] = stage
     state.setdefault("stages", {})[stage] = {
@@ -467,6 +470,149 @@ def version_of(binary):
     return parse_version(proc.stdout) if proc.returncode == 0 else None
 
 
+YARN_LINK_NAME = "opencode2"
+
+
+def config_root_of(binary):
+    proc = run([binary, "debug", "paths", "config"], timeout=30)
+    return (proc.stdout or "").strip() if proc.returncode == 0 else None
+
+
+def target_package(home):
+    """(package_dir, package_bin, package_json_version) for the V2 package."""
+    package_dir = os.path.join(home, ".config", "yarn", "global",
+                               "node_modules", "@opencode", "cli")
+    package_bin = os.path.join(package_dir, "bin", "opencode.exe")
+    data = read_json(os.path.join(package_dir, "package.json"), {}) or {}
+    version = data.get("version") if isinstance(data, dict) else None
+    return package_dir, package_bin, version
+
+
+def target_package_info(home, target):
+    package_dir, package_bin, version = target_package(home)
+    return {"version": version or target, "path": package_dir,
+            "binary": package_bin}
+
+
+def resolve_target_binary(home, target):
+    """Return (candidate, evidence) for the first binary reporting `target`.
+
+    Order is the Yarn V2 link (`~/.yarn/bin/opencode2`) then the installed
+    package binary. Both packages publish an `opencode` bin; the retained V1
+    package is never a valid target.
+    """
+    yarn_link = os.path.join(home, ".yarn", "bin", YARN_LINK_NAME)
+    _package_dir, package_bin, _version = target_package(home)
+    evidence = []
+    for candidate in (yarn_link, package_bin):
+        exists = os.path.exists(candidate)
+        version = version_of(candidate) if exists else None
+        evidence.append({"path": candidate, "exists": exists,
+                         "version": version})
+        if exists and version == target:
+            return candidate, evidence
+    return None, evidence
+
+
+def repair_default_link(home, link, resolved):
+    """Atomically point `link` at the resolved V2 binary.
+
+    Prefer a relative `opencode2` target when it is the resolved binary, so the
+    shadow tracks Yarn's own V2 link; otherwise link to the package binary.
+    """
+    link_dir = os.path.dirname(link)
+    os.makedirs(link_dir, exist_ok=True)
+    yarn_link = os.path.join(link_dir, YARN_LINK_NAME)
+    if (os.path.exists(yarn_link)
+            and os.path.abspath(yarn_link) == os.path.abspath(resolved)):
+        desired = YARN_LINK_NAME
+    else:
+        desired = resolved
+    tmp = f"{link}.shadow-tmp.{os.getpid()}"
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    os.symlink(desired, tmp)
+    os.replace(tmp, link)
+    return desired
+
+
+def prepare_shadow(home, link, target):
+    """Resolve the V2 target, prove its config root, then repair the default.
+
+    Fails closed (no link change) when no candidate reports `target` or the
+    target's config root is not the supported `~/.config/opencode`.
+    """
+    expected = os.path.join(home, ".config", "opencode")
+    resolved, evidence = resolve_target_binary(home, target)
+    result = {"target": target, "link": link, "resolved": resolved,
+              "candidates": evidence, "expected_config": expected,
+              "config_root": None, "default_version": None,
+              "failure_stage": None}
+    if resolved is None:
+        result["failure_stage"] = "target-binary"
+        return result
+    config_root = config_root_of(resolved)
+    result["config_root"] = config_root
+    if (config_root is None
+            or os.path.realpath(config_root) != os.path.realpath(expected)):
+        result["failure_stage"] = "config-root"
+        return result
+    try:
+        result["link_target"] = repair_default_link(home, link, resolved)
+    except OSError as exc:
+        result["failure_stage"] = "repair"
+        result["detail"] = str(exc)
+        return result
+    result["default_version"] = version_of(link)
+    return result
+
+
+def shadow_state(home, link, target):
+    """Diagnostic view of the installed target vs the default command."""
+    expected = os.path.join(home, ".config", "opencode")
+    package_dir, package_bin, package_version = target_package(home)
+    resolved, candidates = resolve_target_binary(home, target)
+    installed = target if resolved else None
+    default_exists = os.path.lexists(link)
+    default_version = version_of(link) if default_exists else None
+    default_config = config_root_of(link) if default_exists else None
+    target_config = config_root_of(resolved) if resolved else None
+    supported_config = (target_config is not None
+                        and os.path.realpath(target_config)
+                        == os.path.realpath(expected))
+    shadow_ok = bool(installed) and default_version == target and supported_config
+    return {
+        "target_installed": installed,
+        "target_package": {"version": package_version, "path": package_dir,
+                           "binary": package_bin},
+        "target_binary": resolved,
+        "candidates": candidates,
+        "default_link": link,
+        "default_link_target": os.readlink(link) if os.path.islink(link) else None,
+        "default_version": default_version,
+        "config_root": default_config or target_config,
+        "target_config_root": target_config,
+        "expected_config": expected,
+        "supported_config": supported_config,
+        "shadow_ok": shadow_ok,
+    }
+
+
+def repair_command(target):
+    return ("python3 scripts/opencode_upgrade.py upgrade --to " + target
+            + " --apply --drain-acknowledged")
+
+
+def last_verify_verified(repo, target):
+    data = read_json(os.path.join(repo, ".scratch", "opencode-v2",
+                                  f"upgrade-{target}-verify.json"))
+    if not isinstance(data, dict):
+        return None
+    return data.get("verified")
+
+
 def topology(home, link):
     """The supported install: `opencode` in PATH + ~/.config/opencode."""
     command = shutil.which("opencode") or link
@@ -506,7 +652,8 @@ def status_payload(args):
     home, link = live_paths(args)
     pinned = v2.VERSION_PIN
     install = topology(home, link)
-    live = version_of(install["command"])
+    shadow = shadow_state(home, link, pinned)
+    live = version_of(install["command"]) if install["command"] else None
     latest = (args.latest or latest_version(args.repo, refresh=args.refresh)
               if args.remote else args.latest)
     state = read_state(args.repo)
@@ -515,10 +662,16 @@ def status_payload(args):
         args.repo, ".scratch", "opencode-v2",
         f"upgrade-{pinned}-verify.json"), {}) or {}
     next_command = "up to date"
-    if not install["supported"]:
-        next_command = ("migrate: python3 scripts/stage_opencode_config.py "
-                        "--backup; opencode upgrade " + pinned
-                        + " --method yarn")
+    repair_needed = bool(shadow["target_installed"]) and not shadow["shadow_ok"]
+    if repair_needed:
+        next_command = repair_command(pinned)
+    elif not install["supported"]:
+        if shadow["target_installed"] and shadow["supported_config"]:
+            next_command = repair_command(pinned)
+        else:
+            next_command = ("migrate: python3 scripts/stage_opencode_config.py "
+                            "--backup; opencode upgrade " + pinned
+                            + " --method yarn")
     elif live != pinned:
         next_command = f"opencode upgrade {pinned} --method yarn"
     elif latest and version_key(latest) > version_key(pinned):
@@ -534,6 +687,10 @@ def status_payload(args):
         "live": live,
         "latest": latest,
         "install": install,
+        "target_installed": shadow["target_installed"],
+        "default_version": shadow["default_version"],
+        "shadow_ok": shadow["shadow_ok"],
+        "shadow": shadow,
         "canary": canary,
         "last_apply": verify or None,
         "state": state or None,
@@ -554,6 +711,9 @@ def print_status(payload, json_mode=False):
     print(f"  resolved:      {install['resolved']}")
     print(f"  config root:   {install['config_root'] or 'unknown'}")
     print(f"  supported:     {'yes' if install['supported'] else 'no'}")
+    print(f"  target pkg:    {payload['target_installed'] or 'not installed'}")
+    print(f"  default:       {payload['default_version'] or 'unknown'}")
+    print(f"  shadow ok:     {'yes' if payload['shadow_ok'] else 'no'}")
     print(f"  V1 rollback:   {install['v1_rollback'] or 'not installed'}")
     canary = payload["canary"]
     if canary:
@@ -562,8 +722,10 @@ def print_status(payload, json_mode=False):
     else:
         print("last canary:   none")
     if payload["last_apply"]:
-        print(f"last apply:    {payload['last_apply'].get('version')} "
-              f"rolled_back={payload['last_apply'].get('rolled_back')}")
+        apply = payload["last_apply"]
+        print(f"last apply:    {apply.get('version')} "
+              f"verified={apply.get('verified')} "
+              f"rolled_back={apply.get('rolled_back')}")
     state = payload["state"]
     if state:
         print(f"upgrade state: {state.get('target')} at {state.get('stage')}")
@@ -591,12 +753,19 @@ def observer_plugin(command):
 def doctor(args):
     home, link = live_paths(args)
     install = topology(home, link)
+    shadow = shadow_state(home, link, v2.VERSION_PIN)
     checks = []
     checks.append(("command", bool(install["command"]),
                    install["command"] or "not found"))
     checks.append(("config-root", install["supported"],
                    f"{install['config_root']} (expected "
                    f"{install['expected_config']})"))
+    checks.append(("target-package", bool(shadow["target_installed"]),
+                   f"{shadow['target_installed'] or 'not installed'} "
+                   f"({shadow['target_package']['path']})"))
+    checks.append(("shadow", shadow["shadow_ok"],
+                   f"default={shadow['default_version']} "
+                   f"target={shadow['target_installed'] or 'not installed'}"))
     live = version_of(install["command"]) if install["command"] else None
     checks.append(("version", live == v2.VERSION_PIN,
                    f"live={live} pinned={v2.VERSION_PIN}"))
@@ -1207,25 +1376,58 @@ def official_upgrade(args, target):
     return proc.returncode
 
 
-def post_upgrade_smoke(args, target):
-    command = shutil.which("opencode") or "opencode"
+def post_upgrade_smoke(args, target, command=None):
+    """Post-apply verification against an explicit, repaired executable."""
     home = os.path.abspath(args.home or os.path.expanduser("~"))
+    command = command or shutil.which("opencode") or "opencode"
+    expected = os.path.join(home, ".config", "opencode")
     checks = []
     live = version_of(command)
     checks.append(("binary", live == target, live or "unknown"))
+    config_root = config_root_of(command)
+    checks.append(("config-root",
+                   config_root is not None
+                   and os.path.realpath(config_root) == os.path.realpath(
+                       expected),
+                   f"{config_root} (expected {expected})"))
     info = run([command, "api", "GET", "/api/info"], timeout=60)
     checks.append(("api", info.returncode == 0 and target in (info.stdout or ""),
                    (info.stdout or "").strip()[:200]))
     agents = post_smoke.check_agents(REPO, None)
     checks.append(("agents", agents[0], agents[1]))
-    config = os.path.join(home, ".config", "opencode")
     plugin = post_smoke.check_plugin(framework=REPO,
-                                     config_root=os.path.dirname(config),
+                                     config_root=os.path.dirname(expected),
                                      binary=command)
     checks.append(("plugin", plugin[0], plugin[1][:240]))
     _row, observer = observer_plugin(command)
     checks.append(("observer", "tui=True" in observer, observer))
     return checks
+
+
+def failure_payload(args, target, home, link, backup, previous, stage, checks,
+                    verified=False):
+    """Truthful apply artifact: no restore happened, so `rolled_back` is false."""
+    link_info = {
+        "path": link,
+        "target": os.readlink(link) if os.path.islink(link) else None,
+        "version": version_of(link) if os.path.lexists(link) else None,
+    }
+    payload = {
+        "version": target,
+        "verified": verified,
+        "rolled_back": False,
+        "failure_stage": stage,
+        "checks": {name: {"ok": ok, "detail": detail}
+                   for name, ok, detail in checks},
+        "backup": backup,
+        "target_package": target_package_info(home, target),
+        "default_link": link_info,
+        "default_version": link_info["version"],
+        "at": now_iso(),
+    }
+    payload["rollback"] = (
+        f"{link} upgrade {previous or '<previous>'} --method {args.method}")
+    return payload
 
 
 def apply_supported(args, target):
@@ -1248,41 +1450,69 @@ def apply_supported(args, target):
         print("close the TUI and run `opencode service stop`, then retry "
               "(or --force).", file=sys.stderr)
         return 2
-    command = shutil.which("opencode") or "opencode"
-    previous = version_of(command)
+    home = os.path.abspath(args.home or os.path.expanduser("~"))
+    link = args.link or os.path.join(home, ".yarn", "bin", "opencode")
+    previous = version_of(link) if os.path.lexists(link) else None
     if getattr(args, "stop_service", False):
-        stopped = run([command, "service", "stop"], timeout=60)
+        stopped = run([link, "service", "stop"], timeout=60)
         print(f"service stop: {stopped.returncode}")
     if getattr(args, "dry_run", False):
         print("would back up the DB and ~/.config/opencode under "
               ".scratch/opencode-v2/")
-        print(f"would run: {command} upgrade {target} --method {args.method}")
+        print(f"would repair {link} to the installed {target} V2 package")
         return 0
     backup, db = pre_upgrade_backup(args, target)
-    rc = official_upgrade(args, target)
-    if rc != 0:
-        print(f"error: official upgrade exited {rc}", file=sys.stderr)
-        return rc
-    checks = post_upgrade_smoke(args, target)
     artifact = os.path.join(args.repo, ".scratch", "opencode-v2",
                             f"upgrade-{target}-verify.json")
-    payload = {"version": target, "checks": {
-        name: {"ok": ok, "detail": detail} for name, ok, detail in checks},
-        "backup": backup, "rolled_back": False, "at": now_iso()}
+
+    resolved, _evidence = resolve_target_binary(home, target)
+    if resolved is None:
+        print(f"installing {target} via the official command", file=sys.stderr)
+        rc = official_upgrade(args, target)
+        if rc != 0:
+            payload = failure_payload(args, target, home, link, backup,
+                                      previous, "official-install", [])
+            write_json(artifact, payload)
+            write_state(args.repo, target, "prepared",
+                        {"artifact": artifact, "verified": False}, force=True)
+            print(f"error: official upgrade exited {rc}", file=sys.stderr)
+            print(f"rollback: {payload['rollback']}", file=sys.stderr)
+            return rc
+
+    shadow = prepare_shadow(home, link, target)
+    if shadow["failure_stage"]:
+        payload = failure_payload(args, target, home, link, backup, previous,
+                                  shadow["failure_stage"], [])
+        payload["shadow"] = shadow
+        write_json(artifact, payload)
+        write_state(args.repo, target, "prepared",
+                    {"artifact": artifact, "verified": False}, force=True)
+        print(f"error: shadow repair failed at {shadow['failure_stage']}",
+              file=sys.stderr)
+        print(f"link: {link}; target package: "
+              f"{payload['target_package']['path']}", file=sys.stderr)
+        print(f"rollback: {payload['rollback']}", file=sys.stderr)
+        return 1
+
+    checks = post_upgrade_smoke(args, target, command=link)
+    failed = [name for name, ok, _detail in checks if not ok]
+    verified = not failed
+    payload = failure_payload(args, target, home, link, backup, previous,
+                              failed[0] if failed else None, checks,
+                              verified=verified)
+    payload["shadow"] = shadow
     write_json(artifact, payload)
     for name, ok, detail in checks:
         print(f"verify {name}: {'PASS' if ok else 'FAIL'} {detail}")
-    if all(ok for _name, ok, _detail in checks):
+    if verified:
         write_state(args.repo, target, "applied", {"artifact": artifact})
         print(f"UPGRADE OK {target} evidence={artifact}")
         return 0
+    write_state(args.repo, target, "prepared",
+                {"artifact": artifact, "verified": False}, force=True)
     print("error: post-upgrade smoke failed", file=sys.stderr)
-    print(f"rollback: {command} upgrade {previous or '<previous>'} "
-          f"--method {args.method}", file=sys.stderr)
+    print(f"rollback: {payload['rollback']}", file=sys.stderr)
     print(f"restore DB: {db}; config: {backup}/config", file=sys.stderr)
-    payload["rolled_back"] = True
-    write_json(artifact, payload)
-    write_state(args.repo, target, "rolled-back", {"artifact": artifact})
     return 1
 
 
@@ -1323,24 +1553,39 @@ def upgrade(args):
         return 2
     home, link = live_paths(args)
     install = topology(home, link)
+    shadow = None
     if not install["supported"]:
-        print("error: this is not the supported install layout; migrate first:",
-              file=sys.stderr)
-        print("  python3 scripts/stage_opencode_config.py --backup",
-              file=sys.stderr)
-        print(f"  opencode upgrade {v2.VERSION_PIN} --method yarn",
-              file=sys.stderr)
-        return 2
-    live = version_of(install["command"])
+        if not args.apply:
+            print("error: this is not the supported install layout; migrate "
+                  "first:", file=sys.stderr)
+            print("  python3 scripts/stage_opencode_config.py --backup",
+                  file=sys.stderr)
+            print(f"  opencode upgrade {v2.VERSION_PIN} --method yarn",
+                  file=sys.stderr)
+            return 2
+        shadow = shadow_state(home, link, target)
+        if not (shadow["target_installed"] and shadow["supported_config"]):
+            print("error: this is not the supported install layout; migrate "
+                  "first:", file=sys.stderr)
+            print("  python3 scripts/stage_opencode_config.py --backup",
+                  file=sys.stderr)
+            print(f"  opencode upgrade {v2.VERSION_PIN} --method yarn",
+                  file=sys.stderr)
+            return 2
+    live = version_of(install["command"]) if install["command"] else None
     if target == v2.VERSION_PIN and not args.force:
-        if live == target:
+        if shadow is None:
+            shadow = shadow_state(home, link, target)
+        prior = last_verify_verified(args.repo, target)
+        healthy = (live == target and install["supported"]
+                   and (shadow["shadow_ok"] or not shadow["target_installed"]))
+        if healthy and prior is not False:
             print(f"already current: {target}")
             return 0
         write_state(args.repo, target, "prepared")
         if args.apply:
             return apply_supported(args, target)
-        print(f"pinned target already prepared; apply with "
-              f"`opencode upgrade {target} --method {args.method}`")
+        print(f"shadow repair needed: {repair_command(target)}")
         return 0
     if args.dry_run:
         rc = plan(argparse.Namespace(

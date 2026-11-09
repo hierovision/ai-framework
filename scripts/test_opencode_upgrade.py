@@ -114,6 +114,129 @@ def _args(repo, **overrides):
     return argparse.Namespace(**values)
 
 
+def _stub_binary(path, version, config_root=None):
+    """A tiny executable that answers `--version` and `debug paths config`."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    lines = [
+        "#!/bin/sh",
+        f'if [ "$1" = "--version" ]; then echo "opencode v{version}"; '
+        "exit 0; fi",
+    ]
+    if config_root:
+        lines.append(
+            'if [ "$1" = "debug" ] && [ "$2" = "paths" ] && '
+            f'[ "$3" = "config" ]; then echo "{config_root}"; exit 0; fi')
+    lines.append("exit 1")
+    _write(path, "\n".join(lines) + "\n")
+    os.chmod(path, 0o755)
+
+
+def _shadow_home(root, target, *, default_version="1.19.4",
+                 binary_version=None, package_version=None,
+                 write_binary=True, opencode2=True, config_root=None):
+    """Fake HOME with the yarn-global V2 package, optional opencode2, and a
+    default `opencode` link that reports `default_version`."""
+    binary_version = binary_version or target
+    home = os.path.join(root, "home")
+    yarn_bin = os.path.join(home, ".yarn", "bin")
+    config = config_root if config_root is not None else os.path.join(
+        home, ".config", "opencode")
+    os.makedirs(config, exist_ok=True)
+    package_dir = os.path.join(home, ".config", "yarn", "global",
+                               "node_modules", "@opencode", "cli")
+    package_bin = os.path.join(package_dir, "bin", "opencode.exe")
+    if write_binary:
+        _stub_binary(package_bin, binary_version, config)
+    if package_version is not None:
+        _write(os.path.join(package_dir, "package.json"), json.dumps({
+            "name": "@opencode/cli", "version": package_version}) + "\n")
+    link2 = os.path.join(yarn_bin, "opencode2")
+    if opencode2 and write_binary:
+        os.makedirs(yarn_bin, exist_ok=True)
+        if os.path.lexists(link2):
+            os.unlink(link2)
+        os.symlink(package_bin, link2)
+    link = os.path.join(yarn_bin, "opencode")
+    if default_version is not None:
+        _stub_binary(link, default_version)
+    return {"home": home, "link": link, "link2": link2, "config": config,
+            "package_dir": package_dir, "package_bin": package_bin,
+            "yarn_bin": yarn_bin}
+
+
+def _v1_only_home(root, default_version="1.19.4"):
+    """Fake HOME before the V2 package exists: only the V1 default link."""
+    home = os.path.join(root, "home")
+    yarn_bin = os.path.join(home, ".yarn", "bin")
+    link = os.path.join(yarn_bin, "opencode")
+    _stub_binary(link, default_version)
+    config = os.path.join(home, ".config", "opencode")
+    os.makedirs(config, exist_ok=True)
+    package_dir = os.path.join(home, ".config", "yarn", "global",
+                               "node_modules", "@opencode", "cli")
+    return {"home": home, "link": link,
+            "link2": os.path.join(yarn_bin, "opencode2"), "config": config,
+            "package_dir": package_dir,
+            "package_bin": os.path.join(package_dir, "bin", "opencode.exe"),
+            "yarn_bin": yarn_bin}
+
+
+def _yarn_relink_stub(fixture, target, calls):
+    """Official-install stub: installs V2, then Yarn links opencode2 to V2 but
+    rewrites the default `opencode` to V1 (the observed dual-bin behavior)."""
+    def install(_args, _target):
+        calls.append("install")
+        _stub_binary(fixture["package_bin"], target, fixture["config"])
+        _write(os.path.join(fixture["package_dir"], "package.json"), json.dumps({
+            "name": "@opencode/cli", "version": target}) + "\n")
+        if os.path.lexists(fixture["link2"]):
+            os.unlink(fixture["link2"])
+        os.symlink(fixture["package_bin"], fixture["link2"])
+        _stub_binary(fixture["link"], "1.19.4")
+        return 0
+    return install
+
+
+def _smoke_recorder(calls, ok=True):
+    def smoke(_args, _target, command=None):
+        calls.append({"event": "smoke", "command": command,
+                      "version": upgrade.version_of(command)
+                      if command else None})
+        return [("binary", ok, "ok" if ok else "forced failure")]
+    return smoke
+
+
+def _patch_apply(backup, smoke, install=None):
+    real = (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+            upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes)
+    upgrade.pre_upgrade_backup = lambda a, t: (
+        backup, os.path.join(backup, "db"))
+    upgrade.official_upgrade = install or (lambda a, t: 0)
+    upgrade.post_upgrade_smoke = smoke
+    upgrade.stage_config.live_processes = lambda: []
+    return real
+
+
+def _restore_apply(real):
+    (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+     upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes) = real
+
+
+@contextlib.contextmanager
+def _path_front(directory):
+    real = os.environ.get("PATH", "")
+    os.environ["PATH"] = directory + os.pathsep + real
+    try:
+        yield
+    finally:
+        os.environ["PATH"] = real
+
+
+def _artifact(root, target):
+    return os.path.join(root, ".scratch", "opencode-v2",
+                        f"upgrade-{target}-verify.json")
+
+
 def test_check_pins_clean_and_stale():
     root = _tmp("upgrade-pins-")
     try:
@@ -258,38 +381,256 @@ def test_check_pr_requires_canary():
 
 def test_apply_requires_consent_and_post_smoke_failure():
     root = _tmp("upgrade-apply-")
-    real = (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
-            upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
-            upgrade.version_of)
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    real = _patch_apply(backup, lambda a, t, command=None: [
+        ("binary", False, "forced failure")])
     try:
-        _fixture(root)
-        args = _args(root, to="2.2.5", skip_canary=True)
-        assert upgrade.apply_supported(args, "2.2.5") == 2
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True)
+        assert upgrade.apply_supported(args, target) == 2
         args.drain_acknowledged = True
-        backup = os.path.join(root, "backup")
-        os.makedirs(backup)
-        upgrade.pre_upgrade_backup = lambda a, t: (backup,
-                                                   os.path.join(root, "db"))
-        upgrade.official_upgrade = lambda a, t: 0
-        upgrade.post_upgrade_smoke = lambda a, t: [
-            ("binary", False, "forced failure")]
-        upgrade.stage_config.live_processes = lambda: []
-        upgrade.version_of = lambda binary: "2.2.5"
         out = io.StringIO()
         with contextlib.redirect_stdout(out), \
                 contextlib.redirect_stderr(out):
-            rc = upgrade.apply_supported(args, "2.2.5")
+            rc = upgrade.apply_supported(args, target)
         assert rc == 1, out.getvalue()
-        artifact = os.path.join(root, ".scratch", "opencode-v2",
-                                "upgrade-2.2.5-verify.json")
-        data = json.load(open(artifact))
-        assert data["rolled_back"] is True
+        data = json.load(open(_artifact(root, target)))
+        assert data["verified"] is False
+        assert data["rolled_back"] is False
         assert "rollback:" in out.getvalue()
     finally:
-        (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
-         upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
-         upgrade.version_of) = real
+        _restore_apply(real)
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_repairs_yarn_relink_before_smoke():
+    root = _tmp("upgrade-relink-")
+    target = v2.VERSION_PIN
+    fixture = _v1_only_home(root)
+    calls = []
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    real = _patch_apply(backup, _smoke_recorder(calls),
+                        _yarn_relink_stub(fixture, target, calls))
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = upgrade.apply_supported(args, target)
+        assert rc == 0
+        assert "install" in calls, calls
+        smoke = [row for row in calls if isinstance(row, dict)]
+        assert len(smoke) == 1, calls
+        assert smoke[0]["version"] == target, smoke
+        assert os.path.realpath(fixture["link"]) == os.path.realpath(
+            fixture["package_bin"])
+        assert json.load(open(_artifact(root, target)))["verified"] is True
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_reuses_installed_target_and_repairs_default():
+    root = _tmp("upgrade-reuse-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    calls = []
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    real = _patch_apply(backup, _smoke_recorder(calls),
+                        lambda a, t: calls.append("install") or 0)
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = upgrade.apply_supported(args, target)
+        assert rc == 0
+        assert "install" not in calls, calls
+        smoke = [row for row in calls if isinstance(row, dict)]
+        assert len(smoke) == 1, calls
+        assert smoke[0]["version"] == target, smoke
+        assert upgrade.read_state(root)["stage"] == "applied"
+        assert os.path.realpath(fixture["link"]) == os.path.realpath(
+            fixture["package_bin"])
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_upgrade_repairs_when_default_is_v1():
+    root = _tmp("upgrade-e2e-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    calls = []
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    real = _patch_apply(backup, _smoke_recorder(calls),
+                        lambda a, t: calls.append("install") or 0)
+    try:
+        args = _args(root, to=target, home=fixture["home"], apply=True,
+                     skip_canary=True, drain_acknowledged=True)
+        with _path_front(fixture["yarn_bin"]), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = upgrade.upgrade(args)
+        assert rc == 0
+        assert "install" not in calls, calls
+        smoke = [row for row in calls if isinstance(row, dict)]
+        assert len(smoke) == 1, calls
+        assert upgrade.read_state(root)["stage"] == "applied"
+        assert os.path.realpath(fixture["link"]) == os.path.realpath(
+            fixture["package_bin"])
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_failure_is_not_reported_as_rolled_back():
+    root = _tmp("upgrade-truthful-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    real = _patch_apply(backup, lambda a, t, command=None: [
+        ("binary", False, "forced failure")])
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.apply_supported(args, target)
+        assert rc == 1, out.getvalue()
+        data = json.load(open(_artifact(root, target)))
+        assert data["verified"] is False
+        assert data["rolled_back"] is False
+        assert data["failure_stage"] == "binary"
+        assert data["target_package"]["version"] == target
+        assert data["target_package"]["path"].endswith(
+            os.path.join("node_modules", "@opencode", "cli"))
+        assert data["default_link"]["path"] == fixture["link"]
+        assert data["default_link"]["version"] == target
+        assert data["backup"] == backup
+        assert upgrade.read_state(root)["stage"] == "prepared"
+        assert "rollback:" in out.getvalue()
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_shadow_repair_refuses_missing_or_wrong_target():
+    target = v2.VERSION_PIN
+    for case in ("missing", "wrong"):
+        root = _tmp("upgrade-shadow-refuse-")
+        if case == "missing":
+            fixture = _shadow_home(root, target, write_binary=False,
+                                   package_version=None, opencode2=False)
+        else:
+            fixture = _shadow_home(root, target, binary_version="2.2.5",
+                                   package_version="2.2.5")
+        backup = os.path.join(root, "backup")
+        os.makedirs(backup)
+        calls = []
+        real = _patch_apply(backup, _smoke_recorder(calls),
+                            lambda a, t: calls.append("install") or 0)
+        try:
+            args = _args(root, to=target, home=fixture["home"],
+                         skip_canary=True, drain_acknowledged=True)
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                rc = upgrade.apply_supported(args, target)
+            assert rc == 1, case
+            assert not any(isinstance(row, dict) for row in calls), calls
+            assert upgrade.version_of(fixture["link"]) != target, case
+            data = json.load(open(_artifact(root, target)))
+            assert data["verified"] is False, case
+            assert data["failure_stage"] == "target-binary", case
+        finally:
+            _restore_apply(real)
+            shutil.rmtree(root, ignore_errors=True)
+
+
+def test_shadow_repair_requires_supported_config_root():
+    root = _tmp("upgrade-shadow-config-")
+    target = v2.VERSION_PIN
+    wrong_config = os.path.join(root, "elsewhere", "opencode")
+    os.makedirs(wrong_config)
+    fixture = _shadow_home(root, target, package_version=target,
+                           config_root=wrong_config)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    calls = []
+    real = _patch_apply(backup, _smoke_recorder(calls),
+                        lambda a, t: calls.append("install") or 0)
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = upgrade.apply_supported(args, target)
+        assert rc == 1
+        assert not any(isinstance(row, dict) for row in calls), calls
+        assert upgrade.version_of(fixture["link"]) != target
+        data = json.load(open(_artifact(root, target)))
+        assert data["verified"] is False
+        assert data["failure_stage"] == "config-root"
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_status_detects_shadow_mismatch_and_next_repair():
+    root = _tmp("upgrade-status-shadow-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    try:
+        with _path_front(fixture["yarn_bin"]):
+            payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["target_installed"] == target
+        assert payload["default_version"] == "1.19.4"
+        assert payload["shadow_ok"] is False
+        assert payload["next"] == (
+            "python3 scripts/opencode_upgrade.py upgrade --to " + target
+            + " --apply --drain-acknowledged")
+        assert "stage_opencode_config.py" not in payload["next"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_doctor_fails_on_shadow_mismatch():
+    root = _tmp("upgrade-doctor-shadow-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    try:
+        out = io.StringIO()
+        with _path_front(fixture["yarn_bin"]), \
+                contextlib.redirect_stdout(out):
+            rc = upgrade.doctor(_args(root, home=fixture["home"]))
+        assert rc == 1
+        assert "shadow: FAIL" in out.getvalue(), out.getvalue()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_upgrade_docs_describe_supported_shadow():
+    readme = open(os.path.join(REPO, "README.md"), encoding="utf-8").read()
+    reference = open(os.path.join(
+        REPO, "reference", "opencode-integration.md"), encoding="utf-8").read()
+    adr = open(os.path.join(
+        REPO, "docs", "ADRs",
+        "ADR-0017-supported-opencode-upgrade.md"), encoding="utf-8").read()
+    for text, name in ((readme, "README"), (reference, "reference"),
+                       (adr, "ADR-0017")):
+        assert "opencode2" in text, name
+        assert "shadow" in text, name
+        assert "upgrade --to" in text and "--apply" in text, name
+    assert "both packages publish" in reference or "dual-bin" in reference
+    assert "2026-11-09" in adr
+    assert "not an automatic rollback" in adr or "no automatic" in adr
 
 
 def test_prune_keeps_versions():
