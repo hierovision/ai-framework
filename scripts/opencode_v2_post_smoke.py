@@ -31,6 +31,11 @@ import uuid
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
+
+
+def default_bin_path():
+    """The supported default command: the explicit yarn link, never PATH."""
+    return os.path.join(os.path.expanduser("~"), ".yarn", "bin", "opencode")
 sys.path.insert(0, HERE)
 
 import opencode_v2 as v2  # noqa: E402
@@ -535,7 +540,7 @@ def main(argv=None):
     ap.add_argument("--consumer-artifact", default=None)
     ap.add_argument("--manifest", default=None)
     ap.add_argument("--artifact", default=None)
-    ap.add_argument("--default-bin", default="opencode")
+    ap.add_argument("--default-bin", default=default_bin_path())
     ap.add_argument("--agents-dir", default=None)
     ap.add_argument("--agent-snapshot", default=None)
     ap.add_argument("--require-consumer", action="store_true")

@@ -60,6 +60,11 @@ def now_date():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
 
 
+def default_bin_path():
+    """The supported default command: the explicit yarn link, never PATH."""
+    return os.path.join(os.path.expanduser("~"), ".yarn", "bin", "opencode")
+
+
 def exact_version(text):
     """Delegate to the shared exact version parser."""
     return v2.parse_opencode_version(text)
@@ -495,8 +500,18 @@ def gate_c6(args):
     if not os.path.isfile(binary):
         evidence(root, "C6.txt", "\n".join(lines + ["C6=FAIL (no V1 prefix)"]))
         return False, "V1 prefix missing"
-    ver = subprocess.run([binary, "--version"], capture_output=True, text=True)
-    lines.append(f"v1_version={ver.stdout.strip()}")
+    try:
+        ver = subprocess.run([binary, "--version"], capture_output=True,
+                             text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        lines.append(f"v1_version_probe_error={type(exc).__name__}: {exc}")
+        evidence(root, "C6.txt", "\n".join(lines + ["C6=FAIL"]))
+        return False, f"V1 version probe failed: {exc}"
+    lines.append(f"v1_version={(ver.stdout or '').strip()}")
+    if ver.returncode != 0:
+        lines.append(f"v1_version_exit={ver.returncode}")
+        evidence(root, "C6.txt", "\n".join(lines + ["C6=FAIL"]))
+        return False, f"V1 version probe exited {ver.returncode}"
     backup = os.path.join(root, "opencode.db")
     if not os.path.isfile(backup):
         lines.append("C6=FAIL (no C5 backup)")
@@ -742,7 +757,7 @@ def main(argv=None):
                                                         "v1-prefix"))
     ap.add_argument("--opencode-bin", default=os.path.join(
         REPO, ".scratch", "v2-prefix", "bin", "opencode2"))
-    ap.add_argument("--default-bin", default="opencode")
+    ap.add_argument("--default-bin", default=default_bin_path())
     ap.add_argument("--db-name", default="stability.db")
     ap.add_argument("--version", default=v2.VERSION_PIN,
                     help="candidate @opencode/cli version (default: pin)")

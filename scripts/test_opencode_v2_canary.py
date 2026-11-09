@@ -475,6 +475,83 @@ def test_c1_install_timeout_is_named_failure():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def _write_exec(path, output):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\necho '" + output + "'\n")
+    os.chmod(path, 0o755)
+
+
+def test_c1_rejects_default_version_change():
+    root = _tmp("canary-c1-default-change-")
+    try:
+        prefix = os.path.join(root, "prefix")
+        candidate = os.path.join(prefix, "bin", "opencode2")
+        _write_exec(candidate, f"opencode v{v2.VERSION_PIN}")
+        default = os.path.join(root, "default")
+        _write_exec(default, "opencode v2.2.5")
+        args = argparse.Namespace(
+            scratch_root=root, prefix=prefix, skip_install=True,
+            version=v2.VERSION_PIN, default_bin=default,
+            default_version=v2.VERSION_PIN)
+        ok, detail = canary.gate_c1(args)
+        assert ok is False
+        assert "C1=FAIL" in detail
+        _write_exec(default, f"opencode v{v2.VERSION_PIN}")
+        ok, detail = canary.gate_c1(args)
+        assert ok is True, detail
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_c6_version_probe_timeout_is_named_failure():
+    root = _tmp("canary-c6-timeout-")
+    real_run = canary.subprocess.run
+    try:
+        prefix = os.path.join(root, "v1")
+        _write_exec(os.path.join(prefix, "bin", "opencode"), "1.19.4")
+
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 30)
+
+        canary.subprocess.run = timeout
+        ok, detail = canary.gate_c6(
+            argparse.Namespace(scratch_root=root, v1_prefix=prefix))
+        assert ok is False
+        assert "V1 version probe failed" in detail
+        text = open(os.path.join(root, "C6.txt")).read()
+        assert "v1_version_probe_error=TimeoutExpired" in text
+        assert "C6=FAIL" in text
+    finally:
+        canary.subprocess.run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_default_bin_path_is_explicit_link():
+    root = _tmp("canary-default-link-")
+    fake_home = os.path.join(root, "home")
+    link = os.path.join(fake_home, ".yarn", "bin", "opencode")
+    _write_exec(link, f"opencode v{v2.VERSION_PIN}")
+    path_dir = os.path.join(root, "pathbin")
+    _write_exec(os.path.join(path_dir, "opencode"), "1.19.4")
+    real_home = os.environ.get("HOME")
+    real_path = os.environ.get("PATH", "")
+    os.environ["HOME"] = fake_home
+    os.environ["PATH"] = path_dir + os.pathsep + real_path
+    try:
+        assert canary.default_bin_path() == link
+        proc = subprocess.run([canary.default_bin_path(), "--version"],
+                              capture_output=True, text=True)
+        assert canary.exact_version(proc.stdout) == v2.VERSION_PIN
+    finally:
+        if real_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = real_home
+        os.environ["PATH"] = real_path
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

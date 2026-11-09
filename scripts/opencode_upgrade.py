@@ -1574,7 +1574,42 @@ def plugin_compat(args, target, opentui):
     return ok, "\n".join(lines)
 
 
-def canary_cmd(args, target):
+def default_bin_path(args):
+    """The explicit default binary: --default-bin, --link, then the yarn link."""
+    home = os.path.abspath(getattr(args, "home", None)
+                           or os.path.expanduser("~"))
+    return (getattr(args, "default_bin", None)
+            or getattr(args, "link", None)
+            or os.path.join(home, ".yarn", "bin", "opencode"))
+
+
+def measure_default_version(args):
+    """Measure the explicit default binary's exact version before canary.
+
+    A V1 default (1.19.4) or a prior V2 (2.2.5) is measured here; an
+    unmeasurable default fails closed with a named error.
+    """
+    binary = default_bin_path(args)
+    try:
+        proc = run([binary, "--version"], timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, (f"cannot measure default binary {binary}: "
+                      f"{type(exc).__name__}: {exc}")
+    if proc.returncode != 0:
+        return None, (f"default binary {binary} --version exited "
+                      f"{proc.returncode}")
+    version = v2.parse_opencode_version(proc.stdout)
+    if not version:
+        return None, (f"cannot parse default binary version from {binary}: "
+                      f"{(proc.stdout or '').strip()!r}")
+    return version, None
+
+
+def canary_cmd(args, target, default_version=None):
+    if default_version is None:
+        default_version, error = measure_default_version(args)
+        if error:
+            raise RuntimeError(error)
     prefix = args.prefix or os.path.join(
         args.repo, ".scratch", "v2-" + target + "-prefix")
     v1_prefix = os.path.join(args.repo, ".scratch", "v1-prefix")
@@ -1586,14 +1621,10 @@ def canary_cmd(args, target):
             os.unlink(link)
         os.symlink(v1_bin, link)
     root = os.path.join(args.repo, ".scratch", "v2-canary-" + target)
-    home = os.path.abspath(getattr(args, "home", None)
-                           or os.path.expanduser("~"))
-    default_bin = (getattr(args, "default_bin", None)
-                   or getattr(args, "link", None)
-                   or os.path.join(home, ".yarn", "bin", "opencode"))
+    default_bin = default_bin_path(args)
     return [sys.executable, os.path.join(HERE, "opencode_v2_canary.py"),
             "--all", "--version", target,
-            "--default-version", v2.VERSION_PIN,
+            "--default-version", default_version,
             "--skip-install", "--prefix", prefix,
             "--opencode-bin", os.path.join(prefix, "bin", "opencode"),
             "--default-bin", default_bin, "--v1-prefix", v1_prefix,
@@ -1678,6 +1709,10 @@ def tui_smoke(args, target, opentui):
 
 def canary(args):
     target = args.to or v2.VERSION_PIN
+    default_version, error = measure_default_version(args)
+    if error:
+        print(f"canary: FAIL — {error}", file=sys.stderr)
+        return 1
     prefix = args.prefix or os.path.join(
         args.repo, ".scratch", "v2-" + target + "-prefix")
     if not args.skip_install:
@@ -1691,7 +1726,7 @@ def canary(args):
             print(f"error: install failed: {(install.stderr or '')[-400:]}",
                   file=sys.stderr)
             return 2
-    argv = canary_cmd(args, target)
+    argv = canary_cmd(args, target, default_version=default_version)
     print("canary: " + " ".join(argv))
     try:
         proc = run(argv, cwd=args.repo, timeout=1800, stream=True)

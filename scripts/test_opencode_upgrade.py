@@ -976,14 +976,81 @@ def test_canary_cmd_exact_args():
         v1 = os.path.join(root, "v1", "opencode")
         _write(v1, "#!/bin/sh\necho 1.19.4\n")
         os.chmod(v1, 0o755)
-        args = _args(root, to=v2.VERSION_PIN, v1_bin=v1, default_bin="/tmp/live")
+        default = os.path.join(root, "default")
+        _stub_binary(default, "2.2.5")
+        args = _args(root, to=v2.VERSION_PIN, v1_bin=v1,
+                     default_bin=default)
         argv = upgrade.canary_cmd(args, v2.VERSION_PIN)
         assert "--all" in argv and "--version" in argv, argv
         assert argv[argv.index("--version") + 1] == v2.VERSION_PIN
-        assert argv[argv.index("--default-version") + 1] == v2.VERSION_PIN
-        assert argv[argv.index("--default-bin") + 1] == "/tmp/live"
+        assert argv[argv.index("--default-version") + 1] == "2.2.5"
+        assert argv[argv.index("--default-bin") + 1] == default
         assert "--skip-install" in argv
         assert f"v2-canary-{v2.VERSION_PIN}" in " ".join(argv)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_canary_cmd_measures_v1_default():
+    root = _tmp("upgrade-canary-v1-")
+    try:
+        default = os.path.join(root, "default")
+        _stub_binary(default, "1.19.4")
+        args = _args(root, to=v2.VERSION_PIN, default_bin=default)
+        argv = upgrade.canary_cmd(args, v2.VERSION_PIN)
+        assert argv[argv.index("--default-version") + 1] == "1.19.4"
+        assert argv[argv.index("--default-bin") + 1] == default
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_canary_cmd_measures_prior_v2_default():
+    root = _tmp("upgrade-canary-prior-v2-")
+    try:
+        default = os.path.join(root, "default")
+        _stub_binary(default, "2.2.5")
+        args = _args(root, to=v2.VERSION_PIN, default_bin=default)
+        argv = upgrade.canary_cmd(args, v2.VERSION_PIN)
+        assert argv[argv.index("--default-version") + 1] == "2.2.5"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_canary_cmd_fails_closed_on_unmeasurable_default():
+    root = _tmp("upgrade-canary-unmeasurable-")
+    try:
+        missing = os.path.join(root, "missing")
+        args = _args(root, to=v2.VERSION_PIN, default_bin=missing)
+        try:
+            upgrade.canary_cmd(args, v2.VERSION_PIN)
+            assert False, "missing default must fail closed"
+        except RuntimeError as exc:
+            assert "cannot measure default binary" in str(exc), exc
+        garbage = os.path.join(root, "garbage")
+        _write(garbage, "#!/bin/sh\necho 'not a version'\n")
+        os.chmod(garbage, 0o755)
+        args.default_bin = garbage
+        try:
+            upgrade.canary_cmd(args, v2.VERSION_PIN)
+            assert False, "unparseable default must fail closed"
+        except RuntimeError as exc:
+            assert "cannot parse default binary version" in str(exc), exc
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_canary_fails_closed_before_install_when_default_unmeasurable():
+    root = _tmp("upgrade-canary-preinstall-")
+    try:
+        args = _args(root, to=v2.VERSION_PIN,
+                     default_bin=os.path.join(root, "missing"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            assert upgrade.canary(args) == 1
+        assert "cannot measure default binary" in out.getvalue()
+        assert not os.path.isdir(os.path.join(
+            root, ".scratch", "v2-" + v2.VERSION_PIN + "-prefix"))
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -1996,6 +2063,7 @@ def test_canary_cmd_uses_explicit_link_not_path():
     target = v2.VERSION_PIN
     home = os.path.join(root, "home")
     link = os.path.join(home, ".yarn", "bin", "opencode")
+    _stub_binary(link, target)
     path_dir = os.path.join(root, "pathbin")
     _stub_binary(os.path.join(path_dir, "opencode"), "1.19.4")
     real_path = os.environ.get("PATH", "")
@@ -2006,10 +2074,12 @@ def test_canary_cmd_uses_explicit_link_not_path():
         argv = upgrade.canary_cmd(args, target)
         default_bin = argv[argv.index("--default-bin") + 1]
         assert default_bin == link
+        assert argv[argv.index("--default-version") + 1] == target
         args.link = None
         argv = upgrade.canary_cmd(args, target)
         default_bin = argv[argv.index("--default-bin") + 1]
         assert default_bin == os.path.join(home, ".yarn", "bin", "opencode")
+        assert argv[argv.index("--default-version") + 1] == target
     finally:
         os.environ["PATH"] = real_path
         shutil.rmtree(root, ignore_errors=True)

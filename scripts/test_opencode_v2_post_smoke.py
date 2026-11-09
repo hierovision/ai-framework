@@ -479,6 +479,31 @@ def test_check_version_spawn_error_is_named():
     assert "FileNotFoundError" in detail
 
 
+def test_default_bin_path_is_explicit_link():
+    root = _tmp("postsmoke-default-link-")
+    fake_home = os.path.join(root, "home")
+    link = os.path.join(fake_home, ".yarn", "bin", "opencode")
+    _stub(os.path.join(fake_home, ".yarn"), "opencode",
+          f"opencode v{v2.VERSION_PIN}")
+    path_dir = os.path.join(root, "pathbin")
+    _stub(path_dir, "opencode", "1.19.4")
+    real_home = os.environ.get("HOME")
+    real_path = os.environ.get("PATH", "")
+    os.environ["HOME"] = fake_home
+    os.environ["PATH"] = path_dir + os.pathsep + real_path
+    try:
+        assert post_smoke.default_bin_path() == link
+        ok, detail = post_smoke.check_version(link)
+        assert ok is True, detail
+    finally:
+        if real_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = real_home
+        os.environ["PATH"] = real_path
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
