@@ -462,6 +462,33 @@ def test_c7_passes_with_empty_plugin_list_and_loader_proof():
         _c7_restore(saved, root)
 
 
+def test_c7_wipes_out_of_band_sentinel_under_c7():
+    """AC-C7: a stale out-of-band sentinel under c7/ is removed before setup.
+
+    The sentinel lives outside the generated config/plugin tree, so only the
+    pre-setup `c7/` wipe removes it; deleting that wipe leaves the file and
+    turns this test red.
+    """
+    root = _tmp("canary-c7-stale-sentinel-")
+    sentinel = os.path.join(root, "c7", "out-of-band-sentinel.txt")
+    os.makedirs(os.path.dirname(sentinel), exist_ok=True)
+    with open(sentinel, "w", encoding="utf-8") as fh:
+        fh.write("stale-c7-residue\n")
+    saved = _c7_patch(lambda _args, _config, plugin_dir, token: (
+        f'msg="loading plugin" id={os.path.realpath(plugin_dir)} '
+        f'entrypoint=file://{os.path.realpath(plugin_dir)}/index.js\n'
+        f"canary-plugin initialized probe={token}\n", None))
+    try:
+        ok, text = canary.gate_c7(_c7_namespace(root))
+        assert ok is True, text
+        assert not os.path.exists(sentinel), \
+            "stale out-of-band c7/ residue survived the pre-setup wipe"
+        assert "stale_c7_state_cleared=True" in text, text
+        assert "C7=PASS" in text, text
+    finally:
+        _c7_restore(saved, root)
+
+
 def test_c7_plugin_list_failure_is_diagnostic_only():
     """AC-C7: a plugin-list timeout stays diagnostic when loader proof is real."""
     root = _tmp("canary-c7-plugin-list-error-")
