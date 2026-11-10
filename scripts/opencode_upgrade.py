@@ -58,6 +58,8 @@ PLUGIN_DIRS = ("auto-compact-at-threshold", "delegation-observer",
 TUI_PLUGINS = ("delegation-observer", "delegation-sentinel")
 V1_BIN = os.path.expanduser(
     "~/.config/yarn/global/node_modules/opencode-ai/bin/opencode.exe")
+MIGRATION_APPLY_TIMEOUT = 900
+MIGRATION_APPLY_POLL_INTERVAL = 0.5
 
 
 # --- small helpers -----------------------------------------------------------
@@ -428,12 +430,6 @@ def check_adr_amendment(repo=REPO, version=None):
     return [(rel, True, version)]
 
 
-def residual_accepted(repo, version, residual):
-    """Accept a non-zero migration residual only with a dated record."""
-    scratch = os.path.join(repo, ".scratch", "v2-canary-" + version)
-    return v2.migration_residual_accepted(repo, scratch, version, residual)
-
-
 def _evidence_field(text, name, cast=str):
     match = re.search(rf"^{re.escape(name)}=(.+)$", text, re.MULTILINE)
     if not match:
@@ -489,14 +485,14 @@ def canary_summary(repo=REPO, version=None):
         migration["source_untouched"] = (
             untouched == "True" if untouched in ("True", "False") else None)
     residual = migration["residual"]
-    accepted = residual_accepted(repo, version, residual)
+    accepted = False
     migration_ok = (
         migration["verdict"] == "PASS"
         and migration["integrity"] == "ok"
         and migration["source_untouched"] is True
         and migration["zero_migration"] is False
         and migration["target_only"] == 0
-        and (residual == 0 or accepted)
+        and residual == 0
     )
     required = (
         ("migration verdict", migration["verdict"]),
@@ -1891,6 +1887,90 @@ def pre_upgrade_backup(args, target):
     return root, db
 
 
+def resume_migration(args, home, link):
+    """Re-arm the real DB cursor, start the repaired V2 service, wait, verify.
+
+    This runs only in the explicit owner-run apply, after the drain/backup and
+    the shadow repair, before the post-smoke. Vendor behavior: a completed
+    `kv.migration.v1-v2` row never imports V1 sessions created below an old
+    cursor, so the apply must re-arm `{"phase":"sessions"}` (no cursor) and
+    wait for the service to write `{"phase":"completed"}`. The result is
+    recorded in the apply artifact; any failure/timeout stops the service and
+    is a truthful apply failure, never a residual acceptance.
+    """
+    db = db_source_path(home)
+    result = {
+        "db": db, "skipped": None, "error": None, "ok": False,
+        "verified": False, "armed": False, "phase": None,
+        "timed_out": False, "elapsed_seconds": 0.0,
+        "service_start_exit": None,
+        "source_session_rows": 0, "pre_existing_v2_rows": 0,
+        "target_session_rows": 0, "migrated_source_rows": 0,
+        "missing_source_rows": 0, "missing_baseline_rows": 0,
+        "target_only_ids": 0, "run_created_ids": 0,
+    }
+    if not db or not os.path.isfile(db):
+        result.update({"ok": True, "verified": True,
+                       "skipped": "source DB absent"})
+        return result
+    try:
+        src_ids = v2.read_ids(db, "session")
+        baseline_ids = v2.read_ids(db, "session_v2")
+        result["source_session_rows"] = len(src_ids)
+        result["pre_existing_v2_rows"] = len(baseline_ids)
+        if not src_ids:
+            result.update({"ok": True, "verified": True,
+                           "skipped": "no V1 sessions"})
+            return result
+        result["armed"] = v2.arm_migration_phase(db)
+        start = run([link, "service", "start"], timeout=60)
+        result["service_start_exit"] = start.returncode
+        if start.returncode != 0:
+            result["error"] = (
+                f"service start exited {start.returncode}: "
+                f"{(start.stderr or '').strip()[:240]}")
+            return result
+        state = v2.wait_for_migration(
+            db, MIGRATION_APPLY_TIMEOUT, MIGRATION_APPLY_POLL_INTERVAL)
+        result.update({
+            "phase": state["phase"],
+            "timed_out": state["timed_out"],
+            "elapsed_seconds": round(state["elapsed"], 2),
+        })
+        target_ids = v2.read_ids(db, "session_v2")
+        member = v2.migration_membership(
+            src_ids, target_ids, baseline_ids=baseline_ids)
+        missing_baseline = baseline_ids - target_ids
+        result.update({
+            "target_session_rows": len(target_ids),
+            "migrated_source_rows": len(src_ids & target_ids),
+            "missing_source_rows": len(member["missing"]),
+            "missing_baseline_rows": len(missing_baseline),
+            "target_only_ids": len(member["phantom"]),
+            "run_created_ids": member["run"],
+        })
+        result["ok"] = bool(
+            state["completed"] and not member["missing"]
+            and not missing_baseline)
+        result["verified"] = result["ok"]
+        if not result["ok"] and not result["error"]:
+            result["error"] = (
+                "migration did not complete"
+                if not state["completed"] else
+                f"{len(member['missing'])} source V1 IDs missing, "
+                f"{len(missing_baseline)} baseline V2 IDs missing")
+        return result
+    except (OSError, subprocess.SubprocessError, sqlite3.Error) as exc:
+        result["error"] = f"{type(exc).__name__}: {exc}"
+        return result
+    finally:
+        if not result["ok"]:
+            try:
+                run([link, "service", "stop"], timeout=60)
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+
 def official_upgrade(args, target, command=None):
     """Run the official upgrade through the explicit default link."""
     command = command or default_bin_path(args)
@@ -2019,6 +2099,9 @@ def apply_supported(args, target):
         else:
             print(f"would install {target} via the official command")
         print(f"would repair the default {link} shadow to the V2 package")
+        print("would re-arm the DB migration cursor, start the repaired V2 "
+              "service, wait for migration completion, and verify every "
+              "source V1 ID plus the pre-existing V2 baseline")
         print("would run the post-upgrade smoke (binary, config root, API, "
               "agents, plugin loader, observer)")
         print(f"would write {artifact} and update upgrade-state.json")
@@ -2027,6 +2110,7 @@ def apply_supported(args, target):
                             f"upgrade-{target}-verify.json")
     backup = None
     db = None
+    migration = None
     stage = "preflight"
 
     def restore_text():
@@ -2104,6 +2188,18 @@ def apply_supported(args, target):
             for line in rollback_lines(payload["rollback"]):
                 print(f"rollback: {line}", file=sys.stderr)
             return 1
+        stage = "migration"
+        migration = resume_migration(args, home, link)
+        if not migration["ok"]:
+            payload = record_failure("migration", [],
+                                     extra={"migration": migration})
+            print("error: post-upgrade migration did not complete: "
+                  + (migration.get("error") or "unknown"), file=sys.stderr)
+            print(f"migration evidence: {artifact}", file=sys.stderr)
+            for line in rollback_lines(payload["rollback"]):
+                print(f"rollback: {line}", file=sys.stderr)
+            print(f"restore: {restore_text()}", file=sys.stderr)
+            return 1
         stage = "smoke"
         checks = post_upgrade_smoke(args, target, command=link)
         failed = [name for name, ok, _detail in checks if not ok]
@@ -2112,6 +2208,7 @@ def apply_supported(args, target):
                                  previous_default, failed[0] if failed else None,
                                  checks, verified=verified, db=db)
         payload["shadow"] = shadow
+        payload["migration"] = migration
         write_apply_artifact(artifact, payload)
         for name, ok, detail in checks:
             print(f"verify {name}: {'PASS' if ok else 'FAIL'} {detail}")
@@ -2128,8 +2225,10 @@ def apply_supported(args, target):
         return 1
     except (OSError, subprocess.SubprocessError, sqlite3.Error) as exc:
         failure_stage = f"exception:{stage}"
-        payload = record_failure(failure_stage, [], extra={
-            "exception": f"{type(exc).__name__}: {exc}"})
+        extra = {"exception": f"{type(exc).__name__}: {exc}"}
+        if migration is not None:
+            extra["migration"] = migration
+        payload = record_failure(failure_stage, [], extra=extra)
         print(f"error: apply aborted during {stage}: "
               f"{type(exc).__name__}: {exc}", file=sys.stderr)
         for line in rollback_lines(payload["rollback"]):
@@ -2227,6 +2326,9 @@ def upgrade(args):
             print(f"would run: {install['command']} upgrade {target} "
                   f"--method {args.method}")
         print(f"would repair the default {link} shadow to the V2 package")
+        print("would re-arm the DB migration cursor, start the repaired V2 "
+              "service, wait for migration completion, and verify every "
+              "source V1 ID plus the pre-existing V2 baseline")
         print("would run the post-upgrade smoke (binary, config root, API, "
               "agents, plugin loader, observer)")
         print(f"would write {artifact} and update upgrade-state.json")

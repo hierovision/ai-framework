@@ -27,9 +27,11 @@ revalidated for 2.2.6 by the canary, 2026-11-08):
     step-finish, reasoning}; tool names are `shell`, `read`, `edit`, `glob`,
     `grep`, `subagent`, not V1 `bash`/`write`/`patch`/`task`.
 
-DB access is read-only (`file:...?mode=ro`). The only mutating calls are
-`session.interrupt`, `session.agent`, and `session.prompt` (wake), never a
-delete and never a direct DB write.
+DB reads use `file:...?mode=ro`. The only mutating application calls are
+`session.interrupt`, `session.agent`, and `session.prompt` (wake). The one
+direct DB write is `arm_migration_phase()`, which re-arms the vendor migration
+row on a scratch copy (canary) or the real DB in the explicit owner-run apply;
+there is never a delete or a hand-migrated session row.
 
 `OPENCODE_DB_PATH` is the highest-precedence test override, then
 `OPENCODE_DB`, then the vendor location (`opencode debug paths db`).
@@ -39,12 +41,14 @@ import os
 import re
 import sqlite3
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 DEFAULT_DB = os.path.expanduser("~/.local/share/opencode/opencode.db")
 VERSION_PIN = "2.2.6"
+MIGRATION_KV_KEY = "migration.v1-v2"
 
 # Tool vocabulary (V1 -> V2). Consumer evals may still emit V1 names; callers
 # that accept aliases log them (see run_behavioral_eval).
@@ -145,31 +149,122 @@ def sqlite_backup(source, dest):
     return dest
 
 
-def migration_residual_accepted(repo, scratch_root, version, residual):
-    """A positive migration residual needs a dated classification record."""
-    if residual == 0:
-        return True
-    if residual is None:
-        return False
-    candidates = (
-        os.path.join(repo, "docs", "opencode-v2-migration-classification.json"),
-        os.path.join(scratch_root, "migration-residual-acceptance.json"),
-    )
-    for path in candidates:
+def read_ids(path, table):
+    """Read a table's `id` column read-only; missing DB/table yields an empty set."""
+    if not path or not os.path.isfile(path):
+        return set()
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+    try:
+        if not table_exists(con, table):
+            return set()
+        return {row[0] for row in con.execute(f"SELECT id FROM {table}")}
+    except sqlite3.Error:
+        return set()
+    finally:
+        con.close()
+
+
+def migration_state(path):
+    """The parsed `kv.migration.v1-v2` payload, or None when absent/unreadable."""
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)
         try:
-            with open(path, encoding="utf-8") as fh:
-                data = json.load(fh)
-        except (OSError, ValueError):
-            continue
-        if not isinstance(data, dict):
-            continue
-        if data.get("version") not in (None, version):
-            continue
-        if data.get("residual") != residual:
-            continue
-        if data.get("owner") and data.get("date"):
-            return True
-    return False
+            if not table_exists(con, "kv"):
+                return None
+            row = con.execute(
+                "SELECT value FROM kv WHERE key=?", (MIGRATION_KV_KEY,)
+            ).fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return None
+    if not row:
+        return None
+    try:
+        value = json.loads(row[0])
+    except (TypeError, ValueError):
+        return {"raw": row[0]}
+    return value if isinstance(value, dict) else {"raw": row[0]}
+
+
+def arm_migration_phase(path, phase="sessions"):
+    """Re-arm the V1→V2 session migration without a cursor.
+
+    Vendor behavior: a completed `kv.migration.v1-v2` row (`{"phase":
+    "completed"}`) prevents a later service start from importing V1 sessions
+    created after that cursor, so the canary copy and the explicit owner-run
+    apply must re-arm `{"phase":"sessions"}` before starting V2. The write is
+    only to the caller-provided DB (a scratch copy or the owner-run real DB).
+    Returns False when the DB has no `kv` table (a fresh V1 DB lets V2 create
+    it and start the migration itself).
+    """
+    con = sqlite3.connect(path, timeout=30)
+    try:
+        if not table_exists(con, "kv"):
+            return False
+        now = int(time.time() * 1000)
+        value = json.dumps({"phase": phase}, separators=(",", ":"))
+        cur = con.execute(
+            "UPDATE kv SET value=?, time_updated=? WHERE key=?",
+            (value, now, MIGRATION_KV_KEY))
+        if cur.rowcount == 0:
+            con.execute(
+                "INSERT INTO kv(key, value, time_created, time_updated) "
+                "VALUES (?, ?, ?, ?)",
+                (MIGRATION_KV_KEY, value, now, now))
+        con.commit()
+        return True
+    finally:
+        con.close()
+
+
+def wait_for_migration(path, timeout, interval=0.5):
+    """Poll `kv.migration.v1-v2` until `phase=completed` or the timeout."""
+    started = time.monotonic()
+    last = None
+    while True:
+        state = migration_state(path)
+        if isinstance(state, dict):
+            last = state
+            if state.get("phase") == "completed":
+                return {"phase": "completed", "completed": True,
+                        "timed_out": False,
+                        "elapsed": time.monotonic() - started}
+        elapsed = time.monotonic() - started
+        if elapsed >= timeout:
+            return {"phase": (last or {}).get("phase"),
+                    "completed": False, "timed_out": True, "elapsed": elapsed}
+        time.sleep(min(interval, max(0.0, timeout - elapsed)))
+
+
+def migration_membership(src_ids, target_ids, baseline_ids=(), run_ids=()):
+    """Measured migration membership (never a vacuous set identity).
+
+    `baseline_ids` are pre-existing source `session_v2` rows (V2-native
+    sessions in the same DB); they are excluded before target-only accounting
+    so they are not misread as migration phantoms. `run_ids` removes sessions
+    a rehearsal run created itself. A non-empty source must migrate at least
+    one row, every source row must be present, and no target ID may remain
+    outside the source/baseline/run sets.
+    """
+    src = set(src_ids)
+    baseline = set(baseline_ids)
+    raw_target = set(target_ids)
+    run = raw_target & set(run_ids)
+    target = raw_target - run
+    migrated = target & src
+    missing = src - target
+    baseline_only = baseline - src
+    phantom = target - src - baseline
+    zero_migration = bool(src) and not migrated
+    ok = bool(src) and not zero_migration and not missing and not phantom
+    return {"ok": ok, "source": len(src), "baseline": len(baseline),
+            "baseline_only": len(baseline_only), "target": len(target),
+            "raw_target": len(raw_target), "run": len(run),
+            "migrated": len(migrated), "missing": missing,
+            "phantom": phantom, "zero_migration": zero_migration}
 
 
 def connect(path=None):

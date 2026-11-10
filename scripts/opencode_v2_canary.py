@@ -12,7 +12,8 @@ Gates (see `docs/ADRs/ADR-0014-opencode-v2-upgrade.md` and
   C1 isolated install/version   C2 service + /api/info        C3 model catalog
   C4 fresh-DB 10/10 stability   C5 backup (first)             C6 V1 rollback
   C7 config/plugin loader proof  C8 capability audit
-  migration  copy-only, 900 s, `session_v2` population + source hash
+  migration  copy-only, 900 s, re-arm cursor + wait for completed,
+             `session_v2` population + source/baseline membership + source hash
 
 Usage:
   python3 scripts/opencode_v2_canary.py --all
@@ -56,6 +57,7 @@ REAL_DB = v2.DEFAULT_DB
 REAL_CONFIG = os.path.expanduser("~/.config/opencode")
 AGENTS_DIR = os.path.join(REPO, "agents")
 MIGRATION_TIMEOUT = 900
+MIGRATION_POLL_INTERVAL = 0.5
 
 # C7 loader proof. `plugin list` does not enumerate local plugin directories,
 # so the pass condition is a real standalone load: the loader's own
@@ -809,89 +811,95 @@ def gate_c8(args):
     return ok, text
 
 
-def migration_membership(src_ids, target_ids, run_ids=()):
-    """Measured migration membership (never a vacuous set identity).
-
-    The rehearsal run creates its own target session(s); `run_ids` removes them
-    before the phantom check. Structural validity requires a non-empty source,
-    at least one migrated source row (zero migration fails even with source
-    rows), and no phantom target IDs. Missing source rows are reported for the
-    residual-acceptance decision.
-    """
-    src = set(src_ids)
-    raw_target = set(target_ids)
-    run = raw_target & set(run_ids)
-    target = raw_target - run
-    migrated = target & src
-    missing = src - target
-    phantom = target - src
-    zero_migration = bool(src) and not migrated
-    ok = bool(src) and not zero_migration and not phantom
-    return {"ok": ok, "source": len(src), "target": len(raw_target),
-            "run": len(run), "migrated": len(migrated),
-            "missing": missing, "phantom": phantom,
-            "zero_migration": zero_migration}
+def migration_membership(src_ids, target_ids, baseline_ids=(), run_ids=()):
+    """Delegate to the shared membership check (baseline-aware)."""
+    return v2.migration_membership(src_ids, target_ids,
+                                   baseline_ids=baseline_ids,
+                                   run_ids=run_ids)
 
 
 def gate_migration(args):
-    """Copy-only 900 s rehearsal: population, membership, integrity, hashes."""
+    """Copy-only rehearsal: re-arm, start V2, wait, verify membership/hashes.
+
+    Vendor behavior (verified on a scratch copy, 2.2.6): a completed
+    `kv.migration.v1-v2` row blocks any later import of V1 sessions created
+    below the cursor. Re-arm `{"phase":"sessions"}` with no cursor, start an
+    isolated V2 service, and poll until the vendor writes
+    `{"phase":"completed"}`. Only then measure V1-ID membership, excluding
+    pre-existing source `session_v2` baseline rows from target-only accounting.
+    """
     root = args.scratch_root
     source = os.path.abspath(args.source_db or REAL_DB)
     copy = os.path.join(root, "migration-rehearsal.db")
     sqlite_backup(source, copy)
     source_hash = sha256(source)
     copy_initial = sha256(copy)
-    src_ids = read_ids(source, "session")
-    ok_auth, detail = import_current_auth(args, copy)
-    rows_after_auth = sql_count(copy, "session_v2")
+    src_ids = v2.read_ids(source, "session")
+    baseline_ids = v2.read_ids(source, "session_v2")
+    armed = v2.arm_migration_phase(copy)
     started = time.monotonic()
+    port = None
+    start = None
+    service_error = None
+    state = {"phase": None, "completed": False, "timed_out": False,
+             "elapsed": 0.0}
+    stopped = []
     try:
-        proc = v2_run(args, {"OPENCODE_DB": copy},
-                      ["run", "--standalone", "--model",
-                       "opencode-go/deepseek-v4.1-flash", "--format", "json",
-                       "Reply OK"], timeout=MIGRATION_TIMEOUT)
-        elapsed = time.monotonic() - started
+        port = str(free_port())
+        v2_run(args, {"OPENCODE_DB": copy},
+               ["service", "set", "port", port], timeout=30)
+        start = v2_run(args, {"OPENCODE_DB": copy}, ["service", "start"],
+                       timeout=60)
+        if start.returncode != 0:
+            service_error = (f"service start exited {start.returncode}: "
+                             f"{(start.stderr or '').strip()[:240]}")
+        else:
+            state = v2.wait_for_migration(
+                copy, MIGRATION_TIMEOUT, MIGRATION_POLL_INTERVAL)
     except (OSError, subprocess.SubprocessError) as exc:
-        evidence(root, "migration-rehearsal.txt",
-                 f"date={now_date()}\nmigration=ERROR "
-                 f"{type(exc).__name__}: {exc}")
-        return False, f"migration probe failed: {exc}"
-    target_ids = read_ids(copy, "session_v2")
-    run_ids = set(re.findall(r'"sessionID"\s*:\s*"([^"]+)"',
-                             proc.stdout or ""))
-    member = migration_membership(src_ids, target_ids, run_ids)
+        service_error = f"{type(exc).__name__}: {exc}"
+    finally:
+        stopped = stop_scratch_services(root)
+    elapsed = (state["elapsed"] if state else
+               time.monotonic() - started)
+    target_ids = v2.read_ids(copy, "session_v2")
+    member = migration_membership(src_ids, target_ids, baseline_ids)
     missing = sorted(member["missing"])
     phantom = sorted(member["phantom"])
-    residual_accepted = v2.migration_residual_accepted(
-        REPO, root, args.version, len(missing))
     untouched = sha256(source) == source_hash
     check = integrity(copy)
-    ok = (ok_auth and proc.returncode == 0 and untouched and check == "ok"
-          and member["ok"] and (not missing or residual_accepted))
+    ok = (service_error is None and start is not None
+          and start.returncode == 0 and state["completed"]
+          and untouched and check == "ok" and member["ok"])
     text = "\n".join([
         f"date={now_date()}",
         f"source={source}",
         f"source_sha256={source_hash}",
         f"source_session_rows={member['source']}",
+        f"source_v2_baseline_rows={member['baseline']}",
+        f"source_v2_baseline_only_rows={member['baseline_only']}",
         f"copy={copy}",
         f"copy_initial_sha256={copy_initial}",
-        f"migration_exit={proc.returncode}",
-        f"migration_stderr={(proc.stderr or '').strip()[:400]}",
+        f"migration_armed={armed}",
+        f"service_port={port}",
+        f"service_start_exit={start.returncode if start else 'missing'}",
+        f"service_error={service_error or 'none'}",
+        f"service_stopped={','.join(stopped)}",
+        f"migration_phase={state['phase']}",
+        f"migration_timed_out={state['timed_out']}",
         f"migration_elapsed_seconds={elapsed:.2f}",
-        f"session_v2_after_auth_import={rows_after_auth}",
         f"target_session_rows={member['target']}",
+        f"target_raw_session_rows={member['raw_target']}",
         f"run_created_ids={member['run']}",
         f"migrated_source_rows={member['migrated']}",
         f"source_sessions_not_migrated={len(missing)}",
         f"target_only_ids={len(phantom)}",
         f"zero_migration={member['zero_migration']}",
         f"migrated_ids_subset_of_source={not phantom}",
-        f"residual_accepted={residual_accepted}",
         f"target_integrity_check={check}",
         f"source_backup_sha256_after={sha256(source)}",
         f"source_untouched={untouched}",
-        f"migration={'PASS' if ok else 'FAIL'} with fidelity residual "
-        f"{len(missing)} (requires classification or owner acceptance)",
+        f"migration={'PASS' if ok else 'FAIL'}",
     ])
     evidence(root, "migration-rehearsal.txt", text)
     write_text(os.path.join(root, "migration-residual-ids.json"),

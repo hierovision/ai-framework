@@ -59,6 +59,43 @@ if args[:1] == ["models"]:
         if binding:
             print(binding)
     sys.exit(0)
+if args[:2] == ["service", "set"]:
+    sys.exit(0)
+if args[:2] == ["service", "start"]:
+    mode = os.environ.get("V2_TEST_MIGRATION", "complete")
+    if mode == "crash":
+        print("fake service start failed", file=sys.stderr)
+        sys.exit(7)
+    db = os.environ.get("OPENCODE_DB")
+    if db and os.path.isfile(db):
+        con = sqlite3.connect(db)
+        con.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, "
+                    "value TEXT NOT NULL, time_created INTEGER NOT NULL, "
+                    "time_updated INTEGER NOT NULL)")
+        if mode != "timeout":
+            con.execute("CREATE TABLE IF NOT EXISTS session_v2 "
+                        "(id TEXT PRIMARY KEY)")
+            skip = set(json.loads(os.environ.get("V2_TEST_SKIP_IDS", "[]")))
+            rows = [r[0] for r in con.execute("SELECT id FROM session")]
+            if mode != "noop":
+                for sid in rows:
+                    if sid not in skip:
+                        con.execute("INSERT OR IGNORE INTO session_v2(id) "
+                                    "VALUES (?)", (sid,))
+            value = '{"phase":"completed"}'
+        else:
+            value = '{"phase":"sessions"}'
+        now = 1
+        con.execute("INSERT INTO kv(key,value,time_created,time_updated) "
+                    "VALUES ('migration.v1-v2',?,?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+                    "time_updated=excluded.time_updated",
+                    (value, now, now))
+        con.commit()
+        con.close()
+    sys.exit(0)
+if args[:2] == ["service", "stop"]:
+    sys.exit(0)
 if args[:1] == ["run"]:
     db = os.environ.get("OPENCODE_DB")
     if db and os.environ.get("V2_TEST_MIGRATE") == "1" and os.path.isfile(db):
@@ -103,7 +140,7 @@ def _fake_bin(root, name="opencode2"):
     return path
 
 
-def _source_db(root):
+def _source_db(root, baseline_ids=(), completed=False):
     path = os.path.join(root, "source.db")
     con = sqlite3.connect(path)
     con.execute("CREATE TABLE session (id TEXT PRIMARY KEY)")
@@ -111,6 +148,15 @@ def _source_db(root):
     for i in range(12):
         con.execute("INSERT INTO session(id) VALUES (?)", (f"ses_{i:03d}",))
         con.execute("INSERT INTO message VALUES (?, ?)", (f"msg_{i}", f"ses_{i:03d}"))
+    if baseline_ids:
+        con.execute("CREATE TABLE session_v2 (id TEXT PRIMARY KEY)")
+        for sid in baseline_ids:
+            con.execute("INSERT INTO session_v2(id) VALUES (?)", (sid,))
+    con.execute("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, "
+                "time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)")
+    phase = '{"phase":"completed"}' if completed else '{"phase":"sessions"}'
+    con.execute("INSERT INTO kv(key,value,time_created,time_updated) "
+                "VALUES ('migration.v1-v2',?,1,1)", (phase,))
     con.commit()
     con.close()
     return path
@@ -244,66 +290,67 @@ def test_c4_fresh_db_ten_runs():
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_migration_reports_residual():
-    """AC34/AC9: an incomplete backfill fails unless a dated acceptance exists."""
-    root = _tmp("canary-migration-")
+def _migration_args(root, source):
+    return argparse.Namespace(
+        scratch_root=root, source_db=source, opencode_bin="x",
+        version=v2.VERSION_PIN)
+
+
+def test_migration_resume_imports_all_and_excludes_baseline():
+    """The gate re-arms a completed cursor and proves V1 + V2 baseline rows."""
+    root = _tmp("canary-migration-resume-")
     try:
-        home = os.path.join(root, "home")
-        os.makedirs(os.path.join(home, ".local", "share", "opencode"))
-        with open(os.path.join(home, ".local", "share", "opencode",
-                               "auth.json"), "w") as fh:
-            json.dump({"opencode-go": {"type": "api", "key": "k"}}, fh)
         binary = _fake_bin(root)
-        src = _source_db(root)
+        src = _source_db(root, baseline_ids=("ses_pre001", "ses_pre002"),
+                         completed=True)
         out = os.path.join(root, "ev")
-        skip = json.dumps(["ses_010", "ses_011"])
         r = _run(root, ["--gate", "migration", "--scratch-root", out,
                         "--source-db", src, "--opencode-bin", binary],
-                 {"HOME": home, "V2_TEST_MIGRATE": "1",
-                  "V2_TEST_SKIP_IDS": skip, "V2_TEST_ALLOW_NO_C5": "1"})
-        assert r.returncode == 1, (r.stdout, r.stderr)
+                 {"V2_TEST_ALLOW_NO_C5": "1", "V2_TEST_MIGRATION": "complete"})
+        assert r.returncode == 0, (r.stdout, r.stderr)
         text = open(os.path.join(out, "migration-rehearsal.txt")).read()
         assert "source_session_rows=12" in text, text
-        assert "migrated_source_rows=10" in text, text
-        assert "source_sessions_not_migrated=2" in text, text
+        assert "source_v2_baseline_rows=2" in text, text
+        assert "source_v2_baseline_only_rows=2" in text, text
+        assert "target_session_rows=14" in text, text
+        assert "migrated_source_rows=12" in text, text
+        assert "source_sessions_not_migrated=0" in text, text
         assert "target_only_ids=0" in text, text
-        assert "migrated_ids_subset_of_source=True" in text, text
-        assert "residual_accepted=False" in text, text
-        assert "migration=FAIL" in text, text
-        assert "requires classification or owner acceptance" in text, text
-        assert "source_untouched=True" in text, text
+        assert "zero_migration=False" in text, text
+        assert "migration_armed=True" in text, text
+        assert "migration_phase=completed" in text, text
+        assert "migration_timed_out=False" in text, text
+        assert "migration=PASS" in text, text
         rehearsal = os.path.join(out, "migration-rehearsal.db")
         assert stat.S_IMODE(os.stat(rehearsal).st_mode) == 0o600
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_migration_residual_acceptance_passes():
-    root = _tmp("canary-migration-accept-")
+def test_migration_missing_row_fails_without_acceptance():
+    """A completed phase with a missing V1 row is a hard failure, no residual."""
+    root = _tmp("canary-migration-missing-")
     try:
-        home = os.path.join(root, "home")
-        os.makedirs(os.path.join(home, ".local", "share", "opencode"))
-        with open(os.path.join(home, ".local", "share", "opencode",
-                               "auth.json"), "w") as fh:
-            json.dump({"opencode-go": {"type": "api", "key": "k"}}, fh)
         binary = _fake_bin(root)
-        src = _source_db(root)
+        src = _source_db(root, completed=True)
         out = os.path.join(root, "ev")
         os.makedirs(out, exist_ok=True)
         with open(os.path.join(out, "migration-residual-acceptance.json"),
                   "w", encoding="utf-8") as fh:
-            json.dump({"version": v2.VERSION_PIN, "residual": 2,
-                       "owner": "owner", "date": "2026-11-09"}, fh)
-        skip = json.dumps(["ses_010", "ses_011"])
+            json.dump({"version": v2.VERSION_PIN, "residual": 1,
+                       "owner": "owner", "date": "2026-11-10"}, fh)
+        skip = json.dumps(["ses_011"])
         r = _run(root, ["--gate", "migration", "--scratch-root", out,
                         "--source-db", src, "--opencode-bin", binary],
-                 {"HOME": home, "V2_TEST_MIGRATE": "1",
-                  "V2_TEST_SKIP_IDS": skip, "V2_TEST_ALLOW_NO_C5": "1"})
-        assert r.returncode == 0, (r.stdout, r.stderr)
+                 {"V2_TEST_ALLOW_NO_C5": "1", "V2_TEST_MIGRATION": "complete",
+                  "V2_TEST_SKIP_IDS": skip})
+        assert r.returncode == 1, (r.stdout, r.stderr)
         text = open(os.path.join(out, "migration-rehearsal.txt")).read()
-        assert "source_sessions_not_migrated=2" in text, text
-        assert "residual_accepted=True" in text, text
-        assert "migration=PASS" in text, text
+        assert "source_sessions_not_migrated=1" in text, text
+        assert "target_only_ids=0" in text, text
+        assert "residual_accepted" not in text, text
+        assert "migration=FAIL" in text, text
+        assert "source_untouched=True" in text, text
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -311,17 +358,12 @@ def test_migration_residual_acceptance_passes():
 def test_migration_zero_rows_fails():
     root = _tmp("canary-migration-zero-")
     try:
-        home = os.path.join(root, "home")
-        os.makedirs(os.path.join(home, ".local", "share", "opencode"))
-        with open(os.path.join(home, ".local", "share", "opencode",
-                               "auth.json"), "w") as fh:
-            json.dump({"opencode-go": {"type": "api", "key": "k"}}, fh)
         binary = _fake_bin(root)
-        src = _source_db(root)
+        src = _source_db(root, completed=True)
         out = os.path.join(root, "ev")
         r = _run(root, ["--gate", "migration", "--scratch-root", out,
                         "--source-db", src, "--opencode-bin", binary],
-                 {"HOME": home, "V2_TEST_ALLOW_NO_C5": "1"})
+                 {"V2_TEST_ALLOW_NO_C5": "1", "V2_TEST_MIGRATION": "noop"})
         assert r.returncode == 1, (r.stdout, r.stderr)
         text = open(os.path.join(out, "migration-rehearsal.txt")).read()
         assert "source_session_rows=12" in text, text
@@ -330,6 +372,64 @@ def test_migration_zero_rows_fails():
         assert "source_sessions_not_migrated=12" in text, text
         assert "migration=FAIL" in text, text
     finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_migration_timeout_fails_and_stops_service():
+    """A non-completing phase times out, fails, and always cleans the service."""
+    root = _tmp("canary-migration-timeout-")
+    real_run = canary.v2_run
+    real_stop = canary.stop_scratch_services
+    real_timeout = canary.MIGRATION_TIMEOUT
+    stopped = []
+    try:
+        source = _source_db(root, completed=True)
+
+        def fake_run(_args, _env, argv, timeout=180):
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        canary.v2_run = fake_run
+        canary.free_port = lambda: 12345
+        canary.stop_scratch_services = lambda path: stopped.append(path) or []
+        canary.MIGRATION_TIMEOUT = 0.2
+        ok, text = canary.gate_migration(_migration_args(root, source))
+        assert ok is False, text
+        assert "migration_timed_out=True" in text, text
+        assert "migration_phase=sessions" in text, text
+        assert "migration=FAIL" in text, text
+        assert stopped, "gate must stop the scratch service in finally"
+    finally:
+        canary.v2_run = real_run
+        canary.stop_scratch_services = real_stop
+        canary.MIGRATION_TIMEOUT = real_timeout
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_migration_service_start_failure_stops_service():
+    """A failed service start is named and still cleans up the process tree."""
+    root = _tmp("canary-migration-start-fail-")
+    real_run = canary.v2_run
+    real_stop = canary.stop_scratch_services
+    stopped = []
+    try:
+        source = _source_db(root, completed=True)
+
+        def fake_run(_args, _env, argv, timeout=180):
+            if argv[:2] == ["service", "start"]:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        canary.v2_run = fake_run
+        canary.free_port = lambda: 12345
+        canary.stop_scratch_services = lambda path: stopped.append(path) or []
+        ok, text = canary.gate_migration(_migration_args(root, source))
+        assert ok is False, text
+        assert "service_error=TimeoutExpired" in text, text
+        assert "migration=FAIL" in text, text
+        assert stopped, "failed start must still stop the scratch service"
+    finally:
+        canary.v2_run = real_run
+        canary.stop_scratch_services = real_stop
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -364,12 +464,31 @@ def test_migration_membership_non_vacuous():
     assert full["phantom"] == set()
     assert full["run"] == 1
     partial = canary.migration_membership({"ses_1", "ses_2"}, {"ses_1"})
-    assert partial["ok"] is True
+    assert partial["ok"] is False
     assert partial["missing"] == {"ses_2"}
     phantom = canary.migration_membership(
         {"ses_1"}, {"ses_1", "ses_phantom"})
     assert phantom["ok"] is False
     assert phantom["phantom"] == {"ses_phantom"}
+
+
+def test_migration_membership_excludes_source_v2_baseline():
+    """Pre-existing project V2 rows are baseline, never target-only phantoms."""
+    member = canary.migration_membership(
+        {"ses_1"}, {"ses_1", "ses_pre_a", "ses_pre_b"},
+        baseline_ids={"ses_pre_a", "ses_pre_b"})
+    assert member["ok"] is True, member
+    assert member["baseline"] == 2
+    assert member["baseline_only"] == 2
+    assert member["target"] == 3
+    assert member["migrated"] == 1
+    assert member["phantom"] == set()
+    # A genuinely new unknown ID is still a phantom after baseline exclusion.
+    member = canary.migration_membership(
+        {"ses_1"}, {"ses_1", "ses_pre_a", "ses_unknown"},
+        baseline_ids={"ses_pre_a"})
+    assert member["ok"] is False
+    assert member["phantom"] == {"ses_unknown"}
 
 
 def test_exact_version_helpers():
@@ -815,27 +934,28 @@ def test_gate_c4_probe_timeout_is_named():
 
 
 def test_gate_migration_probe_timeout_is_named():
-    root = _tmp("canary-migration-timeout-")
-    real_auth = canary.import_current_auth
+    root = _tmp("canary-migration-probe-timeout-")
     real_run = canary.v2_run
+    real_stop = canary.stop_scratch_services
     try:
         source = _source_db(root)
-        canary.import_current_auth = lambda *args, **kwargs: (True, "ok")
 
         def timeout(*args, **kwargs):
             raise subprocess.TimeoutExpired(args[0], 900)
 
         canary.v2_run = timeout
+        canary.stop_scratch_services = lambda *args, **kwargs: []
         ok, detail = canary.gate_migration(argparse.Namespace(
             scratch_root=root, source_db=source, opencode_bin="x",
             version=v2.VERSION_PIN))
         assert ok is False
-        assert "migration probe failed" in detail
+        assert "service_error=TimeoutExpired" in detail
         text = open(os.path.join(root, "migration-rehearsal.txt")).read()
-        assert "migration=ERROR TimeoutExpired" in text
+        assert "service_error=TimeoutExpired" in text
+        assert "migration=FAIL" in text
     finally:
-        canary.import_current_auth = real_auth
         canary.v2_run = real_run
+        canary.stop_scratch_services = real_stop
         shutil.rmtree(root, ignore_errors=True)
 
 
