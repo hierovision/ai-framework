@@ -659,6 +659,9 @@ def test_apply_smoke_exception_stops_migration_service():
             assert upgrade.apply_supported(args, target) == 1
         data = json.load(open(_artifact(root, target)))
         assert data["failure_stage"] == "exception:smoke", data
+        assert data["migration"]["phase"] == "completed", data
+        assert data["migration"]["migrated_source_rows"] == 3, data
+        assert data["migration"]["missing_source_rows"] == 0, data
         assert data["migration"]["service_stopped_on_failure"] is True, data
         assert any(call[1:3] == ["service", "stop"] for call in calls), calls
         assert upgrade.read_state(root)["stage"] == "prepared"
@@ -706,6 +709,9 @@ def test_apply_smoke_failure_stops_migration_service():
         data = json.load(open(_artifact(root, target)))
         assert data["verified"] is False
         assert data["failure_stage"] == "binary", data
+        assert data["migration"]["phase"] == "completed", data
+        assert data["migration"]["migrated_source_rows"] == 3, data
+        assert data["migration"]["missing_source_rows"] == 0, data
         assert data["migration"]["service_stopped_on_failure"] is True, data
         assert any(call[1:3] == ["service", "stop"] for call in calls), calls
         assert upgrade.read_state(root)["stage"] == "prepared"
