@@ -290,7 +290,12 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
   the per-run token the probe passes as `OPENCODE_LOADER_PROBE_TOKEN` (the
   plugin echoes it as `extra.probe`), so a different plugin copy emitting the
   same static text cannot satisfy the check. Three pieces of evidence are
-  required: config wiring, runtime probe, and loader log.
+  required: config wiring, runtime probe, and loader log. Canary C7 uses the
+  same loader proof for `plugins/canary-plugin`: it wires the directory as
+  `plugins: ["./plugins/canary-plugin"]`, requires a `loading plugin` line
+  resolving to that directory plus the per-run `canary-plugin initialized`
+  marker, and keeps `plugin list` as diagnostic text only (its empty result is
+  not a failure).
 - **TUI context correction (probed 2026-10-29, live TUI).** The keymap is
   `ctx.keymap`, not `ctx.ui.keymap` (the latter is undefined and fails the TUI
   part at setup). A plugin command registered with `palette: true` / `slash`

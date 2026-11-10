@@ -387,41 +387,214 @@ def test_exact_version_helpers():
     assert canary.api_version('{"version":"2.2.6"}') == "2.2.6"
 
 
-def test_c7_asserts_markers():
-    root = _tmp("canary-c7-")
-    real_run = canary.v2_run
-    real_assert = canary.v2.assert_scratch_db
-    real_port = canary.free_port
+def _c7_namespace(root):
+    return argparse.Namespace(scratch_root=root, opencode_bin="/fake/opencode")
+
+
+def _c7_patch(loader, plugin_rows="", plugin_list_raises=False):
+    """Patch C7's service/loader seams for a hermetic gate call."""
+    saved = {
+        "v2_run": canary.v2_run,
+        "assert_scratch_db": canary.v2.assert_scratch_db,
+        "free_port": canary.free_port,
+        "stop_scratch_services": canary.stop_scratch_services,
+        "c7_loader_probe": canary.c7_loader_probe,
+    }
+
+    def fake_v2_run(_args, _env, argv, timeout=180):
+        if argv[:2] == ["debug", "config"]:
+            return subprocess.CompletedProcess(
+                argv, 0, "canary-marker ./plugins/canary-plugin", "")
+        if argv[:2] == ["plugin", "list"]:
+            if plugin_list_raises:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return subprocess.CompletedProcess(argv, 0, plugin_rows, "")
+        if argv[:3] == ["api", "GET", "/api/agent"]:
+            return subprocess.CompletedProcess(argv, 0, "canary-marker", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    canary.v2_run = fake_v2_run
     canary.v2.assert_scratch_db = lambda *args, **kwargs: None
     canary.free_port = lambda: 12345
+    canary.stop_scratch_services = lambda *args, **kwargs: []
+    canary.c7_loader_probe = loader
+    return saved
+
+
+def _c7_restore(saved, root):
+    canary.v2_run = saved["v2_run"]
+    canary.v2.assert_scratch_db = saved["assert_scratch_db"]
+    canary.free_port = saved["free_port"]
+    canary.stop_scratch_services = saved["stop_scratch_services"]
+    canary.c7_loader_probe = saved["c7_loader_probe"]
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def test_c7_passes_with_empty_plugin_list_and_loader_proof():
+    """AC-C7: `plugin list` empty is diagnostic only; real loader proof passes."""
+    root = _tmp("canary-c7-loader-pass-")
+    stale = os.path.join(root, "c7", "config", "opencode", "plugins",
+                         "canary-plugin", "index.js")
+    os.makedirs(os.path.dirname(stale), exist_ok=True)
+    with open(stale, "w", encoding="utf-8") as fh:
+        fh.write("stale canary-plugin initialized\n")
+    saved = _c7_patch(lambda _args, _config, plugin_dir, token: (
+        f'msg="loading plugin" id={os.path.realpath(plugin_dir)} '
+        f'entrypoint=file://{os.path.realpath(plugin_dir)}/index.js\n'
+        f"canary-plugin initialized probe={token}\n", None))
     try:
-        def respond(plugin_marker=True):
-            def fake(_args, _env, argv, timeout=180):
-                if argv[:2] == ["debug", "config"]:
-                    return subprocess.CompletedProcess(
-                        argv, 0, "canary-marker", "")
-                if argv[:2] == ["plugin", "list"]:
-                    stdout = "canary-plugin" if plugin_marker else ""
-                    return subprocess.CompletedProcess(argv, 0, stdout, "")
-                if argv[:3] == ["api", "GET", "/api/agent"]:
-                    return subprocess.CompletedProcess(
-                        argv, 0, "canary-marker", "")
-                return subprocess.CompletedProcess(argv, 0, "", "")
-            return fake
-        canary.v2_run = respond(True)
-        ok, text = canary.gate_c7(argparse.Namespace(scratch_root=root))
+        ok, text = canary.gate_c7(_c7_namespace(root))
         assert ok is True, text
-        assert "marker_plugin_present=True" in text
-        assert "C7=PASS" in text
-        canary.v2_run = respond(False)
-        ok, text = canary.gate_c7(argparse.Namespace(scratch_root=root))
-        assert ok is False, text
-        assert "marker_plugin_present=False" in text
-        assert "C7=FAIL" in text
+        assert "plugin_list_rows=" in text, text
+        assert "plugin_list_loader_proof=False" in text, text
+        assert "loader_loaded_plugin=True" in text, text
+        assert "loader_marker_attributed=True" in text, text
+        assert "C7=PASS" in text, text
+        config = os.path.join(root, "c7", "config", "opencode",
+                              "opencode.jsonc")
+        with open(config, encoding="utf-8") as fh:
+            assert "./plugins/canary-plugin" in fh.read()
+        with open(stale, encoding="utf-8") as fh:
+            index = fh.read()
+        assert "stale canary-plugin initialized" not in index, index
+        assert "OPENCODE_LOADER_PROBE_TOKEN" in index, index
     finally:
-        canary.v2_run = real_run
-        canary.v2.assert_scratch_db = real_assert
-        canary.free_port = real_port
+        _c7_restore(saved, root)
+
+
+def test_c7_wipes_out_of_band_sentinel_under_c7():
+    """AC-C7: a stale out-of-band sentinel under c7/ is removed before setup.
+
+    The sentinel lives outside the generated config/plugin tree, so only the
+    pre-setup `c7/` wipe removes it; deleting that wipe leaves the file and
+    turns this test red.
+    """
+    root = _tmp("canary-c7-stale-sentinel-")
+    sentinel = os.path.join(root, "c7", "out-of-band-sentinel.txt")
+    os.makedirs(os.path.dirname(sentinel), exist_ok=True)
+    with open(sentinel, "w", encoding="utf-8") as fh:
+        fh.write("stale-c7-residue\n")
+    saved = _c7_patch(lambda _args, _config, plugin_dir, token: (
+        f'msg="loading plugin" id={os.path.realpath(plugin_dir)} '
+        f'entrypoint=file://{os.path.realpath(plugin_dir)}/index.js\n'
+        f"canary-plugin initialized probe={token}\n", None))
+    try:
+        ok, text = canary.gate_c7(_c7_namespace(root))
+        assert ok is True, text
+        assert not os.path.exists(sentinel), \
+            "stale out-of-band c7/ residue survived the pre-setup wipe"
+        assert "stale_c7_state_cleared=True" in text, text
+        assert "C7=PASS" in text, text
+    finally:
+        _c7_restore(saved, root)
+
+
+def test_c7_plugin_list_failure_is_diagnostic_only():
+    """AC-C7: a plugin-list timeout stays diagnostic when loader proof is real."""
+    root = _tmp("canary-c7-plugin-list-error-")
+    saved = _c7_patch(lambda _args, _config, plugin_dir, token: (
+        f'msg="loading plugin" id={os.path.realpath(plugin_dir)}\n'
+        f"canary-plugin initialized probe={token}\n", None),
+        plugin_list_raises=True)
+    try:
+        ok, text = canary.gate_c7(_c7_namespace(root))
+        assert ok is True, text
+        assert "plugin_list_error=TimeoutExpired" in text, text
+        assert "C7=PASS" in text, text
+    finally:
+        _c7_restore(saved, root)
+
+
+def test_c7_fails_when_loader_line_missing():
+    """AC-C7: a marker without a loader line naming the directory is a FAIL."""
+    root = _tmp("canary-c7-loader-missing-")
+    saved = _c7_patch(lambda _args, _config, _plugin_dir, token: (
+        f"canary-plugin initialized probe={token}\n", None))
+    try:
+        ok, text = canary.gate_c7(_c7_namespace(root))
+        assert ok is False, text
+        assert "loader_loaded_plugin=False" in text, text
+        assert "loader did not load" in text, text
+        assert "C7=FAIL" in text, text
+    finally:
+        _c7_restore(saved, root)
+
+
+def test_c7_fails_when_marker_unattributed():
+    """AC-C7: a loader line without this probe's marker token is a FAIL."""
+    root = _tmp("canary-c7-marker-missing-")
+    saved = _c7_patch(lambda _args, _config, plugin_dir, _token: (
+        f'msg="loading plugin" id={os.path.realpath(plugin_dir)} '
+        f'entrypoint=file://{os.path.realpath(plugin_dir)}/index.js\n'
+        "canary-plugin initialized probe=someone-else\n", None))
+    try:
+        ok, text = canary.gate_c7(_c7_namespace(root))
+        assert ok is False, text
+        assert "loader_loaded_plugin=True" in text, text
+        assert "loader_marker_attributed=False" in text, text
+        assert "startup marker missing or not attributed" in text, text
+        assert "C7=FAIL" in text, text
+    finally:
+        _c7_restore(saved, root)
+
+
+def test_c7_loader_timeout_is_named_failure():
+    root = _tmp("canary-c7-loader-timeout-")
+    saved = _c7_patch(lambda *_args, **_kwargs: ("", "timeout"))
+    try:
+        ok, text = canary.gate_c7(_c7_namespace(root))
+        assert ok is False, text
+        assert "loader_probe_error=timeout" in text, text
+        assert "loader probe timed out" in text, text
+        assert "C7=FAIL" in text, text
+    finally:
+        _c7_restore(saved, root)
+
+
+def test_c7_loader_spawn_failure_is_named_failure():
+    root = _tmp("canary-c7-loader-spawn-")
+    saved = _c7_patch(lambda *_args, **_kwargs: (
+        "", "cannot launch /fake/opencode: ENOENT"))
+    try:
+        ok, text = canary.gate_c7(_c7_namespace(root))
+        assert ok is False, text
+        assert "loader_probe_error=cannot launch" in text, text
+        assert "C7=FAIL" in text, text
+    finally:
+        _c7_restore(saved, root)
+
+
+def test_c7_loader_verdict_matches_directory_and_token():
+    root = _tmp("canary-c7-verdict-")
+    try:
+        plugin = os.path.join(root, "plugins", "canary-plugin")
+        other = os.path.join(root, "plugins", "other")
+        token = "probe-token"
+        good = (f'msg="loading plugin" id={os.path.realpath(plugin)}\n'
+                f"canary-plugin initialized probe={token}\n")
+        loaded, markers, failures = canary.c7_loader_log_verdict(
+            good, plugin, token)
+        assert len(loaded) == 1, loaded
+        assert len(markers) == 1, markers
+        assert not failures
+        wrong_dir = (f'msg="loading plugin" id={os.path.realpath(other)}\n'
+                     f"canary-plugin initialized probe={token}\n")
+        loaded, markers, _ = canary.c7_loader_log_verdict(
+            wrong_dir, plugin, token)
+        assert not loaded
+        assert len(markers) == 1
+        wrong_token = (f'msg="loading plugin" id={os.path.realpath(plugin)}\n'
+                       "canary-plugin initialized probe=other-token\n")
+        loaded, markers, _ = canary.c7_loader_log_verdict(
+            wrong_token, plugin, token)
+        assert len(loaded) == 1
+        assert not markers
+        failed = (f'msg="loading plugin" id={os.path.realpath(plugin)}\n'
+                  "failed to load plugin canary-plugin\n")
+        _loaded, _markers, failures = canary.c7_loader_log_verdict(
+            failed, plugin, token)
+        assert failures
+    finally:
         shutil.rmtree(root, ignore_errors=True)
 
 
