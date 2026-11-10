@@ -122,8 +122,9 @@ excludes source `session_v2` baseline rows from target-only accounting. A
 timeout, missing source row, or missing baseline row is a truthful failure
 (`verified: false`, named stage, counts in the artifact); there is no
 residual/owner-acceptance path for these rows. Apply stops a service it
-started on failure and leaves it running on success for the post-smoke; the
-canary stops its scratch service in a `finally`.
+started on any failure, including a post-smoke failure or exception, and
+leaves it running only when the post-smoke succeeds; the canary stops its
+scratch service in a `finally`.
 
 ## Sources
 

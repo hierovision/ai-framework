@@ -3,8 +3,9 @@
 
 Proves: C5 is the first mutation (a binary invoked before C5 aborts), a
 non-scratch/real DB path is refused, credentials never reach evidence, C4 is
-a fresh-DB 10/10 gate, and the migration gate reports its fidelity residual
-instead of claiming lossless migration.
+a fresh-DB 10/10 gate, and the migration gate re-arms a completed cursor,
+waits for `phase=completed`, and verifies source V1 membership with the source
+V2 baseline excluded from phantom accounting.
 
 Run: python3 scripts/test_opencode_v2_canary.py
 """
@@ -930,6 +931,71 @@ def test_gate_c4_probe_timeout_is_named():
         canary.v2.assert_scratch_db = real_assert
         canary.import_current_auth = real_auth
         canary.v2_run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_migration_arm_failure_writes_fail_evidence_and_stops():
+    """A sqlite error during re-arm is guarded, evidenced, and cleans up."""
+    root = _tmp("canary-migration-arm-fail-")
+    real_arm = canary.v2.arm_migration_phase
+    real_stop = canary.stop_scratch_services
+    stopped = []
+    try:
+        source = _source_db(root, completed=True)
+
+        def arm_fail(_path, phase="sessions"):
+            raise sqlite3.Error("cannot write migration phase")
+
+        canary.v2.arm_migration_phase = arm_fail
+        canary.stop_scratch_services = lambda path: stopped.append(path) or []
+        ok, text = canary.gate_migration(_migration_args(root, source))
+        assert ok is False, text
+        assert "migration_armed=False" in text, text
+        assert "service_error=Error: cannot write migration phase" in text, text
+        assert "migration=FAIL" in text, text
+        assert stopped, "arm failure must still run service cleanup"
+        evidence = open(os.path.join(
+            root, "migration-rehearsal.txt")).read()
+        assert "migration=FAIL" in evidence, evidence
+    finally:
+        canary.v2.arm_migration_phase = real_arm
+        canary.stop_scratch_services = real_stop
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_migration_set_port_failure_skips_start_and_stops():
+    """A failed `service set port` records no port, never starts, and fails."""
+    root = _tmp("canary-migration-port-fail-")
+    real_run = canary.v2_run
+    real_stop = canary.stop_scratch_services
+    stopped = []
+    started = []
+    try:
+        source = _source_db(root, completed=True)
+
+        def fake_run(_args, _env, argv, timeout=180):
+            if argv[:3] == ["service", "set", "port"]:
+                return subprocess.CompletedProcess(argv, 7, "", "bad port")
+            if argv[:2] == ["service", "start"]:
+                started.append(argv)
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        canary.v2_run = fake_run
+        canary.free_port = lambda: 12345
+        canary.stop_scratch_services = lambda path: stopped.append(path) or []
+        ok, text = canary.gate_migration(_migration_args(root, source))
+        assert ok is False, text
+        assert "service_set_port_exit=7" in text, text
+        assert "service_port=none" in text, text
+        assert "service_error=service set port exited 7" in text, text
+        assert "service_start_exit=missing" in text, text
+        assert not started, started
+        assert stopped, "port failure must still run service cleanup"
+        assert "migration=FAIL" in text, text
+    finally:
+        canary.v2_run = real_run
+        canary.stop_scratch_services = real_stop
         shutil.rmtree(root, ignore_errors=True)
 
 

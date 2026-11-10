@@ -444,10 +444,10 @@ def _evidence_field(text, name, cast=str):
 def canary_summary(repo=REPO, version=None):
     """Read the canary evidence; None when no evidence exists.
 
-    `ok` requires every C1-C8 gate plus a measured migration verdict: PASS, an
-    intact target, an untouched source, no zero migration, no phantom target
-    IDs, and an accepted residual (a positive residual needs the dated shared
-    classification record).
+    `ok` requires every C1-C8 gate plus a measured migration verdict: PASS,
+    an intact target, an untouched source, no zero migration, no phantom
+    target IDs, and zero missing source sessions. A non-zero residual is a
+    hard failure; there is no residual-acceptance path.
     """
     version = version or v2.VERSION_PIN
     root = os.path.join(repo, ".scratch", "v2-canary-" + version)
@@ -1887,6 +1887,21 @@ def pre_upgrade_backup(args, target):
     return root, db
 
 
+def stop_started_service(link, migration):
+    """Stop a service the migration stage started, recording the outcome."""
+    if not migration or not migration.get("service_started"):
+        return False
+    if migration.get("service_stopped_on_failure"):
+        return True
+    try:
+        run([link, "service", "stop"], timeout=60)
+        migration["service_stopped_on_failure"] = True
+        return True
+    except (OSError, subprocess.SubprocessError):
+        migration["service_stopped_on_failure"] = False
+        return False
+
+
 def resume_migration(args, home, link):
     """Re-arm the real DB cursor, start the repaired V2 service, wait, verify.
 
@@ -1903,6 +1918,7 @@ def resume_migration(args, home, link):
         "db": db, "skipped": None, "error": None, "ok": False,
         "verified": False, "armed": False, "phase": None,
         "timed_out": False, "elapsed_seconds": 0.0,
+        "service_started": False, "service_stopped_on_failure": False,
         "service_start_exit": None,
         "source_session_rows": 0, "pre_existing_v2_rows": 0,
         "target_session_rows": 0, "migrated_source_rows": 0,
@@ -1930,6 +1946,7 @@ def resume_migration(args, home, link):
                 f"service start exited {start.returncode}: "
                 f"{(start.stderr or '').strip()[:240]}")
             return result
+        result["service_started"] = True
         state = v2.wait_for_migration(
             db, MIGRATION_APPLY_TIMEOUT, MIGRATION_APPLY_POLL_INTERVAL)
         result.update({
@@ -1967,8 +1984,9 @@ def resume_migration(args, home, link):
         if not result["ok"]:
             try:
                 run([link, "service", "stop"], timeout=60)
+                result["service_stopped_on_failure"] = True
             except (OSError, subprocess.SubprocessError):
-                pass
+                result["service_stopped_on_failure"] = False
 
 
 def official_upgrade(args, target, command=None):
@@ -2204,6 +2222,8 @@ def apply_supported(args, target):
         checks = post_upgrade_smoke(args, target, command=link)
         failed = [name for name, ok, _detail in checks if not ok]
         verified = not failed
+        if not verified:
+            stop_started_service(link, migration)
         payload = apply_artifact(args, target, home, link, backup,
                                  previous_default, failed[0] if failed else None,
                                  checks, verified=verified, db=db)
@@ -2227,6 +2247,7 @@ def apply_supported(args, target):
         failure_stage = f"exception:{stage}"
         extra = {"exception": f"{type(exc).__name__}: {exc}"}
         if migration is not None:
+            stop_started_service(link, migration)
             extra["migration"] = migration
         payload = record_failure(failure_stage, [], extra=extra)
         print(f"error: apply aborted during {stage}: "

@@ -162,10 +162,15 @@ and the exact repair command, and are read-only (no state writes).
   owner-run apply therefore re-arm `{"phase":"sessions"}` with **no cursor**
   before starting V2, wait until the vendor writes `{"phase":"completed"}`,
   and then verify membership. Pre-existing source `session_v2` rows are the
-  V2 baseline, not migration phantoms. Never claim lossless migration
-  without checking source-ID membership.
-- DB access is read-only (`file:…?mode=ro`). The only mutating API calls are
-  `session.interrupt`, `session.agent`, and `session.prompt`.
+  V2 baseline, not migration phantoms. The apply stops a service it started
+  if the post-smoke fails or throws; it leaves that service running only when
+  the post-smoke succeeds. Never claim lossless migration without checking
+  source-ID membership.
+- DB reads use `file:…?mode=ro`. The only mutating API calls are
+  `session.interrupt`, `session.agent`, and `session.prompt`. The explicit
+  owner-run apply's `arm_migration_phase()` is the sole direct DB write
+  (re-arming the vendor migration row); the canary performs that write only on
+  its scratch copy.
 
 ## JSON event stream
 

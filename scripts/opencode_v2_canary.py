@@ -836,27 +836,37 @@ def gate_migration(args):
     copy_initial = sha256(copy)
     src_ids = v2.read_ids(source, "session")
     baseline_ids = v2.read_ids(source, "session_v2")
-    armed = v2.arm_migration_phase(copy)
     started = time.monotonic()
+    armed = False
     port = None
+    set_port = None
     start = None
     service_error = None
     state = {"phase": None, "completed": False, "timed_out": False,
              "elapsed": 0.0}
     stopped = []
     try:
-        port = str(free_port())
-        v2_run(args, {"OPENCODE_DB": copy},
-               ["service", "set", "port", port], timeout=30)
-        start = v2_run(args, {"OPENCODE_DB": copy}, ["service", "start"],
-                       timeout=60)
-        if start.returncode != 0:
-            service_error = (f"service start exited {start.returncode}: "
-                             f"{(start.stderr or '').strip()[:240]}")
+        armed = v2.arm_migration_phase(copy)
+        candidate_port = str(free_port())
+        set_port = v2_run(args, {"OPENCODE_DB": copy},
+                          ["service", "set", "port", candidate_port],
+                          timeout=30)
+        if set_port.returncode != 0:
+            service_error = (
+                f"service set port exited {set_port.returncode}: "
+                f"{(set_port.stderr or '').strip()[:240]}")
         else:
-            state = v2.wait_for_migration(
-                copy, MIGRATION_TIMEOUT, MIGRATION_POLL_INTERVAL)
-    except (OSError, subprocess.SubprocessError) as exc:
+            port = candidate_port
+            start = v2_run(args, {"OPENCODE_DB": copy}, ["service", "start"],
+                           timeout=60)
+            if start.returncode != 0:
+                service_error = (
+                    f"service start exited {start.returncode}: "
+                    f"{(start.stderr or '').strip()[:240]}")
+            else:
+                state = v2.wait_for_migration(
+                    copy, MIGRATION_TIMEOUT, MIGRATION_POLL_INTERVAL)
+    except (OSError, subprocess.SubprocessError, sqlite3.Error) as exc:
         service_error = f"{type(exc).__name__}: {exc}"
     finally:
         stopped = stop_scratch_services(root)
@@ -868,7 +878,8 @@ def gate_migration(args):
     phantom = sorted(member["phantom"])
     untouched = sha256(source) == source_hash
     check = integrity(copy)
-    ok = (service_error is None and start is not None
+    ok = (service_error is None and set_port is not None
+          and set_port.returncode == 0 and start is not None
           and start.returncode == 0 and state["completed"]
           and untouched and check == "ok" and member["ok"])
     text = "\n".join([
@@ -881,7 +892,8 @@ def gate_migration(args):
         f"copy={copy}",
         f"copy_initial_sha256={copy_initial}",
         f"migration_armed={armed}",
-        f"service_port={port}",
+        f"service_port={port or 'none'}",
+        f"service_set_port_exit={set_port.returncode if set_port else 'missing'}",
         f"service_start_exit={start.returncode if start else 'missing'}",
         f"service_error={service_error or 'none'}",
         f"service_stopped={','.join(stopped)}",
