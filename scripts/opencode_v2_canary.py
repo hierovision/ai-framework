@@ -696,7 +696,15 @@ def gate_c7(args):
             "};\n")
     token = uuid.uuid4().hex
     env = {"XDG_CONFIG_HOME": os.path.join(c7, "config"),
+           "XDG_STATE_HOME": os.path.join(c7, "state"),
+           "XDG_CACHE_HOME": os.path.join(c7, "cache"),
+           "XDG_DATA_HOME": os.path.join(c7, "data"),
+           "XDG_RUNTIME_DIR": os.path.join(c7, "runtime"),
+           "TMPDIR": os.path.join(c7, "tmp"),
            "OPENCODE_DB": os.path.join(root, "c7.db")}
+    for key in ("XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
+                "XDG_RUNTIME_DIR", "TMPDIR"):
+        os.makedirs(env[key], exist_ok=True)
     v2.assert_scratch_db(env["OPENCODE_DB"], root)
     cfg = plugins = agents = None
     service_error = None
