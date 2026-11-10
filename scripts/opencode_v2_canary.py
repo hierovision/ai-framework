@@ -11,7 +11,7 @@ Gates (see `docs/ADRs/ADR-0014-opencode-v2-upgrade.md` and
 `reference/opencode-integration.md`):
   C1 isolated install/version   C2 service + /api/info        C3 model catalog
   C4 fresh-DB 10/10 stability   C5 backup (first)             C6 V1 rollback
-  C7 config/plugin probe        C8 capability audit
+  C7 config/plugin loader proof  C8 capability audit
   migration  copy-only, 900 s, `session_v2` population + source hash
 
 Usage:
@@ -43,6 +43,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import uuid
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
@@ -55,6 +56,15 @@ REAL_DB = v2.DEFAULT_DB
 REAL_CONFIG = os.path.expanduser("~/.config/opencode")
 AGENTS_DIR = os.path.join(REPO, "agents")
 MIGRATION_TIMEOUT = 900
+
+# C7 loader proof. `plugin list` does not enumerate local plugin directories,
+# so the pass condition is a real standalone load: the loader's own
+# `loading plugin` line resolving to the configured directory plus the
+# plugin's setup marker attributed to this probe by a per-run token.
+C7_PLUGIN_REL = "./plugins/canary-plugin"
+C7_LOADER_MARKER = "canary-plugin initialized"
+C7_LOADER_TOKEN_ENV = "OPENCODE_LOADER_PROBE_TOKEN"
+C7_LOADER_TIMEOUT = 60
 
 
 def now_date():
@@ -559,13 +569,98 @@ def gate_c6(args):
     return ok, "\n".join(lines)
 
 
+def c7_loader_log_verdict(log_text, plugin_dir, token):
+    """Parse a standalone log into loader, marker, and failure evidence.
+
+    A loader line only counts when its `id=` resolves to the configured plugin
+    directory; a marker only counts when it carries this probe's token. This
+    keeps an unrelated plugin copy (or a stale config) from satisfying C7.
+    """
+    expected = os.path.realpath(plugin_dir)
+    loaded, markers, failures = [], [], []
+    for line in (log_text or "").splitlines():
+        if "loading plugin" in line:
+            match = re.search(r"\bid=(\S+)", line)
+            if match and os.path.realpath(match.group(1)) == expected:
+                loaded.append(line)
+        if "failed to load plugin" in line and "canary-plugin" in line:
+            failures.append(line)
+        if C7_LOADER_MARKER in line and token and token in line:
+            markers.append(line)
+    return loaded, markers, failures
+
+
+def c7_loader_probe(args, config_root, plugin_dir, token):
+    """Run one bounded standalone CLI; return (stderr_log, error_or_None).
+
+    The invalid model is deliberate: the plugin phase runs before model
+    resolution, so the run exits quickly after the loader/marker evidence.
+    All DB/XDG/TMP paths live under the C7 scratch root; the caller owns
+    service shutdown before this probe starts.
+    """
+    c7 = os.path.join(args.scratch_root, "c7")
+    probe_dir = os.path.join(c7, "loader-probe")
+    for sub in ("state", "cache", "data", "runtime", "tmp"):
+        os.makedirs(os.path.join(probe_dir, sub), exist_ok=True)
+    env = dict(os.environ)
+    env.update({
+        "XDG_CONFIG_HOME": config_root,
+        "XDG_STATE_HOME": os.path.join(probe_dir, "state"),
+        "XDG_CACHE_HOME": os.path.join(probe_dir, "cache"),
+        "XDG_DATA_HOME": os.path.join(probe_dir, "data"),
+        "XDG_RUNTIME_DIR": os.path.join(probe_dir, "runtime"),
+        "TMPDIR": os.path.join(probe_dir, "tmp"),
+        "OPENCODE_DB": os.path.join(probe_dir, "probe.db"),
+        "OPENCODE_LOG_LEVEL": "info",
+        C7_LOADER_TOKEN_ENV: token,
+    })
+    env.pop("OPENCODE_CONFIG_CONTENT", None)
+    v2.assert_scratch_db(env["OPENCODE_DB"], args.scratch_root)
+    binary = getattr(args, "opencode_bin", None) or "opencode"
+    argv = [binary, "run", "--standalone", "--format", "json",
+            "--log-level", "info", "--print-logs",
+            "--model", "canary-probe/none", "canary plugin loader probe"]
+    timed_out = False
+    try:
+        proc = subprocess.Popen(argv, cwd=probe_dir, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, start_new_session=True)
+        try:
+            _out, err = proc.communicate(timeout=C7_LOADER_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            _out, err = proc.communicate()
+    except OSError as exc:
+        detail = f"cannot launch {binary}: {exc}"
+        write_text(os.path.join(c7, "loader.log"), detail + "\n")
+        return "", detail
+    log = err or ""
+    write_text(os.path.join(c7, "loader.log"), log)
+    return log, "timeout" if timed_out else None
+
+
 def gate_c7(args):
-    """Config/plugin probe under an isolated V2 config root."""
+    """Config/plugin probe under an isolated V2 config root.
+
+    Pass requires real loader evidence. `plugin list` returns empty for local
+    plugin directories, so it is diagnostic text only, never a pass condition.
+    """
     root = args.scratch_root
+    stop_scratch_services(root)
     c7 = os.path.join(root, "c7")
+    shutil.rmtree(c7, ignore_errors=True)
+    try:
+        os.remove(os.path.join(root, "c7.db"))
+    except FileNotFoundError:
+        pass
     config = os.path.join(c7, "config", "opencode")
+    plugin_dir = os.path.join(config, "plugins", "canary-plugin")
     os.makedirs(os.path.join(config, "agents"), exist_ok=True)
-    os.makedirs(os.path.join(config, "plugins"), exist_ok=True)
+    os.makedirs(plugin_dir, exist_ok=True)
     marker = {
         "$schema": "https://opencode.ai/config.json",
         "agents": {"canary-marker": {
@@ -575,6 +670,7 @@ def gate_c7(args):
                 {"action": "shell", "resource": "*", "effect": "deny"},
             ]}},
         "permissions": [{"action": "execute", "resource": "*", "effect": "deny"}],
+        "plugins": [C7_PLUGIN_REL],
     }
     write_text(os.path.join(config, "opencode.jsonc"),
                json.dumps(marker, indent=2))
@@ -587,37 +683,85 @@ def gate_c7(args):
                  "  - action: subagent\n    resource: \"*\"\n    effect: deny\n"
                  "  - action: execute\n    resource: \"*\"\n    effect: deny\n"
                  "---\n")
-    with open(os.path.join(config, "plugins", "canary-plugin.js"), "w",
+    with open(os.path.join(plugin_dir, "index.js"), "w",
               encoding="utf-8") as fh:
-        fh.write("export default { id: 'canary-plugin', setup() {} }\n")
+        fh.write(
+            "const PROBE = process.env.OPENCODE_LOADER_PROBE_TOKEN ?? '';\n"
+            "export default {\n"
+            "  id: 'canary-plugin',\n"
+            "  setup() {\n"
+            "    console.error(`canary-plugin initialized probe=${PROBE}`);\n"
+            "    return () => {};\n"
+            "  },\n"
+            "};\n")
+    token = uuid.uuid4().hex
     env = {"XDG_CONFIG_HOME": os.path.join(c7, "config"),
            "OPENCODE_DB": os.path.join(root, "c7.db")}
     v2.assert_scratch_db(env["OPENCODE_DB"], root)
+    cfg = plugins = agents = None
+    service_error = None
+    plugin_list_error = None
     try:
         port = str(free_port())
         v2_run(args, env, ["service", "set", "port", port], timeout=30)
-        start = v2_run(args, env, ["service", "start"], timeout=60)
+        v2_run(args, env, ["service", "start"], timeout=60)
         cfg = v2_run(args, env, ["debug", "config"], timeout=60)
-        plugins = v2_run(args, env, ["plugin", "list"], timeout=60)
         agents = v2_run(args, env, ["api", "GET", "/api/agent"], timeout=60)
     except (OSError, subprocess.SubprocessError) as exc:
-        evidence(root, "C7.txt", f"C7=FAIL ({exc})")
-        return False, str(exc)
-    marker_agent = "canary-marker" in (cfg.stdout or "")
-    marker_agent_api = "canary-marker" in (agents.stdout or "")
-    marker_plugin = "canary-plugin" in (plugins.stdout or "")
-    ok = (cfg.returncode == 0 and plugins.returncode == 0
-          and agents.returncode == 0 and marker_agent and marker_agent_api
-          and marker_plugin)
+        service_error = f"{type(exc).__name__}: {exc}"
+    # Diagnostic only: an empty/nonzero `plugin list` must never decide C7.
+    try:
+        plugins = v2_run(args, env, ["plugin", "list"], timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        plugin_list_error = f"{type(exc).__name__}: {exc}"
+    finally:
+        stop_scratch_services(root)
+    log_text, loader_error = c7_loader_probe(
+        args, os.path.join(c7, "config"), plugin_dir, token)
+    loaded, markers, failures = c7_loader_log_verdict(
+        log_text, plugin_dir, token)
+    marker_agent = bool(cfg) and "canary-marker" in (cfg.stdout or "")
+    marker_agent_api = bool(agents) and "canary-marker" in (agents.stdout or "")
+    loader_loaded = bool(loaded)
+    loader_marker = bool(markers)
+    loader_ok = (loader_error is None and not failures
+                 and loader_loaded and loader_marker)
+    ok = (service_error is None and cfg is not None and cfg.returncode == 0
+          and agents is not None and agents.returncode == 0
+          and marker_agent and marker_agent_api and loader_ok)
+    if loader_error == "timeout":
+        loader_detail = f"loader probe timed out after {C7_LOADER_TIMEOUT}s"
+    elif loader_error:
+        loader_detail = f"loader probe error: {loader_error}"
+    elif failures:
+        loader_detail = f"loader failed to load plugin: {failures[0][:240]}"
+    elif not loader_loaded:
+        loader_detail = f"loader did not load {plugin_dir}"
+    elif not loader_marker:
+        loader_detail = ("startup marker missing or not attributed to this "
+                         f"probe (token {token[:8]}…)")
+    else:
+        loader_detail = f"loader id={os.path.realpath(plugin_dir)}"
+    plugin_exit = plugins.returncode if plugins else "missing"
+    plugin_rows = (plugins.stdout or "").strip()[:200] if plugins else ""
     text = "\n".join([
         f"date={now_date()}",
-        f"debug_config_exit={cfg.returncode}",
+        "stale_c7_state_cleared=True",
+        f"configured_plugin={C7_PLUGIN_REL}",
+        f"debug_config_exit={cfg.returncode if cfg else 'missing'}",
         f"marker_agent_present={marker_agent}",
-        f"plugin_list_exit={plugins.returncode}",
-        f"plugin_rows={(plugins.stdout or '').strip()[:200]}",
-        f"marker_plugin_present={marker_plugin}",
-        f"agent_api_exit={agents.returncode}",
+        f"plugin_list_exit={plugin_exit}",
+        f"plugin_list_rows={plugin_rows}",
+        f"plugin_list_error={plugin_list_error or 'none'}",
+        "plugin_list_loader_proof=False",
+        f"agent_api_exit={agents.returncode if agents else 'missing'}",
         f"agent_api_has_marker={marker_agent_api}",
+        f"service_error={service_error or 'none'}",
+        f"loader_probe_error={loader_error or 'none'}",
+        f"loader_loaded_plugin={loader_loaded}",
+        f"loader_marker_attributed={loader_marker}",
+        f"loader_failed_to_load={bool(failures)}",
+        f"loader_detail={loader_detail}",
         f"C7={'PASS' if ok else 'FAIL'}",
         "global_config_audit=.scratch/v2-canary/global-config-audit.md",
     ])
