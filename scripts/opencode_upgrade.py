@@ -852,7 +852,7 @@ def rollback_plan(link, previous_default, backup, method, home=None,
         copies.append(f"DB: {db}")
     if backup and copies:
         snapshot = f"the pre-apply snapshot at {backup} ({', '.join(copies)})"
-        pre_desc = f"the pre-apply snapshot at {backup} is the V2-era config/DB"
+        pre_desc = f"the pre-apply snapshot at {backup} is the V2-era snapshot"
     elif backup:
         snapshot = f"the pre-apply snapshot at {backup} (no config/DB copy)"
         pre_desc = f"the pre-apply snapshot at {backup} contains no config/DB copy"
@@ -1944,14 +1944,22 @@ def apply_artifact(args, target, home, link, backup, previous_default, stage,
                    checks, verified=False, db=None):
     """Build the apply evidence artifact (success or failure)."""
     current_link = link_state(link)
-    backup_meta = (read_json(os.path.join(backup, "backup.json"), {})
-                   if backup else {}) or {}
-    config_backup = backup_meta.get("config")
-    if not config_backup:
+    backup_meta = (read_json(os.path.join(backup, "backup.json"))
+                   if backup else None)
+    if isinstance(backup_meta, dict):
+        # Metadata is authoritative: a config:null/config_error record means
+        # the partial <backup>/config directory is NOT a restore source.
+        config_backup = backup_meta.get("config")
+        database_backup = backup_meta.get("db") or db
+        config_error = backup_meta.get("config_error")
+    else:
+        # Legacy/pre-metadata backup: infer from the tree.
+        backup_meta = None
         config_backup = (os.path.join(backup, "config")
                          if backup and os.path.isdir(
                              os.path.join(backup, "config")) else None)
-    database_backup = backup_meta.get("db") or db
+        database_backup = db
+        config_error = None
     return {
         "version": target,
         "verified": verified,
@@ -1960,9 +1968,9 @@ def apply_artifact(args, target, home, link, backup, previous_default, stage,
         "checks": {name: {"ok": ok, "detail": detail}
                    for name, ok, detail in checks},
         "backup": backup,
-        "backup_metadata": backup_meta or None,
+        "backup_metadata": backup_meta,
         "config_backup": config_backup,
-        "config_backup_error": backup_meta.get("config_error"),
+        "config_backup_error": config_error,
         "database_backup": database_backup,
         "database_source": db_source_path(home) if home else None,
         "target_package": target_package_info(home, target),
@@ -2022,11 +2030,23 @@ def apply_supported(args, target):
     stage = "preflight"
 
     def restore_text():
+        meta = (read_json(os.path.join(backup, "backup.json"))
+                if backup else None)
+        if isinstance(meta, dict):
+            # Metadata is authoritative; never fall back to a partial config
+            # directory recorded as config:null.
+            config_path = meta.get("config")
+            database = meta.get("db")
+        else:
+            config_path = (os.path.join(backup, "config")
+                           if backup and os.path.isdir(
+                               os.path.join(backup, "config")) else None)
+            database = db
         parts = []
-        if backup and os.path.isdir(os.path.join(backup, "config")):
-            parts.append(f"config: {backup}/config")
-        if db:
-            parts.append(f"DB: {db}")
+        if config_path:
+            parts.append(f"config: {config_path}")
+        if database:
+            parts.append(f"DB: {database}")
         if not parts:
             return "no config/DB pre-upgrade snapshot was created"
         return "restore " + "; ".join(parts)

@@ -2293,19 +2293,79 @@ def test_pre_upgrade_backup_config_failure_reports_db():
         _write(os.path.join(home, ".config", "opencode", "opencode.jsonc"),
                "{}\n")
 
-        def fail(*args, **kwargs):
-            raise OSError("copy failed")
+        def fail(source, dest, *args, **kwargs):
+            os.makedirs(dest, exist_ok=True)
+            _write(os.path.join(dest, "opencode.jsonc"), "{}\n")
+            raise OSError("copy failed after partial")
 
         upgrade.shutil.copytree = fail
         backup, db = upgrade.pre_upgrade_backup(
             _args(root, home=home), v2.VERSION_PIN)
         assert db and os.path.isfile(db)
+        # A partial config dir exists, but metadata says it is not a restore
+        # source.
+        assert os.path.isdir(os.path.join(backup, "config"))
         meta = json.load(open(os.path.join(backup, "backup.json")))
         assert meta["db"] == db
         assert meta["config"] is None
         assert "OSError" in meta["config_error"]
+        link = os.path.join(home, ".yarn", "bin", "opencode")
+        payload = upgrade.apply_artifact(
+            _args(root, home=home), v2.VERSION_PIN, home, link, backup,
+            {"kind": "v2", "version": "2.2.5"}, "smoke", [], db=db)
+        assert payload["config_backup"] is None
+        assert payload["backup_metadata"]["config"] is None
+        assert "OSError" in payload["config_backup_error"]
+        assert payload["database_backup"] == db
+        assert os.path.join(backup, "config") not in payload["rollback"][
+            "guidance"]
     finally:
         upgrade.shutil.copytree = real_copytree
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_partial_config_backup_not_cited_as_restore():
+    root = _tmp("upgrade-partial-config-apply-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    _make_db(os.path.join(fixture["home"], ".local", "share", "opencode",
+                          "opencode.db"))
+    real_copytree = upgrade.shutil.copytree
+    real = (upgrade.official_upgrade, upgrade.post_upgrade_smoke,
+            upgrade.stage_config.live_processes)
+
+    def fail(source, dest, *args, **kwargs):
+        os.makedirs(dest, exist_ok=True)
+        _write(os.path.join(dest, "opencode.jsonc"), "{}\n")
+        raise OSError("partial copy")
+
+    upgrade.shutil.copytree = fail
+    upgrade.official_upgrade = lambda a, t, command=None: 0
+    upgrade.post_upgrade_smoke = lambda a, t, command=None: [
+        ("binary", False, "forced failure")]
+    upgrade.stage_config.live_processes = lambda: []
+    try:
+        args = _args(root, to=target, home=fixture["home"],
+                     skip_canary=True, drain_acknowledged=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            assert upgrade.apply_supported(args, target) == 1
+        data = json.load(open(_artifact(root, target)))
+        assert data["config_backup"] is None
+        assert data["backup_metadata"]["config"] is None
+        assert "OSError" in data["config_backup_error"]
+        assert data["database_backup"] and os.path.isfile(
+            data["database_backup"])
+        assert os.path.join(data["backup"], "config") not in data["rollback"][
+            "guidance"]
+        restore_tail = out.getvalue().split("restore:")[-1]
+        assert "config:" not in restore_tail, restore_tail
+        assert "DB:" in restore_tail, restore_tail
+    finally:
+        upgrade.shutil.copytree = real_copytree
+        (upgrade.official_upgrade, upgrade.post_upgrade_smoke,
+         upgrade.stage_config.live_processes) = real
         shutil.rmtree(root, ignore_errors=True)
 
 
