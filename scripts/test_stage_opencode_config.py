@@ -4,10 +4,13 @@
 Run: python3 scripts/test_stage_opencode_config.py
 """
 import argparse
+import contextlib
+import io
 import json
 import os
 import shutil
 import sqlite3
+import stat
 import sys
 import tempfile
 
@@ -84,6 +87,8 @@ def test_stage_moves_v1_and_links_v2():
         backup = os.path.join(home, ".config", backups[0])
         assert json.load(open(os.path.join(backup, "opencode.jsonc")))["v1"]
         assert open(os.path.join(backup, "service.json")).read() == "v1-service\n"
+        assert stat.S_IMODE(os.stat(os.path.join(
+            backup, "opencode.db")).st_mode) == 0o600
         con = sqlite3.connect(os.path.join(backup, "opencode.db"))
         assert con.execute("SELECT COUNT(*) FROM session").fetchone()[0] == 1
         con.close()
@@ -113,6 +118,17 @@ def test_stage_dry_run_is_read_only():
                        for name in os.listdir(os.path.join(home, ".config")))
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_backup_flag_is_documented_noop():
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            stage.main(["--help"])
+    except SystemExit:
+        pass
+    assert "no-op" in out.getvalue()
+    assert "--backup" in out.getvalue()
 
 
 def main():

@@ -116,6 +116,62 @@ def db_path():
     return DEFAULT_DB
 
 
+def db_path_for_home(home):
+    """DB source path for an explicit HOME, honoring the same env precedence."""
+    explicit = os.environ.get("OPENCODE_DB_PATH") or os.environ.get("OPENCODE_DB")
+    if explicit:
+        return os.path.expanduser(explicit)
+    return os.path.join(home, ".local", "share", "opencode", "opencode.db")
+
+
+def sqlite_backup(source, dest):
+    """Consistent, owner-only (0600) SQLite backup via Python sqlite3."""
+    src = sqlite3.connect(f"file:{source}?mode=ro", uri=True, timeout=30)
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+        for leftover in (dest, dest + "-wal", dest + "-shm"):
+            try:
+                os.remove(leftover)
+            except FileNotFoundError:
+                pass
+        dst = sqlite3.connect(dest, timeout=30)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    os.chmod(dest, 0o600)
+    return dest
+
+
+def migration_residual_accepted(repo, scratch_root, version, residual):
+    """A positive migration residual needs a dated classification record."""
+    if residual == 0:
+        return True
+    if residual is None:
+        return False
+    candidates = (
+        os.path.join(repo, "docs", "opencode-v2-migration-classification.json"),
+        os.path.join(scratch_root, "migration-residual-acceptance.json"),
+    )
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("version") not in (None, version):
+            continue
+        if data.get("residual") != residual:
+            continue
+        if data.get("owner") and data.get("date"):
+            return True
+    return False
+
+
 def connect(path=None):
     """Read-only connection, or None when the DB is absent/unreadable."""
     path = path or db_path()
@@ -291,15 +347,28 @@ def list_agents(directory=None, server=None):
     return [a.get("id") for a in data if isinstance(a, dict) and a.get("id")]
 
 
+def parse_opencode_version(text):
+    """One exact version parser for every OpenCode probe.
+
+    Accepts `opencode vX.Y.Z`, `vX.Y.Z`, or a bare `X.Y.Z` on a line by itself.
+    A superstring like `1.19.40` parses as `1.19.40` (so an exact comparison to
+    `1.19.4` fails); prerelease suffixes and embedded text return None.
+    """
+    for line in reversed((text or "").strip().splitlines()):
+        match = re.fullmatch(r"(?:opencode\s+)?v?(\d+\.\d+\.\d+)",
+                             line.strip())
+        if match:
+            return match.group(1)
+    return None
+
+
 def version():
     try:
         proc = subprocess.run([binary(), "--version"], capture_output=True,
                               text=True, timeout=15)
     except (OSError, subprocess.SubprocessError):
         return None
-    text = (proc.stdout or "").strip()
-    m = re.search(r"(\d+\.\d+\.\d+)", text)
-    return m.group(1) if m else None
+    return parse_opencode_version(proc.stdout)
 
 
 # --- V2 storage readers ------------------------------------------------------

@@ -25,6 +25,7 @@ the V1 rollback binary as the C1 "default":
     --prefix .scratch/v2-<version>-prefix \
     --opencode-bin .scratch/v2-<version>-prefix/bin/opencode \
     --default-bin ~/.config/yarn/global/node_modules/opencode-ai/bin/opencode.exe \
+    --default-version 1.19.4 \
     --v1-prefix .scratch/v1-prefix \
     --scratch-root .scratch/v2-canary-<version>
 """
@@ -60,6 +61,28 @@ def now_date():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
 
 
+def default_bin_path():
+    """The supported default command: the explicit yarn link, never PATH."""
+    return os.path.join(os.path.expanduser("~"), ".yarn", "bin", "opencode")
+
+
+def exact_version(text):
+    """Delegate to the shared exact version parser."""
+    return v2.parse_opencode_version(text)
+
+
+def api_version(text):
+    """Exact `version` field from an API payload (JSON first, then regex)."""
+    try:
+        data = json.loads(text or "{}")
+        if isinstance(data, dict) and data.get("version"):
+            return data["version"]
+    except ValueError:
+        pass
+    match = re.search(r'"version"\s*:\s*"([^"]+)"', text or "")
+    return match.group(1) if match else None
+
+
 def sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -81,19 +104,8 @@ def evidence(root, name, text):
 
 
 def sqlite_backup(source, dest):
-    """Consistent backup through Python sqlite3 (the sqlite3 CLI is absent)."""
-    src = sqlite3.connect(f"file:{source}?mode=ro", uri=True, timeout=30)
-    try:
-        os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
-        dst = sqlite3.connect(dest, timeout=30)
-        try:
-            src.backup(dst)
-        finally:
-            dst.close()
-    finally:
-        src.close()
-    os.chmod(dest, 0o600)
-    return dest
+    """Delegate to the shared 0600-preserving SQLite backup helper."""
+    return v2.sqlite_backup(source, dest)
 
 
 def integrity(path):
@@ -274,29 +286,42 @@ def gate_c1(args):
     prefix = args.prefix
     lines = [f"date={now_date()}"]
     if not args.skip_install:
-        proc = subprocess.run(
-            ["npm", "install", "--global", "--prefix", prefix,
-             f"@opencode/cli@{args.version}"],
-            capture_output=True, text=True)
+        try:
+            proc = subprocess.run(
+                ["npm", "install", "--global", "--prefix", prefix,
+                 f"@opencode/cli@{args.version}"],
+                capture_output=True, text=True, timeout=600)
+        except (OSError, subprocess.SubprocessError) as exc:
+            lines.append(f"install_error={type(exc).__name__}: {exc}")
+            evidence(root, "C1.txt", "\n".join(lines + ["C1=FAIL"]))
+            return False, f"install probe failed: {exc}"
         lines.append(f"install_exit={proc.returncode}")
         if proc.returncode != 0:
             evidence(root, "C1.txt", "\n".join(lines + ["C1=FAIL"]))
-            return False, proc.stderr[-400:]
+            return False, (proc.stderr or "")[-400:]
     binary = os.path.join(prefix, "bin", "opencode2")
     if not os.path.isfile(binary):
         binary = os.path.join(prefix, "bin", "opencode")
     if not os.path.isfile(binary):
         evidence(root, "C1.txt", "\n".join(lines + ["C1=FAIL"]))
         return False, "isolated binary missing"
-    iso = subprocess.run([binary, "--version"], capture_output=True, text=True)
-    default = subprocess.run([args.default_bin, "--version"],
-                             capture_output=True, text=True)
-    ok = args.version in iso.stdout and args.default_version in default.stdout
+    try:
+        iso = subprocess.run([binary, "--version"], capture_output=True,
+                             text=True, timeout=30)
+        default = subprocess.run([args.default_bin, "--version"],
+                                 capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        lines.append(f"version_probe_error={type(exc).__name__}: {exc}")
+        evidence(root, "C1.txt", "\n".join(lines + ["C1=FAIL"]))
+        return False, f"version probe failed: {exc}"
+    ok = (iso.returncode == 0 and default.returncode == 0
+          and exact_version(iso.stdout) == args.version
+          and exact_version(default.stdout) == args.default_version)
     lines += [
         f"isolated_command={binary} --version",
-        f"isolated_output={iso.stdout.strip()}",
+        f"isolated_output={(iso.stdout or '').strip()}",
         f"default_command={args.default_bin} --version",
-        f"default_output={default.stdout.strip()}",
+        f"default_output={(default.stdout or '').strip()}",
         f"C1={'PASS' if ok else 'FAIL'}",
     ]
     evidence(root, "C1.txt", "\n".join(lines))
@@ -311,11 +336,11 @@ def gate_c2(args):
         start = v2_run(args, {}, ["service", "start"], timeout=60)
         status = v2_run(args, {}, ["service", "status"], timeout=60)
         api = v2_run(args, {}, ["api", "GET", "/api/info"], timeout=60)
-    except subprocess.TimeoutExpired:
-        evidence(root, "C2.txt", "C2=FAIL timeout")
-        return False, "timeout"
+    except (OSError, subprocess.SubprocessError) as exc:
+        evidence(root, "C2.txt", f"C2=FAIL {type(exc).__name__}: {exc}")
+        return False, str(exc)
     ok = status.returncode == 0 and api.returncode == 0 and \
-        args.version in (api.stdout or "")
+        api_version(api.stdout) == args.version
     text = "\n".join([
         f"date={now_date()}",
         f"service_port={port}",
@@ -376,10 +401,14 @@ def import_current_auth(args, db):
     env.update(scratch_env(args.scratch_root))
     env["OPENCODE_DB"] = db
     env["OPENCODE_LOG_LEVEL"] = "ERROR"
-    proc = subprocess.run(
-        [args.opencode_bin, "auth", "import", "--standalone"],
-        input=json.dumps(payload), capture_output=True, text=True, env=env,
-        timeout=120)
+    try:
+        proc = subprocess.run(
+            [args.opencode_bin, "auth", "import", "--standalone"],
+            input=json.dumps(payload), capture_output=True, text=True, env=env,
+            timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, (f"auth import probe failed: {type(exc).__name__}: "
+                       f"{exc}")
     if proc.returncode == 0:
         # A migrated V1 DB may already carry an older, expired credential for
         # the same integration. Make the freshly imported "default" the only
@@ -400,8 +429,17 @@ def gate_c3(args):
     db = os.path.join(root, "c3-real.db")
     v2.assert_scratch_db(db, root)
     ok_auth, detail = import_current_auth(args, db)
-    proc = v2_run(args, {"OPENCODE_DB": db}, ["models", "--standalone"],
-                  timeout=120)
+    try:
+        proc = v2_run(args, {"OPENCODE_DB": db}, ["models", "--standalone"],
+                      timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        text = "\n".join([
+            f"date={now_date()}",
+            f"models_probe_error={type(exc).__name__}: {exc}",
+            "C3=FAIL",
+        ])
+        evidence(root, "C3-real.txt", text)
+        return False, text
     expected = sorted(set(agent_bindings().values()))
     catalog = proc.stdout or ""
     missing = [b for b in expected if b not in catalog]
@@ -440,9 +478,10 @@ def gate_c4(args):
                           ["run", "--standalone", "--model",
                            "opencode-go/deepseek-v4.1-flash", "--format", "json",
                            "Reply OK"], timeout=180)
-        except subprocess.TimeoutExpired:
+        except (OSError, subprocess.SubprocessError) as exc:
             ok = False
-            timings.append("timeout")
+            timings.append(f"error:{type(exc).__name__}")
+            texts.append(f"{type(exc).__name__}: {exc}")
             break
         elapsed = time.monotonic() - started
         timings.append(f"{elapsed:.2f}")
@@ -476,8 +515,18 @@ def gate_c6(args):
     if not os.path.isfile(binary):
         evidence(root, "C6.txt", "\n".join(lines + ["C6=FAIL (no V1 prefix)"]))
         return False, "V1 prefix missing"
-    ver = subprocess.run([binary, "--version"], capture_output=True, text=True)
-    lines.append(f"v1_version={ver.stdout.strip()}")
+    try:
+        ver = subprocess.run([binary, "--version"], capture_output=True,
+                             text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        lines.append(f"v1_version_probe_error={type(exc).__name__}: {exc}")
+        evidence(root, "C6.txt", "\n".join(lines + ["C6=FAIL"]))
+        return False, f"V1 version probe failed: {exc}"
+    lines.append(f"v1_version={(ver.stdout or '').strip()}")
+    if ver.returncode != 0:
+        lines.append(f"v1_version_exit={ver.returncode}")
+        evidence(root, "C6.txt", "\n".join(lines + ["C6=FAIL"]))
+        return False, f"V1 version probe exited {ver.returncode}"
     backup = os.path.join(root, "opencode.db")
     if not os.path.isfile(backup):
         lines.append("C6=FAIL (no C5 backup)")
@@ -501,7 +550,8 @@ def gate_c6(args):
         return False, str(exc)
     ids = re.findall(r"ses_[A-Za-z0-9]+", proc.stdout or "")
     known = [i for i in ids if i in source_ids]
-    ok = "1.19.4" in ver.stdout and proc.returncode == 0 and bool(known)
+    ok = (exact_version(ver.stdout) == "1.19.4"
+          and proc.returncode == 0 and bool(known))
     lines += [f"session_list_exit={proc.returncode}",
               f"session_ids={known[:3]}",
               f"C6={'PASS' if ok else 'FAIL'}"]
@@ -553,19 +603,25 @@ def gate_c7(args):
     except (OSError, subprocess.SubprocessError) as exc:
         evidence(root, "C7.txt", f"C7=FAIL ({exc})")
         return False, str(exc)
+    marker_agent = "canary-marker" in (cfg.stdout or "")
+    marker_agent_api = "canary-marker" in (agents.stdout or "")
+    marker_plugin = "canary-plugin" in (plugins.stdout or "")
+    ok = (cfg.returncode == 0 and plugins.returncode == 0
+          and agents.returncode == 0 and marker_agent and marker_agent_api
+          and marker_plugin)
     text = "\n".join([
         f"date={now_date()}",
         f"debug_config_exit={cfg.returncode}",
-        "marker_agent_present=" + str("canary-marker" in (cfg.stdout or "")),
+        f"marker_agent_present={marker_agent}",
         f"plugin_list_exit={plugins.returncode}",
-        "plugin_rows=" + str((plugins.stdout or "").strip()[:200]),
+        f"plugin_rows={(plugins.stdout or '').strip()[:200]}",
+        f"marker_plugin_present={marker_plugin}",
         f"agent_api_exit={agents.returncode}",
-        "agent_api_has_marker=" + str("canary-marker" in (agents.stdout or "")),
-        f"C7={'PASS' if cfg.returncode == 0 and plugins.returncode == 0 else 'FAIL'}",
+        f"agent_api_has_marker={marker_agent_api}",
+        f"C7={'PASS' if ok else 'FAIL'}",
         "global_config_audit=.scratch/v2-canary/global-config-audit.md",
     ])
     evidence(root, "C7.txt", text)
-    ok = cfg.returncode == 0 and plugins.returncode == 0
     return ok, text
 
 
@@ -573,16 +629,22 @@ def gate_c8(args):
     root = args.scratch_root
     patterns = ("todowrite", "lsp", "websearch")
     hits = {}
-    for pattern in patterns:
-        proc = subprocess.run(
-            ["grep", "-R", "-l", "-i", "--exclude-dir=node_modules",
-             "--exclude-dir=__pycache__", pattern, "skills", "agents",
-             "scripts", "reference", ".github"],
-            cwd=REPO, capture_output=True, text=True)
-        files = [f for f in (proc.stdout or "").splitlines()
-                 if ".opencode/plans" not in f
-                 and "opencode_v2_canary.py" not in f]
-        hits[pattern] = files
+    try:
+        for pattern in patterns:
+            proc = subprocess.run(
+                ["grep", "-R", "-l", "-i", "--exclude-dir=node_modules",
+                 "--exclude-dir=__pycache__", pattern, "skills", "agents",
+                 "scripts", "reference", ".github"],
+                cwd=REPO, capture_output=True, text=True, timeout=120)
+            files = [f for f in (proc.stdout or "").splitlines()
+                     if ".opencode/plans" not in f
+                     and "opencode_v2_canary.py" not in f]
+            hits[pattern] = files
+    except (OSError, subprocess.SubprocessError) as exc:
+        text = (f"date={now_date()}\n"
+                f"C8=FAIL (probe error: {type(exc).__name__}: {exc})")
+        evidence(root, "C8.txt", text)
+        return False, text
     ok = all(not files for files in hits.values())
     text = "\n".join([
         f"date={now_date()}",
@@ -593,6 +655,30 @@ def gate_c8(args):
     ])
     evidence(root, "C8.txt", text)
     return ok, text
+
+
+def migration_membership(src_ids, target_ids, run_ids=()):
+    """Measured migration membership (never a vacuous set identity).
+
+    The rehearsal run creates its own target session(s); `run_ids` removes them
+    before the phantom check. Structural validity requires a non-empty source,
+    at least one migrated source row (zero migration fails even with source
+    rows), and no phantom target IDs. Missing source rows are reported for the
+    residual-acceptance decision.
+    """
+    src = set(src_ids)
+    raw_target = set(target_ids)
+    run = raw_target & set(run_ids)
+    target = raw_target - run
+    migrated = target & src
+    missing = src - target
+    phantom = target - src
+    zero_migration = bool(src) and not migrated
+    ok = bool(src) and not zero_migration and not phantom
+    return {"ok": ok, "source": len(src), "target": len(raw_target),
+            "run": len(run), "migrated": len(migrated),
+            "missing": missing, "phantom": phantom,
+            "zero_migration": zero_migration}
 
 
 def gate_migration(args):
@@ -613,31 +699,42 @@ def gate_migration(args):
                        "opencode-go/deepseek-v4.1-flash", "--format", "json",
                        "Reply OK"], timeout=MIGRATION_TIMEOUT)
         elapsed = time.monotonic() - started
-    except subprocess.TimeoutExpired:
+    except (OSError, subprocess.SubprocessError) as exc:
         evidence(root, "migration-rehearsal.txt",
-                 f"date={now_date()}\nmigration=TIMEOUT>{MIGRATION_TIMEOUT}s")
-        return False, "migration timeout"
-    migrated = read_ids(copy, "session_v2")
-    missing = sorted(set(src_ids) - set(migrated))
+                 f"date={now_date()}\nmigration=ERROR "
+                 f"{type(exc).__name__}: {exc}")
+        return False, f"migration probe failed: {exc}"
+    target_ids = read_ids(copy, "session_v2")
+    run_ids = set(re.findall(r'"sessionID"\s*:\s*"([^"]+)"',
+                             proc.stdout or ""))
+    member = migration_membership(src_ids, target_ids, run_ids)
+    missing = sorted(member["missing"])
+    phantom = sorted(member["phantom"])
+    residual_accepted = v2.migration_residual_accepted(
+        REPO, root, args.version, len(missing))
     untouched = sha256(source) == source_hash
     check = integrity(copy)
     ok = (ok_auth and proc.returncode == 0 and untouched and check == "ok"
-          and len(migrated & src_ids) > 0)
+          and member["ok"] and (not missing or residual_accepted))
     text = "\n".join([
         f"date={now_date()}",
         f"source={source}",
         f"source_sha256={source_hash}",
-        f"source_session_rows={len(src_ids)}",
+        f"source_session_rows={member['source']}",
         f"copy={copy}",
         f"copy_initial_sha256={copy_initial}",
         f"migration_exit={proc.returncode}",
         f"migration_stderr={(proc.stderr or '').strip()[:400]}",
         f"migration_elapsed_seconds={elapsed:.2f}",
         f"session_v2_after_auth_import={rows_after_auth}",
-        f"session_v2_rows={len(migrated)}",
-        f"preexisting_sessions_migrated={len(set(src_ids) & migrated)}",
+        f"target_session_rows={member['target']}",
+        f"run_created_ids={member['run']}",
+        f"migrated_source_rows={member['migrated']}",
         f"source_sessions_not_migrated={len(missing)}",
-        f"migrated_ids_present_in_source={set(migrated) <= set(src_ids) | set(migrated)}",
+        f"target_only_ids={len(phantom)}",
+        f"zero_migration={member['zero_migration']}",
+        f"migrated_ids_subset_of_source={not phantom}",
+        f"residual_accepted={residual_accepted}",
         f"target_integrity_check={check}",
         f"source_backup_sha256_after={sha256(source)}",
         f"source_untouched={untouched}",
@@ -647,6 +744,8 @@ def gate_migration(args):
     evidence(root, "migration-rehearsal.txt", text)
     write_text(os.path.join(root, "migration-residual-ids.json"),
                json.dumps(missing, indent=2))
+    write_text(os.path.join(root, "migration-phantom-ids.json"),
+               json.dumps(phantom, indent=2))
     return ok, text
 
 
@@ -680,7 +779,7 @@ def main(argv=None):
                                                         "v1-prefix"))
     ap.add_argument("--opencode-bin", default=os.path.join(
         REPO, ".scratch", "v2-prefix", "bin", "opencode2"))
-    ap.add_argument("--default-bin", default="opencode")
+    ap.add_argument("--default-bin", default=default_bin_path())
     ap.add_argument("--db-name", default="stability.db")
     ap.add_argument("--version", default=v2.VERSION_PIN,
                     help="candidate @opencode/cli version (default: pin)")

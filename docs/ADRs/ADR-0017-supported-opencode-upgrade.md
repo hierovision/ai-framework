@@ -46,13 +46,14 @@ window.
    `VERSION_PIN` remains the single version source; `check --pins-only`
    verifies the docs/CI/plugin seams; `prepare` updates them. The live
    `scripts/opencode_upgrade.py upgrade --apply` backs up the DB/config, runs
-   the official command, and post-smokes (`--version`, `/api/info`, agents,
-   plugin loader, observer API). It does not manage a link or a custom DB
-   rollback.
+   the official command, repairs the default package-bin shadow, and
+   post-smokes (`--version`, config root, `/api/info`, agents, plugin loader,
+   observer API). It does not manage a custom DB rollback.
 5. **Rollback.** V2→V2: `opencode upgrade <previous> --method yarn` plus the
    pre-upgrade DB/config backup. V1: reinstall the shadowed V1 bin and restore
    the V1 config/DB backups. Both are documented and drilled; there is no
-   automatic link/DB rollback.
+   automatic link/DB rollback. The only automatic filesystem action is the
+   package-bin shadow repair described in the 2026-11-09 amendment.
 6. **Retirements.** `opencode_v2_cutover.py` and its test are retired; the
    versioned wrapper/directory layout is retired; ADR-0016's custom
    install/apply standard is superseded by this ADR. ADR-0014 remains the
@@ -71,6 +72,35 @@ window.
   one-link switch.
 - The repo no longer owns a binary installation format; it owns only the
   config corpus, the pin checks, and the canary.
+
+## 2026-11-09 amendment — package-bin shadow and truthful failure
+
+The 2.2.6 install exposed the yarn-global dual-bin collision: the retained V1
+`opencode-ai` package and the V2 `@opencode/cli` package both publish an
+`opencode` bin. Yarn linked the V2 package as `opencode2` but left the default
+`opencode` on V1, so the orchestrator's post-install smoke measured the stale
+V1 shim.
+
+Repairing the default link to the installed V2 package is an **explicit
+supported action**. `scripts/opencode_upgrade.py upgrade --to <pin> --apply
+--drain-acknowledged` resolves the installed target (`opencode2` first, then
+the package `bin/opencode.exe`), atomically replaces `~/.yarn/bin/opencode`
+with that package binary (preferring a relative `opencode2` target), and
+verifies `opencode --version` and `opencode debug paths config` against
+`~/.config/opencode` before the smoke. When the target package is already
+installed, the apply skips the official install and only repairs and verifies.
+
+Failed verification is **not an automatic rollback**. The target package and
+the repaired default stay in place; the artifact records `verified: false`,
+`rolled_back: false`, the failing stage, the target package version/path,
+default-link evidence, and the exact manual rollback guidance, while upgrade
+state stays `prepared`. Every apply failure — including a command timeout or
+spawn error — writes that named artifact. A predecessor artifact is archived
+before overwrite (`.failed-<stamp>` unverified, `.previous-<stamp>` verified).
+For a V1 previous default the rollback points at the actual
+`~/.config/opencode.v1-backup-*` tree, not the V2-era pre-apply snapshot; SQLite
+backups are written mode 0600. The pre-upgrade package/config/DB snapshot plus
+that manual guidance remain the rollback.
 
 ## Sources
 

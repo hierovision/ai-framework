@@ -35,11 +35,15 @@ sys.path.insert(0, HERE)
 
 import opencode_v2 as v2  # noqa: E402
 
+
+def default_bin_path():
+    """The supported default command: the explicit yarn link, never PATH."""
+    return os.path.join(os.path.expanduser("~"), ".yarn", "bin", "opencode")
+
+
 AGENTS_DIR = os.path.join(REPO, "agents")
 DEFAULT_ARTIFACT = os.path.join(REPO, ".scratch", "opencode-v2",
                                 "post-smoke.json")
-EXPECTED_AGENTS = 17
-EXPECTED_CONSUMER_AGENTS = 10
 PLUGIN_REL = "./plugins/auto-compact-at-threshold"
 PLUGIN_BARE = "plugins/auto-compact-at-threshold"
 LOADER_MARKER = "auto-compact-at-threshold initialized"
@@ -57,23 +61,34 @@ def sha256(path):
 
 
 def git_sha(path):
-    proc = subprocess.run(["git", "-C", path, "rev-parse", "HEAD"],
-                          capture_output=True, text=True)
+    proc = run(["git", "-C", path, "rev-parse", "HEAD"], timeout=30)
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
 def run(argv, cwd=None, env=None, timeout=180):
+    """Run a command; timeouts/spawn errors yield a failed CompletedProcess."""
     try:
         return subprocess.run(argv, cwd=cwd, env=env, capture_output=True,
                               text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return None, str(exc)
+        return subprocess.CompletedProcess(argv, 1, "", f"{type(exc).__name__}: {exc}")
+
+
+def parsed_version(text):
+    """Delegate to the shared exact version parser."""
+    return v2.parse_opencode_version(text)
 
 
 def check_version(binary):
-    proc = subprocess.run([binary, "--version"], capture_output=True, text=True)
-    return proc.returncode == 0 and v2.VERSION_PIN in proc.stdout, \
-        proc.stdout.strip()
+    """Exact version via the shared parser, compared to the pin."""
+    try:
+        proc = subprocess.run([binary, "--version"], capture_output=True,
+                              text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    version = v2.parse_opencode_version(proc.stdout)
+    return proc.returncode == 0 and version == v2.VERSION_PIN, \
+        version or (proc.stdout or "").strip()
 
 
 def agent_files(root):
@@ -82,13 +97,66 @@ def agent_files(root):
     return sorted(f for f in os.listdir(root) if f.endswith(".md"))
 
 
-def check_agents(framework, consumer):
-    fw = len(agent_files(os.path.join(framework, "agents")))
-    cs = len(agent_files(os.path.join(consumer, ".opencode", "agents"))) \
-        if consumer else 0
-    ok = fw == EXPECTED_AGENTS and (consumer is None
-                                    or cs == EXPECTED_CONSUMER_AGENTS)
-    return ok, f"framework={fw} consumer={cs}"
+def agent_ids(root):
+    return {name[:-3] for name in agent_files(root)}
+
+
+def live_agent_ids(binary):
+    proc = run([binary, "api", "GET", "/api/agent"], timeout=60)
+    if proc.returncode != 0:
+        return None, f"agent api unavailable: {proc.stderr or proc.returncode}"
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except ValueError:
+        return None, "agent api returned non-JSON"
+    rows = data.get("data") if isinstance(data, dict) else data
+    live = {(row.get("id") or row.get("name"))
+            for row in rows or [] if isinstance(row, dict)}
+    live.discard(None)
+    return live, f"live={len(live)}"
+
+
+def check_agents(framework, consumer, binary=None):
+    """Derive expected IDs from the corpus; verify them live when possible.
+
+    The live API may include built-ins and newly added agents; only missing
+    expected framework/consumer IDs fail. Without a binary the check is a
+    corpus presence check (no fixed count).
+    """
+    expected = agent_ids(os.path.join(framework, "agents"))
+    consumer_expected = (agent_ids(os.path.join(consumer, ".opencode",
+                                                "agents"))
+                         if consumer else set())
+    if not expected:
+        return False, "framework agent corpus is empty"
+    if binary:
+        live, detail = live_agent_ids(binary)
+        if live is None:
+            return False, detail
+        expected_all = expected | consumer_expected
+        missing = sorted(expected_all - live)
+        return (not missing,
+                f"{detail} expected={len(expected_all)} missing={missing}")
+    return True, (f"framework={len(expected)} "
+                  f"consumer={len(consumer_expected)} (corpus only)")
+
+
+def check_agents_live(binary, framework):
+    """Every expected framework agent ID is present in the live API.
+
+    Built-ins and newly added agents are tolerated; a missing framework ID is
+    a failure. This replaces the hardcoded repo file-count check for the
+    apply smoke.
+    """
+    expected = agent_ids(os.path.join(framework, "agents"))
+    if not expected:
+        return False, "framework agent corpus is empty"
+    live, detail = live_agent_ids(binary)
+    if live is None:
+        return False, detail
+    missing = sorted(expected - live)
+    return (not missing,
+            f"{detail} expected={len(expected)} missing={missing}")
 
 
 def check_config(framework, consumer):
@@ -221,7 +289,7 @@ def loader_evidence(root, binary, plugin_dir):
 
 
 def check_plugin(manifest=None, framework=None, config_root=None,
-                 binary="opencode"):
+                 binary=None):
     """AC41/N1: the versioned config wires the plugin, runtime evidence proves
     its behavior, and V2's actual loader log proves it loaded.
 
@@ -229,6 +297,7 @@ def check_plugin(manifest=None, framework=None, config_root=None,
     local directories, and a bare `plugins/...` spec is an npm package spec in
     V2. The loader probe runs the real CLI with the versioned config.
     """
+    binary = binary or default_bin_path()
     root = os.path.abspath(_versioned_root(manifest, config_root))
     cfg_path = os.path.join(root, "opencode", "opencode.jsonc")
     plugin_dir = os.path.join(root, "opencode", "plugins",
@@ -255,13 +324,15 @@ def check_plugin(manifest=None, framework=None, config_root=None,
     probe = os.path.join(plugin_dir, "runtime-probe.mjs")
     if not os.path.isfile(probe):
         return False, f"runtime probe missing: {probe}"
-    node = subprocess.run(["node", probe], capture_output=True, text=True,
-                          timeout=60)
+    node = run(["node", probe], timeout=60)
+    if node.returncode != 0:
+        return False, (f"runtime probe failed: "
+                       f"{(node.stderr or '').strip()[:200]}")
     try:
         evidence = json.loads((node.stdout or "").strip().splitlines()[-1])
     except (IndexError, ValueError):
         return False, f"runtime probe emitted no JSON: {node.stderr[:200]}"
-    if node.returncode != 0 or not evidence.get("startup_marker") \
+    if not evidence.get("startup_marker") \
             or not evidence.get("subscription_aborted"):
         return False, f"runtime probe failed: {evidence}"
     source = evidence.get("source") or ""
@@ -314,14 +385,13 @@ def drills(framework, consumer, evidence_path=None):
                         f"D1-D6 evidence missing: {path}"))
     # D7: model doctor + consumer bindings (offline / read-only).
     doctor = os.path.join(REPO, "scripts", "model-liveness-check.py")
-    p1 = subprocess.run([sys.executable, doctor], capture_output=True,
-                        text=True) if os.path.isfile(doctor) else None
+    p1 = run([sys.executable, doctor], timeout=120) \
+        if os.path.isfile(doctor) else None
     results.append(("D7-model-doctor", bool(p1 and p1.returncode == 0),
                     (p1.stdout or p1.stderr or "missing").strip()[:200]
                     if p1 else "model-liveness-check.py missing"))
-    p2 = subprocess.run([sys.executable, os.path.join(
-        REPO, "scripts", "check-consumer-bindings.py"), framework],
-        capture_output=True, text=True)
+    p2 = run([sys.executable, os.path.join(
+        REPO, "scripts", "check-consumer-bindings.py"), framework], timeout=120)
     results.append(("D7-consumer", p2.returncode == 0,
                     (p2.stdout or p2.stderr or "").strip()[-200:]))
     return results
@@ -340,7 +410,7 @@ def pre_merge(args):
     binary = args.default_bin
     ok, detail = check_version(binary)
     checks.append(("default-is-v2", ok, detail))
-    ok, detail = check_agents(args.framework, args.consumer)
+    ok, detail = check_agents(args.framework, args.consumer, args.default_bin)
     checks.append(("agents-load", ok, detail))
     ok, detail = check_config(args.framework, args.consumer)
     checks.append(("config", ok, detail))
@@ -420,8 +490,16 @@ def rollback_check(args):
         manifest = json.load(fh)
     checks = []
     binary = args.default_bin
-    proc = subprocess.run([binary, "--version"], capture_output=True, text=True)
-    checks.append(("v1-version", "1.19.4" in proc.stdout, proc.stdout.strip()))
+    try:
+        proc = subprocess.run([binary, "--version"], capture_output=True,
+                              text=True, timeout=30)
+        version_ok = (proc.returncode == 0
+                      and parsed_version(proc.stdout) == "1.19.4")
+        version_detail = (proc.stdout or "").strip()
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        version_ok = False
+        version_detail = f"{type(exc).__name__}: {exc}"
+    checks.append(("v1-version", version_ok, version_detail))
     backup = (manifest.get("backup") or {}).get("path")
     if backup and os.path.isfile(backup):
         import sqlite3
@@ -466,7 +544,7 @@ def main(argv=None):
     ap.add_argument("--consumer-artifact", default=None)
     ap.add_argument("--manifest", default=None)
     ap.add_argument("--artifact", default=None)
-    ap.add_argument("--default-bin", default="opencode")
+    ap.add_argument("--default-bin", default=default_bin_path())
     ap.add_argument("--agents-dir", default=None)
     ap.add_argument("--agent-snapshot", default=None)
     ap.add_argument("--require-consumer", action="store_true")

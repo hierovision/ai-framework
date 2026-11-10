@@ -30,6 +30,31 @@ staged with `python3 scripts/stage_opencode_config.py --backup`. The canary
 and pin check are the pre-merge gates; see ADR-0017. Never hand-edit a pin
 seam.
 
+The yarn-global install retains the V1 `opencode-ai` package, so **both
+packages publish an `opencode` bin**: Yarn links the V2 binary as `opencode2`
+and may leave the default `opencode` pointing at V1. The supported sequence is
+**canary -> apply -> verify**. First generate fresh hardened canary evidence
+for the pin: `python3 scripts/opencode_upgrade.py canary --to <pin>`. Legacy
+evidence without `zero_migration`/`target_only_ids` is refused; regenerate it.
+Then run `python3 scripts/opencode_upgrade.py upgrade --to <pin> --apply
+--drain-acknowledged` (with the pinned version) from a normal terminal with all
+sessions closed; it reuses the installed V2 package (no Yarn reinstall),
+atomically repairs the default `opencode` shadow to that package binary, and
+verifies `opencode --version` + `opencode debug paths config` before the smoke.
+A predecessor `upgrade-<pin>-verify.json` is preserved before new evidence is
+written: an unverified one as
+`upgrade-<pin>-verify.json.failed-<UTC stamp>`, a verified one as
+`upgrade-<pin>-verify.json.previous-<UTC stamp>`. A failed verification records
+`verified: false` with the exact manual rollback guidance — never an automatic
+rollback (ADR-0017).
+For a V1 previous default, rollback uses the actual
+`~/.config/opencode.v1-backup-*` tree, not the V2-era pre-apply snapshot.
+SQLite backups are written mode 0600. Existing backups created before this fix
+may still be group/world-readable; the owner runs once from the repo root after
+merge:
+`chmod 600 ~/.config/opencode.v1-backup-*/opencode.db
+"$PWD"/.scratch/opencode-v2/pre-upgrade-*/opencode.db 2>/dev/null`.
+
 Re-run after adding new skills or agents. `git pull` alone updates the
 content of already-linked skills/agents. Agent files are validated on
 install: the ID is **path-derived**, so a legacy `name:` frontmatter key is

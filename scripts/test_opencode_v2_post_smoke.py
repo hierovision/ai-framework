@@ -22,6 +22,7 @@ sys.path.insert(0, HERE)
 
 import scratch_cleanup  # noqa: E402
 import opencode_v2 as v2  # noqa: E402
+import opencode_v2_post_smoke as post_smoke  # noqa: E402
 
 
 def _tmp(prefix):
@@ -84,10 +85,15 @@ def _fake_bin(root, version=None):
     d = os.path.join(root, "bin")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "opencode")
+    agent_rows = ",".join(f'{{"id":"agent-{i}"}}' for i in range(17))
     with open(path, "w") as fh:
         fh.write(f"""#!/bin/sh
 if [ "$1" = "--version" ]; then
   echo '{version}'
+  exit 0
+fi
+if [ "$1" = "api" ] && [ "$2" = "GET" ] && [ "$3" = "/api/agent" ]; then
+  echo '{{"data":[{agent_rows},{{"id":"builtin"}}]}}'
   exit 0
 fi
 if [ "$1" = "run" ]; then
@@ -319,6 +325,294 @@ def test_rollback_check_verifies_db_and_agents():
         assert "db-integrity: PASS" in r.stdout
         assert "v1-agent-hashes: PASS" in r.stdout
     finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _stub(root, name, output):
+    path = os.path.join(root, "bin", name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\nprintf '%s\\n' " + json.dumps(output) + "\n")
+    os.chmod(path, 0o755)
+    return path
+
+
+def test_check_agents_live_tolerates_extras_and_flags_missing():
+    root = _tmp("postsmoke-agents-live-")
+    try:
+        expected = sorted(name[:-3] for name in os.listdir(
+            os.path.join(REPO, "agents")) if name.endswith(".md"))
+        ids = expected + ["builtin", "new-agent"]
+        binary = _stub(root, "opencode",
+                       json.dumps({"data": [{"id": i} for i in ids]}))
+        ok, detail = post_smoke.check_agents_live(binary, REPO)
+        assert ok is True, detail
+        assert "missing=[]" in detail
+        missing = expected[0]
+        ids = expected[1:] + ["builtin"]
+        binary = _stub(root, "opencode2",
+                       json.dumps({"data": [{"id": i} for i in ids]}))
+        ok, detail = post_smoke.check_agents_live(binary, REPO)
+        assert ok is False
+        assert missing in detail
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_check_version_is_exact():
+    root = _tmp("postsmoke-version-")
+    try:
+        long_version = _stub(root, "long", f"opencode v{v2.VERSION_PIN}0")
+        ok, detail = post_smoke.check_version(long_version)
+        assert ok is False, detail
+        assert detail != v2.VERSION_PIN
+        exact = _stub(root, "exact", f"opencode v{v2.VERSION_PIN}")
+        ok, detail = post_smoke.check_version(exact)
+        assert ok is True, detail
+        assert detail == v2.VERSION_PIN
+        bare = _stub(root, "bare", v2.VERSION_PIN)
+        assert post_smoke.check_version(bare)[0] is True
+        v_form = _stub(root, "vform", f"v{v2.VERSION_PIN}")
+        assert post_smoke.check_version(v_form)[0] is True
+        embedded = _stub(root, "embedded", f"build {v2.VERSION_PIN}")
+        assert post_smoke.check_version(embedded)[0] is False
+        prerelease = _stub(root, "rc", f"opencode v{v2.VERSION_PIN}-rc")
+        assert post_smoke.check_version(prerelease)[0] is False
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_run_spawn_error_returns_completed_process():
+    result = post_smoke.run(["definitely-not-a-real-binary-xyz"])
+    assert hasattr(result, "returncode")
+    assert result.returncode != 0
+    assert "FileNotFoundError" in (result.stderr or "")
+
+
+def test_check_agents_corpus_derived_live():
+    root = _tmp("postsmoke-agents-corpus-")
+    try:
+        fw = os.path.join(root, "framework")
+        os.makedirs(os.path.join(fw, "agents"))
+        for name in ("alpha", "beta"):
+            with open(os.path.join(fw, "agents", name + ".md"), "w") as fh:
+                fh.write("---\ndescription: d\nmodel: m\npermissions: []\n---\n")
+        cs = os.path.join(root, "consumer")
+        os.makedirs(os.path.join(cs, ".opencode", "agents"))
+        with open(os.path.join(cs, ".opencode", "agents", "gamma.md"),
+                  "w") as fh:
+            fh.write("---\ndescription: d\nmodel: m\npermissions: []\n---\n")
+        live = _stub(root, "live", json.dumps({"data": [
+            {"id": "alpha"}, {"id": "beta"}, {"id": "gamma"},
+            {"id": "builtin"}]}))
+        ok, detail = post_smoke.check_agents(fw, cs, live)
+        assert ok is True, detail
+        assert "missing=[]" in detail
+        missing = _stub(root, "missing", json.dumps({"data": [
+            {"id": "alpha"}, {"id": "builtin"}]}))
+        ok, detail = post_smoke.check_agents(fw, cs, missing)
+        assert ok is False
+        assert "beta" in detail and "gamma" in detail
+        ok, detail = post_smoke.check_agents(fw, cs)
+        assert ok is True
+        assert "framework=2" in detail and "consumer=1" in detail
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_rollback_check_rejects_v1_superstring():
+    root = _tmp("smoke-rollback-super-")
+    try:
+        binary = _fake_bin(root, version="1.19.40")
+        backup = os.path.join(root, "final.db")
+        con = sqlite3.connect(backup)
+        con.execute("CREATE TABLE session (id TEXT)")
+        con.commit()
+        con.close()
+        snapshot = os.path.join(root, "snapshot")
+        os.makedirs(snapshot)
+        with open(os.path.join(snapshot, "a.md"), "w") as fh:
+            fh.write("agent\n")
+        import hashlib
+        digest = hashlib.sha256(b"agent\n").hexdigest()
+        with open(os.path.join(snapshot, "hashes.json"), "w") as fh:
+            json.dump({"a.md": digest}, fh)
+        agents = os.path.join(root, "agents")
+        os.makedirs(agents)
+        with open(os.path.join(agents, "a.md"), "w") as fh:
+            fh.write("agent\n")
+        manifest = os.path.join(root, "manifest.json")
+        with open(manifest, "w") as fh:
+            json.dump({"backup": {"path": backup}}, fh)
+        r = _run(["--rollback-check", "--manifest", manifest,
+                  "--default-bin", binary, "--agent-snapshot", snapshot,
+                  "--agents-dir", agents])
+        assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+        assert "v1-version: FAIL" in r.stdout
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_rollback_check_handles_spawn_error():
+    root = _tmp("smoke-rollback-spawn-")
+    try:
+        snapshot = os.path.join(root, "snapshot")
+        os.makedirs(snapshot)
+        agents = os.path.join(root, "agents")
+        os.makedirs(agents)
+        manifest = os.path.join(root, "manifest.json")
+        with open(manifest, "w") as fh:
+            json.dump({"backup": {"path": os.path.join(root, "missing.db")}},
+                      fh)
+        r = _run(["--rollback-check", "--manifest", manifest,
+                  "--default-bin", "/definitely/not/opencode",
+                  "--agent-snapshot", snapshot, "--agents-dir", agents])
+        assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+        assert "v1-version: FAIL FileNotFoundError" in r.stdout
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_check_version_spawn_error_is_named():
+    ok, detail = post_smoke.check_version("/definitely/not/opencode")
+    assert ok is False
+    assert "FileNotFoundError" in detail
+
+
+def test_default_bin_path_is_explicit_link():
+    root = _tmp("postsmoke-default-link-")
+    fake_home = os.path.join(root, "home")
+    link = os.path.join(fake_home, ".yarn", "bin", "opencode")
+    _stub(os.path.join(fake_home, ".yarn"), "opencode",
+          f"opencode v{v2.VERSION_PIN}")
+    path_dir = os.path.join(root, "pathbin")
+    _stub(path_dir, "opencode", "1.19.4")
+    real_home = os.environ.get("HOME")
+    real_path = os.environ.get("PATH", "")
+    os.environ["HOME"] = fake_home
+    os.environ["PATH"] = path_dir + os.pathsep + real_path
+    try:
+        assert post_smoke.default_bin_path() == link
+        ok, detail = post_smoke.check_version(link)
+        assert ok is True, detail
+    finally:
+        if real_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = real_home
+        os.environ["PATH"] = real_path
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_git_sha_spawn_error_returns_none():
+    real_run = post_smoke.subprocess.run
+
+    def error(*args, **kwargs):
+        raise OSError("spawn failed")
+
+    post_smoke.subprocess.run = error
+    try:
+        assert post_smoke.git_sha(REPO) is None
+    finally:
+        post_smoke.subprocess.run = real_run
+
+
+def test_d7_probe_timeout_is_named_failure():
+    root = _tmp("postsmoke-drills-")
+    real_run = post_smoke.subprocess.run
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 120)
+
+    post_smoke.subprocess.run = timeout
+    try:
+        results = post_smoke.drills(
+            REPO, None, evidence_path=os.path.join(root, "missing.json"))
+        by_name = {name: (ok, detail) for name, ok, detail in results}
+        assert by_name["D7-model-doctor"][0] is False
+        assert "TimeoutExpired" in by_name["D7-model-doctor"][1]
+        assert by_name["D7-consumer"][0] is False
+        assert "timed out" in by_name["D7-consumer"][1]
+    finally:
+        post_smoke.subprocess.run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_check_plugin_runtime_probe_timeout_is_named():
+    root = _tmp("postsmoke-plugin-timeout-")
+    real_run = post_smoke.subprocess.run
+    try:
+        fw = _framework(root)
+
+        def timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], 60)
+
+        post_smoke.subprocess.run = timeout
+        ok, detail = post_smoke.check_plugin(config_root=_config_root(fw))
+        assert ok is False
+        assert "runtime probe failed" in detail
+        assert "TimeoutExpired" in detail
+    finally:
+        post_smoke.subprocess.run = real_run
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_check_agents_live_empty_corpus_fails():
+    root = _tmp("postsmoke-empty-agents-")
+    try:
+        framework = os.path.join(root, "empty")
+        os.makedirs(os.path.join(framework, "agents"))
+        ok, detail = post_smoke.check_agents_live("x", framework)
+        assert ok is False
+        assert "framework agent corpus is empty" in detail
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_check_plugin_defaults_to_explicit_link():
+    root = _tmp("postsmoke-plugin-link-")
+    real_run = post_smoke.subprocess.run
+    real_loader = post_smoke.loader_evidence
+    real_home = os.environ.get("HOME")
+    real_path = os.environ.get("PATH", "")
+    captured = {}
+    try:
+        fw = _framework(root)
+        config_root = _config_root(fw)
+        probe = os.path.join(config_root, "opencode", "plugins",
+                             "auto-compact-at-threshold", "runtime-probe.mjs")
+        payload = json.dumps({
+            "startup_marker": True,
+            "subscription_aborted": True,
+            "plugin_id": "auto-compact-at-threshold",
+            "source": "file://" + os.path.realpath(probe),
+        })
+        post_smoke.subprocess.run = lambda argv, **kwargs: \
+            subprocess.CompletedProcess(argv, 0, payload, "")
+
+        def capture(root_, binary, plugin_dir):
+            captured["binary"] = binary
+            return True, "ok"
+
+        post_smoke.loader_evidence = capture
+        fake_home = os.path.join(root, "home")
+        path_dir = os.path.join(root, "pathbin")
+        _stub(path_dir, "opencode", "1.19.4")
+        os.environ["HOME"] = fake_home
+        os.environ["PATH"] = path_dir + os.pathsep + real_path
+        ok, detail = post_smoke.check_plugin(config_root=config_root)
+        assert ok is True, detail
+        assert captured["binary"] == os.path.join(
+            fake_home, ".yarn", "bin", "opencode")
+        assert captured["binary"] != os.path.join(path_dir, "opencode")
+    finally:
+        post_smoke.subprocess.run = real_run
+        post_smoke.loader_evidence = real_loader
+        if real_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = real_home
+        os.environ["PATH"] = real_path
         shutil.rmtree(root, ignore_errors=True)
 
 

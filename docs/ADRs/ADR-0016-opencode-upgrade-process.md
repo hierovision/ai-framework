@@ -77,7 +77,9 @@ must replace.
    `.scratch/v2-canary-<version>/`; the apply verification artifact lives
    under `.scratch/opencode-v2/upgrade-<version>-verify.json`; the ADR
    amendment is the commit-visible summary. `check --pr` fails a pin change
-   whose amendment is missing or names another version.
+   whose amendment is missing or names another version. *(Superseded by
+   ADR-0017: `check --pr` is a local/manual release gate; CI runs only
+   `check --pins-only` and the hermetic suite.)*
 10. **Hygiene.** `prune --keep N` removes old scratch prefixes, canary roots,
     and plugin-compat copies while preserving the current pin and the last N
     versions. `prepare` prints a lockfile delta summary so review focuses on
