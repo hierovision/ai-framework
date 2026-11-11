@@ -102,6 +102,30 @@ For a V1 previous default the rollback points at the actual
 backups are written mode 0600. The pre-upgrade package/config/DB snapshot plus
 that manual guidance remain the rollback.
 
+## 2026-11-10 amendment — migration resume before smoke
+
+A completed `kv.migration.v1-v2` row is not a permanent lossless claim. Vendor
+behavior on 2.2.6: once the row is `{"phase":"completed"}`, a later service
+start does not import V1 sessions created below that cursor. The live DB had
+17 such subagent sessions (V1 `session` 2216, V2 `session_v2` 2251, cursor
+completed), so the canary's previous single `run` rehearsal left them
+unmigrated and misreported 52 pre-existing source `session_v2` rows as
+target-only phantoms.
+
+The canary migration gate and the explicit owner-run
+`upgrade --to <pin> --apply --drain-acknowledged` now re-arm
+`{"phase":"sessions"}` with no cursor on a scratch copy / the real DB
+respectively, start an isolated V2 service (scratch) or the repaired default
+service (apply), poll until `{"phase":"completed"}` with a bounded timeout,
+and verify every source V1 ID plus the pre-existing V2 baseline. The canary
+excludes source `session_v2` baseline rows from target-only accounting. A
+timeout, missing source row, or missing baseline row is a truthful failure
+(`verified: false`, named stage, counts in the artifact); there is no
+residual/owner-acceptance path for these rows. Apply stops a service it
+started on any failure, including a post-smoke failure or exception, and
+leaves it running only when the post-smoke succeeds; the canary stops its
+scratch service in a `finally`.
+
 ## Sources
 
 - Owner directive 2026-11-02 (supported path; yarn global; V1 shadowed; thin

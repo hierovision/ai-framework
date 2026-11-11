@@ -241,20 +241,26 @@ def _smoke_recorder(calls, ok=True):
     return smoke
 
 
-def _patch_apply(backup, smoke, install=None):
+def _patch_apply(backup, smoke, install=None, migration=None):
     real = (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
-            upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes)
+            upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
+            upgrade.resume_migration)
     upgrade.pre_upgrade_backup = lambda a, t: (
         backup, os.path.join(backup, "db"))
     upgrade.official_upgrade = install or (lambda a, t, command=None: 0)
     upgrade.post_upgrade_smoke = smoke
     upgrade.stage_config.live_processes = lambda: []
+    upgrade.resume_migration = migration or (
+        lambda a, h, l: {"ok": True, "verified": True, "skipped": "test",
+                         "source_session_rows": 0,
+                         "missing_source_rows": 0})
     return real
 
 
 def _restore_apply(real):
     (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
-     upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes) = real
+     upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
+     upgrade.resume_migration) = real
 
 
 @contextlib.contextmanager
@@ -487,6 +493,310 @@ def test_apply_reuses_installed_target_and_repairs_default():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def _migration_db(root, source_ids=("ses_1", "ses_2", "ses_3"),
+                  baseline_ids=("ses_pre",), completed=True):
+    db = os.path.join(root, "home", ".local", "share", "opencode",
+                      "opencode.db")
+    os.makedirs(os.path.dirname(db), exist_ok=True)
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE session (id TEXT PRIMARY KEY)")
+    for sid in source_ids:
+        con.execute("INSERT INTO session(id) VALUES (?)", (sid,))
+    con.execute("CREATE TABLE session_v2 (id TEXT PRIMARY KEY)")
+    for sid in baseline_ids:
+        con.execute("INSERT INTO session_v2(id) VALUES (?)", (sid,))
+    con.execute("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, "
+                "time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)")
+    phase = '{"phase":"completed"}' if completed else '{"phase":"sessions"}'
+    con.execute("INSERT INTO kv(key,value,time_created,time_updated) "
+                "VALUES ('migration.v1-v2',?,1,1)", (phase,))
+    con.commit()
+    con.close()
+    return db
+
+
+def _migration_runner(db, source_ids, baseline_ids=(), complete=True,
+                      calls=None):
+    calls = calls if calls is not None else []
+
+    def fake_run(argv, **kwargs):
+        if argv[1:3] == ["service", "start"]:
+            calls.append("start")
+            con = sqlite3.connect(db)
+            for sid in source_ids:
+                con.execute("INSERT OR IGNORE INTO session_v2(id) VALUES (?)",
+                            (sid,))
+            for sid in baseline_ids:
+                con.execute("DELETE FROM session_v2 WHERE id=?", (sid,))
+            value = '{"phase":"completed"}' if complete else '{"phase":"sessions"}'
+            con.execute("UPDATE kv SET value=? WHERE key='migration.v1-v2'",
+                        (value,))
+            con.commit()
+            con.close()
+            return subprocess.CompletedProcess(argv, 0, "started", "")
+        if argv[1:3] == ["service", "stop"]:
+            calls.append("stop")
+            return subprocess.CompletedProcess(argv, 0, "stopped", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    return fake_run, calls
+
+
+def test_apply_migration_runs_before_smoke_and_is_in_artifact():
+    root = _tmp("upgrade-migration-order-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    order = []
+    migration = {"ok": True, "verified": True, "source_session_rows": 3,
+                 "pre_existing_v2_rows": 1, "target_session_rows": 4,
+                 "migrated_source_rows": 3, "missing_source_rows": 0,
+                 "missing_baseline_rows": 0, "target_only_ids": 0,
+                 "run_created_ids": 0, "phase": "completed",
+                 "timed_out": False, "elapsed_seconds": 1.0}
+
+    def resume(_args, _home, _link):
+        order.append("migration")
+        return dict(migration)
+
+    def smoke(_args, _target, command=None):
+        order.append("smoke")
+        return [("binary", True, "ok")]
+
+    real = _patch_apply(backup, smoke, migration=resume)
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.apply_supported(args, target) == 0
+        assert order == ["migration", "smoke"], order
+        data = json.load(open(_artifact(root, target)))
+        assert data["verified"] is True
+        assert data["migration"] == migration, data["migration"]
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_migration_failure_is_truthful_and_skips_smoke():
+    root = _tmp("upgrade-migration-fail-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    order = []
+    migration = {"ok": False, "verified": False, "timed_out": True,
+                 "phase": "sessions", "error": "migration did not complete",
+                 "source_session_rows": 3, "pre_existing_v2_rows": 1,
+                 "target_session_rows": 1, "migrated_source_rows": 0,
+                 "missing_source_rows": 3, "missing_baseline_rows": 0,
+                 "target_only_ids": 0, "run_created_ids": 0}
+
+    def resume(_args, _home, _link):
+        order.append("migration")
+        return dict(migration)
+
+    def smoke(_args, _target, command=None):
+        order.append("smoke")
+        return [("binary", True, "ok")]
+
+    real = _patch_apply(backup, smoke, migration=resume)
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            assert upgrade.apply_supported(args, target) == 1
+        assert order == ["migration"], order
+        data = json.load(open(_artifact(root, target)))
+        assert data["verified"] is False
+        assert data["failure_stage"] == "migration", data
+        assert data["migration"] == migration, data["migration"]
+        assert "migration did not complete" in out.getvalue()
+        assert upgrade.read_state(root)["stage"] == "prepared"
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_smoke_exception_stops_migration_service():
+    root = _tmp("upgrade-migration-smoke-exc-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    migration = {"ok": True, "verified": True, "phase": "completed",
+                 "service_started": True,
+                 "service_stopped_on_failure": False,
+                 "source_session_rows": 3, "migrated_source_rows": 3,
+                 "missing_source_rows": 0, "missing_baseline_rows": 0}
+    calls = []
+
+    def smoke(_args, _target, command=None):
+        raise FileNotFoundError("missing binary")
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        if "--version" in argv:
+            return subprocess.CompletedProcess(
+                argv, 0, f"opencode v{target}", "")
+        if argv[1:4] == ["debug", "paths", "config"]:
+            return subprocess.CompletedProcess(argv, 0, fixture["config"], "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    real = _patch_apply(backup, smoke,
+                        migration=lambda a, h, l: dict(migration))
+    real_run = upgrade.run
+    upgrade.run = fake_run
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.apply_supported(args, target) == 1
+        data = json.load(open(_artifact(root, target)))
+        assert data["failure_stage"] == "exception:smoke", data
+        assert data["migration"]["phase"] == "completed", data
+        assert data["migration"]["migrated_source_rows"] == 3, data
+        assert data["migration"]["missing_source_rows"] == 0, data
+        assert data["migration"]["service_stopped_on_failure"] is True, data
+        assert any(call[1:3] == ["service", "stop"] for call in calls), calls
+        assert upgrade.read_state(root)["stage"] == "prepared"
+    finally:
+        upgrade.run = real_run
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_smoke_failure_stops_migration_service():
+    root = _tmp("upgrade-migration-smoke-fail-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    migration = {"ok": True, "verified": True, "phase": "completed",
+                 "service_started": True,
+                 "service_stopped_on_failure": False,
+                 "source_session_rows": 3, "migrated_source_rows": 3,
+                 "missing_source_rows": 0, "missing_baseline_rows": 0}
+    calls = []
+
+    def smoke(_args, _target, command=None):
+        return [("binary", False, "forced failure")]
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        if "--version" in argv:
+            return subprocess.CompletedProcess(
+                argv, 0, f"opencode v{target}", "")
+        if argv[1:4] == ["debug", "paths", "config"]:
+            return subprocess.CompletedProcess(argv, 0, fixture["config"], "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    real = _patch_apply(backup, smoke,
+                        migration=lambda a, h, l: dict(migration))
+    real_run = upgrade.run
+    upgrade.run = fake_run
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.apply_supported(args, target) == 1
+        data = json.load(open(_artifact(root, target)))
+        assert data["verified"] is False
+        assert data["failure_stage"] == "binary", data
+        assert data["migration"]["phase"] == "completed", data
+        assert data["migration"]["migrated_source_rows"] == 3, data
+        assert data["migration"]["missing_source_rows"] == 0, data
+        assert data["migration"]["service_stopped_on_failure"] is True, data
+        assert any(call[1:3] == ["service", "stop"] for call in calls), calls
+        assert upgrade.read_state(root)["stage"] == "prepared"
+    finally:
+        upgrade.run = real_run
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_resume_migration_rearms_and_verifies_counts():
+    root = _tmp("upgrade-migration-resume-")
+    db = _migration_db(root)
+    fake_run, calls = _migration_runner(db, ("ses_1", "ses_2", "ses_3"))
+    real = (upgrade.db_source_path, upgrade.run)
+    upgrade.db_source_path = lambda home: db
+    upgrade.run = fake_run
+    try:
+        result = upgrade.resume_migration(
+            _args(root, home=os.path.join(root, "home")), root, "/fake/opencode")
+        assert result["ok"] is True, result
+        assert result["armed"] is True, result
+        assert result["phase"] == "completed"
+        assert result["source_session_rows"] == 3
+        assert result["pre_existing_v2_rows"] == 1
+        assert result["target_session_rows"] == 4
+        assert result["migrated_source_rows"] == 3
+        assert result["missing_source_rows"] == 0
+        assert result["missing_baseline_rows"] == 0
+        assert result["service_started"] is True, result
+        assert result["service_stopped_on_failure"] is False, result
+        assert "stop" not in calls, calls
+    finally:
+        (upgrade.db_source_path, upgrade.run) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_resume_migration_timeout_stops_service():
+    root = _tmp("upgrade-migration-timeout-")
+    db = _migration_db(root)
+    fake_run, calls = _migration_runner(
+        db, ("ses_1", "ses_2", "ses_3"), complete=False)
+    real = (upgrade.db_source_path, upgrade.run,
+            upgrade.MIGRATION_APPLY_TIMEOUT)
+    upgrade.db_source_path = lambda home: db
+    upgrade.run = fake_run
+    upgrade.MIGRATION_APPLY_TIMEOUT = 0.2
+    try:
+        result = upgrade.resume_migration(
+            _args(root, home=os.path.join(root, "home")), root, "/fake/opencode")
+        assert result["ok"] is False, result
+        assert result["timed_out"] is True, result
+        assert result["phase"] == "sessions", result
+        assert "migration did not complete" in result["error"], result
+        assert result["service_started"] is True, result
+        assert result["service_stopped_on_failure"] is True, result
+        assert calls == ["start", "stop"], calls
+    finally:
+        (upgrade.db_source_path, upgrade.run,
+         upgrade.MIGRATION_APPLY_TIMEOUT) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_resume_migration_missing_source_or_baseline_fails():
+    root = _tmp("upgrade-migration-missing-")
+    db = _migration_db(root)
+    fake_run, calls = _migration_runner(
+        db, ("ses_1", "ses_2"), baseline_ids=("ses_pre",))
+    real = (upgrade.db_source_path, upgrade.run)
+    upgrade.db_source_path = lambda home: db
+    upgrade.run = fake_run
+    try:
+        result = upgrade.resume_migration(
+            _args(root, home=os.path.join(root, "home")), root, "/fake/opencode")
+        assert result["ok"] is False, result
+        assert result["missing_source_rows"] == 1, result
+        assert result["missing_baseline_rows"] == 1, result
+        assert result["service_started"] is True, result
+        assert result["service_stopped_on_failure"] is True, result
+        assert calls == ["start", "stop"], calls
+        assert "source V1 IDs missing" in result["error"], result
+    finally:
+        (upgrade.db_source_path, upgrade.run) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_apply_v1_default_failure_has_v1_rollback():
     root = _tmp("upgrade-v1-rollback-")
     target = v2.VERSION_PIN
@@ -595,6 +905,7 @@ def test_apply_dry_run_text_truthful():
             "would back up any existing DB/config",
             f"would install {target} via the official command",
             f"would repair the default {absent['link']} shadow",
+            "would re-arm the DB migration cursor",
             "would run the post-upgrade smoke",
             f"would write {_artifact(absent_root, target)}",
         ]
@@ -618,6 +929,7 @@ def test_apply_dry_run_text_truthful():
             "would back up any existing DB/config",
             f"would reuse the installed {target} V2 package",
             f"would repair the default {present['link']} shadow",
+            "would re-arm the DB migration cursor",
             "would run the post-upgrade smoke",
             f"would write {_artifact(present_root, target)}",
         ]
@@ -1405,7 +1717,8 @@ def test_apply_spawn_error_writes_failure_artifact():
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_canary_residual_acceptance():
+def test_canary_nonzero_residual_is_not_accepted():
+    """A completed migration must import every V1 row; no residual escape."""
     root = _tmp("upgrade-residual-")
     target = v2.VERSION_PIN
     ev = os.path.join(root, ".scratch", "v2-canary-" + target)
@@ -1421,20 +1734,18 @@ def test_canary_residual_acceptance():
             "zero_migration=False",
             "target_integrity_check=ok",
             "source_untouched=True",
-            "migration=PASS with fidelity residual 3",
+            "migration=PASS",
         ]) + "\n")
+        _write(os.path.join(root, "docs",
+                            "opencode-v2-migration-classification.json"),
+               json.dumps({"version": target, "residual": 3,
+                           "owner": "owner", "date": "2026-11-10"}) + "\n")
         summary = upgrade.canary_summary(root, target)
         assert summary["ok"] is False
         assert summary["residual"] == 3
         assert summary["migration"]["verdict"] == "PASS"
         assert summary["residual_accepted"] is False
-        _write(os.path.join(root, "docs",
-                            "opencode-v2-migration-classification.json"),
-               json.dumps({"version": target, "residual": 3,
-                           "owner": "owner", "date": "2026-11-09"}) + "\n")
-        summary = upgrade.canary_summary(root, target)
-        assert summary["ok"] is True
-        assert summary["residual_accepted"] is True
+        assert "residual=3" in (summary["reason"] or "")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -1815,6 +2126,7 @@ def test_upgrade_dry_run_lists_all_actions():
             "would back up any existing DB/config",
             f"would run: {fixture['link']} upgrade {target} --method yarn",
             f"would repair the default {fixture['link']} shadow",
+            "would re-arm the DB migration cursor",
             "would run the post-upgrade smoke",
             f"would write {_artifact(root, target)}",
         ]

@@ -155,10 +155,22 @@ and the exact repair command, and are read-only (no state writes).
   marker). `time_idle` is the idle clock, not a per-token clock.
 - First V2 boot auto-migrates V1 sessions **one-way**. Migration is batched
   and resumable (`kv.migration.v1-v2` cursor); a truncated run leaves a
-  lower-id tail unmigrated, which a later boot resumes. Never claim lossless
-  migration without checking source-ID membership.
-- DB access is read-only (`file:…?mode=ro`). The only mutating API calls are
-  `session.interrupt`, `session.agent`, and `session.prompt`.
+  lower-id tail unmigrated, which a later boot resumes. A **completed**
+  cursor (`{"phase":"completed"}`) is final only for sessions that existed
+  when it completed: V1 sessions created afterwards (for example subagent
+  sessions) are never imported by a later boot. The canary and the explicit
+  owner-run apply therefore re-arm `{"phase":"sessions"}` with **no cursor**
+  before starting V2, wait until the vendor writes `{"phase":"completed"}`,
+  and then verify membership. Pre-existing source `session_v2` rows are the
+  V2 baseline, not migration phantoms. The apply stops a service it started
+  if the post-smoke fails or throws; it leaves that service running only when
+  the post-smoke succeeds. Never claim lossless migration without checking
+  source-ID membership.
+- DB reads use `file:…?mode=ro`. The only mutating API calls are
+  `session.interrupt`, `session.agent`, and `session.prompt`. The explicit
+  owner-run apply's `arm_migration_phase()` is the sole direct DB write
+  (re-arming the vendor migration row); the canary performs that write only on
+  its scratch copy.
 
 ## JSON event stream
 
@@ -195,10 +207,12 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
   permission", and stderr carries
   `permission requested: <action> (<target>); auto-rejecting`. Classify it as
   `permission denied: <tool> <target>`, never `empty result`.
-- Migration residual: cutover preflight fails closed unless the canary report
-  shows zero missing sessions or a machine-readable classification
-  (`docs/opencode-v2-migration-classification.json`) / dated owner acceptance
-  matches the reported count.
+- Migration completeness: cutover/apply preflight fails closed unless every
+  source V1 ID is present after `phase=completed`. A non-zero residual is a
+  hard failure, never an owner acceptance; source `session_v2` baseline rows
+  are excluded from target-only accounting. The historical 2026-10-29
+  classification (`docs/opencode-v2-migration-classification.json`) records a
+  truncated pre-fix rehearsal and is not an acceptance path for new gaps.
 - There is no `OPENCODE_PERMISSION` env var. `OPENCODE_CONFIG_CONTENT` /
   `OPENCODE_CONFIG` are recorded as config sources but do **not** activate an
   injected agent/grant under V2 2.1.4; the dispatcher writes a generated
