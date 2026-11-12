@@ -3,6 +3,6 @@
   "private": true,
   "description": "Pinned Playwright for scripts/smoke.mjs (RM-073 P1-6)",
   "dependencies": {
-    "playwright": "1.64.1"
+    "playwright": "1.65.0"
   }
 }
