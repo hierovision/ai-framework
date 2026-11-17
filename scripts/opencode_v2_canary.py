@@ -67,6 +67,10 @@ C7_PLUGIN_REL = "./plugins/canary-plugin"
 C7_LOADER_MARKER = "canary-plugin initialized"
 C7_LOADER_TOKEN_ENV = "OPENCODE_LOADER_PROBE_TOKEN"
 C7_LOADER_TIMEOUT = 60
+# 2.2.7 stopped making agent.list wait for a location to finish loading; an
+# immediate call can return an empty/partial list. Poll a bounded condition.
+C7_AGENT_POLL_TIMEOUT = 15
+C7_AGENT_POLL_INTERVAL = 0.25
 
 
 def now_date():
@@ -645,6 +649,30 @@ def c7_loader_probe(args, config_root, plugin_dir, token):
     return log, "timeout" if timed_out else None
 
 
+def wait_for_c7_agent_marker(args, env, timeout=None, interval=None):
+    """Poll `/api/agent` until the C7 marker appears, bounded.
+
+    OpenCode 2.2.7 no longer makes `agent.list` wait for a location to finish
+    loading. The first response after `service start` can therefore be empty
+    even though the configured marker agent is about to load. Poll a
+    condition, never a fixed sleep, and return the last response plus the
+    number of polls for evidence.
+    """
+    timeout = C7_AGENT_POLL_TIMEOUT if timeout is None else timeout
+    interval = C7_AGENT_POLL_INTERVAL if interval is None else interval
+    deadline = time.monotonic() + timeout
+    polls = 0
+    last = None
+    while True:
+        polls += 1
+        last = v2_run(args, env, ["api", "GET", "/api/agent"], timeout=60)
+        if last.returncode == 0 and "canary-marker" in (last.stdout or ""):
+            return last, polls
+        if time.monotonic() >= deadline:
+            return last, polls
+        time.sleep(interval)
+
+
 def gate_c7(args):
     """Config/plugin probe under an isolated V2 config root.
 
@@ -709,6 +737,7 @@ def gate_c7(args):
         os.makedirs(env[key], exist_ok=True)
     v2.assert_scratch_db(env["OPENCODE_DB"], root)
     cfg = plugins = agents = None
+    agent_polls = 0
     service_error = None
     plugin_list_error = None
     try:
@@ -716,7 +745,7 @@ def gate_c7(args):
         v2_run(args, env, ["service", "set", "port", port], timeout=30)
         v2_run(args, env, ["service", "start"], timeout=60)
         cfg = v2_run(args, env, ["debug", "config"], timeout=60)
-        agents = v2_run(args, env, ["api", "GET", "/api/agent"], timeout=60)
+        agents, agent_polls = wait_for_c7_agent_marker(args, env)
     except (OSError, subprocess.SubprocessError) as exc:
         service_error = f"{type(exc).__name__}: {exc}"
     # Diagnostic only: an empty/nonzero `plugin list` must never decide C7.
@@ -765,6 +794,7 @@ def gate_c7(args):
         f"plugin_list_error={plugin_list_error or 'none'}",
         "plugin_list_loader_proof=False",
         f"agent_api_exit={agents.returncode if agents else 'missing'}",
+        f"agent_api_polls={agent_polls}",
         f"agent_api_has_marker={marker_agent_api}",
         f"service_error={service_error or 'none'}",
         f"loader_probe_error={loader_error or 'none'}",
