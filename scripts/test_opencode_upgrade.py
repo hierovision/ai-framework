@@ -1839,7 +1839,7 @@ def test_version_parsing_rejects_substrings():
             assert v2.parse_opencode_version(text) == expected, (text, expected)
         assert upgrade.api_version('{"version":"2.2.60"}',
                                    v2.VERSION_PIN)[0] is False
-        assert upgrade.api_version('{"version":"2.2.6"}',
+        assert upgrade.api_version('{"version":"' + v2.VERSION_PIN + '"}',
                                    v2.VERSION_PIN)[0] is True
     finally:
         shutil.rmtree(root, ignore_errors=True)
