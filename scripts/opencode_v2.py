@@ -47,7 +47,7 @@ import urllib.parse
 import urllib.request
 
 DEFAULT_DB = os.path.expanduser("~/.local/share/opencode/opencode.db")
-VERSION_PIN = "2.2.6"
+VERSION_PIN = "2.2.7"
 MIGRATION_KV_KEY = "migration.v1-v2"
 
 # Tool vocabulary (V1 -> V2). Consumer evals may still emit V1 names; callers
