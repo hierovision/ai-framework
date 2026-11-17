@@ -851,7 +851,7 @@ def migration_membership(src_ids, target_ids, baseline_ids=(), run_ids=()):
 def gate_migration(args):
     """Copy-only rehearsal: re-arm, start V2, wait, verify membership/hashes.
 
-    Vendor behavior (verified on a scratch copy, 2.2.6): a completed
+    Vendor behavior (verified on a scratch copy, 2.2.6 and 2.2.7): a completed
     `kv.migration.v1-v2` row blocks any later import of V1 sessions created
     below the cursor. Re-arm `{"phase":"sessions"}` with no cursor, start an
     isolated V2 service, and poll until the vendor writes
