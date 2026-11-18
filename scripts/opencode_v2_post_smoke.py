@@ -27,6 +27,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -50,6 +51,10 @@ LOADER_MARKER = "auto-compact-at-threshold initialized"
 LOADER_TOKEN_ENV = "OPENCODE_LOADER_PROBE_TOKEN"
 LOADER_LOG = os.path.join(REPO, ".scratch", "opencode-v2", "plugin-loader.log")
 LOADER_TIMEOUT = 45
+# 2.2.7 stopped making agent.list wait for a location to finish loading; the
+# first post-start response can be empty. Poll a bounded condition.
+AGENT_POLL_TIMEOUT = 15
+AGENT_POLL_INTERVAL = 0.25
 
 
 def sha256(path):
@@ -116,12 +121,43 @@ def live_agent_ids(binary):
     return live, f"live={len(live)}"
 
 
-def check_agents(framework, consumer, binary=None):
+def wait_for_agent_ids(binary, expected, timeout=None):
+    """Poll `/api/agent` until every expected ID is present, bounded.
+
+    Returns `(live, missing, detail)`. `live` is None only when the API never
+    returned a parseable payload. OpenCode 2.2.7 no longer makes agent.list
+    wait for a location to finish loading, so a single immediate probe can be
+    empty even when the configured agents are about to appear.
+    """
+    timeout = AGENT_POLL_TIMEOUT if timeout is None else timeout
+    deadline = time.monotonic() + timeout
+    polls = 0
+    last_live = None
+    last_detail = "agent api unavailable"
+    while True:
+        polls += 1
+        live, detail = live_agent_ids(binary)
+        last_detail = detail
+        if live is not None:
+            last_live = live
+            missing = expected - live
+            if not missing:
+                return live, set(), f"{detail} polls={polls}"
+        if time.monotonic() >= deadline:
+            if last_live is None:
+                return None, None, f"{last_detail} polls={polls}"
+            return (last_live, expected - last_live,
+                    f"{last_detail} polls={polls}")
+        time.sleep(AGENT_POLL_INTERVAL)
+
+
+def check_agents(framework, consumer, binary=None, timeout=None):
     """Derive expected IDs from the corpus; verify them live when possible.
 
     The live API may include built-ins and newly added agents; only missing
     expected framework/consumer IDs fail. Without a binary the check is a
-    corpus presence check (no fixed count).
+    corpus presence check (no fixed count). With a binary, poll until the
+    expected IDs appear or the bounded timeout expires.
     """
     expected = agent_ids(os.path.join(framework, "agents"))
     consumer_expected = (agent_ids(os.path.join(consumer, ".opencode",
@@ -130,33 +166,34 @@ def check_agents(framework, consumer, binary=None):
     if not expected:
         return False, "framework agent corpus is empty"
     if binary:
-        live, detail = live_agent_ids(binary)
+        expected_all = expected | consumer_expected
+        live, missing, detail = wait_for_agent_ids(
+            binary, expected_all, timeout=timeout)
         if live is None:
             return False, detail
-        expected_all = expected | consumer_expected
-        missing = sorted(expected_all - live)
         return (not missing,
-                f"{detail} expected={len(expected_all)} missing={missing}")
+                f"{detail} expected={len(expected_all)} "
+                f"missing={sorted(missing)}")
     return True, (f"framework={len(expected)} "
                   f"consumer={len(consumer_expected)} (corpus only)")
 
 
-def check_agents_live(binary, framework):
+def check_agents_live(binary, framework, timeout=None):
     """Every expected framework agent ID is present in the live API.
 
     Built-ins and newly added agents are tolerated; a missing framework ID is
-    a failure. This replaces the hardcoded repo file-count check for the
-    apply smoke.
+    a failure. Polls with a bounded timeout because 2.2.7 returns a partial
+    agent list while the location is still loading.
     """
     expected = agent_ids(os.path.join(framework, "agents"))
     if not expected:
         return False, "framework agent corpus is empty"
-    live, detail = live_agent_ids(binary)
+    live, missing, detail = wait_for_agent_ids(binary, expected,
+                                               timeout=timeout)
     if live is None:
         return False, detail
-    missing = sorted(expected - live)
     return (not missing,
-            f"{detail} expected={len(expected)} missing={missing}")
+            f"{detail} expected={len(expected)} missing={sorted(missing)}")
 
 
 def check_config(framework, consumer):
