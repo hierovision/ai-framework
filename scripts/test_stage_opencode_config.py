@@ -11,6 +11,7 @@ import os
 import shutil
 import sqlite3
 import stat
+import subprocess
 import sys
 import tempfile
 
@@ -129,6 +130,65 @@ def test_backup_flag_is_documented_noop():
         pass
     assert "no-op" in out.getvalue()
     assert "--backup" in out.getvalue()
+
+
+def _fake_ps(text):
+    real = stage.subprocess.run
+    stage.subprocess.run = lambda argv, **kwargs: subprocess.CompletedProcess(
+        argv, 0, text, "")
+    return real
+
+
+def test_live_processes_ignores_wrapper_tee_and_orchestrator():
+    """The drain gate must match process identity, not paths/arguments.
+
+    The upgrade wrapper, its `tee` log path, and the orchestrator all contain
+    the substring `opencode`; none of them is a live OpenCode session.
+    """
+    text = "\n".join([
+        "82895 bash bash .scratch/opencode-v2/apply-2.2.7.sh",
+        "83066 tee tee -a /repo/.scratch/opencode-v2/apply-2.2.7.log",
+        "83067 python3 python3 scripts/opencode_upgrade.py upgrade --to 2.2.7",
+        "83068 ps ps -eo pid=,comm=,args=",
+    ]) + "\n"
+    real = _fake_ps(text)
+    try:
+        assert stage.live_processes() == []
+    finally:
+        stage.subprocess.run = real
+
+
+def test_live_processes_ignores_script_names_in_shell_arguments():
+    """A grep/bash command naming a supervision script is not that script."""
+    text = "\n".join([
+        "84000 bash bash -c 'grep dispatch_agent.py scripts/foo'",
+        "84001 grep grep -R dispatch_agent.py scripts",
+        "84002 tee tee -a /tmp/opencode.log",
+    ]) + "\n"
+    real = _fake_ps(text)
+    try:
+        assert stage.live_processes() == []
+    finally:
+        stage.subprocess.run = real
+
+
+def test_live_processes_flags_real_opencode_and_supervision():
+    text = "\n".join([
+        "83202 opencode.exe /repo/opencode.exe serve --service",
+        "83429 opencode opencode",
+        "83500 python3 python3 /repo/scripts/dispatch_agent.py --agent x",
+        "83501 python3 python3 /repo/scripts/observe_completion.py",
+        "83502 python3 python3 /repo/scripts/watch_agent.py",
+        "83503 python3 python3 /repo/scripts/session_guard.py",
+    ]) + "\n"
+    real = _fake_ps(text)
+    try:
+        hits = stage.live_processes()
+        assert len(hits) == 6, hits
+        assert any("opencode.exe" in hit for hit in hits), hits
+        assert any("dispatch_agent.py" in hit for hit in hits), hits
+    finally:
+        stage.subprocess.run = real
 
 
 def main():

@@ -28,6 +28,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -41,13 +42,16 @@ import opencode_v2 as v2  # noqa: E402
 PLUGIN_DIRS = ("auto-compact-at-threshold", "delegation-observer",
                "delegation-sentinel")
 PLUGIN_REL = "./plugins/"
-PROCESS_PATTERNS = (
-    r"opencode(\.exe)?\b",
-    r"dispatch_agent\.py",
-    r"observe_completion\.py",
-    r"watch_agent\.py",
-    r"session_guard\.py",
-)
+# Match process identity, never the whole command line: the upgrade wrapper,
+# its `tee` log path, and the orchestrator all contain the substring
+# `opencode` and must not block the drain gate.
+OPENCODE_COMMS = frozenset(("opencode", "opencode.exe", "opencode-ai"))
+SUPERVISION_SCRIPTS = ("dispatch_agent.py", "observe_completion.py",
+                       "watch_agent.py", "session_guard.py")
+SUPERVISION_RE = re.compile(
+    r"(?:^|\s)(?:\S*/)?("
+    + "|".join(re.escape(name) for name in SUPERVISION_SCRIPTS)
+    + r")(?=\s|$)")
 
 
 def now_stamp():
@@ -65,17 +69,34 @@ def sqlite_backup(source, dest):
     return v2.sqlite_backup(source, dest)
 
 
-def live_processes():
-    import re
-    proc = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True,
-                          text=True)
+def parse_live_processes(text):
+    """Return `ps -eo pid=,comm=,args=` lines that are live OpenCode or
+    supervision processes.
+
+    A hit requires either an `opencode`-family executable name (the TUI, the
+    service, or the retained V1 binary) or a Python process whose argument
+    path is one of the supervision scripts. Shell wrappers, `tee`, `grep`,
+    `ps`, and the upgrade orchestrator are intentionally not hits even when
+    their paths contain `opencode`.
+    """
     hits = []
-    for line in (proc.stdout or "").splitlines():
-        if "stage_opencode_config.py" in line:
+    for line in (text or "").splitlines():
+        fields = line.strip().split(None, 2)
+        if len(fields) < 2:
             continue
-        if any(re.search(pattern, line) for pattern in PROCESS_PATTERNS):
+        comm = fields[1]
+        args = fields[2] if len(fields) > 2 else ""
+        if comm in OPENCODE_COMMS:
+            hits.append(line.strip())
+        elif comm.startswith("python") and SUPERVISION_RE.search(args):
             hits.append(line.strip())
     return hits
+
+
+def live_processes():
+    proc = subprocess.run(["ps", "-eo", "pid=,comm=,args="],
+                          capture_output=True, text=True)
+    return parse_live_processes(proc.stdout)
 
 
 def build_plugins(repo, target):
