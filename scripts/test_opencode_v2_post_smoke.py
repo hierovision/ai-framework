@@ -337,6 +337,24 @@ def _stub(root, name, output):
     return path
 
 
+def _sequence_stub(root, name, outputs):
+    """A stub binary that returns successive outputs, last one repeating."""
+    path = os.path.join(root, "bin", name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    counter = os.path.join(root, "count-" + name)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(
+            "#!/usr/bin/env python3\n"
+            "import pathlib\n"
+            f"outputs = {outputs!r}\n"
+            f"counter = pathlib.Path({counter!r})\n"
+            "n = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+            "counter.write_text(str(n))\n"
+            "print(outputs[min(n, len(outputs)) - 1])\n")
+    os.chmod(path, 0o755)
+    return path
+
+
 def test_check_agents_live_tolerates_extras_and_flags_missing():
     root = _tmp("postsmoke-agents-live-")
     try:
@@ -352,9 +370,26 @@ def test_check_agents_live_tolerates_extras_and_flags_missing():
         ids = expected[1:] + ["builtin"]
         binary = _stub(root, "opencode2",
                        json.dumps({"data": [{"id": i} for i in ids]}))
-        ok, detail = post_smoke.check_agents_live(binary, REPO)
+        ok, detail = post_smoke.check_agents_live(binary, REPO, timeout=0)
         assert ok is False
         assert missing in detail
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_check_agents_live_polls_until_agents_load():
+    """2.2.7 agent.list can be empty immediately after service start."""
+    root = _tmp("postsmoke-agents-poll-")
+    try:
+        expected = sorted(name[:-3] for name in os.listdir(
+            os.path.join(REPO, "agents")) if name.endswith(".md"))
+        empty = json.dumps({"data": []})
+        full = json.dumps({"data": [{"id": i} for i in expected]})
+        binary = _sequence_stub(root, "opencode", [empty, full])
+        ok, detail = post_smoke.check_agents_live(binary, REPO, timeout=2)
+        assert ok is True, detail
+        assert "polls=2" in detail, detail
+        assert "missing=[]" in detail, detail
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
