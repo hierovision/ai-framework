@@ -511,8 +511,13 @@ def _c7_namespace(root):
     return argparse.Namespace(scratch_root=root, opencode_bin="/fake/opencode")
 
 
-def _c7_patch(loader, plugin_rows="", plugin_list_raises=False):
-    """Patch C7's service/loader seams for a hermetic gate call."""
+def _c7_patch(loader, plugin_rows="", plugin_list_raises=False,
+              agent_sequence=None):
+    """Patch C7's service/loader seams for a hermetic gate call.
+
+    `agent_sequence` supplies successive `/api/agent` responses; the last
+    entry repeats. The default returns the marker immediately.
+    """
     saved = {
         "v2_run": canary.v2_run,
         "assert_scratch_db": canary.v2.assert_scratch_db,
@@ -520,6 +525,7 @@ def _c7_patch(loader, plugin_rows="", plugin_list_raises=False):
         "stop_scratch_services": canary.stop_scratch_services,
         "c7_loader_probe": canary.c7_loader_probe,
     }
+    sequence = list(agent_sequence) if agent_sequence else ["canary-marker"]
 
     def fake_v2_run(_args, _env, argv, timeout=180):
         if argv[:2] == ["debug", "config"]:
@@ -530,7 +536,8 @@ def _c7_patch(loader, plugin_rows="", plugin_list_raises=False):
                 raise subprocess.TimeoutExpired(argv, timeout)
             return subprocess.CompletedProcess(argv, 0, plugin_rows, "")
         if argv[:3] == ["api", "GET", "/api/agent"]:
-            return subprocess.CompletedProcess(argv, 0, "canary-marker", "")
+            row = sequence.pop(0) if len(sequence) > 1 else sequence[0]
+            return subprocess.CompletedProcess(argv, 0, row, "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     canary.v2_run = fake_v2_run
@@ -579,6 +586,50 @@ def test_c7_passes_with_empty_plugin_list_and_loader_proof():
         assert "stale canary-plugin initialized" not in index, index
         assert "OPENCODE_LOADER_PROBE_TOKEN" in index, index
     finally:
+        _c7_restore(saved, root)
+
+
+def test_c7_polls_agent_api_until_marker_appears():
+    """AC-C7: 2.2.7 agent.list can return before the marker agent loads.
+
+    The gate must poll a bounded condition, not assert on the first response.
+    """
+    root = _tmp("canary-c7-agent-poll-")
+    saved = _c7_patch(
+        lambda _args, _config, plugin_dir, token: (
+            f'msg="loading plugin" id={os.path.realpath(plugin_dir)} '
+            f'entrypoint=file://{os.path.realpath(plugin_dir)}/index.js\n'
+            f"canary-plugin initialized probe={token}\n", None),
+        agent_sequence=["", '{"data":[]}',
+                        '{"data":[{"id":"canary-marker"}]}'])
+    try:
+        ok, text = canary.gate_c7(_c7_namespace(root))
+        assert ok is True, text
+        assert "agent_api_polls=3" in text, text
+        assert "agent_api_has_marker=True" in text, text
+        assert "C7=PASS" in text, text
+    finally:
+        _c7_restore(saved, root)
+
+
+def test_c7_fails_when_agent_marker_never_appears():
+    """AC-C7: polling is bounded; a missing marker is still a named FAIL."""
+    root = _tmp("canary-c7-agent-missing-")
+    saved_timeout = canary.C7_AGENT_POLL_TIMEOUT
+    saved = _c7_patch(
+        lambda _args, _config, plugin_dir, token: (
+            f'msg="loading plugin" id={os.path.realpath(plugin_dir)} '
+            f'entrypoint=file://{os.path.realpath(plugin_dir)}/index.js\n'
+            f"canary-plugin initialized probe={token}\n", None),
+        agent_sequence=['{"data":[]}'])
+    canary.C7_AGENT_POLL_TIMEOUT = 0
+    try:
+        ok, text = canary.gate_c7(_c7_namespace(root))
+        assert ok is False, text
+        assert "agent_api_has_marker=False" in text, text
+        assert "C7=FAIL" in text, text
+    finally:
+        canary.C7_AGENT_POLL_TIMEOUT = saved_timeout
         _c7_restore(saved, root)
 
 
