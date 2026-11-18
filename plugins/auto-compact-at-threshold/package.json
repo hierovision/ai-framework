@@ -5,6 +5,6 @@
   "type": "module",
   "description": "V2 auto-compaction plugin at a context fraction",
   "dependencies": {
-    "@opencode/plugin": "2.2.7"
+    "@opencode/plugin": "2.3.0"
   }
 }
