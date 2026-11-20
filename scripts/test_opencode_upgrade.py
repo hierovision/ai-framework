@@ -174,6 +174,7 @@ def _args(repo, **overrides):
         "tui_timeout": 20, "force": False, "resume": False, "apply": False,
         "keep": 1, "method": "yarn", "drain_acknowledged": False,
         "channel": None, "auto": False, "auto_merge": False,
+        "detach": False, "supervise": False,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -1746,6 +1747,10 @@ def test_verify_repairs_smoke_only_failure():
         assert len(archives) == 1, archives
         assert open(archives[0], "rb").read() == prior_bytes
         assert upgrade.read_state(root)["stage"] == "applied"
+        summary = open(upgrade.last_run_path(), encoding="utf-8").read()
+        assert "- result: verified" in summary, summary
+        assert f"- artifact: {artifact}" in summary, summary
+        assert "- next: up to date" in summary, summary
     finally:
         (upgrade.post_upgrade_smoke, upgrade.official_upgrade,
          upgrade.pre_upgrade_backup, upgrade.resume_migration) = real
@@ -4970,6 +4975,539 @@ def test_auto_merge_is_not_the_default():
             rc = upgrade.upgrade(_args(root, to="2.2.8", auto_merge=True))
         assert rc == 2, out.getvalue()
         assert "--auto-merge requires --auto" in out.getvalue(), out.getvalue()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _write_supervisor(phase, pid=None, target=None, **extra):
+    payload = {
+        "pid": pid if pid is not None else os.getpid(),
+        "target": target or v2.VERSION_PIN,
+        "phase": phase,
+        "log": "/tmp/opencode/supervisor.log",
+        "started": "2026-11-20T00:00:00Z",
+        "updated": "2026-11-20T00:00:00Z",
+    }
+    payload.update(extra)
+    upgrade.write_json(upgrade.supervisor_path(), payload)
+    return payload
+
+
+def test_detached_supervisor_waits_for_tui():
+    """AC11: spawn detaches; the child waits for the TUI before applying."""
+    root = _tmp("upgrade-detach-wait-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    real = (upgrade.subprocess.Popen, upgrade.stage_config.tui_processes,
+            upgrade.merged_pin, upgrade.run, upgrade.apply_supported,
+            upgrade.update_supervisor, upgrade.TUI_POLL_INTERVAL,
+            upgrade.TUI_WAIT_TIMEOUT)
+    try:
+        created = {}
+
+        class FakeProc:
+            pid = 4321
+
+        def fake_popen(argv, **kwargs):
+            created["argv"] = argv
+            created["kwargs"] = kwargs
+            return FakeProc()
+
+        upgrade.subprocess.Popen = fake_popen
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.spawn_supervisor(
+                _args(root, home=fixture["home"]), target,
+                merge_commit="merge-sha")
+        assert rc == 0, out.getvalue()
+        assert created["kwargs"]["start_new_session"] is True
+        assert created["kwargs"]["stdin"] is subprocess.DEVNULL
+        assert "--supervise" in created["argv"], created["argv"]
+        assert "--force" not in created["argv"], created["argv"]
+        record = json.load(open(upgrade.supervisor_path()))
+        assert record["pid"] == 4321 and record["target"] == target
+        assert record["phase"] == "waiting-tui"
+        assert record["log"] and record["started"] and record["updated"]
+        assert record["merge_commit"] == "merge-sha"
+        assert "close the OpenCode TUI" in out.getvalue(), out.getvalue()
+
+        polls = {"n": 0}
+        upgrade.stage_config.tui_processes = lambda: (
+            ["opencode opencode"] if polls.__setitem__(
+                "n", polls["n"] + 1) or polls["n"] < 3 else [])
+        upgrade.merged_pin = lambda repo, refs=None: target
+        upgrade.TUI_POLL_INTERVAL = 0
+        upgrade.TUI_WAIT_TIMEOUT = 5
+        phases = []
+        real_update = upgrade.update_supervisor
+
+        def spy(target_, phase, **kwargs):
+            phases.append(phase)
+            return real_update(target_, phase, **kwargs)
+
+        upgrade.update_supervisor = spy
+        applied = []
+        upgrade.apply_supported = lambda args, t, resume_prior=None: (
+            applied.append(t) or 0)
+        stopped = []
+        upgrade.run = lambda argv, **kwargs: (
+            stopped.append(list(argv))
+            or subprocess.CompletedProcess(argv, 0, "", ""))
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = upgrade.supervise(
+                _args(root, home=fixture["home"]), target)
+        assert rc == 0
+        assert applied == [target], applied
+        assert any(argv[1:3] == ["service", "stop"] for argv in stopped), \
+            stopped
+        assert phases == ["waiting-tui", "stopping-service", "applying",
+                          "done"], phases
+        assert polls["n"] >= 3
+        assert json.load(open(upgrade.supervisor_path()))["phase"] == "done"
+    finally:
+        (upgrade.subprocess.Popen, upgrade.stage_config.tui_processes,
+         upgrade.merged_pin, upgrade.run, upgrade.apply_supported,
+         upgrade.update_supervisor, upgrade.TUI_POLL_INTERVAL,
+         upgrade.TUI_WAIT_TIMEOUT) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_detached_supervisor_timeout_aborts():
+    """AC11: a TUI that never exits aborts with no mutation."""
+    root = _tmp("upgrade-detach-timeout-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    real = (upgrade.stage_config.tui_processes, upgrade.merged_pin,
+            upgrade.run, upgrade.apply_supported, upgrade.TUI_POLL_INTERVAL,
+            upgrade.TUI_WAIT_TIMEOUT)
+    try:
+        upgrade.stage_config.tui_processes = lambda: ["opencode opencode"]
+        upgrade.TUI_POLL_INTERVAL = 0
+        upgrade.TUI_WAIT_TIMEOUT = 0
+        upgrade.merged_pin = lambda repo, refs=None: (
+            (_ for _ in ()).throw(AssertionError("pin check must not run")))
+        calls = []
+        upgrade.run = lambda argv, **kwargs: (
+            calls.append(list(argv))
+            or subprocess.CompletedProcess(argv, 0, "", ""))
+        upgrade.apply_supported = lambda *a, **k: calls.append("apply") or 0
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = upgrade.supervise(
+                _args(root, home=fixture["home"]), target)
+        assert rc == 2
+        assert calls == [], calls
+        record = json.load(open(upgrade.supervisor_path()))
+        assert record["phase"] == "timeout"
+        assert "no service stop, backup, or install" not in json.dumps(record)
+    finally:
+        (upgrade.stage_config.tui_processes, upgrade.merged_pin,
+         upgrade.run, upgrade.apply_supported, upgrade.TUI_POLL_INTERVAL,
+         upgrade.TUI_WAIT_TIMEOUT) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_supervisor_refuses_pin_mismatch():
+    """AC11: the merged main pin must equal the target before any mutation."""
+    root = _tmp("upgrade-detach-pin-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    real = (upgrade.stage_config.tui_processes, upgrade.merged_pin,
+            upgrade.run, upgrade.apply_supported)
+    try:
+        upgrade.stage_config.tui_processes = lambda: []
+        upgrade.merged_pin = lambda repo, refs=None: "9.9.9"
+        calls = []
+        upgrade.run = lambda argv, **kwargs: (
+            calls.append(list(argv))
+            or subprocess.CompletedProcess(argv, 0, "", ""))
+        upgrade.apply_supported = lambda *a, **k: calls.append("apply") or 0
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.supervise(
+                _args(root, home=fixture["home"]), target)
+        assert rc == 2, out.getvalue()
+        assert "refusing to apply" in out.getvalue(), out.getvalue()
+        assert not [argv for argv in calls
+                    if "service" in argv or "apply" in argv], calls
+        assert any(argv[3:4] == ["fetch"] for argv in calls), calls
+        assert json.load(open(upgrade.supervisor_path()))["phase"] == \
+            "pin-check"
+    finally:
+        (upgrade.stage_config.tui_processes, upgrade.merged_pin,
+         upgrade.run, upgrade.apply_supported) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_supervisor_refreshes_stale_main_once():
+    """AC11: one best-effort fetch before the pin check fails closed."""
+    root = _tmp("upgrade-detach-stale-main-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    real = (upgrade.stage_config.tui_processes, upgrade.merged_pin,
+            upgrade.run, upgrade.apply_supported)
+    try:
+        upgrade.stage_config.tui_processes = lambda: []
+        pins = {"n": 0}
+
+        def merged(repo, refs=None):
+            pins["n"] += 1
+            return "9.9.9" if pins["n"] == 1 else target
+
+        upgrade.merged_pin = merged
+        calls = []
+        upgrade.run = lambda argv, **kwargs: (
+            calls.append(list(argv))
+            or subprocess.CompletedProcess(argv, 0, "", ""))
+        applied = []
+        upgrade.apply_supported = lambda *a, **k: applied.append(a[1]) or 0
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = upgrade.supervise(
+                _args(root, home=fixture["home"]), target)
+        assert rc == 0
+        assert applied == [target], applied
+        assert any(argv[3:4] == ["fetch"] for argv in calls), calls
+        assert any(argv[1:3] == ["service", "stop"] for argv in calls), calls
+    finally:
+        (upgrade.stage_config.tui_processes, upgrade.merged_pin,
+         upgrade.run, upgrade.apply_supported) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_status_resume_after_crash():
+    """AC12: status maps each supervisor phase to an exact next action."""
+    root = _tmp("upgrade-status-supervisor-")
+    real = (upgrade.topology, upgrade.shadow_state, upgrade.version_of,
+            upgrade.canary_summary)
+    try:
+        upgrade.topology = lambda home, link: {"command": "opencode",
+                                               "supported": True}
+        upgrade.shadow_state = lambda home, link, target: {
+            "target_installed": target, "supported_config": True,
+            "shadow_ok": True, "default_version": target,
+            "target_package": {"path": "x"}}
+        upgrade.version_of = lambda binary: v2.VERSION_PIN
+        upgrade.canary_summary = lambda repo, target: {
+            "ok": True, "gates": {}, "residual": 0, "reason": None}
+        cases = (
+            ("waiting-tui", os.getpid(), "close the TUI"),
+            ("applying", 999999, "resume"),
+            ("failed", 999999, "verify"),
+            ("done", 999999, "up to date"),
+        )
+        for phase, pid, expected in cases:
+            _write_supervisor(phase, pid=pid)
+            payload = upgrade.status_payload(_args(root))
+            supervisor = payload["supervisor"]
+            assert supervisor["phase"] == phase, supervisor
+            assert expected in supervisor["next"], (phase, supervisor["next"])
+    finally:
+        (upgrade.topology, upgrade.shadow_state, upgrade.version_of,
+         upgrade.canary_summary) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _resume_prior(target, stage, backup):
+    return {
+        "version": target, "verified": False, "rolled_back": False,
+        "failure_stage": stage,
+        "checks": ({} if stage not in upgrade.SMOKE_FAILURE_STAGES else
+                   {name: {"ok": name != stage, "detail": "fixture"}
+                    for name in upgrade.SMOKE_FAILURE_STAGES}),
+        "backup": backup,
+        "database_backup": None,
+        "previous_default": {"version": "1.19.4", "kind": "v1"},
+        "at": "2026-11-20T00:00:00Z",
+    }
+
+
+def test_resume_skips_completed_install_and_backup():
+    """AC12: resume reuses the backup and never reinstalls the target."""
+    root = _tmp("upgrade-resume-install-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    prior = _resume_prior(target, "migration", backup)
+    _write(upgrade.apply_artifact_path(root, target), json.dumps(prior) + "\n")
+    real = (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+            upgrade.resume_migration, upgrade.post_upgrade_smoke,
+            upgrade.stage_config.live_processes)
+    calls = []
+
+    def forbidden(name):
+        def fail(*_a, **_k):
+            calls.append(name)
+            raise AssertionError(f"{name} must not run on resume")
+        return fail
+
+    upgrade.pre_upgrade_backup = forbidden("backup")
+    upgrade.official_upgrade = forbidden("install")
+    upgrade.resume_migration = lambda *a, **k: {
+        "ok": True, "verified": True, "skipped": "test"}
+    upgrade.post_upgrade_smoke = lambda *a, **k: [("binary", True, "ok")]
+    upgrade.stage_config.live_processes = lambda: []
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = upgrade.apply_resume(
+                _args(root, to=target, home=fixture["home"],
+                      skip_canary=True, drain_acknowledged=True), target)
+        assert rc == 0
+        assert calls == [], calls
+        data = json.load(open(upgrade.apply_artifact_path(root, target)))
+        assert data["resumed_from"]["failure_stage"] == "migration", data
+        assert data["backup"] == backup, data
+        assert upgrade.read_state(root)["stage"] == "applied"
+    finally:
+        (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+         upgrade.resume_migration, upgrade.post_upgrade_smoke,
+         upgrade.stage_config.live_processes) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_resume_shadow_stage_reuses_backup():
+    """AC12: a shadow-stage failure resumes at shadow with the prior backup."""
+    root = _tmp("upgrade-resume-shadow-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    _write(upgrade.apply_artifact_path(root, target),
+           json.dumps(_resume_prior(target, "shadow", backup)) + "\n")
+    real = (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+            upgrade.resume_migration, upgrade.post_upgrade_smoke,
+            upgrade.stage_config.live_processes)
+    calls = []
+
+    def forbidden(name):
+        def fail(*_a, **_k):
+            calls.append(name)
+            raise AssertionError(f"{name} must not run on resume")
+        return fail
+
+    upgrade.pre_upgrade_backup = forbidden("backup")
+    upgrade.official_upgrade = forbidden("install")
+    upgrade.resume_migration = lambda *a, **k: {
+        "ok": True, "verified": True, "skipped": "test"}
+    upgrade.post_upgrade_smoke = lambda *a, **k: [("binary", True, "ok")]
+    upgrade.stage_config.live_processes = lambda: []
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = upgrade.apply_resume(
+                _args(root, to=target, home=fixture["home"],
+                      skip_canary=True, drain_acknowledged=True), target)
+        assert rc == 0
+        assert calls == [], calls
+        data = json.load(open(upgrade.apply_artifact_path(root, target)))
+        assert data["resumed_from"]["failure_stage"] == "shadow", data
+    finally:
+        (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+         upgrade.resume_migration, upgrade.post_upgrade_smoke,
+         upgrade.stage_config.live_processes) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_resume_smoke_failure_delegates_to_verify():
+    """AC12: a smoke-only failure resumes through verify (no backup/install)."""
+    root = _tmp("upgrade-resume-smoke-")
+    target = v2.VERSION_PIN
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    prior = _resume_prior(target, "plugin", backup)
+    _write(upgrade.apply_artifact_path(root, target), json.dumps(prior) + "\n")
+    real = upgrade.verify
+    calls = []
+    upgrade.verify = lambda args: calls.append("verify") or 0
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = upgrade.apply_resume(
+                _args(root, to=target, skip_canary=True,
+                      drain_acknowledged=True), target)
+        assert rc == 0
+        assert calls == ["verify"], calls
+    finally:
+        upgrade.verify = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_resume_without_artifact_falls_back_to_full_apply():
+    """AC12: no prior artifact -> the full apply path."""
+    root = _tmp("upgrade-resume-none-")
+    real = upgrade.apply_supported
+    calls = []
+    upgrade.apply_supported = lambda args, target, resume_prior=None: (
+        calls.append(resume_prior) or 0)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = upgrade.apply_resume(
+                _args(root, to=v2.VERSION_PIN, drain_acknowledged=True),
+                v2.VERSION_PIN)
+        assert rc == 0
+        assert calls == [None], calls
+    finally:
+        upgrade.apply_supported = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_final_summary_fields():
+    """AC12: last-run.md carries target/source/result/checks/artifact/backup."""
+    root = _tmp("upgrade-last-run-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    calls = []
+    real = _patch_apply(backup, _smoke_recorder(calls))
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.apply_supported(args, target) == 0
+        text = open(upgrade.last_run_path(), encoding="utf-8").read()
+        assert f"- target: {target}" in text, text
+        assert "- source_version: 1.19.4" in text, text
+        assert f"- target_version: {target}" in text, text
+        assert "- result: verified" in text, text
+        assert "- checks: binary=PASS" in text, text
+        assert (f"- artifact: {upgrade.apply_artifact_path(root, target)}"
+                ) in text, text
+        assert f"- backup: {backup}" in text, text
+        assert "- merge_commit: none" in text, text
+        assert "- next: up to date" in text, text
+    finally:
+        _restore_apply(real)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_spawns_supervisor_after_merge():
+    """AC11: a merged auto-merge with drain-ack spawns the detached supervisor."""
+    root = _tmp("upgrade-auto-spawn-")
+    target = "2.2.8"
+    real = (upgrade.run, upgrade.auto_merge_decision, upgrade.wait_for_merge,
+            upgrade.run_check_pr, upgrade.open_pr, upgrade.plugin_peers,
+            upgrade.canary_summary, upgrade.spawn_supervisor)
+    try:
+        _write_manifest(root, target)
+        upgrade.run = lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 0, "", "")
+        upgrade.auto_merge_decision = lambda *a, **k: {
+            "allowed": True, "reasons": [], "checks": {"pr_head": "head-a"},
+            "pr": {"headRefOid": "head-a"}}
+        upgrade.wait_for_merge = lambda repo, url, timeout=None, interval=None: {
+            "merged": True, "closed": False,
+            "state": {"state": "MERGED", "headRefOid": "head-a",
+                      "mergeCommit": {"oid": "merge-sha"}},
+            "polls": 1, "timed_out": False}
+        upgrade.run_check_pr = lambda args: 0
+        upgrade.open_pr = lambda args, t, o, s, manifest=None: (0, PR_URL)
+        upgrade.plugin_peers = lambda *a, **k: {}
+        upgrade.canary_summary = lambda repo, t: {
+            "ok": True, "gates": {"C1": "PASS"}, "residual": 0}
+        spawned = []
+        upgrade.spawn_supervisor = lambda args, target_, merge_commit=None: (
+            spawned.append((target_, merge_commit)) or 0)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.auto_pre_merge(
+                _args(root, to=target, auto=True, auto_merge=True,
+                      drain_acknowledged=True, opentui="0.8.2"), target)
+        assert rc == 0, out.getvalue()
+        assert spawned == [(target, "merge-sha")], spawned
+        text = open(upgrade.last_run_path(), encoding="utf-8").read()
+        assert "- result: supervisor-started" in text, text
+        assert "- merge_commit: merge-sha" in text, text
+    finally:
+        (upgrade.run, upgrade.auto_merge_decision, upgrade.wait_for_merge,
+         upgrade.run_check_pr, upgrade.open_pr, upgrade.plugin_peers,
+         upgrade.canary_summary, upgrade.spawn_supervisor) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_without_drain_stops_at_merged_apply_command():
+    """AC11: no drain ack -> merged, no spawn, exact apply command printed."""
+    root = _tmp("upgrade-auto-nodrain-")
+    target = "2.2.8"
+    real = (upgrade.run, upgrade.auto_merge_decision, upgrade.wait_for_merge,
+            upgrade.run_check_pr, upgrade.open_pr, upgrade.plugin_peers,
+            upgrade.canary_summary, upgrade.spawn_supervisor)
+    try:
+        _write_manifest(root, target)
+        upgrade.run = lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 0, "", "")
+        upgrade.auto_merge_decision = lambda *a, **k: {
+            "allowed": True, "reasons": [], "checks": {"pr_head": "head-a"},
+            "pr": {"headRefOid": "head-a"}}
+        upgrade.wait_for_merge = lambda repo, url, timeout=None, interval=None: {
+            "merged": True, "closed": False,
+            "state": {"state": "MERGED", "headRefOid": "head-a",
+                      "mergeCommit": {"oid": "merge-sha"}},
+            "polls": 1, "timed_out": False}
+        upgrade.run_check_pr = lambda args: 0
+        upgrade.open_pr = lambda args, t, o, s, manifest=None: (0, PR_URL)
+        upgrade.plugin_peers = lambda *a, **k: {}
+        upgrade.canary_summary = lambda repo, t: {
+            "ok": True, "gates": {"C1": "PASS"}, "residual": 0}
+        spawned = []
+        upgrade.spawn_supervisor = lambda *a, **k: spawned.append(a) or 0
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.auto_pre_merge(
+                _args(root, to=target, auto=True, auto_merge=True,
+                      drain_acknowledged=False, opentui="0.8.2"), target)
+        assert rc == 0, out.getvalue()
+        assert spawned == [], spawned
+        assert (f"apply: python3 scripts/opencode_upgrade.py upgrade --to "
+                f"{target} --apply --drain-acknowledged") in out.getvalue()
+    finally:
+        (upgrade.run, upgrade.auto_merge_decision, upgrade.wait_for_merge,
+         upgrade.run_check_pr, upgrade.open_pr, upgrade.plugin_peers,
+         upgrade.canary_summary, upgrade.spawn_supervisor) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_upgrade_detach_requires_drain_ack():
+    """AC11: --detach is refused without --drain-acknowledged."""
+    root = _tmp("upgrade-detach-ack-")
+    try:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.upgrade(_args(root, to=v2.VERSION_PIN, apply=True,
+                                       detach=True))
+        assert rc == 2, out.getvalue()
+        assert "--detach requires --drain-acknowledged" in out.getvalue()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_status_and_verify_keep_legacy_fallback_with_supervisor():
+    """AC12: legacy .scratch state/artifact still resolve beside supervisor.json."""
+    root = _tmp("upgrade-legacy-supervisor-")
+    target = v2.VERSION_PIN
+    legacy_state = os.path.join(root, ".scratch", "opencode-v2",
+                                "upgrade-state.json")
+    legacy_artifact = os.path.join(root, ".scratch", "opencode-v2",
+                                   f"upgrade-{target}-verify.json")
+    try:
+        _write(legacy_state, json.dumps({"target": target, "stage": "canaried",
+                                         "stages": {}}) + "\n")
+        _write(legacy_artifact, json.dumps(_verified_artifact(target)) + "\n")
+        _write_supervisor("failed", pid=999999)
+        payload = upgrade.status_payload(_args(root))
+        assert payload["state"]["stage"] == "canaried"
+        assert payload["last_apply"]["verified"] is True
+        assert payload["supervisor"]["phase"] == "failed"
+        assert upgrade.last_verify_verified(root, target) is True
+        assert upgrade.read_apply_artifact(root, target)[1] == legacy_artifact
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

@@ -203,6 +203,40 @@ default. Rollback remains manual (no automatic rollback change), and the
 detached supervisor/resume/`last-run.md` lanes are not part of this
 amendment.
 
+## 2026-11-20 amendment — detached apply, resume, and the run summary
+
+`upgrade --to <pin> --apply --detach --drain-acknowledged` starts a detached
+supervisor in a new session (`start_new_session=True`, stdio to
+`supervisor-<pin>.log`) and returns immediately with the log and
+`supervisor.json` paths. The record carries pid, target, phase, log, and
+started/updated. The child waits up to 600 s for the **TUI** to exit
+(`tui_processes()` filters the opencode family and excludes `serve`/
+`--service` and supervision processes); on timeout it records `timeout` and
+performs no service stop, backup, install, or migration. After the TUI exits,
+the child confirms the merged `main` `VERSION_PIN` equals the target
+(`pin-check` on mismatch), stops the service, and runs the existing apply
+directly (`apply_supported`, not the whole upgrade pipeline). Phases:
+`waiting-tui`, `timeout`, `pin-check`, `stopping-service`, `applying`,
+`done`/`failed`. It never passes `--force`.
+
+The auto lane uses the same supervisor: after a successful auto-merge with
+`--drain-acknowledged` it spawns the detached child; without the drain
+acknowledgment it stops at merged and prints the exact apply command. A
+refused, closed, or timed-out merge never spawns.
+
+`upgrade --to <pin> --apply --resume --drain-acknowledged` resumes from the
+prior artifact: it reuses the recorded backup/DB snapshot, does not create a
+new backup, and does not reinstall an already-installed target; it resumes at
+shadow/migration/smoke. A smoke-only failure delegates to `verify` (no
+backup/install/migration). With no prior artifact or usable backup it falls
+back to the full apply. `status` reads `supervisor.json`, checks pid liveness,
+and names the exact next action per phase; after apply/verify/auto completion
+`last-run.md` records target, source/target versions, result, checks, artifact,
+backup, merge commit, and next step.
+
+Rollback remains manual. This amendment does not add automatic rollback, an
+auto-rollback on a failed smoke, or a `rollback` command.
+
 ## Sources
 
 - Owner directive 2026-11-02 (supported path; yarn global; V1 shadowed; thin

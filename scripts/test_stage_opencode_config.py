@@ -191,6 +191,23 @@ def test_live_processes_flags_real_opencode_and_supervision():
         stage.subprocess.run = real
 
 
+def test_tui_processes_excludes_service_and_supervision():
+    """The supervisor waits for the TUI only: serve/--service is not a TUI."""
+    text = "\n".join([
+        "83202 opencode.exe /repo/opencode.exe serve --service",
+        "83429 opencode opencode",
+        "83430 opencode opencode --standalone",
+        "83431 opencode opencode serve",
+        "83500 python3 python3 /repo/scripts/dispatch_agent.py --agent x",
+    ]) + "\n"
+    hits = stage.parse_tui_processes(text)
+    assert len(hits) == 2, hits
+    assert any("83429" in hit for hit in hits), hits
+    assert any("83430" in hit for hit in hits), hits
+    assert not any("serve" in hit or "dispatch_agent" in hit
+                   for hit in hits), hits
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
