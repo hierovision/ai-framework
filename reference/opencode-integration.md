@@ -75,7 +75,37 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
   exact `canary --to <pin>` command.
 - `prepare --to X` — bumps `VERSION_PIN`, the docs/reference/README and
   plugin peer/README roots, refreshes lockfiles, and appends the dated ADR
-  amendment. `--dry-run` writes nothing; `--open-pr` opens the PR.
+  amendment. Lockfiles are generated and validated in a fresh temp copy per
+  plugin (`npm install --package-lock-only --include=optional` then
+  `npm ci`), never by an incremental `npm install` in the real plugin tree and
+  never against an existing `node_modules`; the resulting lockfile is copied
+  into the plugin directory. `--dry-run` writes nothing.
+  `--open-pr` runs the **local pre-PR gate** first: the four opencode suites
+  (`test_opencode_upgrade.py`, `test_opencode_v2_canary.py`,
+  `test_opencode_v2_post_smoke.py`, `test_stage_opencode_config.py`) and
+  `check --pins-only`, all before `git add`, `git commit`, `git push`, or
+  `gh pr create`. A gate or lockfile failure exits nonzero, writes
+  `.scratch/opencode-v2/prepare-<pin>-failure.json` naming the failed stage
+  (`lockfile:<plugin>`, `suite:<file>`, or `pins-only`), restores every written
+  seam/plugin/lockfile/ADR file (a generated lockfile is removed), leaves state
+  at its prior stage, and opens no PR.
+  `prepare` also writes a deterministic
+  `.scratch/opencode-v2/prepare-<pin>-manifest.json` (sorted paths, added/
+  removed counts, and the changed `VERSION_PIN` lines; no timestamps). At
+  `--open-pr` the manifest is reconciled with the **actual PR change set**
+  (`git diff --name-only $(git merge-base main HEAD)...HEAD` plus the index),
+  so any pre-existing branch commit or stray staged path becomes a manifest
+  row and makes the classifier non-machine; a missing merge-base is a named
+  refusal before commit/push/PR. The commit is path-scoped to the generated
+  files (`git commit -- <paths>`), so a pre-staged unrelated file cannot ride
+  the PR. The machine-only classifier is exposed now for the Phase 2
+  `--auto-merge` lane: only the pin seams,
+  plugin manifests/lockfiles/READMEs, `README.md`,
+  `reference/opencode-integration.md`, and the ADR-0014 amendment may change;
+  `scripts/opencode_v2.py` is allowed **only** for its `VERSION_PIN` line; any
+  test, canary, post-smoke, orchestrator, or other path makes the diff
+  non-machine, and a missing/empty manifest fails closed. Phase 2 auto-merge
+  is not implemented yet.
 - `prune --keep N` — remove old scratch prefixes/compat dirs and the state-dir
   `v2-canary-*` evidence beyond `--keep` (the current pin is always kept).
 - `verify --to <pin>` — the narrow recovery for a **smoke-only** failed apply.
