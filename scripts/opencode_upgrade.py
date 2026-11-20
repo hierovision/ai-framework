@@ -1497,7 +1497,8 @@ def seam_changes(repo=REPO, version=None, opentui=None):
 
 def append_adr_amendment(repo, version, opentui, summary, pending=False):
     path = adr_path(repo)
-    text = open(path, encoding="utf-8").read()
+    text = (open(path, encoding="utf-8").read()
+            if os.path.isfile(path) else "")
     marker = f"version pin {version}.**"
     if marker in text:
         return False
@@ -1644,12 +1645,38 @@ def clean_lockfile(directory, name, timeout=CLEAN_LOCKFILE_TIMEOUT):
 
 
 def changed_line_entries(old, new):
-    """`[{"op": "+"|"-", "text": ...}]` for a minimal line diff."""
+    """`[{"op": "+"|"-", "text": ...}]` for a minimal line diff.
+
+    Only the unified-diff header region (before the first `@@`) is skipped, so
+    a removed/added content line whose text starts with `--` (emitted as
+    `--- ...`) is still reported.
+    """
     rows = []
+    header = True
     for line in difflib.unified_diff((old or "").splitlines(),
                                      (new or "").splitlines(),
                                      n=0, lineterm=""):
-        if line.startswith(("+++", "---", "@@")):
+        if line.startswith("@@"):
+            header = False
+            continue
+        if header:
+            continue
+        if line[:1] in ("+", "-"):
+            rows.append({"op": line[0], "text": line[1:]})
+    return rows
+
+
+def parse_unified_diff(text):
+    """`[{"op", "text"}]` from `git diff` output (headers skipped per file)."""
+    rows = []
+    header = True
+    for line in (text or "").splitlines():
+        if line.startswith("diff --git "):
+            header = True
+            continue
+        if header:
+            if line.startswith("@@"):
+                header = False
             continue
         if line[:1] in ("+", "-"):
             rows.append({"op": line[0], "text": line[1:]})
@@ -1692,10 +1719,13 @@ def machine_diff(manifest):
     reference / ADR-0014 amendment makes the diff non-machine. `scripts/
     opencode_v2.py` is allowlisted only for changed `VERSION_PIN` lines, so an
     arbitrary code edit there is rejected. A harness (test/canary/post-smoke/
-    orchestrator) path is always rejected.
+    orchestrator) path is always rejected. A missing or empty manifest fails
+    closed.
     """
+    if not isinstance(manifest, dict) or not manifest.get("files"):
+        return (False, ["no manifest"])
     reasons = []
-    for row in (manifest or {}).get("files") or []:
+    for row in manifest.get("files") or []:
         path = row.get("path") or ""
         if path == "scripts/opencode_v2.py":
             changed = [line for line in row.get("lines") or []
@@ -1749,6 +1779,85 @@ def run_pre_pr_gate(args, target):
                             detail[-400:] or f"exit {proc.returncode}")
     checks.append({"check": "pins-only", "ok": True, "detail": "passed"})
     return checks
+
+
+def pr_base(repo, base_ref="main"):
+    """The merge-base SHA for the PR diff; a failure is a named refusal."""
+    proc = run(["git", "-C", repo, "merge-base", base_ref, "HEAD"], timeout=60)
+    sha = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not sha:
+        raise PrepGateError(
+            "pr-diff",
+            f"cannot resolve merge-base {base_ref}..HEAD: "
+            f"{(proc.stderr or '').strip()[-200:] or 'no output'}")
+    return sha
+
+
+def git_name_only(repo, rev_args):
+    proc = run(["git", "-C", repo, "diff", "--name-only"] + rev_args,
+               timeout=60)
+    if proc.returncode != 0:
+        raise PrepGateError(
+            "pr-diff",
+            f"git diff --name-only {' '.join(rev_args)} failed: "
+            f"{(proc.stderr or '').strip()[-200:]}")
+    return [line.strip() for line in (proc.stdout or "").splitlines()
+            if line.strip()]
+
+
+def pr_change_set(repo, base_ref="main"):
+    """`(base, paths)` for the actual PR change set: branch commits + index.
+
+    This is the authoritative set — the generated manifest is only a subset of
+    it. Staged paths are included because a stray `git add` is exactly what
+    must not ride the PR unnoticed.
+    """
+    base = pr_base(repo, base_ref)
+    branch = git_name_only(repo, [f"{base}...HEAD"])
+    staged = git_name_only(repo, ["--cached"])
+    return base, sorted(set(branch) | set(staged))
+
+
+def git_diff_line_entries(repo, base, path):
+    """Changed `+`/`-` lines for `path` across `base...HEAD`."""
+    proc = run(["git", "-C", repo, "diff", "--unified=0",
+                f"{base}...HEAD", "--", path], timeout=60)
+    if proc.returncode != 0:
+        raise PrepGateError(
+            "pr-diff",
+            f"git diff {base}...HEAD -- {path} failed: "
+            f"{(proc.stderr or '').strip()[-200:]}")
+    return parse_unified_diff(proc.stdout)
+
+
+def reconcile_manifest(repo, manifest, paths, base=None):
+    """Append the actual PR paths the generated manifest does not cover.
+
+    Any path outside the generated set becomes a manifest row, so the
+    classifier fails closed. For `scripts/opencode_v2.py` the branch diff lines
+    are merged in, so a code change in an earlier commit is not mistaken for a
+    pin-only bump. Returns the appended paths.
+    """
+    files = manifest.setdefault("files", [])
+    by_path = {row.get("path"): row for row in files}
+    appended = []
+    for path in sorted(set(paths)):
+        row = by_path.get(path)
+        if row is None:
+            row = {"path": path, "added": 0, "removed": 0}
+            files.append(row)
+            by_path[path] = row
+            appended.append(path)
+        if path == "scripts/opencode_v2.py" and base:
+            seen = {(line.get("op"), line.get("text"))
+                    for line in row.get("lines") or []}
+            for entry in git_diff_line_entries(repo, base, path):
+                key = (entry.get("op"), entry.get("text"))
+                if key not in seen:
+                    row.setdefault("lines", []).append(entry)
+                    seen.add(key)
+    files.sort(key=lambda row: row.get("path") or "")
+    return appended
 
 
 def prepare(args):
@@ -1837,18 +1946,22 @@ def prepare(args):
         stage = "adr-amendment"
         adr = adr_path(args.repo)
         old_adr = (open(adr, encoding="utf-8").read()
-                   if os.path.isfile(adr) else "")
-        if os.path.isfile(adr):
-            originals.setdefault(adr, old_adr)
+                   if os.path.isfile(adr) else None)
+        originals.setdefault(adr, old_adr)
         append_adr_amendment(args.repo, target, opentui, summary or {},
                              pending=pending)
-        generated.append((os.path.relpath(adr, args.repo), old_adr,
+        generated.append((os.path.relpath(adr, args.repo), old_adr or "",
                           open(adr, encoding="utf-8").read()))
         completed.append({"action": "adr-amendment",
                           "path": os.path.relpath(adr, args.repo)})
         stage = "verify"
         results = check_seams(args.repo, target, opentui)
         failed = [row for row in results if not row[1]]
+        if failed:
+            for path, ok, detail in failed:
+                print(f"  {path}: FAIL {detail}")
+            raise RuntimeError("seam verification failed: " + ", ".join(
+                path for path, _ok, _detail in failed))
         stage = "lockfile-delta"
         delta = lockfile_delta(args.repo, lock_paths) if lock_paths else ""
         print(f"prepared {target} (OpenTUI {opentui}); "
@@ -1856,11 +1969,6 @@ def prepare(args):
         if delta:
             print("lockfile delta:")
             print(delta)
-        for path, ok, detail in failed:
-            print(f"  {path}: FAIL {detail}")
-        if failed:
-            raise RuntimeError("seam verification failed: " + ", ".join(
-                path for path, _ok, _detail in failed))
         stage = "manifest"
         manifest = manifest_from_generated(target, generated)
         if args.open_pr:
@@ -1919,7 +2027,7 @@ def pr_body(target, opentui, summary, notes, manifest=None):
         lines.append("- none found in the release range")
     if manifest is not None:
         machine, reasons = machine_diff(manifest)
-        lines += ["", "### Diff manifest",
+        lines += ["", "### Diff manifest (merge-base(main)..HEAD + index)",
                   f"- machine-only: {'yes' if machine else 'no'}"]
         for row in manifest.get("files") or []:
             lines.append(f"- `{row.get('path')}`: "
@@ -1943,31 +2051,70 @@ def pr_body(target, opentui, summary, notes, manifest=None):
 
 
 def open_pr(args, target, opentui, summary, manifest=None):
+    """Commit the generated paths, reconcile the manifest with the PR diff,
+    then push and open the PR.
+
+    The manifest is authoritative for the **whole** PR diff, not just the
+    generated writes: pre-existing branch commits and any staged path are
+    appended (so the classifier rejects them) before the body is written. A
+    merge-base/diff failure is a named refusal with no push or PR. The commit
+    is path-scoped to the generated files, so a pre-staged unrelated file can
+    never ride along.
+    """
     notes = breaking_notes(fetch_releases(), v2.VERSION_PIN, target)
+    manifest = manifest or {"target": target, "files": []}
+    manifest_path = prepare_manifest_path(args.repo, target)
     body_path = os.path.join(args.repo, ".scratch", "opencode-v2",
                              f"pr-body-{target}.md")
-    os.makedirs(os.path.dirname(body_path), exist_ok=True)
-    with open(body_path, "w", encoding="utf-8") as fh:
-        fh.write(pr_body(target, opentui, summary, notes, manifest=manifest))
+
+    def write_body():
+        os.makedirs(os.path.dirname(body_path), exist_ok=True)
+        with open(body_path, "w", encoding="utf-8") as fh:
+            fh.write(pr_body(target, opentui, summary, notes,
+                             manifest=manifest))
+
+    try:
+        base, actual = pr_change_set(args.repo)
+        reconcile_manifest(args.repo, manifest, actual, base=base)
+    except PrepGateError as exc:
+        print(f"error: {exc.stage}: {exc}", file=sys.stderr)
+        print("no commit, push, or PR was attempted", file=sys.stderr)
+        return 2
+    write_json(manifest_path, manifest)
+    write_body()
     files = [seam["path"] for seam in SEAMS] + [row[0] for row in PLUGIN_JSONS]
     files.append(os.path.relpath(adr_path(args.repo), args.repo))
-    lockfiles = [os.path.relpath(p, args.repo) for p in glob.glob(
+    files += [os.path.relpath(p, args.repo) for p in glob.glob(
         os.path.join(args.repo, "plugins", "*", "package-lock.json"))]
-    files += lockfiles
+    files = list(dict.fromkeys(files))  # dedupe duplicate seam paths
     added = run(["git", "-C", args.repo, "add"] + files, timeout=120)
     if added.returncode != 0:
         print(f"error: git add failed: {(added.stderr or '')[-300:]}",
               file=sys.stderr)
         return 2
-    staged = run(["git", "-C", args.repo, "diff", "--cached", "--quiet"],
-                 timeout=30)
+    staged = run(["git", "-C", args.repo, "diff", "--cached", "--quiet", "--"]
+                 + files, timeout=30)
     if staged.returncode != 0:
+        # Path-scoped: pre-staged foreign files stay in the index, uncommitted.
         commit = run(["git", "-C", args.repo, "commit", "-m",
-                      f"chore(opencode): pin {target}"], timeout=120)
+                      f"chore(opencode): pin {target}", "--"] + files,
+                     timeout=120)
         if commit.returncode != 0:
             print(f"error: commit failed: {(commit.stderr or '')[-300:]}",
                   file=sys.stderr)
             return 2
+    # Recompute the authoritative PR diff after the commit and rewrite the
+    # body if reconciliation added a path.
+    try:
+        base, actual = pr_change_set(args.repo)
+        appended = reconcile_manifest(args.repo, manifest, actual, base=base)
+    except PrepGateError as exc:
+        print(f"error: {exc.stage}: {exc}", file=sys.stderr)
+        print("no push or PR was attempted", file=sys.stderr)
+        return 2
+    if appended:
+        write_json(manifest_path, manifest)
+        write_body()
     push = run(["git", "-C", args.repo, "push", "-u", "origin", "HEAD"],
                timeout=180)
     if push.returncode != 0:
