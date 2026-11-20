@@ -106,8 +106,7 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
   `reference/opencode-integration.md`, and the ADR-0014 amendment may change;
   `scripts/opencode_v2.py` is allowed **only** for its `VERSION_PIN` line; any
   test, canary, post-smoke, orchestrator, or other path makes the diff
-  non-machine, and a missing/empty manifest fails closed. Phase 2 auto-merge
-  is not implemented yet.
+  non-machine, and a missing/empty manifest fails closed.
 - `prune --keep N` — remove old scratch prefixes/compat dirs and the state-dir
   `v2-canary-*` evidence beyond `--keep` (the current pin is always kept).
 - `verify --to <pin>` — the narrow recovery for a **smoke-only** failed apply.
