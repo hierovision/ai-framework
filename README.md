@@ -47,6 +47,18 @@ written: an unverified one as
 `upgrade-<pin>-verify.json.previous-<UTC stamp>`. A failed verification records
 `verified: false` with the exact manual rollback guidance — never an automatic
 rollback (ADR-0017).
+
+For a patch upgrade, the owner can run one pre-merge command:
+`python3 scripts/opencode_upgrade.py upgrade --to <latest> --auto`
+(add `--channel patch` to resolve the newest patch inside the pinned `X.Y`).
+It runs plan → canary → prepare (clean lockfiles, the four local suites and
+`check --pins-only`) → `check --pr` → PR. Without `--auto-merge` it stops at
+the PR URL with the canary summary. `--auto-merge` is explicit opt-in: it
+enables `gh pr merge --auto --squash` only for a patch target with a
+machine-only full PR diff, a passing canary, a clean tracked tree, and a
+`main`-based PR; otherwise the PR stays open for review. Minor/major targets
+always stop at the PR. Merge is user-initiated by default.
+
 For a V1 previous default, rollback uses the actual
 `~/.config/opencode.v1-backup-*` tree, not the V2-era pre-apply snapshot.
 SQLite backups are written mode 0600. Existing backups created before this fix

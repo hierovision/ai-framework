@@ -73,6 +73,8 @@ PRE_PR_SUITE_TIMEOUT = 1800
 PRE_PR_SUITES = ("test_opencode_upgrade.py", "test_opencode_v2_canary.py",
                  "test_opencode_v2_post_smoke.py",
                  "test_stage_opencode_config.py")
+AUTO_MERGE_TIMEOUT = 1800
+AUTO_MERGE_POLL = 15
 
 
 # --- small helpers -----------------------------------------------------------
@@ -2002,7 +2004,9 @@ def prepare(args):
               "is in the artifact", file=sys.stderr)
         return 1
     if args.open_pr:
-        return open_pr(args, target, opentui, summary or {}, manifest=manifest)
+        rc, _url = open_pr(args, target, opentui, summary or {},
+                           manifest=manifest)
+        return rc
     print(f"next: opencode upgrade {target} --method yarn")
     return 0
 
@@ -2079,7 +2083,7 @@ def open_pr(args, target, opentui, summary, manifest=None):
     except PrepGateError as exc:
         print(f"error: {exc.stage}: {exc}", file=sys.stderr)
         print("no commit, push, or PR was attempted", file=sys.stderr)
-        return 2
+        return 2, None
     write_json(manifest_path, manifest)
     write_body()
     files = [seam["path"] for seam in SEAMS] + [row[0] for row in PLUGIN_JSONS]
@@ -2091,7 +2095,7 @@ def open_pr(args, target, opentui, summary, manifest=None):
     if added.returncode != 0:
         print(f"error: git add failed: {(added.stderr or '')[-300:]}",
               file=sys.stderr)
-        return 2
+        return 2, None
     staged = run(["git", "-C", args.repo, "diff", "--cached", "--quiet", "--"]
                  + files, timeout=30)
     if staged.returncode != 0:
@@ -2102,7 +2106,7 @@ def open_pr(args, target, opentui, summary, manifest=None):
         if commit.returncode != 0:
             print(f"error: commit failed: {(commit.stderr or '')[-300:]}",
                   file=sys.stderr)
-            return 2
+            return 2, None
     # Recompute the authoritative PR diff after the commit and rewrite the
     # body if reconciliation added a path.
     try:
@@ -2111,7 +2115,7 @@ def open_pr(args, target, opentui, summary, manifest=None):
     except PrepGateError as exc:
         print(f"error: {exc.stage}: {exc}", file=sys.stderr)
         print("no push or PR was attempted", file=sys.stderr)
-        return 2
+        return 2, None
     if appended:
         write_json(manifest_path, manifest)
         write_body()
@@ -2120,7 +2124,7 @@ def open_pr(args, target, opentui, summary, manifest=None):
     if push.returncode != 0:
         print(f"error: push failed: {(push.stderr or '')[-300:]}",
               file=sys.stderr)
-        return 2
+        return 2, None
     branch = run(["git", "-C", args.repo, "branch", "--show-current"],
                  timeout=30).stdout.strip()
     title = f"chore(opencode): pin {target}"
@@ -2129,16 +2133,17 @@ def open_pr(args, target, opentui, summary, manifest=None):
                    timeout=60)
     if existing.returncode == 0 and existing.stdout.strip():
         print(f"PR already open: {existing.stdout.strip()}")
-        return 0
+        return 0, existing.stdout.strip()
     created = run(["gh", "pr", "create", "--base", "main", "--head", branch,
                    "--title", title, "--body-file", body_path],
                   cwd=args.repo, env=gh_env(), timeout=120)
     if created.returncode != 0:
         print(f"error: gh pr create failed: "
               f"{(created.stderr or '')[-300:]}", file=sys.stderr)
-        return 2
-    print(created.stdout.strip())
-    return 0
+        return 2, None
+    url = created.stdout.strip()
+    print(url)
+    return 0, url
 
 
 # --- canary / plugin compatibility -----------------------------------------
@@ -3000,9 +3005,245 @@ def prune(args):
     return 0
 
 
+# --- Phase 2: patch channel / one-command pre-merge / opt-in auto-merge ----
+
+def release_tags(releases):
+    """Exact `X.Y.Z` tags from a release list (v-prefix tolerated)."""
+    tags = []
+    for release in releases or []:
+        tag = (release.get("tag_name") or "").lstrip("v")
+        if re.fullmatch(r"\d+\.\d+\.\d+", tag):
+            tags.append(tag)
+    return tags
+
+
+def patch_target(releases, pinned=None):
+    """Newest patch in the pin's `X.Y`, or None. Never a minor/major."""
+    pinned = pinned or v2.VERSION_PIN
+    major, minor = pinned.split(".")[:2]
+    same_minor = [tag for tag in release_tags(releases)
+                  if tag.split(".")[:2] == [major, minor]
+                  and version_key(tag) > version_key(pinned)]
+    return max(same_minor, key=version_key) if same_minor else None
+
+
+def resolve_target(args):
+    """Explicit `--to` wins; else `--channel patch`; else the latest release.
+
+    Returns `(target, message)`. `target` is None when the patch channel has
+    no newer patch; `message` is the truthful "already current" line and the
+    caller exits 0 without a plan/canary run.
+    """
+    if getattr(args, "to", None) is not None:
+        return args.to, None
+    if getattr(args, "channel", None) == "patch":
+        releases = (read_json(args.releases_file)
+                    if getattr(args, "releases_file", None)
+                    else fetch_releases())
+        target = patch_target(releases, v2.VERSION_PIN)
+        if target is None:
+            major, minor = v2.VERSION_PIN.split(".")[:2]
+            return None, (f"already current: pinned {v2.VERSION_PIN}; no "
+                          f"newer patch in {major}.{minor}.x")
+        return target, None
+    return latest_version(args.repo, refresh=args.refresh), None
+
+
+def run_check_pr(args):
+    """Run `check --pr` in a fresh interpreter (the pin file just changed)."""
+    argv = [sys.executable, os.path.join(HERE, "opencode_upgrade.py"),
+            "check", "--pr", "--repo", args.repo]
+    try:
+        proc = run(argv, cwd=args.repo, timeout=PRE_PR_SUITE_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"error: check --pr could not run: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return 2
+    if proc.returncode != 0:
+        detail = ((proc.stdout or "") + (proc.stderr or "")).strip()[-400:]
+        print(f"error: check --pr refused the release: {detail}",
+              file=sys.stderr)
+    return proc.returncode
+
+
+def pr_view(repo, url):
+    """`gh pr view <url>` JSON (state/base/mergeable), or None."""
+    proc = run(["gh", "pr", "view", url, "--json",
+                "state,baseRefName,mergeable,url,number"],
+               cwd=repo, env=gh_env(), timeout=60)
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def auto_merge_decision(args, target, manifest, summary, url):
+    """The AC10 policy: patch, machine-only, canary, clean tree, main base.
+
+    The current checkout need not be `main` (prepare runs on the upgrade
+    branch); "main" means the PR base and main ancestry. Returns
+    `{"allowed", "reasons", "checks"}`.
+    """
+    repo = args.repo
+    pinned = v2.VERSION_PIN
+    reasons = []
+    checks = {}
+    target_parts = target.split(".")
+    pinned_parts = pinned.split(".")
+    patch_ok = (target_parts[:2] == pinned_parts[:2]
+                and version_key(target) > version_key(pinned))
+    checks["patch"] = patch_ok
+    if not patch_ok:
+        reasons.append(f"target {target} is not a patch newer than the "
+                       f"pinned {pinned}")
+    machine, machine_reasons = machine_diff(manifest)
+    checks["machine_only"] = machine
+    if not machine:
+        reasons.append("diff is not machine-only: "
+                       + "; ".join(machine_reasons))
+    canary = summary or canary_summary(repo, target) or {}
+    checks["canary"] = bool(canary.get("ok"))
+    if not canary.get("ok"):
+        reasons.append("canary is not passing for " + target)
+    status = run(["git", "-C", repo, "status", "--porcelain",
+                  "--untracked-files=no"], timeout=30)
+    clean = status.returncode == 0 and not (status.stdout or "").strip()
+    checks["clean_tracked_tree"] = clean
+    if status.returncode != 0:
+        reasons.append("cannot read the tracked tree status: "
+                       + (status.stderr or "").strip()[-200:])
+    elif not clean:
+        reasons.append("tracked tree is dirty: "
+                       + (status.stdout or "").strip().splitlines()[0])
+    ancestry = run(["git", "-C", repo, "merge-base", "--is-ancestor",
+                    "main", "HEAD"], timeout=30)
+    based_on_main = ancestry.returncode == 0
+    checks["based_on_main"] = based_on_main
+    if not based_on_main:
+        reasons.append("branch is not based on main")
+    pr = pr_view(repo, url)
+    base = (pr or {}).get("baseRefName")
+    checks["pr_base"] = base
+    if pr is None:
+        reasons.append("cannot read the PR base")
+    elif base != "main":
+        reasons.append(f"PR base is {base}, not main")
+    return {"allowed": not reasons, "reasons": reasons, "checks": checks,
+            "pr": pr}
+
+
+def wait_for_merge(repo, url, timeout=None, interval=None):
+    """Poll the PR until MERGED/CLOSED or the bounded timeout."""
+    timeout = AUTO_MERGE_TIMEOUT if timeout is None else timeout
+    interval = AUTO_MERGE_POLL if interval is None else interval
+    last = {"state": None}
+
+    def probe():
+        state = pr_view(repo, url)
+        last["state"] = state
+        if state and state.get("state") in ("MERGED", "CLOSED"):
+            return state
+        return None
+
+    value, polls, timed_out = v2.wait_for(probe, timeout, interval)
+    state = value or last["state"]
+    return {"merged": bool(state and state.get("state") == "MERGED"),
+            "closed": bool(state and state.get("state") == "CLOSED"),
+            "state": state, "polls": polls, "timed_out": timed_out}
+
+
+def auto_merge_path(repo, target):
+    return os.path.join(repo, ".scratch", "opencode-v2",
+                        f"auto-merge-{target}.json")
+
+
+def auto_pre_merge(args, target):
+    """One-command pre-merge: check --pr -> PR -> optional auto-merge.
+
+    The plan/canary/prepare gates already ran in `upgrade()`. This adds the
+    local `check --pr` gate before the PR, then (only with `--auto-merge`)
+    applies the AC10 policy, enables `gh pr merge --auto --squash`, and polls
+    to a bounded timeout.
+    """
+    manifest_path = prepare_manifest_path(args.repo, target)
+    if not os.path.isfile(manifest_path):
+        print(f"error: no prepare manifest at {manifest_path}; rerun "
+              f"`upgrade --to {target}` (without --resume) before --auto",
+              file=sys.stderr)
+        return 2
+    manifest = read_json(manifest_path, {}) or {}
+    # A fresh interpreter is required: prepare just bumped VERSION_PIN on
+    # disk, while this process still holds the pre-bump value.
+    rc = run_check_pr(args)
+    if rc != 0:
+        print("error: check --pr refused the PR; no branch push or PR "
+              "was attempted", file=sys.stderr)
+        return rc
+    peers = (read_json(args.plugin_json) if args.plugin_json
+             else plugin_peers(target, args.repo))
+    opentui = resolve_opentui(target, args.opentui, peers or {})
+    summary = canary_summary(args.repo, target) or {}
+    rc, url = open_pr(args, target, opentui, summary, manifest=manifest)
+    if rc != 0:
+        return rc
+    manifest = read_json(manifest_path, {}) or manifest
+    if not args.auto_merge:
+        gates = " ".join(f"{k}={v}"
+                         for k, v in (summary.get("gates") or {}).items())
+        print(f"PR ready: {url}")
+        print(f"canary: {gates or 'missing'}; migration residual "
+              f"{summary.get('residual')}; CI runs on the PR")
+        print("auto-merge: not requested (pass --auto-merge to opt in)")
+        return 0
+    decision = auto_merge_decision(args, target, manifest, summary, url)
+    write_json(auto_merge_path(args.repo, target), {
+        "target": target,
+        "pr": url,
+        "authorized": decision["allowed"],
+        "reasons": decision["reasons"],
+        "checks": decision["checks"],
+        "at": now_iso(),
+    })
+    if not decision["allowed"]:
+        print(f"auto-merge refused; PR left open for review: {url}",
+              file=sys.stderr)
+        for reason in decision["reasons"]:
+            print(f"  - {reason}", file=sys.stderr)
+        return 0
+    print(f"auto-merge authorized for {target} (patch, machine-only): {url}")
+    merge = run(["gh", "pr", "merge", "--auto", "--squash", url],
+                cwd=args.repo, env=gh_env(), timeout=120)
+    if merge.returncode != 0:
+        print(f"error: gh pr merge --auto failed: "
+              f"{(merge.stderr or '')[-300:]}", file=sys.stderr)
+        return 2
+    outcome = wait_for_merge(args.repo, url)
+    if outcome["merged"]:
+        print(f"merged: {url} (polls={outcome['polls']})")
+        return 0
+    if outcome["closed"]:
+        print(f"error: PR closed without merging: {url}", file=sys.stderr)
+        return 1
+    print(f"error: timed out waiting for merge after "
+          f"{AUTO_MERGE_TIMEOUT}s (PR left open): {url}", file=sys.stderr)
+    return 1
+
+
 def upgrade(args):
-    target = (args.to if args.to is not None
-              else latest_version(args.repo, refresh=args.refresh))
+    if getattr(args, "auto_merge", False) and not getattr(args, "auto", False):
+        print("error: --auto-merge requires --auto", file=sys.stderr)
+        return 2
+    if getattr(args, "auto", False) and getattr(args, "apply", False):
+        print("error: --auto is the pre-merge lane; --apply is the live "
+              "switch; run them separately", file=sys.stderr)
+        return 2
+    target, message = resolve_target(args)
+    if message:
+        print(message)
+        return 0
     if not target:
         print("error: no target version", file=sys.stderr)
         return 2
@@ -3087,9 +3328,17 @@ def upgrade(args):
         if rc != 0:
             return rc
     if "prepared" not in stages_done:
-        rc = prepare(args)
+        auto_open = getattr(args, "open_pr", False)
+        if getattr(args, "auto", False):
+            args.open_pr = False  # PR opens after the local check --pr gate
+        try:
+            rc = prepare(args)
+        finally:
+            args.open_pr = auto_open
         if rc != 0:
             return rc
+    if getattr(args, "auto", False):
+        return auto_pre_merge(args, target)
     if args.apply:
         return apply_supported(args, target)
     print(f"ready: run `opencode upgrade {target} --method {args.method}` "
@@ -3128,6 +3377,13 @@ def build_parser():
         cmd.add_argument("--force", action="store_true")
         cmd.add_argument("--resume", action="store_true")
         cmd.add_argument("--apply", action="store_true")
+        cmd.add_argument("--channel", default=None, choices=("patch",),
+                         help="resolve the newest patch in the pinned X.Y")
+        cmd.add_argument("--auto", action="store_true",
+                         help="run plan -> canary -> prepare -> check --pr -> PR")
+        cmd.add_argument("--auto-merge", action="store_true",
+                         help="opt in to gh pr merge --auto --squash when the "
+                              "patch/machine-only policy allows it")
         cmd.add_argument("--keep", type=int, default=1)
         cmd.add_argument("--method", default="yarn",
                          choices=("curl", "npm", "pnpm", "bun", "yarn", "vp",

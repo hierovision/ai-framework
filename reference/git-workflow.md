@@ -20,6 +20,28 @@ override the *naming* via their rules file; the *discipline* is fixed.
   `allow_squash_merge=true`). Do not re-enable them; the PR title becomes
   the main-history subject.
 
+### Opt-in patch auto-merge (2026-11-20)
+
+The merge remains user-initiated by default. The single exception is the
+explicitly authorized patch lane: `python3 scripts/opencode_upgrade.py upgrade
+--to <patch> --auto --auto-merge` may enable `gh pr merge --auto --squash`
+only when **all** of these hold:
+
+- the target is a patch inside the pinned `X.Y` (never a minor/major);
+- the Phase 1 diff manifest is present and `machine_diff` is true for the
+  **full PR diff** (generated writes plus any branch-commit/staged path);
+- the canary passes for the target;
+- the tracked tree is clean; and
+- the PR base is `main` and the branch has main ancestry.
+
+The current checkout may be the upgrade branch (`prepare` runs there); "main"
+means the PR base/ancestry, not the current branch name. A refusal leaves the
+PR open for review and prints the reason; minor/major targets and any
+non-machine diff always stop at PR ready. `--auto-merge` is never a default,
+and the explicit authorization plus its checks are recorded in
+`.scratch/opencode-v2/auto-merge-<pin>.json`. This protected-action exception
+is recorded in ADR-0017.
+
 ## All work requires a branch
 
 - Work touching tracked files — implement passes, trivial single-file
