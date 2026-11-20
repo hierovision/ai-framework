@@ -1878,6 +1878,102 @@ def _ok_smoke(*_a, **_k):
     return [(name, True, "ok") for name in upgrade.SMOKE_FAILURE_STAGES]
 
 
+def _service_binary(root, running=True, version=None):
+    """A stub that answers --version/debug/service like the real CLI."""
+    version = version or v2.VERSION_PIN
+    config = os.path.join(root, "home", ".config", "opencode")
+    os.makedirs(config, exist_ok=True)
+    path = os.path.join(root, "service-bin", "opencode")
+    log = os.path.join(root, "service.log")
+    status = "http://127.0.0.1:4096" if running else "stopped"
+    exit_code = 0 if running else 1
+    _write(path, (
+        "#!/bin/sh\n"
+        'if [ "$1" = "--version" ]; then echo "opencode v' + version
+        + '"; exit 0; fi\n'
+        'if [ "$1" = "debug" ]; then echo "' + config + '"; exit 0; fi\n'
+        'if [ "$1" = "service" ] && [ "$2" = "status" ]; then echo "'
+        + status + '"; exit ' + str(exit_code) + '; fi\n'
+        'if [ "$1" = "service" ]; then echo "service $2" >> "' + log
+        + '"; exit 0; fi\n'
+        'echo "unexpected: $@" >&2; exit 1\n'))
+    os.chmod(path, 0o755)
+    return path, log
+
+
+def test_service_state_classifies_status_output():
+    """AC2: status classification is explicit (never an implicit start)."""
+    root = _tmp("upgrade-service-classify-")
+    try:
+        path, _log = _service_binary(root, running=True)
+        assert upgrade.service_state(path)["running"] is True
+        blocked, _log = _service_binary(root, running=False)
+        assert upgrade.service_state(blocked)["running"] is False
+        silent = os.path.join(root, "silent")
+        _write(silent, "#!/bin/sh\nexit 1\n")
+        os.chmod(silent, 0o755)
+        assert upgrade.service_state(silent)["running"] is None
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_service_path_against_fake_cli():
+    """AC2: the real status/start/stop path owns only its own service."""
+    target = v2.VERSION_PIN
+    root = _tmp("upgrade-verify-service-cli-")
+    try:
+        fixture = _shadow_home(root, target, default_version=target,
+                               package_version=target)
+        artifact = upgrade.apply_artifact_path(root, target)
+        _write(artifact, json.dumps(_failed_artifact(target, "api")) + "\n")
+        binary, log = _service_binary(root, running=False)
+        real = upgrade.post_upgrade_smoke
+
+        def smoke(_args, _target, command=None, _log=log):
+            with open(_log, "a", encoding="utf-8") as fh:
+                fh.write("smoke\n")
+            return [(name, True, "ok")
+                    for name in upgrade.SMOKE_FAILURE_STAGES]
+
+        upgrade.post_upgrade_smoke = smoke
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(_args(root, to=target, home=fixture["home"],
+                                          default_bin=binary))
+            assert rc == 0, out.getvalue()
+            assert open(log, encoding="utf-8").read().splitlines() == [
+                "service start", "smoke", "service stop"], open(log).read()
+        finally:
+            upgrade.post_upgrade_smoke = real
+
+        # A running service is left untouched: only the smoke is recorded.
+        _write(artifact, json.dumps(_failed_artifact(target, "api")) + "\n")
+        os.remove(log)
+        running, log = _service_binary(root, running=True)
+
+        def smoke_running(_args, _target, command=None, _log=log):
+            with open(_log, "a", encoding="utf-8") as fh:
+                fh.write("smoke\n")
+            return [(name, True, "ok")
+                    for name in upgrade.SMOKE_FAILURE_STAGES]
+
+        upgrade.post_upgrade_smoke = smoke_running
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(_args(root, to=target, home=fixture["home"],
+                                          default_bin=running))
+            assert rc == 0, out.getvalue()
+            assert open(log, encoding="utf-8").read().splitlines() == ["smoke"]
+        finally:
+            upgrade.post_upgrade_smoke = real
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_verify_leaves_a_running_service_alone():
     """AC2: a pre-running service is not stopped by verify."""
     root = _tmp("upgrade-verify-service-running-")
