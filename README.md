@@ -59,6 +59,17 @@ machine-only full PR diff, a passing canary, a clean tracked tree, and a
 `main`-based PR; otherwise the PR stays open for review. Minor/major targets
 always stop at the PR. Merge is user-initiated by default.
 
+For the live switch, run `python3 scripts/opencode_upgrade.py upgrade --to <pin>
+--apply --detach --drain-acknowledged`; a detached supervisor waits up to ten
+minutes for the OpenCode TUI to exit, then stops the service and applies. Its
+`supervisor.json` and `supervisor-<pin>.log` (under the XDG state dir) report
+the phase, and `status` prints the exact next action. After a crash, resume
+with `upgrade --to <pin> --apply --resume --drain-acknowledged`: it reuses the
+prior backup/DB snapshot, does not reinstall an installed target, and a
+smoke-only failure delegates to `verify`. `last-run.md` records the target,
+source/target versions, result, checks, artifact, backup, merge commit, and
+next step. Rollback remains manual; there is no automatic rollback.
+
 For a V1 previous default, rollback uses the actual
 `~/.config/opencode.v1-backup-*` tree, not the V2-era pre-apply snapshot.
 SQLite backups are written mode 0600. Existing backups created before this fix

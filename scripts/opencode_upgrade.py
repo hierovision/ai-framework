@@ -75,6 +75,8 @@ PRE_PR_SUITES = ("test_opencode_upgrade.py", "test_opencode_v2_canary.py",
                  "test_stage_opencode_config.py")
 AUTO_MERGE_TIMEOUT = 1800
 AUTO_MERGE_POLL = 15
+TUI_WAIT_TIMEOUT = 600
+TUI_POLL_INTERVAL = 2.0
 
 
 # --- small helpers -----------------------------------------------------------
@@ -1232,6 +1234,7 @@ def status_payload(args):
         "apply_artifact": verify_path,
         "last_apply": verify or None,
         "state": state or None,
+        "supervisor": supervisor_status(),
         "next": next_command,
     }
 
@@ -1271,6 +1274,13 @@ def print_status(payload, json_mode=False):
     state = payload["state"]
     if state:
         print(f"upgrade state: {state.get('target')} at {state.get('stage')}")
+    supervisor = payload.get("supervisor")
+    if supervisor and supervisor.get("phase") != "done":
+        alive = "yes" if supervisor.get("alive") else "no"
+        print(f"supervisor:    {supervisor.get('phase')} "
+              f"pid={supervisor.get('pid')} alive={alive}")
+        print(f"  log:         {supervisor.get('log')}")
+        print(f"  next:        {supervisor.get('next')}")
     print(f"next:    {payload['next']}")
 
 
@@ -2650,7 +2660,7 @@ def apply_artifact(args, target, home, link, backup, previous_default, stage,
     }
 
 
-def apply_supported(args, target):
+def apply_supported(args, target, resume_prior=None):
     if not getattr(args, "drain_acknowledged", False):
         print("error: --apply requires --drain-acknowledged", file=sys.stderr)
         return 2
@@ -2670,7 +2680,9 @@ def apply_supported(args, target):
             return 2
     home = os.path.abspath(args.home or os.path.expanduser("~"))
     link = args.link or os.path.join(home, ".yarn", "bin", "opencode")
-    previous_default = link_state(link)
+    prior_default = (resume_prior or {}).get("previous_default")
+    previous_default = (prior_default if isinstance(prior_default, dict)
+                        else link_state(link))
     if getattr(args, "dry_run", False):
         resolved, _evidence = resolve_target_binary(home, target)
         artifact = apply_artifact_path(args.repo, target)
@@ -2725,9 +2737,18 @@ def apply_supported(args, target):
                                  verified=False, db=db)
         if extra:
             payload.update(extra)
+        if resume_prior is not None:
+            payload["resumed_from"] = resume_prior
         write_apply_artifact(artifact, payload)
         write_state(args.repo, target, "prepared",
                     {"artifact": artifact, "verified": False}, force=True)
+        write_last_run(
+            target, "failed",
+            source_version=(previous_default or {}).get("version"),
+            checks={name: "PASS" if ok else "FAIL" for name, ok, _d in checks},
+            artifact=artifact, backup=backup,
+            next_step=(verify_command(target) if verify_eligible(payload)
+                       else repair_command(target)))
         return payload
 
     try:
@@ -2747,7 +2768,13 @@ def apply_supported(args, target):
             return 2
         write_state(args.repo, target, "prepared")
         stage = "backup"
-        backup, db = pre_upgrade_backup(args, target)
+        resumed_backup = (resume_prior or {}).get("backup")
+        if resume_prior and resumed_backup and os.path.isdir(resumed_backup):
+            backup = resumed_backup
+            db = resume_prior.get("database_backup")
+            print(f"resume: reusing backup {backup}")
+        else:
+            backup, db = pre_upgrade_backup(args, target)
         stage = "install"
         resolved, _evidence = resolve_target_binary(home, target)
         if resolved is None:
@@ -2795,15 +2822,29 @@ def apply_supported(args, target):
                                  checks, verified=verified, db=db)
         payload["shadow"] = shadow
         payload["migration"] = migration
+        if resume_prior is not None:
+            payload["resumed_from"] = resume_prior
         write_apply_artifact(artifact, payload)
         for name, ok, detail in checks:
             print(f"verify {name}: {'PASS' if ok else 'FAIL'} {detail}")
         if verified:
             write_state(args.repo, target, "applied", {"artifact": artifact})
+            write_last_run(
+                target, "verified",
+                source_version=(previous_default or {}).get("version"),
+                checks={name: "PASS" for name, ok, _d in checks if ok},
+                artifact=artifact, backup=backup, next_step="up to date")
             print(f"UPGRADE OK {target} evidence={artifact}")
             return 0
         write_state(args.repo, target, "prepared",
                     {"artifact": artifact, "verified": False}, force=True)
+        write_last_run(
+            target, "failed",
+            source_version=(previous_default or {}).get("version"),
+            checks={name: "PASS" if ok else "FAIL" for name, ok, _d in checks},
+            artifact=artifact, backup=backup,
+            next_step=(verify_command(target) if verify_eligible(payload)
+                       else repair_command(target)))
         print("error: post-upgrade smoke failed", file=sys.stderr)
         for line in rollback_lines(payload["rollback"]):
             print(f"rollback: {line}", file=sys.stderr)
@@ -2904,6 +2945,15 @@ def verify(args):
             if state.get("target") == target and state.get("stage") != "applied":
                 write_state(args.repo, target, "applied",
                             {"artifact": source, "verified": True}, force=True)
+            write_last_run(
+                target, "verified",
+                source_version=(prior.get("previous_default") or {}).get(
+                    "version"),
+                checks={name: "PASS" for name, row in
+                        (prior.get("checks") or {}).items()
+                        if row.get("ok") is True},
+                artifact=source, backup=prior.get("backup"),
+                next_step="up to date")
             return 0
         print(f"error: the artifact is verified for {target} but the live "
               f"default does not match: default={link} "
@@ -2976,6 +3026,11 @@ def verify(args):
     if verified:
         write_state(args.repo, target, "applied",
                     {"artifact": path, "verified": True}, force=True)
+        write_last_run(
+            target, "verified",
+            source_version=(prior.get("previous_default") or {}).get("version"),
+            checks={name: "PASS" for name, ok, _d in checks if ok},
+            artifact=path, backup=prior.get("backup"), next_step="up to date")
         print(f"UPGRADE VERIFIED {target} evidence={path} "
               f"archived={payload.get('archived_artifact')} "
               f"service_started={service['started_by_verify']} "
@@ -2983,6 +3038,12 @@ def verify(args):
         return 0
     write_state(args.repo, target, "prepared",
                 {"artifact": path, "verified": False}, force=True)
+    write_last_run(
+        target, "failed",
+        source_version=(prior.get("previous_default") or {}).get("version"),
+        checks={name: "PASS" if ok else "FAIL" for name, ok, _d in checks},
+        artifact=path, backup=prior.get("backup"),
+        next_step=repair_command(target))
     print("error: post-upgrade smoke failed during verify", file=sys.stderr)
     for line in rollback_lines(payload["rollback"]):
         print(f"rollback: {line}", file=sys.stderr)
@@ -3244,6 +3305,9 @@ def auto_pre_merge(args, target):
         print(f"canary: {gates or 'missing'}; migration residual "
               f"{summary.get('residual')}; CI runs on the PR")
         print("auto-merge: not requested (pass --auto-merge to opt in)")
+        write_last_run(
+            target, "pr-ready", source_version=v2.VERSION_PIN,
+            artifact=manifest_path, next_step=f"review/merge {url}, then apply")
         return 0
     decision = auto_merge_decision(args, target, manifest, summary, url)
     decided_head = decision["checks"].get("pr_head")
@@ -3262,6 +3326,10 @@ def auto_pre_merge(args, target):
               file=sys.stderr)
         for reason in decision["reasons"]:
             print(f"  - {reason}", file=sys.stderr)
+        write_last_run(
+            target, "refused", source_version=v2.VERSION_PIN,
+            artifact=manifest_path,
+            next_step=f"review {url}; auto-merge was refused")
         return 0
     print(f"auto-merge authorized for {target} (patch, machine-only): {url}")
     merge = run(["gh", "pr", "merge", "--auto", "--squash", url],
@@ -3269,6 +3337,10 @@ def auto_pre_merge(args, target):
     if merge.returncode != 0:
         print(f"error: gh pr merge --auto failed: "
               f"{(merge.stderr or '')[-300:]}", file=sys.stderr)
+        write_last_run(
+            target, "failed", source_version=v2.VERSION_PIN,
+            artifact=manifest_path,
+            next_step=f"review {url}; gh pr merge --auto failed")
         return 2
     outcome = wait_for_merge(args.repo, url)
     final = outcome.get("state") or {}
@@ -3292,16 +3364,334 @@ def auto_pre_merge(args, target):
             return 1
         print(f"merged: {url} (polls={outcome['polls']} "
               f"head={final_head} merge_commit={merge_commit})")
+        want_detach = (getattr(args, "detach", False)
+                       or (getattr(args, "auto", False)
+                           and getattr(args, "auto_merge", False)))
+        apply_cmd = (f"python3 scripts/opencode_upgrade.py upgrade --to "
+                     f"{target} --apply --drain-acknowledged")
+        if want_detach and getattr(args, "drain_acknowledged", False):
+            rc = spawn_supervisor(args, target, merge_commit=merge_commit)
+            if rc == 0:
+                write_last_run(
+                    target, "supervisor-started",
+                    source_version=v2.VERSION_PIN, artifact=manifest_path,
+                    merge_commit=merge_commit,
+                    next_step="close the TUI; the detached supervisor continues")
+            else:
+                write_last_run(
+                    target, "supervisor-failed",
+                    source_version=v2.VERSION_PIN, artifact=manifest_path,
+                    merge_commit=merge_commit, next_step=apply_cmd)
+            return rc
+        print(f"apply: {apply_cmd}")
+        write_last_run(
+            target, "merged", source_version=v2.VERSION_PIN,
+            artifact=manifest_path, merge_commit=merge_commit,
+            next_step=apply_cmd)
         return 0
     if outcome["closed"]:
         print(f"error: PR closed without merging: {url}", file=sys.stderr)
+        write_last_run(
+            target, "closed", source_version=v2.VERSION_PIN,
+            artifact=manifest_path,
+            next_step=f"open a new PR or apply {target} manually")
         return 1
     print(f"error: timed out waiting for merge after "
           f"{AUTO_MERGE_TIMEOUT}s (PR left open): {url}", file=sys.stderr)
+    write_last_run(
+        target, "timeout", source_version=v2.VERSION_PIN,
+        artifact=manifest_path,
+        next_step=f"inspect {url}; the PR stays open")
     return 1
 
 
+# --- Phase 3: detached supervisor, resume, last-run summary ----------------
+
+def supervisor_path():
+    return os.path.join(v2.state_home(), "supervisor.json")
+
+
+def supervisor_log_path(target):
+    return os.path.join(v2.state_home(), f"supervisor-{target}.log")
+
+
+def last_run_path():
+    return os.path.join(v2.state_home(), "last-run.md")
+
+
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (TypeError, ValueError, OSError):
+        return False
+    return True
+
+
+def update_supervisor(target, phase, **extra):
+    """Merge one phase update into the XDG `supervisor.json` record."""
+    path = supervisor_path()
+    with file_lock(path):
+        data = read_json(path, {}) or {}
+        data.setdefault("started", now_iso())
+        data.update({"target": target, "phase": phase, "updated": now_iso()})
+        data.update(extra)
+        write_json(path, data)
+    return path
+
+
+def supervisor_next_command(data):
+    """The exact next action for a supervisor phase (truthful on crash)."""
+    target = (data or {}).get("target") or v2.VERSION_PIN
+    phase = (data or {}).get("phase")
+    log = (data or {}).get("log") or "the supervisor log"
+    alive = (data or {}).get("alive")
+    detach = (f"python3 scripts/opencode_upgrade.py upgrade --to {target} "
+              "--apply --detach --drain-acknowledged")
+    resume = (f"python3 scripts/opencode_upgrade.py upgrade --to {target} "
+              "--apply --resume --drain-acknowledged")
+    if phase == "done":
+        return "up to date"
+    if phase == "timeout":
+        return f"close the TUI and rerun: {detach} (log: {log})"
+    if phase == "pin-check":
+        return (f"merged main pin does not match {target}; run the full apply "
+                f"after the merge lands (log: {log})")
+    if phase == "tree-check":
+        return ("checkout does not match origin/main; switch/pull and retry: "
+                f"{detach} (log: {log})")
+    if not alive and phase == "waiting-tui":
+        return (f"supervisor stopped while waiting for the TUI; close it and "
+                f"rerun: {detach} (log: {log})")
+    if not alive and phase in ("stopping-service", "applying"):
+        return (f"supervisor stopped at {phase}; inspect {log}, then {resume}")
+    if phase == "waiting-tui":
+        return f"close the TUI; the supervisor continues (log: {log})"
+    if phase in ("stopping-service", "applying"):
+        return f"applying; inspect {log}; if stopped, {resume}"
+    if phase == "failed":
+        return (f"run `python3 scripts/opencode_upgrade.py verify --to "
+                f"{target}` or the full apply; log: {log}")
+    return f"inspect {log} and rerun {resume}"
+
+
+def supervisor_status():
+    data = read_json(supervisor_path(), {}) or {}
+    if not data:
+        return None
+    data["alive"] = pid_alive(data.get("pid"))
+    data["next"] = supervisor_next_command(data)
+    return data
+
+
+def merged_pin(repo, refs=("origin/main", "main")):
+    """`VERSION_PIN` on the merged main ref, or None when unreadable."""
+    for ref in refs:
+        proc = run(["git", "-C", repo, "show",
+                   f"{ref}:scripts/opencode_v2.py"], timeout=30)
+        if proc.returncode != 0:
+            continue
+        match = re.search(r'VERSION_PIN = "(?P<version>\d+\.\d+\.\d+)"',
+                          proc.stdout or "")
+        if match:
+            return match.group("version")
+    return None
+
+
+def start_supervisor_process(argv, log_path, repo):
+    """Start the detached child in a new session with stdio on the log."""
+    os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
+    with open(log_path, "a", encoding="utf-8") as log:
+        return subprocess.Popen(
+            argv, cwd=repo, stdin=subprocess.DEVNULL, stdout=log,
+            stderr=subprocess.STDOUT, start_new_session=True)
+
+
+def spawn_supervisor(args, target, merge_commit=None):
+    """Spawn the detached supervisor and return immediately."""
+    log_path = supervisor_log_path(target)
+    argv = [sys.executable, os.path.realpath(__file__), "upgrade",
+            "--to", target, "--apply", "--drain-acknowledged", "--supervise",
+            "--repo", args.repo]
+    if getattr(args, "home", None):
+        argv += ["--home", args.home]
+    if getattr(args, "link", None):
+        argv += ["--link", args.link]
+    if getattr(args, "method", None):
+        argv += ["--method", args.method]
+    if getattr(args, "resume", False):
+        argv += ["--resume"]
+    try:
+        proc = start_supervisor_process(argv, log_path, args.repo)
+    except OSError as exc:
+        print(f"error: cannot start the detached supervisor: "
+              f"{type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    update_supervisor(target, "waiting-tui", pid=proc.pid, log=log_path,
+                      started=now_iso(), merge_commit=merge_commit)
+    print(f"supervisor: pid={proc.pid} log={log_path} status={supervisor_path()}")
+    print("close the OpenCode TUI; the supervisor continues in the background")
+    return 0
+
+
+def checkout_matches_main(repo):
+    """`(ok, reason)`: scripts/ and agents/ match origin/main and are clean.
+
+    The smoke runs the local scripts and derives expected agent IDs from the
+    local agents/ corpus, so a checkout that diverges from the merged main
+    must not be applied. Fail closed when origin/main is unresolvable.
+    """
+    ref = run(["git", "-C", repo, "rev-parse", "--verify", "origin/main"],
+              timeout=30)
+    if ref.returncode != 0 or not (ref.stdout or "").strip():
+        return False, "cannot resolve origin/main"
+    dirty = run(["git", "-C", repo, "status", "--porcelain",
+                 "--untracked-files=no", "--", "scripts", "agents"],
+                timeout=30)
+    if dirty.returncode != 0:
+        return False, "cannot read the tracked tree status"
+    if (dirty.stdout or "").strip():
+        return False, "uncommitted changes under scripts/ or agents/"
+    diff = run(["git", "-C", repo, "diff", "--quiet", "origin/main", "--",
+                "scripts", "agents"], timeout=60)
+    if diff.returncode != 0:
+        if diff.returncode == 1:
+            return False, "scripts/ or agents/ differ from origin/main"
+        return False, "cannot diff scripts/ and agents/ against origin/main"
+    return True, None
+
+
+def supervise(args, target):
+    """Child entry: wait for the TUI, confirm pin + tree, then apply."""
+    update_supervisor(target, "waiting-tui", pid=os.getpid())
+
+    def no_tui():
+        return True if not stage_config.tui_processes() else None
+
+    _value, polls, timed_out = v2.wait_for(
+        no_tui, TUI_WAIT_TIMEOUT, TUI_POLL_INTERVAL)
+    if timed_out:
+        update_supervisor(target, "timeout", polls=polls)
+        print(f"supervisor: the TUI is still running after "
+              f"{TUI_WAIT_TIMEOUT}s; no service stop, backup, or install was "
+              "performed", file=sys.stderr)
+        return 2
+    pin = merged_pin(args.repo)
+    if pin != target:
+        # A just-merged PR updates origin/main remotely; refresh the local
+        # remote-tracking ref once before failing closed.
+        fetched = run(["git", "-C", args.repo, "fetch", "--quiet",
+                       "origin", "main"], timeout=60)
+        if fetched.returncode == 0:
+            pin = merged_pin(args.repo)
+    if pin != target:
+        update_supervisor(target, "pin-check", merged_pin=pin)
+        print(f"supervisor: merged main pin is {pin or 'unreadable'}, not "
+              f"{target}; refusing to apply (no mutation)", file=sys.stderr)
+        return 2
+    tree_ok, tree_reason = checkout_matches_main(args.repo)
+    if not tree_ok:
+        update_supervisor(target, "tree-check", detail=tree_reason)
+        print(f"supervisor: checkout does not match origin/main "
+              f"({tree_reason}); switch/pull and retry (no mutation)",
+              file=sys.stderr)
+        return 2
+    home, link = live_paths(args)
+    update_supervisor(target, "stopping-service", polls=polls, merged_pin=pin)
+    try:
+        stopped = run([link, "service", "stop"], timeout=60)
+        stop_exit = stopped.returncode
+    except (OSError, subprocess.SubprocessError) as exc:
+        stop_exit = None
+        print(f"supervisor: service stop failed: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+    update_supervisor(target, "applying", service_stop_exit=stop_exit)
+    try:
+        rc = apply_resume(args, target) if getattr(args, "resume", False) \
+            else apply_supported(args, target)
+    except (OSError, subprocess.SubprocessError, sqlite3.Error) as exc:
+        update_supervisor(target, "failed", apply_rc=1,
+                          error=f"{type(exc).__name__}: {exc}")
+        print(f"supervisor: apply failed: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return 1
+    update_supervisor(target, "done" if rc == 0 else "failed", apply_rc=rc)
+    return rc
+
+
+def write_last_run(target, result, *, source_version=None, checks=None,
+                   artifact=None, backup=None, merge_commit=None,
+                   next_step=None):
+    """Write the human summary to `$XDG_STATE_HOME/opencode-upgrade/last-run.md`."""
+    checks = checks or {}
+    rendered = " ".join(f"{name}={value}" for name, value in checks.items()) \
+        or "none"
+    lines = [
+        "# OpenCode upgrade last run",
+        "",
+        f"- target: {target}",
+        f"- source_version: {source_version or 'unknown'}",
+        f"- target_version: {target}",
+        f"- result: {result}",
+        f"- checks: {rendered}",
+        f"- artifact: {artifact or 'none'}",
+        f"- backup: {backup or 'none'}",
+        f"- merge_commit: {merge_commit or 'none'}",
+        f"- next: {next_step or 'none'}",
+        f"- at: {now_iso()}",
+        "",
+    ]
+    path = last_run_path()
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    return path
+
+
+def apply_resume(args, target):
+    """Resume an interrupted apply: reuse the prior backup, skip reinstall.
+
+    A smoke-only failure delegates to `verify` (no backup/install/migration).
+    No prior artifact or usable backup falls back to the full apply.
+    """
+    prior, source = read_apply_artifact(args.repo, target)
+    if prior is None:
+        print("resume: no prior apply artifact; falling back to the full apply")
+        return apply_supported(args, target)
+    if artifact_verified(prior) is False and verify_eligible(prior):
+        print(f"resume: smoke-only failure at {prior.get('failure_stage')}; "
+              "delegating to verify")
+        return verify(args)
+    backup = prior.get("backup")
+    if not backup or not os.path.isdir(backup):
+        print("resume: no usable prior backup; falling back to the full apply")
+        return apply_supported(args, target)
+    print(f"resume: reusing backup {backup}; skipping backup and reinstall")
+    return apply_supported(args, target, resume_prior=prior)
+
+
 def upgrade(args):
+    if getattr(args, "supervise", False):
+        try:
+            target, message = resolve_target(args)
+        except ChannelError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        if not target:
+            print(message or "error: no target version", file=sys.stderr)
+            return 2
+        return supervise(args, target)
+    if getattr(args, "detach", False) and not getattr(
+            args, "drain_acknowledged", False):
+        print("error: --detach requires --drain-acknowledged", file=sys.stderr)
+        return 2
+    if getattr(args, "detach", False) and not getattr(args, "apply", False) \
+            and not getattr(args, "auto", False):
+        print("error: --detach requires --apply (or --auto)", file=sys.stderr)
+        return 2
     if getattr(args, "auto_merge", False) and not getattr(args, "auto", False):
         print("error: --auto-merge requires --auto", file=sys.stderr)
         return 2
@@ -3352,6 +3742,10 @@ def upgrade(args):
             print(f"already current: {target}")
             return 0
         if args.apply:
+            if args.detach:
+                return spawn_supervisor(args, target)
+            if args.resume:
+                return apply_resume(args, target)
             return apply_supported(args, target)
         if not print_canary_prerequisite(args.repo, target):
             label = ("verification needed" if shadow["shadow_ok"]
@@ -3413,6 +3807,10 @@ def upgrade(args):
     if getattr(args, "auto", False):
         return auto_pre_merge(args, target)
     if args.apply:
+        if args.detach:
+            return spawn_supervisor(args, target)
+        if args.resume:
+            return apply_resume(args, target)
         return apply_supported(args, target)
     print(f"ready: run `opencode upgrade {target} --method {args.method}` "
           "from a normal terminal after closing every session")
@@ -3457,6 +3855,11 @@ def build_parser():
         cmd.add_argument("--auto-merge", action="store_true",
                          help="opt in to gh pr merge --auto --squash when the "
                               "patch/machine-only policy allows it")
+        cmd.add_argument("--detach", action="store_true",
+                         help="spawn a detached supervisor that waits for the "
+                              "TUI, then applies (requires --drain-acknowledged)")
+        cmd.add_argument("--supervise", action="store_true",
+                         help=argparse.SUPPRESS)
         cmd.add_argument("--keep", type=int, default=1)
         cmd.add_argument("--method", default="yarn",
                          choices=("curl", "npm", "pnpm", "bun", "yarn", "vp",

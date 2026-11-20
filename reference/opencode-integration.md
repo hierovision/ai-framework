@@ -57,7 +57,9 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
 `scripts/opencode_upgrade.py` is the pre-merge helper:
 
 - `status` / `doctor` — command, resolved binary, config root, pinned/live/
-  latest, last canary/verify, and the next command. `doctor` is read-only.
+  latest, last canary/verify, the next command, and (when present) the
+  detached supervisor's phase, pid liveness, log, and exact next action
+  (`supervisor.json`). `status`/`doctor` are read-only.
 - `check --pins-only` — offline consistency across every active pin seam; CI
   runs it. `check --remote` drives the weekly issue-first drift workflow.
   `check --pr` is a **local/manual** release gate (it requires the ADR
@@ -144,6 +146,31 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
   branch). A refusal leaves the PR open, prints the reason, and records it in
   `.scratch/opencode-v2/auto-merge-<pin>.json`; minor/major and non-machine
   diffs always stop at PR ready. Merge is user-initiated by default.
+- `upgrade --to <pin> --apply --detach --drain-acknowledged` — spawn a
+  detached supervisor (`start_new_session`, stdio to
+  `supervisor-<pin>.log`) and return immediately with the log/status path.
+  `supervisor.json` (XDG state dir) records pid/target/phase/log/started/
+  updated. The child waits up to 600 s for the OpenCode **TUI** to exit
+  (`tui_processes()` excludes `serve`/`--service`), writes phase `timeout`
+  and mutates nothing on expiry, then confirms the merged `main` `VERSION_PIN`
+  equals the target (phase `pin-check` on mismatch) and that the local
+  `scripts/` + `agents/` trees match `origin/main` with no uncommitted changes
+  there (phase `tree-check` on divergence; unresolvable `origin/main` fails
+  closed). Only then does it stop the service and run the existing apply
+  (phases `waiting-tui`, `tree-check`, `stopping-service`, `applying`,
+  `done`/`failed`). It never passes `--force`. After a successful
+  auto-merge with `--drain-acknowledged`, the auto lane spawns the same
+  supervisor; without a drain acknowledgment it stops at merged and prints the
+  apply command.
+- `upgrade --to <pin> --apply --resume --drain-acknowledged` — resume an
+  interrupted apply from the prior artifact: reuse its backup/DB snapshot,
+  never create a new backup or reinstall an already-installed target, and
+  re-run shadow/migration/smoke. A smoke-only failure delegates to `verify`
+  (no backup/install/migration); no prior artifact/backup falls back to the
+  full apply. `last-run.md` (XDG state dir) records target, source/target
+  versions, result, checks, artifact, backup, merge commit, and next step
+  after apply/verify/auto completion. Rollback remains manual; Phase 3 adds
+  no automatic rollback.
 
 **State and evidence (2026-11-20).** Upgrade state and evidence live under
 `$XDG_STATE_HOME/opencode-upgrade` (default

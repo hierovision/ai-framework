@@ -94,9 +94,37 @@ def parse_live_processes(text):
 
 
 def live_processes():
+    """All live OpenCode or supervision processes (the drain gate)."""
     proc = subprocess.run(["ps", "-eo", "pid=,comm=,args="],
                           capture_output=True, text=True)
     return parse_live_processes(proc.stdout)
+
+
+def parse_tui_processes(text):
+    """Live OpenCode TUI processes: the opencode family minus serve/service.
+
+    Built on `parse_live_processes` (identity by `comm`, not substring). The
+    managed service and any `serve`/`--service` invocation are excluded; the
+    TUI is the foreground client the operator closes before a detached apply.
+    """
+    hits = []
+    for line in parse_live_processes(text):
+        fields = line.strip().split(None, 2)
+        comm = fields[1] if len(fields) > 1 else ""
+        args = fields[2] if len(fields) > 2 else ""
+        if comm not in OPENCODE_COMMS:
+            continue
+        if re.search(r"(?:^|\s)serve(?:\s|$)|--service\b", args):
+            continue
+        hits.append(line.strip())
+    return hits
+
+
+def tui_processes():
+    """`ps` snapshot of live OpenCode TUI processes (read-only)."""
+    proc = subprocess.run(["ps", "-eo", "pid=,comm=,args="],
+                          capture_output=True, text=True)
+    return parse_tui_processes(proc.stdout)
 
 
 def build_plugins(repo, target):
