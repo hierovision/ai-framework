@@ -653,13 +653,19 @@ def plugin_peers(version, repo=REPO):
 
 
 def fetch_releases(timeout=30):
+    """Release list, `[]` for a successful empty response, None on failure.
+
+    Transport/HTTP/JSON failures return None so the patch channel can fail
+    closed instead of reporting "already current" on an unreadable registry.
+    """
     req = urllib.request.Request(
         RELEASES_URL, headers={"User-Agent": "opencode-upgrade"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
-            return json.load(response)
-    except Exception:
-        return []
+            data = json.load(response)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, list) else None
 
 
 def breaking_notes(releases, current, target):
@@ -1749,6 +1755,11 @@ def prepare_manifest_path(repo, target):
                         f"prepare-{target}-manifest.json")
 
 
+def gate_evidence_path(repo, target):
+    return os.path.join(repo, ".scratch", "opencode-v2",
+                        f"prepare-{target}-gate.json")
+
+
 def run_pre_pr_gate(args, target):
     """Run the four opencode suites + `check --pins-only` before any git/gh.
 
@@ -1973,12 +1984,17 @@ def prepare(args):
             print(delta)
         stage = "manifest"
         manifest = manifest_from_generated(target, generated)
-        if args.open_pr:
+        if args.open_pr or getattr(args, "auto", False):
+            # The auto lane opens a PR too: run the same AC6 gate here, inside
+            # the rollback path, before any git/gh operation.
             stage = "pre-pr-gate"
             gate_checks = run_pre_pr_gate(args, target)
         stage = "state"
         write_state(args.repo, target, "prepared")
         write_json(prepare_manifest_path(args.repo, target), manifest)
+        if gate_checks is not None:
+            write_json(gate_evidence_path(args.repo, target),
+                       {"target": target, "checks": gate_checks})
     except (OSError, subprocess.SubprocessError, RuntimeError,
             ValueError) as exc:
         failed_stage = getattr(exc, "stage", None) or stage
@@ -3027,19 +3043,34 @@ def patch_target(releases, pinned=None):
     return max(same_minor, key=version_key) if same_minor else None
 
 
+class ChannelError(RuntimeError):
+    """The patch channel cannot read a trustworthy release list."""
+
+
 def resolve_target(args):
     """Explicit `--to` wins; else `--channel patch`; else the latest release.
 
     Returns `(target, message)`. `target` is None when the patch channel has
     no newer patch; `message` is the truthful "already current" line and the
-    caller exits 0 without a plan/canary run.
+    caller exits 0 without a plan/canary run. An unreadable release list is a
+    `ChannelError` (the caller exits 2) — never "already current".
     """
     if getattr(args, "to", None) is not None:
         return args.to, None
     if getattr(args, "channel", None) == "patch":
-        releases = (read_json(args.releases_file)
-                    if getattr(args, "releases_file", None)
-                    else fetch_releases())
+        releases_file = getattr(args, "releases_file", None)
+        if releases_file:
+            releases = read_json(releases_file, None)
+            if not isinstance(releases, list):
+                raise ChannelError(
+                    f"cannot read --releases-file {releases_file!r}; "
+                    "expected a JSON release list")
+        else:
+            releases = fetch_releases()
+            if not isinstance(releases, list):
+                raise ChannelError(
+                    "cannot read the OpenCode release list (transport/HTTP/"
+                    "JSON failure); refusing to guess the patch channel")
         target = patch_target(releases, v2.VERSION_PIN)
         if target is None:
             major, minor = v2.VERSION_PIN.split(".")[:2]
@@ -3069,7 +3100,8 @@ def run_check_pr(args):
 def pr_view(repo, url):
     """`gh pr view <url>` JSON (state/base/mergeable), or None."""
     proc = run(["gh", "pr", "view", url, "--json",
-                "state,baseRefName,mergeable,url,number"],
+                "state,baseRefName,mergeable,url,number,headRefOid,"
+                "mergeCommit"],
                cwd=repo, env=gh_env(), timeout=60)
     if proc.returncode != 0:
         return None
@@ -3126,11 +3158,15 @@ def auto_merge_decision(args, target, manifest, summary, url):
         reasons.append("branch is not based on main")
     pr = pr_view(repo, url)
     base = (pr or {}).get("baseRefName")
+    head = (pr or {}).get("headRefOid")
     checks["pr_base"] = base
+    checks["pr_head"] = head
     if pr is None:
         reasons.append("cannot read the PR base")
     elif base != "main":
         reasons.append(f"PR base is {base}, not main")
+    if not head:
+        reasons.append("cannot read the PR head (headRefOid)")
     return {"allowed": not reasons, "reasons": reasons, "checks": checks,
             "pr": pr}
 
@@ -3175,6 +3211,17 @@ def auto_pre_merge(args, target):
               file=sys.stderr)
         return 2
     manifest = read_json(manifest_path, {}) or {}
+    gate = read_json(gate_evidence_path(args.repo, target), {}) or {}
+    if not gate.get("checks"):
+        # Resume/direct call: the AC6 gate has not run for this preparation.
+        try:
+            checks = run_pre_pr_gate(args, target)
+        except PrepGateError as exc:
+            print(f"error: {exc.stage}: {exc}", file=sys.stderr)
+            print("no PR was created", file=sys.stderr)
+            return 2
+        write_json(gate_evidence_path(args.repo, target),
+                   {"target": target, "checks": checks})
     # A fresh interpreter is required: prepare just bumped VERSION_PIN on
     # disk, while this process still holds the pre-bump value.
     rc = run_check_pr(args)
@@ -3199,14 +3246,17 @@ def auto_pre_merge(args, target):
         print("auto-merge: not requested (pass --auto-merge to opt in)")
         return 0
     decision = auto_merge_decision(args, target, manifest, summary, url)
-    write_json(auto_merge_path(args.repo, target), {
+    decided_head = decision["checks"].get("pr_head")
+    record = {
         "target": target,
         "pr": url,
         "authorized": decision["allowed"],
         "reasons": decision["reasons"],
         "checks": decision["checks"],
+        "decided_head": decided_head,
         "at": now_iso(),
-    })
+    }
+    write_json(auto_merge_path(args.repo, target), record)
     if not decision["allowed"]:
         print(f"auto-merge refused; PR left open for review: {url}",
               file=sys.stderr)
@@ -3221,8 +3271,27 @@ def auto_pre_merge(args, target):
               f"{(merge.stderr or '')[-300:]}", file=sys.stderr)
         return 2
     outcome = wait_for_merge(args.repo, url)
+    final = outcome.get("state") or {}
+    final_head = final.get("headRefOid")
+    merge_commit = (final.get("mergeCommit") or {}).get("oid")
+    record.update({
+        "merged": outcome["merged"],
+        "closed": outcome["closed"],
+        "timed_out": outcome["timed_out"],
+        "polls": outcome["polls"],
+        "final_head": final_head,
+        "merge_commit": merge_commit,
+    })
+    write_json(auto_merge_path(args.repo, target), record)
     if outcome["merged"]:
-        print(f"merged: {url} (polls={outcome['polls']})")
+        if not final_head or final_head != decided_head:
+            print("error: PR head changed during the CI window: decided "
+                  f"{decided_head} / merged {final_head} (merge commit "
+                  f"{merge_commit}); the merged commit may not be the "
+                  "reviewed one", file=sys.stderr)
+            return 1
+        print(f"merged: {url} (polls={outcome['polls']} "
+              f"head={final_head} merge_commit={merge_commit})")
         return 0
     if outcome["closed"]:
         print(f"error: PR closed without merging: {url}", file=sys.stderr)
@@ -3240,7 +3309,11 @@ def upgrade(args):
         print("error: --auto is the pre-merge lane; --apply is the live "
               "switch; run them separately", file=sys.stderr)
         return 2
-    target, message = resolve_target(args)
+    try:
+        target, message = resolve_target(args)
+    except ChannelError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     if message:
         print(message)
         return 0

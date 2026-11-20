@@ -4293,6 +4293,9 @@ def test_channel_patch_stays_in_minor():
         releases = _releases_file(root, ["2.2.7", "2.3.0", "2.2.8"])
         assert upgrade.patch_target(json.load(open(releases)),
                                     v2.VERSION_PIN) == "2.2.8"
+        assert upgrade.patch_target(
+            [{"tag_name": "v2.2.9"}, {"tag_name": "v2.2.70"}],
+            "2.2.7") == "2.2.70"
         args = _args(root, channel="patch", releases_file=releases)
         assert upgrade.resolve_target(args) == ("2.2.8", None)
         calls = []
@@ -4351,26 +4354,165 @@ def test_channel_explicit_to_wins():
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_auto_runs_premerge_in_order():
-    """AC9: plan -> canary -> prepare(no PR) -> check --pr -> PR."""
-    root = _tmp("upgrade-auto-order-")
-    target = "2.2.8"
+def test_fetch_releases_failures_are_none():
+    """Major 2: transport/HTTP/JSON failure is None; an empty list is []."""
+    real = upgrade.urllib.request.urlopen
     try:
-        _write_manifest(root, target)
+        def boom(*args, **kwargs):
+            raise OSError("network down")
+
+        upgrade.urllib.request.urlopen = boom
+        assert upgrade.fetch_releases() is None
+
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, *args):
+                return self.payload
+
+        upgrade.urllib.request.urlopen = lambda *a, **k: Response(b"not json")
+        assert upgrade.fetch_releases() is None
+        upgrade.urllib.request.urlopen = lambda *a, **k: Response(b"[]")
+        assert upgrade.fetch_releases() == []
+    finally:
+        upgrade.urllib.request.urlopen = real
+
+
+def test_channel_patch_release_fetch_failure():
+    """Major 2: an unreadable release fetch is an error, not 'already current'."""
+    root = _tmp("upgrade-channel-fetch-fail-")
+    real = (upgrade.fetch_releases, upgrade.plan, upgrade.canary)
+    try:
+        upgrade.fetch_releases = lambda *a, **k: None
         calls = []
-        with _auto_patches(calls, target) as calls:
+        upgrade.plan = lambda args: calls.append("plan") or 0
+        upgrade.canary = lambda args: calls.append("canary") or 0
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.upgrade(_args(root, channel="patch"))
+        text = out.getvalue()
+        assert rc == 2, text
+        assert "cannot read the OpenCode release list" in text, text
+        assert "already current" not in text, text
+        assert calls == [], calls
+    finally:
+        (upgrade.fetch_releases, upgrade.plan, upgrade.canary) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_channel_patch_unreadable_releases_file():
+    """Major 2: a missing/malformed --releases-file is a named rc 2."""
+    root = _tmp("upgrade-channel-file-fail-")
+    real = (upgrade.plan, upgrade.canary)
+    try:
+        calls = []
+        upgrade.plan = lambda args: calls.append("plan") or 0
+        upgrade.canary = lambda args: calls.append("canary") or 0
+        for path in (os.path.join(root, "missing.json"),
+                     os.path.join(root, "bad.json")):
+            if path.endswith("bad.json"):
+                _write(path, "{not json")
             out = io.StringIO()
             with contextlib.redirect_stdout(out), \
                     contextlib.redirect_stderr(out):
-                rc = upgrade.upgrade(_args(root, to=target, auto=True,
-                                           opentui="0.8.2"))
-        assert rc == 0, out.getvalue()
-        assert calls == [("plan", target), ("canary", target),
-                         ("prepare", target, False), ("check-pr", True),
-                         ("open-pr", target)], calls
-        assert PR_URL in out.getvalue(), out.getvalue()
-        assert "auto-merge: not requested" in out.getvalue(), out.getvalue()
+                rc = upgrade.upgrade(_args(root, channel="patch",
+                                           releases_file=path))
+            text = out.getvalue()
+            assert rc == 2, (path, text)
+            assert "cannot read --releases-file" in text, text
+            assert "already current" not in text, text
+        assert calls == [], calls
     finally:
+        (upgrade.plan, upgrade.canary) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_runs_premerge_in_order():
+    """AC9 + AC6: the real prepare gate (four suites + pins) runs before PR."""
+    root = _tmp("upgrade-auto-order-")
+    target = "2.2.8"
+    real = {name: getattr(upgrade, name)
+            for name in ("run", "plan", "canary", "topology", "version_of",
+                         "plugin_peers", "fetch_releases")}
+    recorded = []
+    try:
+        _fixture(root)
+        _evidence(root, target)
+        peers = _prepare_peers(root)
+
+        def fake_run(argv, cwd=None, **kwargs):
+            recorded.append(list(argv))
+            text = ""
+            if argv[0] == sys.executable and len(argv) > 1:
+                return subprocess.CompletedProcess(argv, 0, "PASS", "")
+            if argv[3:4] == ["show"]:
+                return subprocess.CompletedProcess(argv, 1, "", "")
+            if argv[3:4] == ["merge-base"] and "--is-ancestor" not in argv:
+                text = "base-sha\n"
+            elif argv[3:4] == ["merge-base"]:
+                text = ""
+            elif argv[3:5] == ["diff", "--name-only"]:
+                text = ""
+            elif argv[3:4] == ["diff"] and "--cached" in argv \
+                    and "--quiet" in argv:
+                return subprocess.CompletedProcess(argv, 1, "", "")
+            elif argv[3:4] == ["branch"]:
+                text = "feat/test\n"
+            elif argv[0] == "gh" and argv[1:3] == ["pr", "list"]:
+                text = ""
+            elif argv[0] == "gh" and argv[1:3] == ["pr", "create"]:
+                text = PR_URL + "\n"
+            return subprocess.CompletedProcess(argv, 0, text, "")
+
+        upgrade.run = fake_run
+        upgrade.plan = lambda args: 0
+        upgrade.canary = lambda args: 0
+        upgrade.topology = lambda home, link: {"supported": True,
+                                               "command": "opencode"}
+        upgrade.version_of = lambda binary: v2.VERSION_PIN
+        upgrade.plugin_peers = lambda *a, **k: {}
+        upgrade.fetch_releases = lambda timeout=30: []
+        with _clean_lockfiles(), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                       opentui="0.8.2"))
+        assert rc == 0, rc
+        joined = [" ".join(argv) for argv in recorded]
+        suites = [i for i, argv in enumerate(recorded)
+                  if argv[0] == sys.executable
+                  and os.path.basename(argv[1]).startswith("test_")]
+        assert len(suites) == 4, joined
+        pins = [i for i, argv in enumerate(recorded)
+                if argv[0] == sys.executable
+                and "check" in argv and "--pins-only" in argv]
+        check_pr = [i for i, argv in enumerate(recorded)
+                    if argv[0] == sys.executable
+                    and "check" in argv and "--pr" in argv]
+        first_mutating_git = next(
+            i for i, argv in enumerate(recorded)
+            if argv[0] == "git" and argv[3:4]
+            and argv[3] in ("add", "commit", "push"))
+        assert pins, joined
+        assert check_pr, joined
+        assert max(suites + pins) < first_mutating_git, joined
+        assert max(check_pr) < first_mutating_git, joined
+        assert any(argv[0] == "gh" and argv[1:3] == ["pr", "create"]
+                   for argv in recorded), joined
+        assert os.path.isfile(upgrade.gate_evidence_path(root, target))
+        manifest = json.load(open(upgrade.prepare_manifest_path(root, target)))
+        assert upgrade.machine_diff(manifest) == (True, []), manifest
+    finally:
+        for name, value in real.items():
+            setattr(upgrade, name, value)
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -4459,9 +4601,12 @@ def test_auto_waits_for_merge_with_auto_merge():
         upgrade.run = lambda argv, **kwargs: recorded.append(list(argv)) or \
             subprocess.CompletedProcess(argv, 0, "", "")
         upgrade.auto_merge_decision = lambda *a, **k: {
-            "allowed": True, "reasons": [], "checks": {}, "pr": {}}
+            "allowed": True, "reasons": [], "checks": {"pr_head": "head-a"},
+            "pr": {"headRefOid": "head-a"}}
         upgrade.wait_for_merge = lambda repo, url, timeout=None, interval=None: {
-            "merged": True, "closed": False, "state": {"state": "MERGED"},
+            "merged": True, "closed": False,
+            "state": {"state": "MERGED", "headRefOid": "head-a",
+                      "mergeCommit": {"oid": "squash-sha"}},
             "polls": 2, "timed_out": False}
         calls = []
         with _auto_patches(calls, target):
@@ -4479,6 +4624,9 @@ def test_auto_waits_for_merge_with_auto_merge():
         summary = json.load(open(upgrade.auto_merge_path(root, target)))
         assert summary["authorized"] is True, summary
         assert summary["pr"] == PR_URL, summary
+        assert summary["decided_head"] == "head-a", summary
+        assert summary["final_head"] == "head-a", summary
+        assert summary["merge_commit"] == "squash-sha", summary
     finally:
         upgrade.run = real_run
         upgrade.auto_merge_decision = real_decision
@@ -4499,7 +4647,8 @@ def _run_auto_merge_outcome(root, target, outcome):
         upgrade.run = lambda argv, **kwargs: subprocess.CompletedProcess(
             argv, 0, "", "")
         upgrade.auto_merge_decision = lambda *a, **k: {
-            "allowed": True, "reasons": [], "checks": {}, "pr": {}}
+            "allowed": True, "reasons": [], "checks": {"pr_head": "head-a"},
+            "pr": {"headRefOid": "head-a"}}
         upgrade.wait_for_merge = lambda repo, url, timeout=None, interval=None: \
             outcome
         upgrade.run_check_pr = lambda args: 0
@@ -4523,6 +4672,83 @@ def _run_auto_merge_outcome(root, target, outcome):
         upgrade.open_pr = real_open
         upgrade.plugin_peers = real_peers
         upgrade.canary_summary = real_canary
+
+
+def test_auto_merge_head_drift_is_loud():
+    """Minor 4: a head change during the CI window is a loud failure."""
+    root = _tmp("upgrade-auto-head-drift-")
+    target = "2.2.8"
+    real_run = upgrade.run
+    real_decision = upgrade.auto_merge_decision
+    real_wait = upgrade.wait_for_merge
+    real_check = upgrade.run_check_pr
+    real_open = upgrade.open_pr
+    real_peers = upgrade.plugin_peers
+    real_canary = upgrade.canary_summary
+    try:
+        _write_manifest(root, target)
+        upgrade.run = lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 0, "", "")
+        upgrade.auto_merge_decision = lambda *a, **k: {
+            "allowed": True, "reasons": [], "checks": {"pr_head": "head-a"},
+            "pr": {"headRefOid": "head-a"}}
+        upgrade.wait_for_merge = lambda repo, url, timeout=None, interval=None: {
+            "merged": True, "closed": False,
+            "state": {"state": "MERGED", "headRefOid": "head-b",
+                      "mergeCommit": {"oid": "squash-sha"}},
+            "polls": 2, "timed_out": False}
+        upgrade.run_check_pr = lambda args: 0
+        upgrade.open_pr = lambda args, t, o, s, manifest=None: (0, PR_URL)
+        upgrade.plugin_peers = lambda *a, **k: {}
+        upgrade.canary_summary = lambda repo, t: {"ok": True,
+                                                  "gates": {"C1": "PASS"},
+                                                  "residual": 0}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.auto_pre_merge(
+                _args(root, to=target, auto=True, auto_merge=True,
+                      opentui="0.8.2"), target)
+        text = out.getvalue()
+        assert rc == 1, text
+        assert "head changed during the CI window" in text, text
+        summary = json.load(open(upgrade.auto_merge_path(root, target)))
+        assert summary["decided_head"] == "head-a", summary
+        assert summary["final_head"] == "head-b", summary
+        assert summary["merge_commit"] == "squash-sha", summary
+    finally:
+        upgrade.run = real_run
+        upgrade.auto_merge_decision = real_decision
+        upgrade.wait_for_merge = real_wait
+        upgrade.run_check_pr = real_check
+        upgrade.open_pr = real_open
+        upgrade.plugin_peers = real_peers
+        upgrade.canary_summary = real_canary
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_merge_refuses_missing_pr_head():
+    """Minor 4: no headRefOid means the drift check is impossible -> refuse."""
+    root = _tmp("upgrade-auto-no-head-")
+    real_run = upgrade.run
+    real_view = upgrade.pr_view
+    try:
+        def fake_run(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        upgrade.run = fake_run
+        upgrade.pr_view = lambda repo, url: {"baseRefName": "main",
+                                             "state": "OPEN", "url": url}
+        result = upgrade.auto_merge_decision(
+            _args(root), "2.2.8", _machine_manifest("2.2.8"),
+            {"ok": True}, PR_URL)
+        assert result["allowed"] is False
+        assert any("cannot read the PR head" in reason
+                   for reason in result["reasons"]), result["reasons"]
+    finally:
+        upgrade.run = real_run
+        upgrade.pr_view = real_view
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_auto_merge_timeout_and_closed():
@@ -4585,7 +4811,8 @@ def _decision(root, target, manifest, *, summary=None, status_out="",
 
     upgrade.run = fake
     upgrade.pr_view = lambda repo, url: {"baseRefName": base,
-                                         "state": "OPEN", "url": url}
+                                         "state": "OPEN", "url": url,
+                                         "headRefOid": "head-a"}
     try:
         return upgrade.auto_merge_decision(
             _args(root), target, manifest,
@@ -4606,6 +4833,7 @@ def test_auto_merge_allowed_for_clean_patch():
         assert result["checks"]["clean_tracked_tree"] is True
         assert result["checks"]["based_on_main"] is True
         assert result["checks"]["pr_base"] == "main"
+        assert result["checks"]["pr_head"] == "head-a"
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
