@@ -38,7 +38,59 @@ def _tmp(prefix):
     base = os.path.join(REPO, ".scratch", "test-tmp")
     os.makedirs(base, exist_ok=True)
     scratch_cleanup.prune_test_scratch(base)
-    return tempfile.mkdtemp(prefix=prefix, dir=base)
+    root = tempfile.mkdtemp(prefix=prefix, dir=base)
+    # Hermetic state: never write the host's XDG state dir from a test. The
+    # override points at the legacy layout so existing `.scratch` assertions
+    # keep meaning, and the fallback path is still exercised.
+    os.environ["OPENCODE_UPGRADE_STATE_HOME"] = os.path.join(
+        root, ".scratch", "opencode-v2")
+    return root
+
+
+@contextlib.contextmanager
+def _state_home(path):
+    """Point the authoritative state dir at `path` for one test."""
+    real = os.environ.get("OPENCODE_UPGRADE_STATE_HOME")
+    os.environ["OPENCODE_UPGRADE_STATE_HOME"] = path
+    try:
+        yield path
+    finally:
+        if real is None:
+            os.environ.pop("OPENCODE_UPGRADE_STATE_HOME", None)
+        else:
+            os.environ["OPENCODE_UPGRADE_STATE_HOME"] = real
+
+
+@contextlib.contextmanager
+def _service_patch(running=True, start_exit=0, stop_exit=0, calls=None):
+    """Fake `service status/start/stop` for a hermetic verify call."""
+    real_state, real_action = upgrade.service_state, upgrade._service_action
+    calls = calls if calls is not None else []
+    upgrade.service_state = lambda command: (
+        calls.append(("status", command))
+        or {"running": running, "detail": "fixture", "exit": 0})
+
+    def action(command, name, timeout=60):
+        calls.append((name, command))
+        return start_exit if name == "start" else stop_exit
+
+    upgrade._service_action = action
+    try:
+        yield calls
+    finally:
+        upgrade.service_state = real_state
+        upgrade._service_action = real_action
+
+
+def _pin_superstring(pin=None):
+    """A parseable version that is a superstring of the pin (2.2.7 -> 2.2.70)."""
+    return (pin or v2.VERSION_PIN) + "0"
+
+
+def _other_version(version=None):
+    """A parseable version different from the pin (never a current literal)."""
+    major, minor, patch = (int(p) for p in (version or v2.VERSION_PIN).split("."))
+    return f"{major}.{minor}.{patch + 1}"
 
 
 def _write(path, text):
@@ -378,6 +430,8 @@ def test_status_supported_topology():
             "exit 1\n"))
         os.chmod(link, 0o755)
         upgrade.write_state(root, v2.VERSION_PIN, "canaried")
+        _write(upgrade.apply_artifact_path(root, v2.VERSION_PIN),
+               json.dumps(_verified_artifact(v2.VERSION_PIN)) + "\n")
         payload = upgrade.status_payload(_args(root, home=home))
         assert payload["pinned"] == v2.VERSION_PIN
         assert payload["live"] == v2.VERSION_PIN
@@ -890,51 +944,59 @@ def test_apply_dry_run_text_truthful():
     present_root = _tmp("upgrade-dryrun-present-")
     try:
         absent = _v1_only_home(absent_root)
-        args = _args(absent_root, to=target, home=absent["home"],
-                     skip_canary=True, drain_acknowledged=True, dry_run=True)
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out), \
-                contextlib.redirect_stderr(out):
-            assert upgrade.apply_supported(args, target) == 0
-        text = out.getvalue()
-        assert f"would install {target} via the official command" in text, text
-        assert "would run the post-upgrade smoke" in text, text
-        assert f"would write {_artifact(absent_root, target)}" in text, text
-        absent_order = [
-            "would check the drain gate",
-            "would back up any existing DB/config",
-            f"would install {target} via the official command",
-            f"would repair the default {absent['link']} shadow",
-            "would re-arm the DB migration cursor",
-            "would run the post-upgrade smoke",
-            f"would write {_artifact(absent_root, target)}",
-        ]
-        positions = [text.index(item) for item in absent_order]
-        assert positions == sorted(positions), positions
+        with _state_home(os.path.join(absent_root, ".scratch",
+                                      "opencode-v2")):
+            args = _args(absent_root, to=target, home=absent["home"],
+                         skip_canary=True, drain_acknowledged=True,
+                         dry_run=True)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                assert upgrade.apply_supported(args, target) == 0
+            text = out.getvalue()
+            artifact = upgrade.apply_artifact_path(absent_root, target)
+            assert f"would install {target} via the official command" in text, text
+            assert "would run the post-upgrade smoke" in text, text
+            assert f"would write {artifact}" in text, text
+            absent_order = [
+                "would check the drain gate",
+                "would back up any existing DB/config",
+                f"would install {target} via the official command",
+                f"would repair the default {absent['link']} shadow",
+                "would re-arm the DB migration cursor",
+                "would run the post-upgrade smoke",
+                f"would write {artifact}",
+            ]
+            positions = [text.index(item) for item in absent_order]
+            assert positions == sorted(positions), positions
 
         present = _shadow_home(present_root, target, package_version=target)
-        args = _args(present_root, to=target, home=present["home"],
-                     skip_canary=True, drain_acknowledged=True, dry_run=True)
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out), \
-                contextlib.redirect_stderr(out):
-            assert upgrade.apply_supported(args, target) == 0
-        text = out.getvalue()
-        assert (f"would reuse the installed {target} V2 package") in text, text
-        assert f"would repair the default {present['link']} shadow" in text, text
-        assert "would run the post-upgrade smoke" in text, text
-        assert f"would write {_artifact(present_root, target)}" in text, text
-        present_order = [
-            "would check the drain gate",
-            "would back up any existing DB/config",
-            f"would reuse the installed {target} V2 package",
-            f"would repair the default {present['link']} shadow",
-            "would re-arm the DB migration cursor",
-            "would run the post-upgrade smoke",
-            f"would write {_artifact(present_root, target)}",
-        ]
-        positions = [text.index(item) for item in present_order]
-        assert positions == sorted(positions), positions
+        with _state_home(os.path.join(present_root, ".scratch",
+                                      "opencode-v2")):
+            args = _args(present_root, to=target, home=present["home"],
+                         skip_canary=True, drain_acknowledged=True,
+                         dry_run=True)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                assert upgrade.apply_supported(args, target) == 0
+            text = out.getvalue()
+            artifact = upgrade.apply_artifact_path(present_root, target)
+            assert (f"would reuse the installed {target} V2 package") in text, text
+            assert f"would repair the default {present['link']} shadow" in text, text
+            assert "would run the post-upgrade smoke" in text, text
+            assert f"would write {artifact}" in text, text
+            present_order = [
+                "would check the drain gate",
+                "would back up any existing DB/config",
+                f"would reuse the installed {target} V2 package",
+                f"would repair the default {present['link']} shadow",
+                "would re-arm the DB migration cursor",
+                "would run the post-upgrade smoke",
+                f"would write {artifact}",
+            ]
+            positions = [text.index(item) for item in present_order]
+            assert positions == sorted(positions), positions
     finally:
         upgrade.stage_config.live_processes = real_live
         shutil.rmtree(absent_root, ignore_errors=True)
@@ -1085,14 +1147,15 @@ def test_failed_reapply_regresses_applied_to_prepared():
 
 def test_shadow_repair_refuses_missing_or_wrong_target():
     target = v2.VERSION_PIN
+    wrong = _other_version()
     for case in ("missing", "wrong"):
         root = _tmp("upgrade-shadow-refuse-")
         if case == "missing":
             fixture = _shadow_home(root, target, write_binary=False,
                                    package_version=None, opencode2=False)
         else:
-            fixture = _shadow_home(root, target, binary_version="2.2.5",
-                                   package_version="2.2.5")
+            fixture = _shadow_home(root, target, binary_version=wrong,
+                                   package_version=wrong)
         backup = os.path.join(root, "backup")
         os.makedirs(backup)
         calls = []
@@ -1115,7 +1178,7 @@ def test_shadow_repair_refuses_missing_or_wrong_target():
             if case == "missing":
                 assert data["target_package"]["version"] is None, case
             else:
-                assert data["target_package"]["version"] == "2.2.5", case
+                assert data["target_package"]["version"] == wrong, case
         finally:
             _restore_apply(real)
             shutil.rmtree(root, ignore_errors=True)
@@ -1200,11 +1263,15 @@ def test_status_names_recorded_target_for_resume():
             payload = upgrade.status_payload(_args(root, home=fixture["home"]))
         assert payload["next"] == (
             "python3 scripts/opencode_upgrade.py upgrade --to 2.3.0 --resume")
-        # A legacy rolled-back stage is not resumable.
+        # A legacy rolled-back stage is not resumable, and without a verified
+        # pinned artifact the truthful next is the full apply — not up to date.
         upgrade.write_state(root, "2.3.0", "rolled-back")
         with _path_front(fixture["yarn_bin"]):
             payload = upgrade.status_payload(_args(root, home=fixture["home"]))
-        assert payload["next"] == "up to date", payload["next"]
+        assert "resume" not in payload["next"], payload["next"]
+        assert payload["next"] == upgrade.repair_command(v2.VERSION_PIN), \
+            payload["next"]
+        assert payload["next"] != "up to date"
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -1288,14 +1355,15 @@ def test_canary_cmd_exact_args():
         v1 = os.path.join(root, "v1", "opencode")
         _write(v1, "#!/bin/sh\necho 1.19.4\n")
         os.chmod(v1, 0o755)
+        prior = _other_version()
         default = os.path.join(root, "default")
-        _stub_binary(default, "2.2.5")
+        _stub_binary(default, prior)
         args = _args(root, to=v2.VERSION_PIN, v1_bin=v1,
                      default_bin=default)
         argv = upgrade.canary_cmd(args, v2.VERSION_PIN)
         assert "--all" in argv and "--version" in argv, argv
         assert argv[argv.index("--version") + 1] == v2.VERSION_PIN
-        assert argv[argv.index("--default-version") + 1] == "2.2.5"
+        assert argv[argv.index("--default-version") + 1] == prior
         assert argv[argv.index("--default-bin") + 1] == default
         assert "--skip-install" in argv
         assert f"v2-canary-{v2.VERSION_PIN}" in " ".join(argv)
@@ -1319,11 +1387,12 @@ def test_canary_cmd_measures_v1_default():
 def test_canary_cmd_measures_prior_v2_default():
     root = _tmp("upgrade-canary-prior-v2-")
     try:
+        prior = _other_version()
         default = os.path.join(root, "default")
-        _stub_binary(default, "2.2.5")
+        _stub_binary(default, prior)
         args = _args(root, to=v2.VERSION_PIN, default_bin=default)
         argv = upgrade.canary_cmd(args, v2.VERSION_PIN)
-        assert argv[argv.index("--default-version") + 1] == "2.2.5"
+        assert argv[argv.index("--default-version") + 1] == prior
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -1380,7 +1449,7 @@ def test_upgrade_resume_skips_completed_stages():
         upgrade.prepare = lambda args: calls.append("prepare") or 0
         upgrade.topology = lambda home, link: {
             "supported": True, "command": "opencode"}
-        upgrade.version_of = lambda binary: "2.2.5"
+        upgrade.version_of = lambda binary: _other_version("2.3.0")
         peers = _json_file(root, {
             "@opencode/plugin": "2.3.0",
             "@opentui/core": ">=0.8.0",
@@ -1508,6 +1577,908 @@ def test_upgrade_reverifies_after_legacy_failed_artifact():
     finally:
         _restore_apply(real)
         shutil.rmtree(root, ignore_errors=True)
+
+
+def _failed_artifact(target, stage, **extra):
+    """A modern unverified artifact with `stage` as the recorded failure."""
+    payload = {
+        "version": target,
+        "verified": False,
+        "rolled_back": False,
+        "failure_stage": stage,
+        "checks": {name: {"ok": name != stage, "detail": "fixture"}
+                   for name in upgrade.SMOKE_FAILURE_STAGES},
+        "at": "2026-11-20T00:00:00Z",
+    }
+    payload.update(extra)
+    return payload
+
+
+def _verified_artifact(target, **extra):
+    payload = {
+        "version": target,
+        "verified": True,
+        "rolled_back": False,
+        "failure_stage": None,
+        "checks": {name: {"ok": True, "detail": "ok"}
+                   for name in upgrade.SMOKE_FAILURE_STAGES},
+        "at": "2026-11-20T00:00:00Z",
+    }
+    payload.update(extra)
+    return payload
+
+
+def test_status_unverified_smoke_names_verify():
+    """AC1: a smoke-only failed apply is not `up to date`; next is verify."""
+    root = _tmp("upgrade-status-verify-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    try:
+        _evidence(root, target)
+        upgrade.write_state(root, target, "prepared")
+        _write(upgrade.apply_artifact_path(root, target),
+               json.dumps(_failed_artifact(target, "plugin")) + "\n")
+        with _path_front(fixture["yarn_bin"]):
+            payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["shadow_ok"] is True, payload["shadow"]
+        assert payload["apply_unverified"] is True
+        assert payload["failure_stage"] == "plugin"
+        assert payload["next"] == upgrade.verify_command(target), payload["next"]
+        assert payload["next"] != "up to date"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_status_unverified_migration_names_full_apply():
+    """AC1: a non-smoke failure stage names the full apply, never verify."""
+    root = _tmp("upgrade-status-full-apply-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    try:
+        _evidence(root, target)
+        upgrade.write_state(root, target, "prepared")
+        _write(upgrade.apply_artifact_path(root, target),
+               json.dumps(_failed_artifact(target, "migration")) + "\n")
+        with _path_front(fixture["yarn_bin"]):
+            payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["apply_unverified"] is True
+        assert payload["next"] == upgrade.repair_command(target), payload["next"]
+        assert "verify --to" not in payload["next"]
+        assert payload["next"] != "up to date"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_status_prepared_with_verified_artifact_is_not_up_to_date():
+    """AC1: state `prepared` never reports `up to date`; verify advances it."""
+    root = _tmp("upgrade-status-prepared-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    try:
+        _evidence(root, target)
+        upgrade.write_state(root, target, "prepared")
+        _write(upgrade.apply_artifact_path(root, target),
+               json.dumps(_verified_artifact(target)) + "\n")
+        with _path_front(fixture["yarn_bin"]):
+            payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["apply_incomplete"] is True
+        assert payload["next"] == upgrade.verify_command(target), payload["next"]
+        upgrade.write_state(root, target, "applied",
+                            {"artifact": upgrade.apply_artifact_path(
+                                root, target)})
+        with _path_front(fixture["yarn_bin"]):
+            payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["next"] == "up to date", payload["next"]
+        # A prepared state with no artifact at all is still not `up to date`.
+        upgrade.write_state(root, target, "prepared", force=True)
+        os.remove(upgrade.apply_artifact_path(root, target))
+        with _path_front(fixture["yarn_bin"]):
+            payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["apply_incomplete"] is True
+        assert payload["next"] == upgrade.repair_command(target), payload["next"]
+        assert payload["next"] != "up to date"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_repairs_smoke_only_failure():
+    """AC2: verify re-runs the full smoke, archives, and advances state."""
+    root = _tmp("upgrade-verify-repair-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(root, target)
+    prior = _failed_artifact(
+        target, "plugin",
+        backup=os.path.join(root, "backup"),
+        previous_default={"version": target, "kind": "v2",
+                          "path": fixture["link"]})
+    _write(artifact, json.dumps(prior) + "\n")
+    prior_bytes = open(artifact, "rb").read()
+    upgrade.write_state(root, target, "prepared")
+    calls = []
+    real = (upgrade.post_upgrade_smoke, upgrade.official_upgrade,
+            upgrade.pre_upgrade_backup, upgrade.resume_migration)
+
+    def smoke(_args, _target, command=None):
+        calls.append(("smoke", command,
+                      upgrade.version_of(command) if command else None))
+        return [(name, True, "ok") for name in upgrade.SMOKE_FAILURE_STAGES]
+
+    def forbidden(name):
+        def fail(*_a, **_k):
+            calls.append((name,))
+            raise AssertionError(f"{name} must not run during verify")
+        return fail
+
+    upgrade.post_upgrade_smoke = smoke
+    upgrade.official_upgrade = forbidden("install")
+    upgrade.pre_upgrade_backup = forbidden("backup")
+    upgrade.resume_migration = forbidden("migration")
+    try:
+        # The service is stopped: verify starts it, smokes, then stops only
+        # the service it started.
+        with _service_patch(running=False) as service_calls:
+            out = io.StringIO()
+            with _path_front(fixture["yarn_bin"]), \
+                    contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(
+                    _args(root, to=target, home=fixture["home"]))
+        assert rc == 0, out.getvalue()
+        assert calls == [("smoke", fixture["link"], target)], calls
+        assert service_calls == [
+            ("status", fixture["link"]),
+            ("start", fixture["link"]),
+            ("stop", fixture["link"]),
+        ], service_calls
+        data = json.load(open(artifact))
+        assert data["verified"] is True, data
+        assert data["verify_only"] is True, data
+        assert data["prior_artifact"] == artifact, data["prior_artifact"]
+        assert data["service"]["started_by_verify"] is True, data["service"]
+        assert data["service"]["stopped_after"] is True, data["service"]
+        archives = sorted(glob.glob(artifact + ".failed-*"))
+        assert len(archives) == 1, archives
+        assert open(archives[0], "rb").read() == prior_bytes
+        assert upgrade.read_state(root)["stage"] == "applied"
+    finally:
+        (upgrade.post_upgrade_smoke, upgrade.official_upgrade,
+         upgrade.pre_upgrade_backup, upgrade.resume_migration) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_refuses_non_smoke_failure():
+    """AC2: install/shadow/migration failures are refused with the apply cmd."""
+    root = _tmp("upgrade-verify-refuse-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(root, target)
+    try:
+        for stage in ("migration", "shadow", "official-install",
+                      "exception:install", "target-binary", None):
+            _write(artifact, json.dumps(_failed_artifact(target, stage)) + "\n")
+            before = open(artifact, "rb").read()
+            upgrade.write_state(root, target, "prepared")
+            real = (upgrade.post_upgrade_smoke, upgrade.official_upgrade,
+                    upgrade.pre_upgrade_backup, upgrade.resume_migration)
+            calls = []
+
+            def smoke(*_a, **_k):
+                calls.append("smoke")
+                return [("binary", True, "ok")]
+
+            upgrade.post_upgrade_smoke = smoke
+            upgrade.official_upgrade = lambda *a, **k: calls.append("install")
+            upgrade.pre_upgrade_backup = lambda *a, **k: calls.append("backup")
+            upgrade.resume_migration = lambda *a, **k: calls.append("migration")
+            try:
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out), \
+                        contextlib.redirect_stderr(out):
+                    rc = upgrade.verify(
+                        _args(root, to=target, home=fixture["home"]))
+                assert rc == 2, (stage, out.getvalue())
+                assert upgrade.repair_command(target) in out.getvalue(), stage
+                assert calls == [], (stage, calls)
+                assert open(artifact, "rb").read() == before, stage
+                assert upgrade.read_state(root)["stage"] == "prepared", stage
+            finally:
+                (upgrade.post_upgrade_smoke, upgrade.official_upgrade,
+                 upgrade.pre_upgrade_backup, upgrade.resume_migration) = real
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_imports_legacy_artifact_from_repo_scratch():
+    """AC3: a legacy `.scratch` artifact is imported, archived, then replaced."""
+    root = _tmp("upgrade-verify-import-")
+    target = v2.VERSION_PIN
+    state = os.path.join(root, "xdg-state")
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    legacy = os.path.join(root, ".scratch", "opencode-v2",
+                          f"upgrade-{target}-verify.json")
+    _write(legacy, json.dumps(_failed_artifact(target, "agents")) + "\n")
+    legacy_bytes = open(legacy, "rb").read()
+    real = upgrade.post_upgrade_smoke
+    upgrade.post_upgrade_smoke = lambda _a, _t, command=None: [
+        (name, True, "ok") for name in upgrade.SMOKE_FAILURE_STAGES]
+    try:
+        with _state_home(state), _path_front(fixture["yarn_bin"]), \
+                _service_patch(running=True) as service_calls:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(
+                    _args(root, to=target, home=fixture["home"]))
+            assert rc == 0, out.getvalue()
+            assert service_calls == [("status", fixture["link"])], service_calls
+            primary = os.path.join(state, f"upgrade-{target}-verify.json")
+            assert json.load(open(primary))["verified"] is True
+            archives = sorted(glob.glob(primary + ".failed-*"))
+            assert len(archives) == 1, archives
+            assert open(archives[0], "rb").read() == legacy_bytes
+            assert open(legacy, "rb").read() == legacy_bytes
+    finally:
+        upgrade.post_upgrade_smoke = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_state_dir_survives_repo_scratch_removal():
+    """AC3: state/evidence survive `rm -rf .scratch` and a fresh worktree."""
+    root = _tmp("upgrade-state-dir-")
+    target = v2.VERSION_PIN
+    state = os.path.join(root, "xdg-state")
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    real_smoke = upgrade.post_upgrade_smoke
+    try:
+        with _state_home(state):
+            _fixture(root)
+            upgrade.write_state(root, target, "prepared")
+            artifact = upgrade.apply_artifact_path(root, target)
+            _write(artifact, json.dumps(_failed_artifact(target, "plugin"))
+                   + "\n")
+            # The first write imported the legacy canary evidence.
+            assert os.path.isdir(os.path.join(state, "v2-canary-" + target))
+            shutil.rmtree(os.path.join(root, ".scratch"))
+            assert upgrade.canary_summary(root, target)["ok"] is True
+            payload = upgrade.status_payload(
+                _args(root, home=fixture["home"]))
+            assert payload["state"]["stage"] == "prepared"
+            assert payload["last_apply"]["verified"] is False
+            assert payload["apply_artifact"] == artifact
+            assert artifact.startswith(state)
+            assert payload["next"] == upgrade.verify_command(target)
+            assert upgrade.check(_args(root, pr=True)) == 0
+            upgrade.post_upgrade_smoke = lambda _a, _t, command=None: [
+                (name, True, "ok") for name in upgrade.SMOKE_FAILURE_STAGES]
+            out = io.StringIO()
+            with _path_front(fixture["yarn_bin"]), \
+                    _service_patch(running=True), \
+                    contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                assert upgrade.verify(
+                    _args(root, to=target, home=fixture["home"])) == 0, \
+                    out.getvalue()
+            assert json.load(open(artifact))["verified"] is True
+            assert upgrade.read_state(root)["stage"] == "applied"
+            assert glob.glob(artifact + ".failed-*")
+    finally:
+        upgrade.post_upgrade_smoke = real_smoke
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _ok_smoke(*_a, **_k):
+    return [(name, True, "ok") for name in upgrade.SMOKE_FAILURE_STAGES]
+
+
+def _service_binary(root, running=True, version=None):
+    """A stub that answers --version/debug/service like the real CLI."""
+    version = version or v2.VERSION_PIN
+    config = os.path.join(root, "home", ".config", "opencode")
+    os.makedirs(config, exist_ok=True)
+    path = os.path.join(root, "service-bin", "opencode")
+    log = os.path.join(root, "service.log")
+    status = "http://127.0.0.1:4096" if running else "stopped"
+    exit_code = 0 if running else 1
+    _write(path, (
+        "#!/bin/sh\n"
+        'if [ "$1" = "--version" ]; then echo "opencode v' + version
+        + '"; exit 0; fi\n'
+        'if [ "$1" = "debug" ]; then echo "' + config + '"; exit 0; fi\n'
+        'if [ "$1" = "service" ] && [ "$2" = "status" ]; then echo "'
+        + status + '"; exit ' + str(exit_code) + '; fi\n'
+        'if [ "$1" = "service" ]; then echo "service $2" >> "' + log
+        + '"; exit 0; fi\n'
+        'echo "unexpected: $@" >&2; exit 1\n'))
+    os.chmod(path, 0o755)
+    return path, log
+
+
+def test_service_state_classifies_status_output():
+    """AC2: status classification is explicit (never an implicit start)."""
+    root = _tmp("upgrade-service-classify-")
+    try:
+        path, _log = _service_binary(root, running=True)
+        assert upgrade.service_state(path)["running"] is True
+        blocked, _log = _service_binary(root, running=False)
+        assert upgrade.service_state(blocked)["running"] is False
+        silent = os.path.join(root, "silent")
+        _write(silent, "#!/bin/sh\nexit 1\n")
+        os.chmod(silent, 0o755)
+        assert upgrade.service_state(silent)["running"] is None
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_refuses_failed_service_start():
+    """AC2: a failed start refuses before any smoke or artifact rewrite."""
+    root = _tmp("upgrade-verify-start-fails-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(root, target)
+    _write(artifact, json.dumps(_failed_artifact(target, "api")) + "\n")
+    before = open(artifact, "rb").read()
+    upgrade.write_state(root, target, "prepared")
+    calls = []
+    real = upgrade.post_upgrade_smoke
+    upgrade.post_upgrade_smoke = lambda *a, **k: calls.append("smoke") or []
+    try:
+        with _service_patch(running=False, start_exit=3):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(
+                    _args(root, to=target, home=fixture["home"]))
+        assert rc == 2, out.getvalue()
+        assert "service start" in out.getvalue()
+        assert "start_exit=3" in out.getvalue(), out.getvalue()
+        assert "started_by_verify=False" in out.getvalue(), out.getvalue()
+        assert upgrade.repair_command(target) in out.getvalue()
+        assert calls == []
+        assert open(artifact, "rb").read() == before
+        assert glob.glob(artifact + ".failed-*") == []
+        assert upgrade.read_state(root)["stage"] == "prepared"
+    finally:
+        upgrade.post_upgrade_smoke = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_already_verified_refuses_divergent_default_bin():
+    """AC2: the fast path checks the actual --default-bin, not only the link."""
+    target = v2.VERSION_PIN
+    root = _tmp("upgrade-verify-divergent-bin-")
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(root, target)
+    try:
+        _write(artifact, json.dumps(_verified_artifact(target)) + "\n")
+        upgrade.write_state(root, target, "prepared")
+        wrong = _other_version()
+        divergent = os.path.join(root, "divergent-opencode")
+        _stub_binary(divergent, wrong, fixture["config"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.verify(_args(root, to=target, home=fixture["home"],
+                                      default_bin=divergent))
+        assert rc == 2, out.getvalue()
+        assert f"live={wrong}" in out.getvalue(), out.getvalue()
+        assert upgrade.repair_command(target) in out.getvalue()
+        assert upgrade.read_state(root)["stage"] == "prepared"
+
+        # A target-version binary under a foreign config root is also refused.
+        foreign = os.path.join(root, "elsewhere", "opencode")
+        os.makedirs(os.path.dirname(foreign))
+        _stub_binary(foreign, target, os.path.join(root, "elsewhere"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.verify(_args(root, to=target, home=fixture["home"],
+                                      default_bin=foreign))
+        assert rc == 2, out.getvalue()
+        assert "config_root=" in out.getvalue(), out.getvalue()
+        assert upgrade.read_state(root)["stage"] == "prepared"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_service_path_against_fake_cli():
+    """AC2: the real status/start/stop path owns only its own service."""
+    target = v2.VERSION_PIN
+    root = _tmp("upgrade-verify-service-cli-")
+    try:
+        fixture = _shadow_home(root, target, default_version=target,
+                               package_version=target)
+        artifact = upgrade.apply_artifact_path(root, target)
+        _write(artifact, json.dumps(_failed_artifact(target, "api")) + "\n")
+        binary, log = _service_binary(root, running=False)
+        real = upgrade.post_upgrade_smoke
+
+        def smoke(_args, _target, command=None, _log=log):
+            with open(_log, "a", encoding="utf-8") as fh:
+                fh.write("smoke\n")
+            return [(name, True, "ok")
+                    for name in upgrade.SMOKE_FAILURE_STAGES]
+
+        upgrade.post_upgrade_smoke = smoke
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(_args(root, to=target, home=fixture["home"],
+                                          default_bin=binary))
+            assert rc == 0, out.getvalue()
+            assert open(log, encoding="utf-8").read().splitlines() == [
+                "service start", "smoke", "service stop"], open(log).read()
+        finally:
+            upgrade.post_upgrade_smoke = real
+
+        # A running service is left untouched: only the smoke is recorded.
+        _write(artifact, json.dumps(_failed_artifact(target, "api")) + "\n")
+        os.remove(log)
+        running, log = _service_binary(root, running=True)
+
+        def smoke_running(_args, _target, command=None, _log=log):
+            with open(_log, "a", encoding="utf-8") as fh:
+                fh.write("smoke\n")
+            return [(name, True, "ok")
+                    for name in upgrade.SMOKE_FAILURE_STAGES]
+
+        upgrade.post_upgrade_smoke = smoke_running
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(_args(root, to=target, home=fixture["home"],
+                                          default_bin=running))
+            assert rc == 0, out.getvalue()
+            assert open(log, encoding="utf-8").read().splitlines() == ["smoke"]
+        finally:
+            upgrade.post_upgrade_smoke = real
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_leaves_a_running_service_alone():
+    """AC2: a pre-running service is not stopped by verify."""
+    root = _tmp("upgrade-verify-service-running-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(root, target)
+    _write(artifact, json.dumps(_failed_artifact(target, "plugin")) + "\n")
+    real = upgrade.post_upgrade_smoke
+    upgrade.post_upgrade_smoke = _ok_smoke
+    try:
+        with _service_patch(running=True) as service_calls:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(
+                    _args(root, to=target, home=fixture["home"]))
+        assert rc == 0, out.getvalue()
+        assert service_calls == [("status", fixture["link"])], service_calls
+        data = json.load(open(artifact))
+        assert data["service"]["before"]["running"] is True
+        assert data["service"]["started_by_verify"] is False
+        assert data["service"]["stopped_after"] is False
+    finally:
+        upgrade.post_upgrade_smoke = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_refuses_unclassifiable_service():
+    """AC2: verify never relies on the CLI's implicit service auto-start."""
+    root = _tmp("upgrade-verify-service-unknown-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(root, target)
+    _write(artifact, json.dumps(_failed_artifact(target, "api")) + "\n")
+    before = open(artifact, "rb").read()
+    calls = []
+    real = upgrade.post_upgrade_smoke
+    upgrade.post_upgrade_smoke = lambda *a, **k: calls.append("smoke") or []
+    try:
+        with _service_patch(running=None):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(
+                    _args(root, to=target, home=fixture["home"]))
+        assert rc == 2, out.getvalue()
+        assert "implicit service auto-start" in out.getvalue()
+        assert upgrade.repair_command(target) in out.getvalue()
+        assert calls == []
+        assert open(artifact, "rb").read() == before
+    finally:
+        upgrade.post_upgrade_smoke = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_smoke_failure_is_truthful_and_archived():
+    """AC2: a re-run that still fails is rc 1, truthful, and archived."""
+    root = _tmp("upgrade-verify-still-fails-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(root, target)
+    _write(artifact, json.dumps(_failed_artifact(target, "api")) + "\n")
+    prior_bytes = open(artifact, "rb").read()
+    upgrade.write_state(root, target, "prepared")
+    real = upgrade.post_upgrade_smoke
+    upgrade.post_upgrade_smoke = lambda _a, _t, command=None: [
+        ("binary", True, "ok"), ("config-root", True, "ok"),
+        ("api", False, "still failing"), ("agents", True, "ok"),
+        ("plugin", True, "ok"), ("observer", True, "ok")]
+    try:
+        with _service_patch(running=True):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(
+                    _args(root, to=target, home=fixture["home"]))
+        assert rc == 1, out.getvalue()
+        data = json.load(open(artifact))
+        assert data["verified"] is False
+        assert data["failure_stage"] == "api", data
+        assert data["verify_only"] is True
+        assert data["checks"]["api"]["ok"] is False
+        assert upgrade.read_state(root)["stage"] == "prepared"
+        archives = sorted(glob.glob(artifact + ".failed-*"))
+        assert len(archives) == 1, archives
+        assert open(archives[0], "rb").read() == prior_bytes
+    finally:
+        upgrade.post_upgrade_smoke = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_refuses_exception_smoke():
+    """AC2 decision pin: `exception:smoke` is not a completed check."""
+    root = _tmp("upgrade-verify-exception-smoke-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(root, target)
+    _write(artifact, json.dumps({
+        "version": target, "verified": False, "rolled_back": False,
+        "failure_stage": "exception:smoke", "checks": {},
+        "at": "2026-11-20T00:00:00Z"}) + "\n")
+    calls = []
+    real = upgrade.post_upgrade_smoke
+    upgrade.post_upgrade_smoke = lambda *a, **k: calls.append("smoke") or []
+    try:
+        with _service_patch(running=True):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(
+                    _args(root, to=target, home=fixture["home"]))
+        assert rc == 2, out.getvalue()
+        assert upgrade.repair_command(target) in out.getvalue()
+        assert calls == []
+    finally:
+        upgrade.post_upgrade_smoke = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_treats_shadow_config_root_without_checks_as_full_apply():
+    """AC2: a shadow `config-root` collision has no completed smoke."""
+    root = _tmp("upgrade-verify-config-root-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(root, target)
+    collision = {"version": target, "verified": False, "rolled_back": False,
+                 "failure_stage": "config-root", "checks": {},
+                 "at": "2026-11-20T00:00:00Z"}
+    _write(artifact, json.dumps(collision) + "\n")
+    calls = []
+    real = upgrade.post_upgrade_smoke
+    upgrade.post_upgrade_smoke = lambda *a, **k: calls.append("smoke") or []
+    try:
+        with _service_patch(running=True):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(
+                    _args(root, to=target, home=fixture["home"]))
+        assert rc == 2, out.getvalue()
+        assert "no completed post-smoke checks" in out.getvalue()
+        assert upgrade.repair_command(target) in out.getvalue()
+        assert calls == []
+    finally:
+        upgrade.post_upgrade_smoke = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_status_healthy_without_artifact_names_full_apply():
+    """AC1: `up to date` requires a verified artifact, even on a healthy host."""
+    root = _tmp("upgrade-status-no-artifact-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    try:
+        _evidence(root, target)
+        upgrade.write_state(root, target, "applied")
+        with _path_front(fixture["yarn_bin"]):
+            payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["live"] == target
+        assert payload["shadow_ok"] is True
+        assert payload["canary_blocker"] is False
+        assert payload["artifact_verified"] is None
+        assert payload["next"] == upgrade.repair_command(target), payload["next"]
+        assert payload["next"] != "up to date"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_status_config_root_without_checks_names_full_apply():
+    """AC1/AC2: the empty-checks shadow collision is not verify-eligible."""
+    root = _tmp("upgrade-status-config-root-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    try:
+        _evidence(root, target)
+        upgrade.write_state(root, target, "prepared")
+        _write(upgrade.apply_artifact_path(root, target), json.dumps({
+            "version": target, "verified": False, "rolled_back": False,
+            "failure_stage": "config-root", "checks": {},
+            "at": "2026-11-20T00:00:00Z"}) + "\n")
+        with _path_front(fixture["yarn_bin"]):
+            payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["apply_unverified"] is True
+        assert payload["verify_eligible"] is False
+        assert payload["next"] == upgrade.repair_command(target), payload["next"]
+        assert "verify --to" not in payload["next"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_smoke_exception_is_truthful():
+    """AC2: an exception during the re-run writes a truthful failed artifact."""
+    root = _tmp("upgrade-verify-smoke-exc-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(root, target)
+    _write(artifact, json.dumps(_failed_artifact(target, "binary")) + "\n")
+    prior_bytes = open(artifact, "rb").read()
+    upgrade.write_state(root, target, "prepared")
+    real = upgrade.post_upgrade_smoke
+
+    def boom(*_a, **_k):
+        raise OSError("spawn failed")
+
+    upgrade.post_upgrade_smoke = boom
+    try:
+        with _service_patch(running=True):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(
+                    _args(root, to=target, home=fixture["home"]))
+        assert rc == 1, out.getvalue()
+        data = json.load(open(artifact))
+        assert data["verified"] is False
+        assert data["failure_stage"] == "binary"
+        assert data["checks"]["binary"]["ok"] is False
+        assert "OSError" in data["checks"]["binary"]["detail"]
+        assert upgrade.read_state(root)["stage"] == "prepared"
+        archives = sorted(glob.glob(artifact + ".failed-*"))
+        assert len(archives) == 1, archives
+        assert open(archives[0], "rb").read() == prior_bytes
+    finally:
+        upgrade.post_upgrade_smoke = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_already_verified_requires_intact_shadow():
+    """AC2: the fast path confirms the live default before advancing state."""
+    target = v2.VERSION_PIN
+    root = _tmp("upgrade-verify-fastpath-ok-")
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(root, target)
+    try:
+        _write(artifact, json.dumps(_verified_artifact(target)) + "\n")
+        upgrade.write_state(root, target, "prepared")
+        calls = []
+        real = upgrade.post_upgrade_smoke
+        upgrade.post_upgrade_smoke = lambda *a, **k: calls.append("smoke") or []
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(
+                    _args(root, to=target, home=fixture["home"]))
+            assert rc == 0, out.getvalue()
+            assert calls == []
+            assert upgrade.read_state(root)["stage"] == "applied"
+        finally:
+            upgrade.post_upgrade_smoke = real
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+    broken = _tmp("upgrade-verify-fastpath-broken-")
+    wrong = _other_version()
+    fixture = _shadow_home(broken, target, default_version=wrong,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(broken, target)
+    try:
+        _write(artifact, json.dumps(_verified_artifact(target)) + "\n")
+        upgrade.write_state(broken, target, "prepared")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.verify(
+                _args(broken, to=target, home=fixture["home"]))
+        assert rc == 2, out.getvalue()
+        assert "shadow_ok=False" in out.getvalue(), out.getvalue()
+        assert upgrade.read_state(broken)["stage"] == "prepared"
+    finally:
+        shutil.rmtree(broken, ignore_errors=True)
+
+
+def test_status_unverified_artifact_ignores_mismatched_state():
+    """AC1: a verified:false artifact is never `up to date` on state alone."""
+    target = v2.VERSION_PIN
+    cases = {
+        "missing": None,
+        "other-target": {"target": "2.3.0", "stage": "applied"},
+        "prepared": {"target": target, "stage": "prepared"},
+    }
+    for name, legacy_state in cases.items():
+        root = _tmp(f"upgrade-status-mismatch-{name}-")
+        fixture = _shadow_home(root, target, default_version=target,
+                               package_version=target)
+        try:
+            _evidence(root, target)
+            if legacy_state is not None:
+                _write(os.path.join(root, ".scratch", "opencode-v2",
+                                    "upgrade-state.json"),
+                       json.dumps(legacy_state) + "\n")
+            _write(upgrade.apply_artifact_path(root, target),
+                   json.dumps(_failed_artifact(target, "plugin")) + "\n")
+            with _path_front(fixture["yarn_bin"]):
+                payload = upgrade.status_payload(
+                    _args(root, home=fixture["home"]))
+            assert payload["next"] == upgrade.verify_command(target), name
+            assert payload["next"] != "up to date", name
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+        # A non-smoke stage on the same mismatched state names full apply.
+    root = _tmp("upgrade-status-mismatch-migration-")
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    try:
+        _evidence(root, target)
+        _write(upgrade.apply_artifact_path(root, target),
+               json.dumps(_failed_artifact(target, "migration")) + "\n")
+        with _path_front(fixture["yarn_bin"]):
+            payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["next"] == upgrade.repair_command(target), payload["next"]
+        assert "verify --to" not in payload["next"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_rejects_unsafe_target():
+    """AC2: `--to` is an exact version, never a path fragment."""
+    root = _tmp("upgrade-verify-unsafe-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    try:
+        for bad in ("../evil", "2.3.0/../../x", "latest", "v2.3.0", ""):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.main(["verify", "--to", bad, "--repo", root,
+                                   "--home", fixture["home"]])
+            assert rc == 2, (bad, out.getvalue())
+            assert "invalid target version" in out.getvalue(), bad
+            assert not glob.glob(os.path.join(
+                v2.state_home(), f"upgrade-{bad}*")), bad
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.main(["upgrade", "--to", "../evil", "--repo", root,
+                               "--home", fixture["home"]])
+        assert rc == 2, out.getvalue()
+        assert "invalid target version" in out.getvalue()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_legacy_state_import_on_first_write():
+    """AC3: the first write imports the legacy `.scratch` state file."""
+    root = _tmp("upgrade-state-import-")
+    state = os.path.join(root, "xdg-state")
+    legacy = os.path.join(root, ".scratch", "opencode-v2",
+                          "upgrade-state.json")
+    payload = {
+        "target": v2.VERSION_PIN,
+        "stages": {"planned": {"at": "2026-11-17T00:00:00Z", "detail": "ok"},
+                   "canaried": {"at": "2026-11-17T00:00:01Z",
+                                "detail": "ok"}},
+        "stage": "canaried",
+        "updated": "2026-11-17T00:00:01Z",
+    }
+    _write(legacy, json.dumps(payload) + "\n")
+    try:
+        with _state_home(state):
+            assert upgrade.read_state(root)["stage"] == "canaried"
+            upgrade.write_state(root, v2.VERSION_PIN, "prepared")
+            primary = os.path.join(state, "upgrade-state.json")
+            data = json.load(open(primary))
+            assert data["stage"] == "prepared"
+            assert set(data["stages"]) == {"planned", "canaried", "prepared"}
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prune_covers_state_dir_canary():
+    """AC3: prune bounds the state-dir canary evidence too."""
+    root = _tmp("upgrade-prune-state-")
+    state = os.path.join(root, "xdg-state")
+    try:
+        with _state_home(state):
+            for name in ("v2-canary-1.0.0",
+                         "v2-canary-" + v2.VERSION_PIN):
+                os.makedirs(os.path.join(state, name))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                assert upgrade.prune(_args(root, keep=1, dry_run=True)) == 0
+            text = out.getvalue()
+            assert os.path.join(state, "v2-canary-1.0.0") in text, text
+            assert "would remove" in text, text
+            assert os.path.join(state, "v2-canary-" + v2.VERSION_PIN) not in                 text, text
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_tmp_helper_scopes_state_home():
+    """The test helper keeps state writes inside the test's scratch root."""
+    root = _tmp("upgrade-state-scope-")
+    try:
+        override = os.environ["OPENCODE_UPGRADE_STATE_HOME"]
+        assert override.startswith(root), override
+        assert upgrade.state_path(root).startswith(root), \
+            upgrade.state_path(root)
+        assert not upgrade.state_path(root).startswith(
+            os.path.expanduser("~/.local/state")), upgrade.state_path(root)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_no_current_version_literal_against_pin():
+    """AC5: a pin bump alone must not change a current-version expectation."""
+    shapes = (
+        r'_stub_binary\([^,\n]+,\s*"(\d+\.\d+\.\d+)"',
+        r'(?:binary_version|package_version)="(\d+\.\d+\.\d+)"',
+        r'version_of\s*=\s*lambda[^:]*:\s*"(\d+\.\d+\.\d+)"',
+    )
+    offenders = []
+    for name in ("test_opencode_upgrade.py", "test_opencode_v2_canary.py",
+                 "test_opencode_v2_post_smoke.py"):
+        text = open(os.path.join(HERE, name), encoding="utf-8").read()
+        for pattern in shapes:
+            for value in re.findall(pattern, text):
+                if not value.startswith("1."):
+                    offenders.append((name, value))
+    assert not offenders, (
+        "current-version literals must derive from v2.VERSION_PIN: "
+        f"{offenders}")
 
 
 def _make_db(path):
@@ -1807,20 +2778,21 @@ def test_apply_missing_canary_names_prerequisite():
 def test_version_parsing_rejects_substrings():
     root = _tmp("upgrade-versions-")
     try:
-        # Real binaries: V1 prints bare 1.19.4; V2 prints opencode v2.2.6.
+        # Real binaries: V1 prints bare 1.19.4; V2 prints opencode v<pin>.
         v1 = os.path.join(root, "v1")
         _stub_binary(v1, "1.19.4")
         assert upgrade.version_of(v1) == "1.19.4"
         long_version = os.path.join(root, "long")
-        _stub_binary(long_version, "2.2.60")
-        assert upgrade.version_of(long_version) == "2.2.60"
+        superstring = _pin_superstring()
+        _stub_binary(long_version, superstring)
+        assert upgrade.version_of(long_version) == superstring
         assert upgrade.version_of(long_version) != v2.VERSION_PIN
         v1_long = os.path.join(root, "v1long")
         _stub_binary(v1_long, "1.19.40")
         assert upgrade.version_of(v1_long) == "1.19.40"
         assert upgrade.version_of(v1_long) != "1.19.4"
         prerelease = os.path.join(root, "rc")
-        _stub_binary(prerelease, "2.2.6-rc")
+        _stub_binary(prerelease, v2.VERSION_PIN + "-rc")
         assert upgrade.version_of(prerelease) is None
         cases = (
             ("opencode v2.2.6", "2.2.6"),
@@ -1837,7 +2809,7 @@ def test_version_parsing_rejects_substrings():
         )
         for text, expected in cases:
             assert v2.parse_opencode_version(text) == expected, (text, expected)
-        assert upgrade.api_version('{"version":"2.2.60"}',
+        assert upgrade.api_version('{"version":"' + superstring + '"}',
                                    v2.VERSION_PIN)[0] is False
         assert upgrade.api_version('{"version":"' + v2.VERSION_PIN + '"}',
                                    v2.VERSION_PIN)[0] is True
@@ -2045,7 +3017,7 @@ def test_tui_smoke_missing_script_is_named_failure():
             v2.VERSION_PIN, "0.8.1")
         assert ok is False
         assert "script-not-available" in detail
-        evidence = os.path.join(root, ".scratch", "v2-canary-" + v2.VERSION_PIN,
+        evidence = os.path.join(upgrade.canary_root(root, v2.VERSION_PIN),
                                 "tui-smoke.txt")
         assert os.path.isfile(evidence)
     finally:
@@ -2734,8 +3706,14 @@ def test_registry_probe_timeout_returns_none():
 
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    # Safety net: if a test writes state without `_tmp`, it lands in repo
+    # scratch, never the host's XDG state dir. Each test starts from (and is
+    # restored to) this baseline.
+    baseline = os.path.join(REPO, ".scratch", "test-tmp-state")
+    os.environ.setdefault("OPENCODE_UPGRADE_STATE_HOME", baseline)
     failed = 0
     for test in tests:
+        saved = os.environ.get("OPENCODE_UPGRADE_STATE_HOME")
         try:
             test()
             print(f"PASS {test.__name__}")
@@ -2745,6 +3723,11 @@ def main():
         except Exception as exc:  # noqa: BLE001
             failed += 1
             print(f"FAIL {test.__name__}: {type(exc).__name__}: {exc}")
+        finally:
+            if saved is None:
+                os.environ.pop("OPENCODE_UPGRADE_STATE_HOME", None)
+            else:
+                os.environ["OPENCODE_UPGRADE_STATE_HOME"] = saved
     print(f"\n{len(tests) - failed}/{len(tests)} passed")
     return 1 if failed else 0
 

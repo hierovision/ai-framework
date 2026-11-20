@@ -27,7 +27,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import time
 import uuid
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -127,28 +126,28 @@ def wait_for_agent_ids(binary, expected, timeout=None):
     Returns `(live, missing, detail)`. `live` is None only when the API never
     returned a parseable payload. OpenCode 2.2.7 no longer makes agent.list
     wait for a location to finish loading, so a single immediate probe can be
-    empty even when the configured agents are about to appear.
+    empty even when the configured agents are about to appear. The bounded
+    polling is the shared `opencode_v2.wait_for` helper.
     """
     timeout = AGENT_POLL_TIMEOUT if timeout is None else timeout
-    deadline = time.monotonic() + timeout
-    polls = 0
-    last_live = None
-    last_detail = "agent api unavailable"
-    while True:
-        polls += 1
+    state = {"live": None, "detail": "agent api unavailable"}
+
+    def probe():
         live, detail = live_agent_ids(binary)
-        last_detail = detail
+        state["detail"] = detail
         if live is not None:
-            last_live = live
-            missing = expected - live
-            if not missing:
-                return live, set(), f"{detail} polls={polls}"
-        if time.monotonic() >= deadline:
-            if last_live is None:
-                return None, None, f"{last_detail} polls={polls}"
-            return (last_live, expected - last_live,
-                    f"{last_detail} polls={polls}")
-        time.sleep(AGENT_POLL_INTERVAL)
+            state["live"] = live
+            if not (expected - live):
+                return live
+        return None
+
+    _value, polls, timed_out = v2.wait_for(probe, timeout, AGENT_POLL_INTERVAL)
+    live = state["live"]
+    detail = (f"{state['detail']} polls={polls} "
+              f"timeout={float(timeout):g}s timed_out={timed_out}")
+    if live is None:
+        return None, None, detail
+    return live, expected - live, detail
 
 
 def check_agents(framework, consumer, binary=None, timeout=None):
