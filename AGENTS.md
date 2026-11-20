@@ -37,4 +37,6 @@ state or process detail — propose an ADR instead of adding prose here.
    yarn-global `@opencode/cli`; upgrade with `opencode upgrade <target>
    --method yarn`; keep the default `~/.config/opencode` root. The canary and
    `check --pins-only` are the pre-merge gates. Never reintroduce a versioned
-   wrapper or hand-edit a pin seam (ADR-0017).
+   wrapper or hand-edit a pin seam (ADR-0017). The `upgrade --auto` /
+   `--auto-merge` lane is opt-in and never bypasses the canary, pin, local
+   pre-PR, or `check --pr` gates.

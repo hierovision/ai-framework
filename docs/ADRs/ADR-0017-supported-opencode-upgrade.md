@@ -179,6 +179,30 @@ auto-apply change.
 The `--channel patch`, `--auto`, `--auto-merge`, and detached-supervisor lanes
 are **not** delivered by this amendment; they remain open plan items.
 
+## 2026-11-20 amendment — patch channel and opt-in auto-merge
+
+`upgrade --channel patch` resolves the newest `X.Y.Z` inside the pinned `X.Y`
+and never a minor or major. An explicit `--to` wins; when no newer patch
+exists the command exits 0 with an `already current` / `no newer patch`
+message and does not run the plan or canary.
+
+`upgrade --to <patch> --auto` composes the existing gates rather than
+bypassing them: plan → canary → prepare (clean lockfiles, local four suites +
+pins) → `check --pr` → PR. With `--auto-merge` it additionally enables
+`gh pr merge --auto --squash` only when **all** of these hold: the target is a
+patch inside the pinned `X.Y`; the Phase 1 manifest is present and
+`machine_diff` is true for the full PR diff (generated writes plus any
+branch-commit/staged path); the canary passes; the tracked tree is clean; and
+the PR base is `main` with main ancestry. The upgrade branch is the current
+checkout — "main" means PR base/ancestry, never a literal current branch.
+
+Refusals leave the PR open, print the reason, and record the decision in
+`.scratch/opencode-v2/auto-merge-<pin>.json`; minor/major targets and
+non-machine diffs always stop at PR ready. Auto-merge is opt-in, never a
+default. Rollback remains manual (no automatic rollback change), and the
+detached supervisor/resume/`last-run.md` lanes are not part of this
+amendment.
+
 ## Sources
 
 - Owner directive 2026-11-02 (supported path; yarn global; V1 shadowed; thin

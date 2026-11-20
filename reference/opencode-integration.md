@@ -127,6 +127,23 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
   runs the official `opencode upgrade`, and post-smokes (`--version`,
   `/api/info`, agents, plugin loader, observer API). It refuses the retired
   versioned layout and prints the migration commands instead.
+- `upgrade --channel patch` — resolve the newest `X.Y.Z` inside the pinned
+  `X.Y` (never a minor/major; explicit `--to` wins). No newer patch exits 0
+  with `already current` / `no newer patch` and runs no plan or canary.
+- `upgrade --to <patch> --auto` — one-command pre-merge: plan → canary →
+  prepare (clean lockfiles, local suites + pins) → `check --pr` → PR. The
+  Phase 1 gate runs **inside `prepare` in this lane** and, on a resumed or
+  direct call, `auto_pre_merge` runs it before the PR if no gate evidence
+  exists; no gate is skipped. Without `--auto-merge` it exits 0 at the PR URL
+  with the canary/CI summary.
+  `--auto-merge` is opt-in and additionally enables
+  `gh pr merge --auto --squash`, but only when the target is a patch in the
+  pinned `X.Y`, the Phase 1 manifest is present and `machine_diff` is true for
+  the **full PR diff**, the canary passes, the tracked tree is clean, and the
+  PR base is `main` with main ancestry (the checkout may be the upgrade
+  branch). A refusal leaves the PR open, prints the reason, and records it in
+  `.scratch/opencode-v2/auto-merge-<pin>.json`; minor/major and non-machine
+  diffs always stop at PR ready. Merge is user-initiated by default.
 
 **State and evidence (2026-11-20).** Upgrade state and evidence live under
 `$XDG_STATE_HOME/opencode-upgrade` (default

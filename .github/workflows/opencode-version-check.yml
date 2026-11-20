@@ -64,13 +64,17 @@ jobs:
           print("A newer OpenCode release is available.\n")
           print(f"- pinned: `{data['pinned']}`")
           print(f"- latest: `{data['latest']}`\n")
-          print("Run the pre-merge gate, then the supported live upgrade:\n")
+          print("Run the one-command pre-merge (plan -> canary -> prepare -> "
+                "check --pr -> PR), then the supported live upgrade:\n")
           print("```sh")
-          print(f"python3 scripts/opencode_upgrade.py upgrade --to {data['latest']}")
+          print(f"python3 scripts/opencode_upgrade.py upgrade --to {data['latest']} --auto")
+          print("# patch lane: upgrade --channel patch --auto "
+                "(never a minor/major)")
           print(f"opencode upgrade {data['latest']} --method yarn")
           print("```\n")
-          print("The canary is the pre-merge gate; the official upgrade is "
-                "owner-run; see ADR-0017.")
+          print("`--auto` does not bypass the canary/pins/prepare gates; "
+                "auto-merge is opt-in and patch/machine-only. The official "
+                "upgrade is owner-run; see ADR-0017.")
           PY
           version=$(python3 -c 'import json; print(json.load(open(".scratch/opencode-v2/version-check.json"))["latest"])')
           title="OpenCode upgrade available: $version"
