@@ -2498,7 +2498,14 @@ def verify(args):
     stage = prior.get("failure_stage")
     if artifact_verified(prior) is True:
         shadow = shadow_state(home, link, target)
-        if shadow["shadow_ok"]:
+        live = version_of(command)
+        expected_config = os.path.join(home, ".config", "opencode")
+        command_config = config_root_of(command)
+        command_ok = (
+            live == target and command_config is not None
+            and os.path.realpath(command_config)
+            == os.path.realpath(expected_config))
+        if shadow["shadow_ok"] and command_ok:
             print(f"already verified: {target} evidence={source}")
             state = read_state(args.repo)
             if state.get("target") == target and state.get("stage") != "applied":
@@ -2506,8 +2513,11 @@ def verify(args):
                             {"artifact": source, "verified": True}, force=True)
             return 0
         print(f"error: the artifact is verified for {target} but the live "
-              f"default reports {shadow['default_version']} "
-              f"(shadow_ok=False, default={link})", file=sys.stderr)
+              f"default does not match: default={link} "
+              f"default_version={shadow['default_version']} "
+              f"shadow_ok={shadow['shadow_ok']}; command={command} "
+              f"live={live} config_root={command_config} "
+              f"(expected {expected_config})", file=sys.stderr)
         print(f"run the full apply: {repair_command(target)}", file=sys.stderr)
         return 2
     if not verify_eligible(prior):
@@ -2531,6 +2541,18 @@ def verify(args):
     if observed["running"] is False:
         service["start_exit"] = _service_action(command, "start")
         service["started_by_verify"] = service["start_exit"] == 0
+        if not service["started_by_verify"]:
+            print(f"error: `service start` for {command} exited "
+                  f"{service['start_exit']}; refusing to smoke without a "
+                  "service", file=sys.stderr)
+            print(f"service: before={service['before']['running']} "
+                  f"start_exit={service['start_exit']} "
+                  f"started_by_verify={service['started_by_verify']} "
+                  f"stopped_after={service['stopped_after']}",
+                  file=sys.stderr)
+            print(f"run the full apply: {repair_command(target)}",
+                  file=sys.stderr)
+            return 2
     try:
         try:
             checks = post_upgrade_smoke(args, target, command=command)

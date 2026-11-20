@@ -1917,6 +1917,79 @@ def test_service_state_classifies_status_output():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_verify_refuses_failed_service_start():
+    """AC2: a failed start refuses before any smoke or artifact rewrite."""
+    root = _tmp("upgrade-verify-start-fails-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(root, target)
+    _write(artifact, json.dumps(_failed_artifact(target, "api")) + "\n")
+    before = open(artifact, "rb").read()
+    upgrade.write_state(root, target, "prepared")
+    calls = []
+    real = upgrade.post_upgrade_smoke
+    upgrade.post_upgrade_smoke = lambda *a, **k: calls.append("smoke") or []
+    try:
+        with _service_patch(running=False, start_exit=3):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.verify(
+                    _args(root, to=target, home=fixture["home"]))
+        assert rc == 2, out.getvalue()
+        assert "service start" in out.getvalue()
+        assert "start_exit=3" in out.getvalue(), out.getvalue()
+        assert "started_by_verify=False" in out.getvalue(), out.getvalue()
+        assert upgrade.repair_command(target) in out.getvalue()
+        assert calls == []
+        assert open(artifact, "rb").read() == before
+        assert glob.glob(artifact + ".failed-*") == []
+        assert upgrade.read_state(root)["stage"] == "prepared"
+    finally:
+        upgrade.post_upgrade_smoke = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_already_verified_refuses_divergent_default_bin():
+    """AC2: the fast path checks the actual --default-bin, not only the link."""
+    target = v2.VERSION_PIN
+    root = _tmp("upgrade-verify-divergent-bin-")
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    artifact = upgrade.apply_artifact_path(root, target)
+    try:
+        _write(artifact, json.dumps(_verified_artifact(target)) + "\n")
+        upgrade.write_state(root, target, "prepared")
+        wrong = _other_version()
+        divergent = os.path.join(root, "divergent-opencode")
+        _stub_binary(divergent, wrong, fixture["config"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.verify(_args(root, to=target, home=fixture["home"],
+                                      default_bin=divergent))
+        assert rc == 2, out.getvalue()
+        assert f"live={wrong}" in out.getvalue(), out.getvalue()
+        assert upgrade.repair_command(target) in out.getvalue()
+        assert upgrade.read_state(root)["stage"] == "prepared"
+
+        # A target-version binary under a foreign config root is also refused.
+        foreign = os.path.join(root, "elsewhere", "opencode")
+        os.makedirs(os.path.dirname(foreign))
+        _stub_binary(foreign, target, os.path.join(root, "elsewhere"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.verify(_args(root, to=target, home=fixture["home"],
+                                      default_bin=foreign))
+        assert rc == 2, out.getvalue()
+        assert "config_root=" in out.getvalue(), out.getvalue()
+        assert upgrade.read_state(root)["stage"] == "prepared"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_verify_service_path_against_fake_cli():
     """AC2: the real status/start/stop path owns only its own service."""
     target = v2.VERSION_PIN
@@ -2124,6 +2197,27 @@ def test_verify_treats_shadow_config_root_without_checks_as_full_apply():
         assert calls == []
     finally:
         upgrade.post_upgrade_smoke = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_status_healthy_without_artifact_names_full_apply():
+    """AC1: `up to date` requires a verified artifact, even on a healthy host."""
+    root = _tmp("upgrade-status-no-artifact-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, default_version=target,
+                           package_version=target)
+    try:
+        _evidence(root, target)
+        upgrade.write_state(root, target, "applied")
+        with _path_front(fixture["yarn_bin"]):
+            payload = upgrade.status_payload(_args(root, home=fixture["home"]))
+        assert payload["live"] == target
+        assert payload["shadow_ok"] is True
+        assert payload["canary_blocker"] is False
+        assert payload["artifact_verified"] is None
+        assert payload["next"] == upgrade.repair_command(target), payload["next"]
+        assert payload["next"] != "up to date"
+    finally:
         shutil.rmtree(root, ignore_errors=True)
 
 
