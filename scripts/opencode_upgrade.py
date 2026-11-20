@@ -9,7 +9,8 @@ upgrade workflow around it:
   check     offline pin seams (--pins-only), registry drift (--remote), or the
             local/manual canary gate (--pr; not CI-enforced)
   plan      target compatibility matrix + breaking-change notes; no writes
-  prepare   bump every seam, plugin peer/lockfile roots, and the ADR amendment
+  prepare   bump every seam, clean plugin lockfiles, and the ADR amendment;
+            write the diff manifest; --open-pr runs the local pre-PR gate first
   canary    install the candidate in scratch + full canary + plugin typechecks
   prune     remove old scratch prefixes/canary/compat dirs (--keep N)
   verify    re-run the full post-smoke for a smoke-only failed apply; no
@@ -33,6 +34,7 @@ script).
 import argparse
 import contextlib
 import datetime
+import difflib
 import fcntl
 import glob
 import json
@@ -44,6 +46,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 
@@ -65,6 +68,11 @@ V1_BIN = os.path.expanduser(
     "~/.config/yarn/global/node_modules/opencode-ai/bin/opencode.exe")
 MIGRATION_APPLY_TIMEOUT = 900
 MIGRATION_APPLY_POLL_INTERVAL = 0.5
+CLEAN_LOCKFILE_TIMEOUT = 600
+PRE_PR_SUITE_TIMEOUT = 1800
+PRE_PR_SUITES = ("test_opencode_upgrade.py", "test_opencode_v2_canary.py",
+                 "test_opencode_v2_post_smoke.py",
+                 "test_stage_opencode_config.py")
 
 
 # --- small helpers -----------------------------------------------------------
@@ -1543,8 +1551,14 @@ def lockfile_delta(repo, paths):
 
 
 def prepare_failure_artifact(repo, target, stage, exc, completed, restored,
-                             lockfiles=None):
-    """Durable record of a prepare failure after mutation began."""
+                             lockfiles=None, manifest=None, gate=None):
+    """Durable record of a prepare failure after mutation began.
+
+    `stage` names the failed check (a seam/ADR stage, `lockfile:<plugin>`, a
+    `suite:<file>`, `pins-only`, or `pre-pr-gate`). The manifest (when built)
+    and the gate evidence (when the gate ran) are deterministic payloads — no
+    extra timestamps beyond the artifact's own `at`.
+    """
     path = os.path.join(repo, ".scratch", "opencode-v2",
                         f"prepare-{target}-failure.json")
     payload = {
@@ -1559,8 +1573,182 @@ def prepare_failure_artifact(repo, target, stage, exc, completed, restored,
                      "state remains at its prior completed stage"),
         "at": now_iso(),
     }
+    if manifest is not None:
+        payload["manifest"] = manifest
+    if gate is not None:
+        payload["gate"] = gate
     write_json(path, payload)
     return path
+
+
+# --- Phase 1: clean lockfiles, diff manifest, local pre-PR gate -------------
+
+class PrepGateError(RuntimeError):
+    """A local pre-PR gate failure that names the failed check."""
+
+    def __init__(self, stage, detail):
+        super().__init__(detail)
+        self.stage = stage
+
+
+MACHINE_EXACT_PATHS = frozenset({
+    "README.md",
+    "reference/opencode-integration.md",
+    "docs/ADRs/ADR-0014-opencode-v2-upgrade.md",
+})
+MACHINE_PLUGIN_FILES = frozenset({"package.json", "package-lock.json",
+                                  "README.md"})
+PIN_LINE_RE = re.compile(r'^VERSION_PIN = "\d+\.\d+\.\d+"$')
+
+
+def clean_lockfile(directory, name, timeout=CLEAN_LOCKFILE_TIMEOUT):
+    """Generate and verify a plugin lockfile in a fresh temp copy.
+
+    The real plugin directory is only read (`package.json`); the lockfile is
+    generated with `npm install --package-lock-only --include=optional` and
+    then validated with `npm ci` in the same throwaway tree. No existing
+    `node_modules` is used and the real lockfile is not incrementally mutated —
+    the 2.2.7 regression was missing optional platform packages after an
+    incremental `npm install`.
+
+    Returns `{"plugin", "lockfile", "text", "clean"}`; raises RuntimeError on
+    a nonzero command, a missing lockfile, or a failed `npm ci`.
+    """
+    package_json = os.path.join(directory, "package.json")
+    if not os.path.isfile(package_json):
+        raise RuntimeError(f"missing {package_json}")
+    with tempfile.TemporaryDirectory(prefix=f"lockfile-{name}-") as tmp:
+        shutil.copy2(package_json, os.path.join(tmp, "package.json"))
+        generated = run(["npm", "install", "--package-lock-only",
+                         "--include=optional", "--no-audit", "--no-fund",
+                         "--silent"], cwd=tmp, timeout=timeout)
+        if generated.returncode != 0:
+            raise RuntimeError(
+                f"clean lockfile generation failed for {name}: "
+                f"{(generated.stderr or '')[-300:]}")
+        lock = os.path.join(tmp, "package-lock.json")
+        if not os.path.isfile(lock):
+            raise RuntimeError(
+                f"npm did not write package-lock.json for {name} in {tmp}")
+        validation = run(["npm", "ci", "--include=optional", "--no-audit",
+                          "--no-fund", "--silent"], cwd=tmp, timeout=timeout)
+        if validation.returncode != 0:
+            raise RuntimeError(
+                f"npm ci validation failed for {name}: "
+                f"{(validation.stderr or '')[-300:]}")
+        with open(lock, encoding="utf-8") as fh:
+            text = fh.read()
+    return {"plugin": name, "lockfile": os.path.join(directory,
+                                                     "package-lock.json"),
+            "text": text, "clean": True}
+
+
+def changed_line_entries(old, new):
+    """`[{"op": "+"|"-", "text": ...}]` for a minimal line diff."""
+    rows = []
+    for line in difflib.unified_diff((old or "").splitlines(),
+                                     (new or "").splitlines(),
+                                     n=0, lineterm=""):
+        if line.startswith(("+++", "---", "@@")):
+            continue
+        if line[:1] in ("+", "-"):
+            rows.append({"op": line[0], "text": line[1:]})
+    return rows
+
+
+def manifest_from_generated(target, generated):
+    """Deterministic diff manifest for the files prepare generated.
+
+    `generated` is `[(rel_path, old_text, new_text)]`. Rows are sorted by path
+    and carry added/removed counts; `scripts/opencode_v2.py` also carries the
+    changed lines so the classifier can prove only `VERSION_PIN` moved. No
+    timestamps or hashes that vary between runs are included.
+    """
+    rows = []
+    for rel, old, new in sorted(generated, key=lambda row: row[0]):
+        lines = changed_line_entries(old, new)
+        row = {"path": rel,
+               "added": sum(1 for line in lines if line["op"] == "+"),
+               "removed": sum(1 for line in lines if line["op"] == "-")}
+        if rel == "scripts/opencode_v2.py":
+            row["lines"] = lines
+        rows.append(row)
+    return {"target": target, "files": rows}
+
+
+def machine_path(path):
+    """True for a path the machine-only pin bump may touch."""
+    if path in MACHINE_EXACT_PATHS:
+        return True
+    parts = (path or "").split("/")
+    return (len(parts) == 3 and parts[0] == "plugins"
+            and parts[1] in PLUGIN_DIRS and parts[2] in MACHINE_PLUGIN_FILES)
+
+
+def machine_diff(manifest):
+    """`(machine, reasons)` for a prepare diff manifest.
+
+    Any path outside the pin seams / plugin manifests+lockfiles / README /
+    reference / ADR-0014 amendment makes the diff non-machine. `scripts/
+    opencode_v2.py` is allowlisted only for changed `VERSION_PIN` lines, so an
+    arbitrary code edit there is rejected. A harness (test/canary/post-smoke/
+    orchestrator) path is always rejected.
+    """
+    reasons = []
+    for row in (manifest or {}).get("files") or []:
+        path = row.get("path") or ""
+        if path == "scripts/opencode_v2.py":
+            changed = [line for line in row.get("lines") or []
+                       if line.get("op") in ("+", "-")]
+            if not changed:
+                reasons.append(f"{path}: changed without a recorded pin line")
+            for line in changed:
+                text = str(line.get("text") or "")
+                if not PIN_LINE_RE.match(text):
+                    reasons.append(
+                        f"{path}: non-pin hunk {line.get('op')}{text!r}")
+        elif not machine_path(path):
+            reasons.append(f"{path}: not a machine-only path")
+    return (not reasons, reasons)
+
+
+def prepare_manifest_path(repo, target):
+    return os.path.join(repo, ".scratch", "opencode-v2",
+                        f"prepare-{target}-manifest.json")
+
+
+def run_pre_pr_gate(args, target):
+    """Run the four opencode suites + `check --pins-only` before any git/gh.
+
+    Each command runs in the repo with the active interpreter. Raises
+    `PrepGateError` naming the failed check; returns the passing evidence list.
+    """
+    checks = []
+    for name in PRE_PR_SUITES:
+        argv = [sys.executable, os.path.join(HERE, name)]
+        try:
+            proc = run(argv, cwd=args.repo, timeout=PRE_PR_SUITE_TIMEOUT)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise PrepGateError(f"suite:{name}",
+                                f"{type(exc).__name__}: {exc}")
+        if proc.returncode != 0:
+            detail = ((proc.stdout or "") + (proc.stderr or "")).strip()
+            raise PrepGateError(f"suite:{name}",
+                                detail[-400:] or f"exit {proc.returncode}")
+        checks.append({"check": f"suite:{name}", "ok": True,
+                       "detail": "passed"})
+    argv = [sys.executable, os.path.join(HERE, "opencode_upgrade.py"),
+            "check", "--pins-only", "--repo", args.repo]
+    try:
+        proc = run(argv, cwd=args.repo, timeout=PRE_PR_SUITE_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise PrepGateError("pins-only", f"{type(exc).__name__}: {exc}")
+    if proc.returncode != 0:
+        detail = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        raise PrepGateError("pins-only",
+                            detail[-400:] or f"exit {proc.returncode}")
+    checks.append({"check": "pins-only", "ok": True, "detail": "passed"})
+    return checks
 
 
 def prepare(args):
@@ -1595,12 +1783,16 @@ def prepare(args):
     completed = []
     originals = {}
     lock_paths = []
+    generated = []
+    manifest = None
+    gate_checks = None
     stage = "seams"
     try:
         for seams, path, old, new in changes:
             originals.setdefault(path, old)
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(new)
+            generated.append((os.path.relpath(path, args.repo), old, new))
             completed.append({"action": "seam",
                               "path": os.path.relpath(path, args.repo)})
         stage = "plugin-json"
@@ -1609,7 +1801,8 @@ def prepare(args):
             data = read_json(path)
             if not isinstance(data, dict):
                 raise RuntimeError(f"missing {rel}")
-            originals.setdefault(path, open(path, encoding="utf-8").read())
+            old_text = open(path, encoding="utf-8").read()
+            originals.setdefault(path, old_text)
             data["version"] = target
             if has_cli:
                 for key in ("dependencies", "peerDependencies"):
@@ -1622,27 +1815,35 @@ def prepare(args):
                     peers["@opentui/core"] = opentui
                     peers["@opentui/solid"] = opentui
             write_json(path, data)
+            generated.append(
+                (rel, old_text, open(path, encoding="utf-8").read()))
             completed.append({"action": "plugin-json", "path": rel})
-        stage = "npm-install"
         for name in PLUGIN_DIRS:
+            stage = f"lockfile:{name}"
             directory = os.path.join(args.repo, "plugins", name)
             lock = os.path.join(directory, "package-lock.json")
-            if os.path.isfile(lock):
-                lock_paths.append(os.path.relpath(lock, args.repo))
-            proc = run(["npm", "install", "--no-audit", "--no-fund",
-                        "--silent"], cwd=directory, timeout=300)
-            if proc.returncode != 0:
-                raise RuntimeError(
-                    f"npm install failed in {directory}: "
-                    f"{(proc.stderr or '')[-300:]}")
-            completed.append({"action": "npm-install",
-                              "path": os.path.relpath(directory, args.repo)})
+            old_lock = (open(lock, encoding="utf-8").read()
+                        if os.path.isfile(lock) else None)
+            result = clean_lockfile(directory, name)
+            originals.setdefault(lock, old_lock)
+            with open(lock, "w", encoding="utf-8") as fh:
+                fh.write(result["text"])
+            rel = os.path.relpath(lock, args.repo)
+            if rel not in lock_paths:
+                lock_paths.append(rel)
+            generated.append((rel, old_lock or "", result["text"]))
+            completed.append({"action": "lockfile", "path": rel,
+                              "clean": True})
         stage = "adr-amendment"
         adr = adr_path(args.repo)
+        old_adr = (open(adr, encoding="utf-8").read()
+                   if os.path.isfile(adr) else "")
         if os.path.isfile(adr):
-            originals.setdefault(adr, open(adr, encoding="utf-8").read())
+            originals.setdefault(adr, old_adr)
         append_adr_amendment(args.repo, target, opentui, summary or {},
                              pending=pending)
+        generated.append((os.path.relpath(adr, args.repo), old_adr,
+                          open(adr, encoding="utf-8").read()))
         completed.append({"action": "adr-amendment",
                           "path": os.path.relpath(adr, args.repo)})
         stage = "verify"
@@ -1660,34 +1861,45 @@ def prepare(args):
         if failed:
             raise RuntimeError("seam verification failed: " + ", ".join(
                 path for path, _ok, _detail in failed))
+        stage = "manifest"
+        manifest = manifest_from_generated(target, generated)
+        if args.open_pr:
+            stage = "pre-pr-gate"
+            gate_checks = run_pre_pr_gate(args, target)
         stage = "state"
         write_state(args.repo, target, "prepared")
+        write_json(prepare_manifest_path(args.repo, target), manifest)
     except (OSError, subprocess.SubprocessError, RuntimeError,
             ValueError) as exc:
+        failed_stage = getattr(exc, "stage", None) or stage
         restored = []
         for path, original in originals.items():
             try:
-                with open(path, "w", encoding="utf-8") as fh:
-                    fh.write(original)
+                if original is None:
+                    if os.path.exists(path):
+                        os.remove(path)
+                else:
+                    with open(path, "w", encoding="utf-8") as fh:
+                        fh.write(original)
                 restored.append(os.path.relpath(path, args.repo))
             except OSError:
                 pass
         artifact = prepare_failure_artifact(
-            args.repo, target, stage, exc, completed, restored,
-            lockfiles=lock_paths)
-        print(f"error: prepare failed at {stage}: {type(exc).__name__}: {exc}",
-              file=sys.stderr)
+            args.repo, target, failed_stage, exc, completed, restored,
+            lockfiles=lock_paths, manifest=manifest, gate=gate_checks)
+        print(f"error: prepare failed at {failed_stage}: "
+              f"{type(exc).__name__}: {exc}", file=sys.stderr)
         print(f"prepare failure artifact: {artifact}", file=sys.stderr)
         print("state preserved at its prior completed stage; restore guidance "
               "is in the artifact", file=sys.stderr)
         return 1
     if args.open_pr:
-        return open_pr(args, target, opentui, summary or {})
+        return open_pr(args, target, opentui, summary or {}, manifest=manifest)
     print(f"next: opencode upgrade {target} --method yarn")
     return 0
 
 
-def pr_body(target, opentui, summary, notes):
+def pr_body(target, opentui, summary, notes, manifest=None):
     gates = " ".join(f"{k}={v}" for k, v in (summary.get("gates") or {}).items())
     lines = [
         f"## OpenCode {target} upgrade",
@@ -1705,6 +1917,15 @@ def pr_body(target, opentui, summary, notes):
         lines.append(f"- v{tag}: {section.splitlines()[0] if section else ''}")
     if not notes:
         lines.append("- none found in the release range")
+    if manifest is not None:
+        machine, reasons = machine_diff(manifest)
+        lines += ["", "### Diff manifest",
+                  f"- machine-only: {'yes' if machine else 'no'}"]
+        for row in manifest.get("files") or []:
+            lines.append(f"- `{row.get('path')}`: "
+                         f"+{row.get('added', 0)}/-{row.get('removed', 0)}")
+        for reason in reasons:
+            lines.append(f"- non-machine: {reason}")
     lines += [
         "",
         "### Apply (owner, supported install)",
@@ -1721,19 +1942,23 @@ def pr_body(target, opentui, summary, notes):
     return "\n".join(lines)
 
 
-def open_pr(args, target, opentui, summary):
+def open_pr(args, target, opentui, summary, manifest=None):
     notes = breaking_notes(fetch_releases(), v2.VERSION_PIN, target)
     body_path = os.path.join(args.repo, ".scratch", "opencode-v2",
                              f"pr-body-{target}.md")
     os.makedirs(os.path.dirname(body_path), exist_ok=True)
     with open(body_path, "w", encoding="utf-8") as fh:
-        fh.write(pr_body(target, opentui, summary, notes))
+        fh.write(pr_body(target, opentui, summary, notes, manifest=manifest))
     files = [seam["path"] for seam in SEAMS] + [row[0] for row in PLUGIN_JSONS]
     files.append(os.path.relpath(adr_path(args.repo), args.repo))
     lockfiles = [os.path.relpath(p, args.repo) for p in glob.glob(
         os.path.join(args.repo, "plugins", "*", "package-lock.json"))]
     files += lockfiles
-    subprocess.run(["git", "-C", args.repo, "add"] + files, check=False)
+    added = run(["git", "-C", args.repo, "add"] + files, timeout=120)
+    if added.returncode != 0:
+        print(f"error: git add failed: {(added.stderr or '')[-300:]}",
+              file=sys.stderr)
+        return 2
     staged = run(["git", "-C", args.repo, "diff", "--cached", "--quiet"],
                  timeout=30)
     if staged.returncode != 0:

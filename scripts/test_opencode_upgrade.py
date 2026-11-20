@@ -359,7 +359,7 @@ def test_prepare_dry_run_and_update():
         _evidence(root, "2.3.0")
         before = open(os.path.join(root, "README.md")).read()
         upgrade.run = lambda argv, **kwargs: subprocess.CompletedProcess(
-            argv, 0 if argv[:2] == ["npm", "install"] else 1, "", "")
+            argv, 1, "", "")
         peers = _json_file(root, {
             "@opencode/plugin": "2.3.0",
             "@opentui/core": ">=0.8.0",
@@ -369,7 +369,7 @@ def test_prepare_dry_run_and_update():
         with contextlib.redirect_stdout(io.StringIO()):
             assert upgrade.prepare(_args(**{**vars(args), "dry_run": True})) == 0
         assert open(os.path.join(root, "README.md")).read() == before
-        with contextlib.redirect_stdout(io.StringIO()):
+        with _clean_lockfiles(), contextlib.redirect_stdout(io.StringIO()):
             assert upgrade.prepare(args) == 0
         text = open(os.path.join(root, "README.md")).read()
         assert "OpenCode V2 `2.3.0`" in text, text
@@ -2873,10 +2873,10 @@ def test_prepare_allow_pending_canary_is_explicit_bypass():
             "@opentui/solid": ">=0.8.0",
             "solid-js": ">=1.9.0"}, "peers.json")
         upgrade.run = lambda argv, **kwargs: subprocess.CompletedProcess(
-            argv, 0 if argv[:2] == ["npm", "install"] else 1, "", "")
+            argv, 1, "", "")
         args = _args(root, to="2.3.0", opentui="0.8.2", plugin_json=peers,
                      allow_pending_canary=True)
-        with contextlib.redirect_stdout(io.StringIO()), \
+        with _clean_lockfiles(), contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
             assert upgrade.prepare(args) == 0
         assert "2.3.0" in open(os.path.join(root, "README.md")).read()
@@ -3455,6 +3455,44 @@ def _prepare_peers(root):
         "solid-js": ">=1.9.0"}, "peers.json")
 
 
+def _lockfile_for(directory, name):
+    data = json.load(open(os.path.join(directory, "package.json")))
+    version = data.get("version")
+    peers = data.get("peerDependencies") or {}
+    packages = {
+        "": {"version": version,
+             "peerDependencies": {key: peers[key]
+                                  for key in ("@opentui/core", "@opentui/solid")
+                                  if key in peers}},
+        "node_modules/@opencode/plugin": {"version": version},
+    }
+    return json.dumps({"name": name, "version": version,
+                       "lockfileVersion": 3, "requires": True,
+                       "packages": packages}, indent=2) + "\n"
+
+
+@contextlib.contextmanager
+def _clean_lockfiles(fail=None, exc=None, calls=None):
+    """Fake the clean lockfile generation/validation for prepare tests."""
+    real = upgrade.clean_lockfile
+    calls = calls if calls is not None else []
+
+    def fake(directory, name, timeout=600):
+        calls.append({"plugin": name, "directory": directory})
+        if fail == name:
+            raise (exc or RuntimeError(
+                f"clean lockfile validation failed for {name}"))
+        return {"plugin": name,
+                "lockfile": os.path.join(directory, "package-lock.json"),
+                "text": _lockfile_for(directory, name), "clean": True}
+
+    upgrade.clean_lockfile = fake
+    try:
+        yield calls
+    finally:
+        upgrade.clean_lockfile = real
+
+
 def _prepare_originals(root):
     return {
         "readme": open(os.path.join(root, "README.md")).read(),
@@ -3476,29 +3514,29 @@ def _assert_prepare_restored(root, originals):
     assert open(os.path.join(root, "docs", "ADRs",
                              "ADR-0014-opencode-v2-upgrade.md")).read() == \
         originals["adr"]
+    for name in upgrade.PLUGIN_DIRS:
+        assert not os.path.isfile(os.path.join(
+            root, "plugins", name, "package-lock.json")), name
 
 
-def test_prepare_npm_timeout_writes_failure_artifact_and_restores():
+def test_prepare_lockfile_timeout_writes_failure_artifact_and_restores():
     root = _tmp("upgrade-prepare-timeout-")
-    real_run = upgrade.run
     try:
         _fixture(root)
         _evidence(root, "2.3.0")
         peers = _prepare_peers(root)
         originals = _prepare_originals(root)
-
-        def timeout(*args, **kwargs):
-            raise subprocess.TimeoutExpired(args[0], 300)
-
-        upgrade.run = timeout
-        with contextlib.redirect_stdout(io.StringIO()), \
+        with _clean_lockfiles(
+                fail="delegation-observer",
+                exc=subprocess.TimeoutExpired("npm", 600)), \
+                contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
             assert upgrade.prepare(_args(root, to="2.3.0", opentui="0.8.2",
                                          plugin_json=peers)) == 1
         artifact = os.path.join(root, ".scratch", "opencode-v2",
                                 "prepare-2.3.0-failure.json")
         data = json.load(open(artifact))
-        assert data["stage"] == "npm-install"
+        assert data["stage"] == "lockfile:delegation-observer", data["stage"]
         assert "TimeoutExpired" in data["exception"]
         assert data["restored"], data
         assert data["completed"], data
@@ -3506,7 +3544,6 @@ def test_prepare_npm_timeout_writes_failure_artifact_and_restores():
         assert not os.path.isfile(upgrade.state_path(root)) or \
             upgrade.read_state(root).get("stage") != "prepared"
     finally:
-        upgrade.run = real_run
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -3526,7 +3563,7 @@ def test_prepare_adr_failure_restores_written_files():
             raise OSError("adr write failed")
 
         upgrade.append_adr_amendment = fail
-        with contextlib.redirect_stdout(io.StringIO()), \
+        with _clean_lockfiles(), contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
             assert upgrade.prepare(_args(root, to="2.3.0", opentui="0.8.2",
                                          plugin_json=peers)) == 1
@@ -3541,6 +3578,278 @@ def test_prepare_adr_failure_restores_written_files():
         upgrade.run = real_run
         upgrade.append_adr_amendment = real_adr
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_clean_lockfile_validates_in_a_fresh_copy():
+    """AC6: generation and `npm ci` happen in a throwaway tree, not the repo."""
+    root = _tmp("upgrade-clean-lockfile-")
+    directory = os.path.join(root, "plugins", "auto-compact-at-threshold")
+    _write(os.path.join(directory, "package.json"),
+           json.dumps({"name": "auto-compact-at-threshold",
+                       "version": "2.3.0"}) + "\n")
+    recorded = []
+    real_run = upgrade.run
+
+    def fake_run(argv, cwd=None, **kwargs):
+        recorded.append((list(argv), cwd))
+        if argv[:2] == ["npm", "install"]:
+            _write(os.path.join(cwd, "package-lock.json"),
+                   '{"lockfileVersion": 3, "packages": {}}\n')
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    upgrade.run = fake_run
+    try:
+        result = upgrade.clean_lockfile(directory, "auto-compact-at-threshold")
+        assert result["clean"] is True
+        assert result["text"].startswith("{")
+        assert not os.path.isfile(os.path.join(directory,
+                                               "package-lock.json"))
+    finally:
+        upgrade.run = real_run
+    assert [argv[:2] for argv, _cwd in recorded] == [["npm", "install"],
+                                                     ["npm", "ci"]], recorded
+    for argv, cwd in recorded:
+        assert cwd and os.path.realpath(cwd) != os.path.realpath(directory)
+        assert "lockfile-auto-compact-at-threshold-" in cwd, cwd
+        assert "--include=optional" in argv, argv
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prepare_blocks_pr_on_lockfile_failure():
+    """AC6: a clean-lockfile failure restores the tree and opens no PR."""
+    root = _tmp("upgrade-prepare-lockfile-fail-")
+    try:
+        _fixture(root)
+        _evidence(root, "2.3.0")
+        peers = _prepare_peers(root)
+        originals = _prepare_originals(root)
+        recorded = []
+        real_run = upgrade.run
+        upgrade.run = lambda argv, **kwargs: (
+            recorded.append(list(argv))
+            or subprocess.CompletedProcess(argv, 0, "", ""))
+        try:
+            with _clean_lockfiles(fail="delegation-observer"), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                rc = upgrade.prepare(_args(root, to="2.3.0", opentui="0.8.2",
+                                           plugin_json=peers, open_pr=True))
+        finally:
+            upgrade.run = real_run
+        assert rc == 1
+        artifact = os.path.join(root, ".scratch", "opencode-v2",
+                                "prepare-2.3.0-failure.json")
+        data = json.load(open(artifact))
+        assert data["stage"] == "lockfile:delegation-observer", data["stage"]
+        _assert_prepare_restored(root, originals)
+        mutating = [argv for argv in recorded if argv[0] == "git"
+                    and argv[3:4] and argv[3] in ("add", "commit", "push")]
+        assert not mutating, mutating
+        assert not [argv for argv in recorded if argv[0] == "gh"], recorded
+        assert not os.path.isfile(os.path.join(
+            root, ".scratch", "opencode-v2", "pr-body-2.3.0.md"))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prepare_blocks_pr_on_suite_failure():
+    """AC6: a suite failure stops before git add/push/PR and restores files."""
+    root = _tmp("upgrade-prepare-suite-fail-")
+    try:
+        _fixture(root)
+        _evidence(root, "2.3.0")
+        peers = _prepare_peers(root)
+        originals = _prepare_originals(root)
+        recorded = []
+        real_run = upgrade.run
+
+        def fake_run(argv, cwd=None, **kwargs):
+            recorded.append(list(argv))
+            failing = ("test_opencode_v2_canary.py" in " ".join(argv)
+                       and argv[0] == sys.executable)
+            return subprocess.CompletedProcess(argv, 1 if failing else 0,
+                                               "", "canary suite failed")
+
+        upgrade.run = fake_run
+        try:
+            with _clean_lockfiles(), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                rc = upgrade.prepare(_args(root, to="2.3.0", opentui="0.8.2",
+                                           plugin_json=peers, open_pr=True))
+        finally:
+            upgrade.run = real_run
+        assert rc == 1
+        artifact = os.path.join(root, ".scratch", "opencode-v2",
+                                "prepare-2.3.0-failure.json")
+        data = json.load(open(artifact))
+        assert data["stage"] == "suite:test_opencode_v2_canary.py", data["stage"]
+        assert data["manifest"]["target"] == "2.3.0", data.get("manifest")
+        assert data["manifest"]["files"], data["manifest"]
+        _assert_prepare_restored(root, originals)
+        suites = [argv for argv in recorded if argv[0] == sys.executable]
+        assert [os.path.basename(argv[1]) for argv in suites] == [
+            "test_opencode_upgrade.py", "test_opencode_v2_canary.py"], suites
+        mutating = [argv for argv in recorded if argv[0] == "git"
+                    and argv[3:4] and argv[3] in ("add", "commit", "push")]
+        assert not mutating, mutating
+        assert not [argv for argv in recorded if argv[0] == "gh"], recorded
+        assert not os.path.isfile(os.path.join(
+            root, ".scratch", "opencode-v2", "pr-body-2.3.0.md"))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prepare_open_pr_gate_runs_before_git():
+    """AC6: suites + pins run before git add/commit/push/create."""
+    root = _tmp("upgrade-prepare-gate-order-")
+    try:
+        _fixture(root)
+        _evidence(root, "2.3.0")
+        peers = _prepare_peers(root)
+        recorded = []
+        real_run = upgrade.run
+
+        def fake_run(argv, cwd=None, **kwargs):
+            recorded.append(list(argv))
+            text = ""
+            if argv[:3] == ["git", "-C", root] and \
+                    argv[3:5] == ["diff", "--cached"]:
+                return subprocess.CompletedProcess(argv, 1, "", "")
+            if argv[:4] == ["git", "-C", root, "branch"]:
+                text = "feat/test\n"
+            return subprocess.CompletedProcess(argv, 0, text, "")
+
+        upgrade.run = fake_run
+        try:
+            with _clean_lockfiles(), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                rc = upgrade.prepare(_args(root, to="2.3.0", opentui="0.8.2",
+                                           plugin_json=peers, open_pr=True))
+        finally:
+            upgrade.run = real_run
+        assert rc == 0
+        commands = [" ".join(argv) for argv in recorded]
+        gate = [i for i, argv in enumerate(recorded)
+                if argv[0] == sys.executable]
+        assert len(gate) == 5, recorded  # four suites + pins
+        first_git = next(i for i, argv in enumerate(recorded)
+                         if argv[0] == "git" and argv[3:4]
+                         and argv[3] in ("add", "commit", "push"))
+        assert max(gate) < first_git, commands
+        assert any(argv[:3] == ["git", "-C", root] and argv[3] == "push"
+                   for argv in recorded), commands
+        assert any(argv[0] == "gh" and argv[1:3] == ["pr", "create"]
+                   for argv in recorded), commands
+        body = open(os.path.join(root, ".scratch", "opencode-v2",
+                                 "pr-body-2.3.0.md"), encoding="utf-8").read()
+        assert "### Diff manifest" in body, body
+        assert "machine-only: yes" in body, body
+        manifest = json.load(open(os.path.join(
+            root, ".scratch", "opencode-v2",
+            "prepare-2.3.0-manifest.json")))
+        assert upgrade.machine_diff(manifest) == (True, []), manifest
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_prepare_manifest_is_deterministic():
+    """AC7: the manifest has no run-varying timestamps and stable rows."""
+    root = _tmp("upgrade-prepare-manifest-")
+    try:
+        _fixture(root)
+        _evidence(root, "2.3.0")
+        peers = _prepare_peers(root)
+        real_run = upgrade.run
+        upgrade.run = lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 1, "", "")
+        try:
+            with _clean_lockfiles(), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                assert upgrade.prepare(_args(root, to="2.3.0", opentui="0.8.2",
+                                             plugin_json=peers)) == 0
+        finally:
+            upgrade.run = real_run
+        path = os.path.join(root, ".scratch", "opencode-v2",
+                            "prepare-2.3.0-manifest.json")
+        first = json.load(open(path))
+        second = json.load(open(path))
+        assert first == second
+        assert json.dumps(first, sort_keys=True) == \
+            json.dumps(second, sort_keys=True)
+        assert "at" not in first and "updated" not in first
+        paths = [row["path"] for row in first["files"]]
+        assert paths == sorted(paths), paths
+        assert "README.md" in paths and "scripts/opencode_v2.py" in paths
+        assert upgrade.machine_diff(first) == (True, []), first
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_machine_diff_allows_pin_bump():
+    """AC7: the generated pin-bump change set is machine-only."""
+    manifest = {"target": "2.3.0", "files": [
+        {"path": "scripts/opencode_v2.py", "added": 1, "removed": 1,
+         "lines": [{"op": "-", "text": 'VERSION_PIN = "2.2.7"'},
+                   {"op": "+", "text": 'VERSION_PIN = "2.3.0"'}]},
+        {"path": "README.md", "added": 3, "removed": 3},
+        {"path": "reference/opencode-integration.md",
+         "added": 4, "removed": 4},
+        {"path": "docs/ADRs/ADR-0014-opencode-v2-upgrade.md",
+         "added": 6, "removed": 0},
+        {"path": "plugins/auto-compact-at-threshold/package.json",
+         "added": 1, "removed": 1},
+        {"path": "plugins/auto-compact-at-threshold/package-lock.json",
+         "added": 2, "removed": 2},
+        {"path": "plugins/delegation-observer/README.md",
+         "added": 1, "removed": 1},
+    ]}
+    assert upgrade.machine_diff(manifest) == (True, [])
+
+
+def test_machine_diff_rejects_harness_fix():
+    """AC7: the 2.2.7 C7/post-smoke fix shape is not machine-only."""
+    manifest = {"target": "2.2.7", "files": [
+        {"path": "scripts/opencode_v2_canary.py", "added": 8, "removed": 3},
+        {"path": "scripts/opencode_v2_post_smoke.py", "added": 5,
+         "removed": 2},
+        {"path": "scripts/opencode_v2.py", "added": 1, "removed": 1,
+         "lines": [{"op": "-", "text": 'VERSION_PIN = "2.2.6"'},
+                   {"op": "+", "text": 'VERSION_PIN = "2.2.7"'}]},
+    ]}
+    machine, reasons = upgrade.machine_diff(manifest)
+    assert machine is False, reasons
+    assert any("opencode_v2_canary.py" in reason for reason in reasons), reasons
+    assert any("opencode_v2_post_smoke.py" in reason for reason in reasons), \
+        reasons
+
+
+def test_machine_diff_rejects_foreign_test_or_doc():
+    """AC7: a test file or unlisted doc change is not machine-only."""
+    for path in ("scripts/test_opencode_upgrade.py", "docs/ROADMAP.md",
+                 "AGENTS.md", ".github/workflows/opencode-version-check.yml"):
+        manifest = {"target": "2.3.0",
+                    "files": [{"path": path, "added": 1, "removed": 1}]}
+        machine, reasons = upgrade.machine_diff(manifest)
+        assert machine is False, (path, reasons)
+        assert any(path in reason for reason in reasons), reasons
+
+
+def test_machine_diff_rejects_pin_file_code_change():
+    """AC7: opencode_v2.py is allowlisted only for the VERSION_PIN line."""
+    manifest = {"target": "2.3.0", "files": [
+        {"path": "scripts/opencode_v2.py", "added": 2, "removed": 0,
+         "lines": [{"op": "+", "text": 'VERSION_PIN = "2.3.0"'},
+                   {"op": "+", "text": "def helper():"}]},
+    ]}
+    machine, reasons = upgrade.machine_diff(manifest)
+    assert machine is False
+    assert any("non-pin hunk" in reason for reason in reasons), reasons
+    no_lines = {"target": "2.3.0",
+                "files": [{"path": "scripts/opencode_v2.py",
+                           "added": 1, "removed": 1}]}
+    assert upgrade.machine_diff(no_lines)[0] is False
 
 
 def test_prepare_failure_preserves_prior_state():
