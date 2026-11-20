@@ -633,6 +633,67 @@ def test_c7_fails_when_agent_marker_never_appears():
         _c7_restore(saved, root)
 
 
+def test_shared_wait_for_is_bounded_and_condition_driven():
+    """AC4: one helper; probe immediately, pass on success, name the timeout."""
+    polls = []
+    value, count, timed_out = v2.wait_for(
+        lambda: polls.append(1) or "ready", timeout=1, interval=0.01)
+    assert (value, count, timed_out) == ("ready", 1, False), (value, count)
+    value, count, timed_out = v2.wait_for(
+        lambda: None, timeout=0, interval=0.01)
+    assert (value, count, timed_out) == (None, 1, True), (value, count)
+
+
+def test_c7_uses_shared_wait_for():
+    """AC4: C7's agent polling goes through the shared bounded helper."""
+    root = _tmp("canary-c7-shared-wait-")
+    saved = _c7_patch(
+        lambda _args, _config, plugin_dir, token: (
+            f'msg="loading plugin" id={os.path.realpath(plugin_dir)} '
+            f'entrypoint=file://{os.path.realpath(plugin_dir)}/index.js\n'
+            f"canary-plugin initialized probe={token}\n", None),
+        agent_sequence=["", '{"data":[{"id":"canary-marker"}]}'])
+    real_wait = v2.wait_for
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs.get("timeout", args[1] if len(args) > 1 else None))
+        return real_wait(*args, **kwargs)
+
+    v2.wait_for = spy
+    try:
+        ok, text = canary.gate_c7(_c7_namespace(root))
+        assert ok is True, text
+        assert calls, "C7 did not use the shared wait helper"
+        assert "agent_api_polls=2" in text, text
+    finally:
+        v2.wait_for = real_wait
+        _c7_restore(saved, root)
+
+
+def test_c7_timeout_evidence_names_timeout_and_polls():
+    """AC4: a never-loading agent list fails with polls + timeout evidence."""
+    root = _tmp("canary-c7-timeout-evidence-")
+    saved_timeout = canary.C7_AGENT_POLL_TIMEOUT
+    saved = _c7_patch(
+        lambda _args, _config, plugin_dir, token: (
+            f'msg="loading plugin" id={os.path.realpath(plugin_dir)} '
+            f'entrypoint=file://{os.path.realpath(plugin_dir)}/index.js\n'
+            f"canary-plugin initialized probe={token}\n", None),
+        agent_sequence=['{"data":[]}'])
+    canary.C7_AGENT_POLL_TIMEOUT = 0
+    try:
+        ok, text = canary.gate_c7(_c7_namespace(root))
+        assert ok is False, text
+        assert "agent_api_polls=1" in text, text
+        assert "agent_api_timeout_s=0" in text, text
+        assert "agent_api_timed_out=True" in text, text
+        assert "C7=FAIL" in text, text
+    finally:
+        canary.C7_AGENT_POLL_TIMEOUT = saved_timeout
+        _c7_restore(saved, root)
+
+
 def test_c7_wipes_out_of_band_sentinel_under_c7():
     """AC-C7: a stale out-of-band sentinel under c7/ is removed before setup.
 

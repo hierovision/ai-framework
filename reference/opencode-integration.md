@@ -4,7 +4,9 @@ Single home for the OpenCode V2 facts this library relies on. The vendor API
 changes; re-verify against the linked docs before relying on any line.
 **Behavioral facts validated 2026-10-26/27 against opencode `2.1.4`; the
 `2.2.7` upgrade passed the canary on 2026-11-17** (evidence under
-`.scratch/v2-canary-2.2.7/`). Notes that cite `2.1.4` are the original probes;
+`.scratch/v2-canary-2.2.7/`, read as the legacy fallback and imported into
+`$XDG_STATE_HOME/opencode-upgrade/v2-canary-2.2.7/` on the first state write).
+Notes that cite `2.1.4` are the original probes;
 the canary revalidated version, service, model catalog, stability, config/
 plugin load, and migration, not every line.
 
@@ -66,7 +68,8 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
 - `canary --to X` — installs into `.scratch/v2-<version>-prefix`, runs C1–C8
   + migration, typechecks/tests the three plugins against the target
   `@opencode/plugin`/OpenTUI, runs a debug-TUI setup smoke, and stops its
-  scratch services. Evidence: `.scratch/v2-canary-<version>/`. Apply requires
+  scratch services. Evidence: `$XDG_STATE_HOME/opencode-upgrade/v2-canary-<version>/`
+  (legacy `.scratch/v2-canary-<version>/` is read as a fallback). Apply requires
   **fresh hardened** evidence (`zero_migration`, `target_only_ids`, and the
   measured migration verdict); legacy/incomplete evidence is refused with the
   exact `canary --to <pin>` command.
@@ -74,11 +77,33 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
   plugin peer/README roots, refreshes lockfiles, and appends the dated ADR
   amendment. `--dry-run` writes nothing; `--open-pr` opens the PR.
 - `prune --keep N` — remove old scratch prefixes/canary/compat dirs.
+- `verify --to <pin>` — the narrow recovery for a **smoke-only** failed apply.
+  It runs the full post-smoke against the explicit repaired default
+  (`--default-bin` / `--link` / `~/.yarn/bin/opencode`), archives the prior
+  artifact under the existing `.failed-<stamp>` / `.previous-<stamp>`
+  convention, writes `verified: true`, and advances state to `applied`. It
+  does **not** back up, install, migrate, or stop a service. When the recorded
+  failure stage is not a post-smoke check (`binary`, `config-root`, `api`,
+  `agents`, `plugin`, `observer`) it refuses and prints the full apply command.
 - `upgrade --to X [--apply] [--resume]` — `check → plan → canary →
   prepare`; with `--apply --drain-acknowledged` it backs up the DB/config,
   runs the official `opencode upgrade`, and post-smokes (`--version`,
   `/api/info`, agents, plugin loader, observer API). It refuses the retired
   versioned layout and prints the migration commands instead.
+
+**State and evidence (2026-11-20).** Upgrade state and evidence live under
+`$XDG_STATE_HOME/opencode-upgrade` (default
+`~/.local/state/opencode-upgrade`; `OPENCODE_UPGRADE_STATE_HOME` overrides it
+for tests): `upgrade-state.json`, `upgrade-<pin>-verify.json`, and
+`v2-canary-<pin>/`. `status`, `check --pr`, and `verify` read the existing
+repo `.scratch` state/canary/verify artifacts as a fallback and import them on
+the first write, so they still work on the 2.2.7 host and from a fresh
+worktree after `rm -rf .scratch`. Pre-upgrade DB/config/package snapshots stay
+under `.scratch/opencode-v2/pre-upgrade-*` (cited by absolute path in the
+artifact). `status` never reports `up to date` while the pinned artifact is
+`verified:false` or state is `prepared`: a post-smoke failure names
+`verify --to <pin>`, any other failure names the full
+`upgrade --to <pin> --apply --drain-acknowledged` command.
 
 `VERSION_PIN` in `scripts/opencode_v2.py` is the single source: CI exports
 `OPENCODE_VERSION` from it, and `check --pins-only` enforces the remaining

@@ -394,6 +394,50 @@ def test_check_agents_live_polls_until_agents_load():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_check_agents_live_uses_shared_wait_for():
+    """AC4: post-smoke agent polling goes through the shared bounded helper."""
+    root = _tmp("postsmoke-agents-shared-wait-")
+    real_wait = v2.wait_for
+    calls = []
+    try:
+        expected = sorted(name[:-3] for name in os.listdir(
+            os.path.join(REPO, "agents")) if name.endswith(".md"))
+        empty = json.dumps({"data": []})
+        full = json.dumps({"data": [{"id": i} for i in expected]})
+        binary = _sequence_stub(root, "opencode", [empty, full])
+
+        def spy(*args, **kwargs):
+            calls.append(kwargs.get("timeout", args[1] if len(args) > 1 else None))
+            return real_wait(*args, **kwargs)
+
+        v2.wait_for = spy
+        ok, detail = post_smoke.check_agents_live(binary, REPO, timeout=2)
+        assert ok is True, detail
+        assert calls, "post-smoke did not use the shared wait helper"
+        assert "polls=2" in detail, detail
+    finally:
+        v2.wait_for = real_wait
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_check_agents_live_timeout_is_named():
+    """AC4: a never-loading agent list fails with named timeout/polls evidence."""
+    root = _tmp("postsmoke-agents-timeout-")
+    try:
+        expected = sorted(name[:-3] for name in os.listdir(
+            os.path.join(REPO, "agents")) if name.endswith(".md"))
+        empty = json.dumps({"data": []})
+        binary = _sequence_stub(root, "opencode", [empty])
+        ok, detail = post_smoke.check_agents_live(binary, REPO, timeout=0)
+        assert ok is False
+        assert "polls=1" in detail, detail
+        assert "timeout=0s" in detail, detail
+        assert "timed_out=True" in detail, detail
+        assert expected[0] in detail, detail
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_check_version_is_exact():
     root = _tmp("postsmoke-version-")
     try:

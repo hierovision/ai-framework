@@ -654,23 +654,24 @@ def wait_for_c7_agent_marker(args, env, timeout=None, interval=None):
 
     OpenCode 2.2.7 no longer makes `agent.list` wait for a location to finish
     loading. The first response after `service start` can therefore be empty
-    even though the configured marker agent is about to load. Poll a
-    condition, never a fixed sleep, and return the last response plus the
-    number of polls for evidence.
+    even though the configured marker agent is about to load. The polling is
+    the shared `opencode_v2.wait_for` helper; this wrapper supplies the
+    per-poll CLI call and keeps the last response plus the poll count for
+    evidence.
     """
     timeout = C7_AGENT_POLL_TIMEOUT if timeout is None else timeout
     interval = C7_AGENT_POLL_INTERVAL if interval is None else interval
-    deadline = time.monotonic() + timeout
-    polls = 0
-    last = None
-    while True:
-        polls += 1
-        last = v2_run(args, env, ["api", "GET", "/api/agent"], timeout=60)
-        if last.returncode == 0 and "canary-marker" in (last.stdout or ""):
-            return last, polls
-        if time.monotonic() >= deadline:
-            return last, polls
-        time.sleep(interval)
+    last = {"proc": None}
+
+    def probe():
+        proc = v2_run(args, env, ["api", "GET", "/api/agent"], timeout=60)
+        last["proc"] = proc
+        if proc.returncode == 0 and "canary-marker" in (proc.stdout or ""):
+            return proc
+        return None
+
+    value, polls, _timed_out = v2.wait_for(probe, timeout, interval)
+    return value or last["proc"], polls
 
 
 def gate_c7(args):
@@ -761,6 +762,7 @@ def gate_c7(args):
         log_text, plugin_dir, token)
     marker_agent = bool(cfg) and "canary-marker" in (cfg.stdout or "")
     marker_agent_api = bool(agents) and "canary-marker" in (agents.stdout or "")
+    agent_api_timed_out = not marker_agent_api
     loader_loaded = bool(loaded)
     loader_marker = bool(markers)
     loader_ok = (loader_error is None and not failures
@@ -795,6 +797,8 @@ def gate_c7(args):
         "plugin_list_loader_proof=False",
         f"agent_api_exit={agents.returncode if agents else 'missing'}",
         f"agent_api_polls={agent_polls}",
+        f"agent_api_timeout_s={C7_AGENT_POLL_TIMEOUT}",
+        f"agent_api_timed_out={agent_api_timed_out}",
         f"agent_api_has_marker={marker_agent_api}",
         f"service_error={service_error or 'none'}",
         f"loader_probe_error={loader_error or 'none'}",

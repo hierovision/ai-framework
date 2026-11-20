@@ -126,6 +126,47 @@ started on any failure, including a post-smoke failure or exception, and
 leaves it running only when the post-smoke succeeds; the canary stops its
 scratch service in a `finally`.
 
+## 2026-11-20 amendment — verify-only recovery and external state
+
+A failed post-smoke after a completed backup/install/migration previously cost
+a full re-apply (the 2.8 GB backup plus the migration rehearsal) even when
+only a smoke check was wrong. The 2.2.7 apply hit exactly that: `/api/agent`
+can return its first response before a location finishes loading, so a
+single-shot agent assertion failed a healthy install. `verify --to <pin>` is
+the narrow recovery action:
+
+- It runs the **full** post-smoke (binary, config root, API, agents, plugin
+  loader, observer) against the explicit repaired default
+  (`--default-bin`, `--link`, then `~/.yarn/bin/opencode`).
+- It does **not** back up, install, migrate, stop a service, or require
+  `--drain-acknowledged`.
+- It archives the prior artifact under the existing
+  `.failed-<stamp>` / `.previous-<stamp>` convention, writes `verified: true`,
+  and advances state to `applied`.
+- It refuses, naming the full
+  `upgrade --to <pin> --apply --drain-acknowledged` command, when the recorded
+  failure stage is anything other than a post-smoke check (`binary`,
+  `config-root`, `api`, `agents`, `plugin`, `observer`) — install, shadow, and
+  migration failures still need the full apply.
+
+Upgrade state and evidence now live under
+`$XDG_STATE_HOME/opencode-upgrade` (default
+`~/.local/state/opencode-upgrade`): `upgrade-state.json`,
+`upgrade-<pin>-verify.json`, and `v2-canary-<pin>/`. The repo `.scratch`
+state/canary/verify artifacts are read as a fallback and imported on the first
+write, so `status`, `check --pr`, and `verify` survive `rm -rf .scratch` and
+resolve identically from a fresh worktree. Pre-upgrade DB/config/package
+snapshots stay under `.scratch/opencode-v2/pre-upgrade-*` and are cited by
+absolute path in the artifact. `status` never reports `up to date` while the
+pinned artifact is `verified: false` or state is `prepared`: a post-smoke
+failure names `verify --to <pin>`, any other failure names the full apply
+command. The canary C7 and post-smoke agent checks share one bounded
+`wait_for` helper that records `polls` and timeout evidence. There is no
+automatic rollback and no auto-apply change.
+
+The `--channel patch`, `--auto`, `--auto-merge`, and detached-supervisor lanes
+are **not** delivered by this amendment; they remain open plan items.
+
 ## Sources
 
 - Owner directive 2026-11-02 (supported path; yarn global; V1 shadowed; thin

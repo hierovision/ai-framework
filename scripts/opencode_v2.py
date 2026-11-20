@@ -239,6 +239,29 @@ def wait_for_migration(path, timeout, interval=0.5):
         time.sleep(min(interval, max(0.0, timeout - elapsed)))
 
 
+def wait_for(probe, timeout, interval=0.25):
+    """Bounded, condition-driven wait shared by every post-start check.
+
+    Calls `probe()` immediately, then re-probes every `interval` seconds until
+    it returns a truthy value or `timeout` elapses. No fixed pre-probe sleep.
+    Returns `(value, polls, timed_out)` with `value` the last probe result, so
+    a caller can report the last observation on a timeout.
+    """
+    timeout = max(0.0, float(timeout))
+    deadline = time.monotonic() + timeout
+    polls = 0
+    value = None
+    while True:
+        polls += 1
+        value = probe()
+        if value:
+            return value, polls, False
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return value, polls, True
+        time.sleep(min(interval, remaining))
+
+
 def migration_membership(src_ids, target_ids, baseline_ids=(), run_ids=()):
     """Measured migration membership (never a vacuous set identity).
 
@@ -902,3 +925,41 @@ def apply_env(env, updates):
     out = dict(env or os.environ)
     out.update(updates)
     return out
+
+
+# --- upgrade state / evidence ------------------------------------------------
+
+STATE_APP = "opencode-upgrade"
+
+
+def state_home():
+    """Authoritative upgrade state/evidence root (never repo `.scratch`).
+
+    Precedence: `OPENCODE_UPGRADE_STATE_HOME` (hermetic test seam) >
+    `$XDG_STATE_HOME/opencode-upgrade` > `~/.local/state/opencode-upgrade`.
+    A fresh worktree of the same repo resolves the same root, so state and
+    evidence survive `rm -rf .scratch`.
+    """
+    override = os.environ.get("OPENCODE_UPGRADE_STATE_HOME")
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+    xdg = os.environ.get("XDG_STATE_HOME")
+    base = (os.path.abspath(os.path.expanduser(xdg)) if xdg
+            else os.path.join(os.path.expanduser("~"), ".local", "state"))
+    return os.path.join(base, STATE_APP)
+
+
+def evidence_candidates(repo, name):
+    """Authoritative path first, then the two legacy repo `.scratch` shapes."""
+    return [os.path.join(state_home(), name),
+            os.path.join(repo, ".scratch", "opencode-v2", name),
+            os.path.join(repo, ".scratch", name)]
+
+
+def existing_evidence(repo, name):
+    """First existing evidence path for `name`; the authoritative one if none."""
+    candidates = evidence_candidates(repo, name)
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
