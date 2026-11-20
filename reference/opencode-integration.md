@@ -76,15 +76,22 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
 - `prepare --to X` — bumps `VERSION_PIN`, the docs/reference/README and
   plugin peer/README roots, refreshes lockfiles, and appends the dated ADR
   amendment. `--dry-run` writes nothing; `--open-pr` opens the PR.
-- `prune --keep N` — remove old scratch prefixes/canary/compat dirs.
+- `prune --keep N` — remove old scratch prefixes/compat dirs and the state-dir
+  `v2-canary-*` evidence beyond `--keep` (the current pin is always kept).
 - `verify --to <pin>` — the narrow recovery for a **smoke-only** failed apply.
   It runs the full post-smoke against the explicit repaired default
   (`--default-bin` / `--link` / `~/.yarn/bin/opencode`), archives the prior
   artifact under the existing `.failed-<stamp>` / `.previous-<stamp>`
   convention, writes `verified: true`, and advances state to `applied`. It
-  does **not** back up, install, migrate, or stop a service. When the recorded
-  failure stage is not a post-smoke check (`binary`, `config-root`, `api`,
-  `agents`, `plugin`, `observer`) it refuses and prints the full apply command.
+  never backs up, installs, or migrates. Before the smoke it reads
+  `service status`: when stopped it starts the service and stops **only the
+  service it started**; when already running it leaves it running. An
+  unreadable status is a refusal — verify never relies on the CLI's implicit
+  service auto-start. It is eligible only for a completed smoke (non-empty
+  `checks`) whose failed stage is one of `binary`, `config-root`, `api`,
+  `agents`, `plugin`, `observer`; install, shadow (`config-root` with no
+  checks), migration, and `exception:smoke` failures are refused with the full
+  apply command.
 - `upgrade --to X [--apply] [--resume]` — `check → plan → canary →
   prepare`; with `--apply --drain-acknowledged` it backs up the DB/config,
   runs the official `opencode upgrade`, and post-smokes (`--version`,
@@ -101,8 +108,9 @@ the first write, so they still work on the 2.2.7 host and from a fresh
 worktree after `rm -rf .scratch`. Pre-upgrade DB/config/package snapshots stay
 under `.scratch/opencode-v2/pre-upgrade-*` (cited by absolute path in the
 artifact). `status` never reports `up to date` while the pinned artifact is
-`verified:false` or state is `prepared`: a post-smoke failure names
-`verify --to <pin>`, any other failure names the full
+`verified:false` or state is `prepared`; `up to date` requires the pinned
+artifact to be `verified:true` regardless of the state file. A post-smoke
+failure names `verify --to <pin>`, any other failure names the full
 `upgrade --to <pin> --apply --drain-acknowledged` command.
 
 `VERSION_PIN` in `scripts/opencode_v2.py` is the single source: CI exports

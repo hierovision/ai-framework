@@ -138,16 +138,25 @@ the narrow recovery action:
 - It runs the **full** post-smoke (binary, config root, API, agents, plugin
   loader, observer) against the explicit repaired default
   (`--default-bin`, `--link`, then `~/.yarn/bin/opencode`).
-- It does **not** back up, install, migrate, stop a service, or require
-  `--drain-acknowledged`.
+- It does **not** back up, install, or migrate, and it does not require
+  `--drain-acknowledged`. It reads `service status` first: when stopped it
+  starts the service, runs the smoke, and stops **only the service it
+  started**; when already running it leaves it running. An unreadable status
+  is a refusal, because verify never relies on the CLI's implicit service
+  auto-start.
+- It is eligible only when the artifact carries a completed smoke (non-empty
+  `checks`) and the failed stage is one of `binary`, `config-root`, `api`,
+  `agents`, `plugin`, `observer`. A shadow repair's `config-root` failure has
+  empty `checks`, and `exception:smoke` is not a completed check, so both are
+  refused.
 - It archives the prior artifact under the existing
   `.failed-<stamp>` / `.previous-<stamp>` convention, writes `verified: true`,
   and advances state to `applied`.
 - It refuses, naming the full
-  `upgrade --to <pin> --apply --drain-acknowledged` command, when the recorded
-  failure stage is anything other than a post-smoke check (`binary`,
-  `config-root`, `api`, `agents`, `plugin`, `observer`) — install, shadow, and
-  migration failures still need the full apply.
+  `upgrade --to <pin> --apply --drain-acknowledged` command, for any other
+  failure stage — install, shadow, and migration failures still need the full
+  apply. Its already-verified fast path also refuses (rc 2) when the live
+  default or shadow no longer matches the target.
 
 Upgrade state and evidence now live under
 `$XDG_STATE_HOME/opencode-upgrade` (default
@@ -158,11 +167,14 @@ write, so `status`, `check --pr`, and `verify` survive `rm -rf .scratch` and
 resolve identically from a fresh worktree. Pre-upgrade DB/config/package
 snapshots stay under `.scratch/opencode-v2/pre-upgrade-*` and are cited by
 absolute path in the artifact. `status` never reports `up to date` while the
-pinned artifact is `verified: false` or state is `prepared`: a post-smoke
-failure names `verify --to <pin>`, any other failure names the full apply
-command. The canary C7 and post-smoke agent checks share one bounded
-`wait_for` helper that records `polls` and timeout evidence. There is no
-automatic rollback and no auto-apply change.
+pinned artifact is `verified: false` or state is `prepared`; `up to date`
+requires the pinned artifact to be `verified: true` regardless of the state
+file. A post-smoke failure names `verify --to <pin>`, any other failure names
+the full apply command. `prune --keep N` also bounds the state-dir
+`v2-canary-*` evidence (the current pin is always kept). The canary C7 and
+post-smoke agent checks share one bounded `wait_for` helper that records
+`polls` and timeout evidence. There is no automatic rollback and no
+auto-apply change.
 
 The `--channel patch`, `--auto`, `--auto-merge`, and detached-supervisor lanes
 are **not** delivered by this amendment; they remain open plan items.

@@ -656,8 +656,8 @@ def wait_for_c7_agent_marker(args, env, timeout=None, interval=None):
     loading. The first response after `service start` can therefore be empty
     even though the configured marker agent is about to load. The polling is
     the shared `opencode_v2.wait_for` helper; this wrapper supplies the
-    per-poll CLI call and keeps the last response plus the poll count for
-    evidence.
+    per-poll CLI call and keeps the last response, the poll count, and the
+    helper's `timed_out` verdict for evidence.
     """
     timeout = C7_AGENT_POLL_TIMEOUT if timeout is None else timeout
     interval = C7_AGENT_POLL_INTERVAL if interval is None else interval
@@ -670,8 +670,8 @@ def wait_for_c7_agent_marker(args, env, timeout=None, interval=None):
             return proc
         return None
 
-    value, polls, _timed_out = v2.wait_for(probe, timeout, interval)
-    return value or last["proc"], polls
+    value, polls, timed_out = v2.wait_for(probe, timeout, interval)
+    return value or last["proc"], polls, timed_out
 
 
 def gate_c7(args):
@@ -739,6 +739,7 @@ def gate_c7(args):
     v2.assert_scratch_db(env["OPENCODE_DB"], root)
     cfg = plugins = agents = None
     agent_polls = 0
+    agent_api_timed_out = None
     service_error = None
     plugin_list_error = None
     try:
@@ -746,7 +747,8 @@ def gate_c7(args):
         v2_run(args, env, ["service", "set", "port", port], timeout=30)
         v2_run(args, env, ["service", "start"], timeout=60)
         cfg = v2_run(args, env, ["debug", "config"], timeout=60)
-        agents, agent_polls = wait_for_c7_agent_marker(args, env)
+        agents, agent_polls, agent_api_timed_out = wait_for_c7_agent_marker(
+            args, env)
     except (OSError, subprocess.SubprocessError) as exc:
         service_error = f"{type(exc).__name__}: {exc}"
     # Diagnostic only: an empty/nonzero `plugin list` must never decide C7.
@@ -762,7 +764,6 @@ def gate_c7(args):
         log_text, plugin_dir, token)
     marker_agent = bool(cfg) and "canary-marker" in (cfg.stdout or "")
     marker_agent_api = bool(agents) and "canary-marker" in (agents.stdout or "")
-    agent_api_timed_out = not marker_agent_api
     loader_loaded = bool(loaded)
     loader_marker = bool(markers)
     loader_ok = (loader_error is None and not failures

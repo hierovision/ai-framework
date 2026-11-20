@@ -203,6 +203,20 @@ def parse_version(text):
     return v2.parse_opencode_version(text)
 
 
+def valid_target(value):
+    """True only for an exact `X.Y.Z` target (no path or range syntax)."""
+    return (isinstance(value, str) and bool(value)
+            and v2.parse_opencode_version(value) == value)
+
+
+def target_error(value):
+    """A named error for an unsafe/inexact target, else None."""
+    if valid_target(value):
+        return None
+    return (f"invalid target version {value!r}; expected an exact X.Y.Z "
+            "version (no path separators or ranges)")
+
+
 def gh_env():
     """`gh` must read the user's config even when the V2 wrapper set XDG."""
     env = dict(os.environ)
@@ -982,6 +996,28 @@ def artifact_verified(data):
     return checks_ok and data.get("rolled_back") is False
 
 
+def completed_smoke(artifact):
+    """True when the artifact carries a completed smoke's non-empty checks."""
+    if not isinstance(artifact, dict):
+        return False
+    checks = artifact.get("checks")
+    return isinstance(checks, dict) and bool(checks)
+
+
+def verify_eligible(artifact):
+    """Only a completed smoke's six named checks are `verify`-eligible.
+
+    A shadow `config-root` failure records `failure_stage: "config-root"` with
+    empty `checks` (the smoke never ran), so the stage name alone must not
+    authorize a verify-only repair. `exception:smoke` is deliberately refused:
+    an exception during the smoke is not a completed check.
+    """
+    if not isinstance(artifact, dict):
+        return False
+    return (artifact.get("failure_stage") in SMOKE_FAILURE_STAGES
+            and completed_smoke(artifact))
+
+
 def apply_artifact_path(repo, target):
     """Authoritative apply-artifact path (XDG state dir)."""
     return os.path.join(v2.state_home(), f"upgrade-{target}-verify.json")
@@ -1112,6 +1148,7 @@ def status_payload(args):
     canary = canary_summary(args.repo, pinned)
     verify, verify_path = read_apply_artifact(args.repo, pinned)
     verify = verify or {}
+    artifact_status = artifact_verified(verify) if verify else None
     next_command = "up to date"
     repair_needed = (bool(shadow["target_installed"])
                      and shadow["supported_config"]
@@ -1120,33 +1157,30 @@ def status_payload(args):
     apply_next = (repair_needed
                   or (bool(shadow["target_installed"])
                       and install["supported"] and live == pinned))
-    apply_unverified = (
-        bool(verify)
-        and artifact_verified(verify) is False
-        and state.get("target") == pinned
-        and state.get("stage") == "prepared")
-    apply_incomplete = (
-        state.get("target") == pinned
-        and state.get("stage") == "prepared"
-        and not apply_unverified)
+    # A `verified:false` pinned artifact is never `up to date`, regardless of
+    # what the state file says (it may be missing or name another target).
+    apply_unverified = artifact_status is False
+    state_prepared = (state.get("target") == pinned
+                      and state.get("stage") == "prepared")
+    apply_incomplete = state_prepared and not apply_unverified
+    verified_pin = artifact_status is True
+    can_verify = (bool(verify) and verify_eligible(verify)
+                  and live == pinned and shadow["shadow_ok"])
     failure_stage = verify.get("failure_stage")
     if not install["supported"] and not repair_needed:
         next_command = ("migrate: python3 scripts/stage_opencode_config.py "
                         "--backup; opencode upgrade " + pinned
                         + " --method yarn")
     elif apply_unverified:
-        next_command = (
-            verify_command(pinned)
-            if (live == pinned and shadow["shadow_ok"]
-                and failure_stage in SMOKE_FAILURE_STAGES)
-            else repair_command(pinned))
+        next_command = verify_command(pinned) if can_verify \
+            else repair_command(pinned)
     elif canary_blocker and apply_next:
         next_command = canary_command(pinned)
     elif apply_incomplete:
-        next_command = (
-            verify_command(pinned)
-            if (bool(verify) and live == pinned and shadow["shadow_ok"])
-            else repair_command(pinned))
+        next_command = (verify_command(pinned)
+                        if (verified_pin and live == pinned
+                            and shadow["shadow_ok"])
+                        else repair_command(pinned))
     elif repair_needed:
         next_command = repair_command(pinned)
     elif live != pinned:
@@ -1158,6 +1192,9 @@ def status_payload(args):
           and state.get("stage") in RESUMABLE_STAGES):
         next_command = ("python3 scripts/opencode_upgrade.py upgrade --to "
                         + state["target"] + " --resume")
+    elif not verified_pin:
+        # `up to date` requires the pinned artifact's `verified:true`.
+        next_command = repair_command(pinned)
     return {
         "pinned": pinned,
         "live": live,
@@ -1172,6 +1209,8 @@ def status_payload(args):
         "canary_reason": (canary or {}).get("reason"),
         "apply_unverified": apply_unverified,
         "apply_incomplete": apply_incomplete,
+        "artifact_verified": artifact_status,
+        "verify_eligible": verify_eligible(verify) if verify else False,
         "failure_stage": failure_stage,
         "verify_command": verify_command(pinned),
         "apply_artifact": verify_path,
@@ -1351,10 +1390,15 @@ def check(args):
 
 
 def plan(args):
-    target = args.to or latest_version(args.repo, refresh=args.refresh)
+    target = (args.to if args.to is not None
+              else latest_version(args.repo, refresh=args.refresh))
     if not target:
         print("error: no target version (pass --to or --latest)",
               file=sys.stderr)
+        return 2
+    error = target_error(target)
+    if error:
+        print(f"error: {error}", file=sys.stderr)
         return 2
     if target == v2.VERSION_PIN and not args.force:
         print(f"already current: {target}")
@@ -1520,7 +1564,11 @@ def prepare_failure_artifact(repo, target, stage, exc, completed, restored,
 
 
 def prepare(args):
-    target = args.to or v2.VERSION_PIN
+    target = args.to if args.to is not None else v2.VERSION_PIN
+    error = target_error(target)
+    if error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     peers = read_json(args.plugin_json) if args.plugin_json else \
         plugin_peers(target, args.repo)
     opentui = resolve_opentui(target, args.opentui, peers or {})
@@ -1905,7 +1953,11 @@ def tui_smoke(args, target, opentui):
 
 
 def canary(args):
-    target = args.to or v2.VERSION_PIN
+    target = args.to if args.to is not None else v2.VERSION_PIN
+    error = target_error(target)
+    if error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     default_version, error = measure_default_version(args)
     if error:
         print(f"canary: FAIL — {error}", file=sys.stderr)
@@ -2379,18 +2431,61 @@ def apply_supported(args, target):
         return 1
 
 
+def service_state(command):
+    """Explicit `service status` for the repaired default.
+
+    Returns `{"running": True|False|None, "detail", "exit"}`; `running` is
+    None when the output cannot be classified. `None` is a refusal in
+    `verify`: it never relies on the CLI's implicit service auto-start.
+    """
+    try:
+        proc = run([command, "service", "status"], timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"running": None, "detail": f"{type(exc).__name__}: {exc}",
+                "exit": None}
+    detail = (proc.stdout or proc.stderr or "").strip()[:200]
+    if re.search(r"\bstopp?ed\b|\bnot running\b|\binactive\b", detail,
+                 re.IGNORECASE):
+        running = False
+    elif proc.returncode == 0 and detail and (
+            detail.startswith("http") or detail.startswith("{")):
+        running = True
+    else:
+        running = None
+    return {"running": running, "detail": detail, "exit": proc.returncode}
+
+
+def _service_action(command, action, timeout=60):
+    """Run `service <action>`; return the exit code, or None on spawn failure."""
+    try:
+        return run([command, "service", action], timeout=timeout).returncode
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def verify(args):
     """Repair a smoke-only failed apply without backup/install/migration.
 
-    The recorded artifact must be `verified: false` with a post-smoke failure
-    stage (`binary`, `config-root`, `api`, `agents`, `plugin`, `observer`).
-    The full post-smoke then runs against the explicit repaired default; the
-    prior artifact is archived, the new artifact records `verified: true`, and
-    state advances to `applied`. An install, shadow, or migration failure is
-    refused with the full apply command. An already-verified artifact is
-    confirmed without a second smoke (and advances a stale `prepared` state).
+    The recorded artifact must be `verified: false` with a completed
+    post-smoke (`checks` non-empty) whose failed stage is one of `binary`,
+    `config-root`, `api`, `agents`, `plugin`, `observer`. The full post-smoke
+    then runs against the explicit repaired default; the prior artifact is
+    archived, the new artifact records `verified: true`, and state advances to
+    `applied`.
+
+    The service precondition is explicit: read `service status`; when it says
+    stopped, start it and stop only the service `verify` started. When it is
+    already running, leave it running. An unreadable status is a refusal —
+    never rely on the CLI's implicit auto-start. Install, shadow, migration,
+    and `exception:smoke` failures are refused with the full apply command. An
+    already-verified artifact is confirmed without a second smoke only when
+    the live default still reports the target with an intact shadow.
     """
-    target = args.to or v2.VERSION_PIN
+    target = args.to if args.to is not None else v2.VERSION_PIN
+    error = target_error(target)
+    if error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     artifact = import_apply_artifact(args.repo, target)
     prior, source = read_apply_artifact(args.repo, target)
     if prior is None:
@@ -2398,27 +2493,53 @@ def verify(args):
               "repo .scratch fallback", file=sys.stderr)
         print(f"run the full apply: {repair_command(target)}", file=sys.stderr)
         return 2
-    stage = prior.get("failure_stage")
-    if artifact_verified(prior) is True:
-        print(f"already verified: {target} evidence={source}")
-        state = read_state(args.repo)
-        if state.get("target") == target and state.get("stage") != "applied":
-            write_state(args.repo, target, "applied",
-                        {"artifact": source, "verified": True}, force=True)
-        return 0
-    if stage not in SMOKE_FAILURE_STAGES:
-        print(f"error: the recorded failure stage for {target} is "
-              f"{stage or 'unknown'}; `verify` repairs only a post-smoke "
-              "failure (binary, config-root, api, agents, plugin, observer)",
-              file=sys.stderr)
-        print(f"run the full apply: {repair_command(target)}", file=sys.stderr)
-        return 2
     home, link = live_paths(args)
     command = default_bin_path(args)
+    stage = prior.get("failure_stage")
+    if artifact_verified(prior) is True:
+        shadow = shadow_state(home, link, target)
+        if shadow["shadow_ok"]:
+            print(f"already verified: {target} evidence={source}")
+            state = read_state(args.repo)
+            if state.get("target") == target and state.get("stage") != "applied":
+                write_state(args.repo, target, "applied",
+                            {"artifact": source, "verified": True}, force=True)
+            return 0
+        print(f"error: the artifact is verified for {target} but the live "
+              f"default reports {shadow['default_version']} "
+              f"(shadow_ok=False, default={link})", file=sys.stderr)
+        print(f"run the full apply: {repair_command(target)}", file=sys.stderr)
+        return 2
+    if not verify_eligible(prior):
+        reason = (f"the recorded failure stage is {stage or 'unknown'}"
+                  if stage not in SMOKE_FAILURE_STAGES else
+                  "the artifact has no completed post-smoke checks")
+        print(f"error: cannot verify {target}: {reason}; `verify` repairs "
+              "only the six post-smoke checks (binary, config-root, api, "
+              "agents, plugin, observer)", file=sys.stderr)
+        print(f"run the full apply: {repair_command(target)}", file=sys.stderr)
+        return 2
+    observed = service_state(command)
+    service = {"before": observed, "started_by_verify": False,
+               "start_exit": None, "stopped_after": False, "stop_exit": None}
+    if observed["running"] is None:
+        print(f"error: cannot classify `service status` for {command}: "
+              f"{observed['detail'] or 'empty output'}; refusing to rely on "
+              "implicit service auto-start", file=sys.stderr)
+        print(f"run the full apply: {repair_command(target)}", file=sys.stderr)
+        return 2
+    if observed["running"] is False:
+        service["start_exit"] = _service_action(command, "start")
+        service["started_by_verify"] = service["start_exit"] == 0
     try:
-        checks = post_upgrade_smoke(args, target, command=command)
-    except (OSError, subprocess.SubprocessError) as exc:
-        checks = [(stage, False, f"{type(exc).__name__}: {exc}")]
+        try:
+            checks = post_upgrade_smoke(args, target, command=command)
+        except (OSError, subprocess.SubprocessError) as exc:
+            checks = [(stage, False, f"{type(exc).__name__}: {exc}")]
+    finally:
+        if service["started_by_verify"]:
+            service["stop_exit"] = _service_action(command, "stop")
+            service["stopped_after"] = service["stop_exit"] == 0
     failed = [name for name, ok, _detail in checks if not ok]
     verified = not failed
     payload = apply_artifact(
@@ -2427,6 +2548,7 @@ def verify(args):
         verified=verified, db=prior.get("database_backup"))
     payload["verify_only"] = True
     payload["prior_artifact"] = source
+    payload["service"] = service
     try:
         path = import_apply_artifact(args.repo, target)
         write_apply_artifact(path, payload)
@@ -2440,7 +2562,9 @@ def verify(args):
         write_state(args.repo, target, "applied",
                     {"artifact": path, "verified": True}, force=True)
         print(f"UPGRADE VERIFIED {target} evidence={path} "
-              f"archived={payload.get('archived_artifact')}")
+              f"archived={payload.get('archived_artifact')} "
+              f"service_started={service['started_by_verify']} "
+              f"service_stopped={service['stopped_after']}")
         return 0
     write_state(args.repo, target, "prepared",
                 {"artifact": path, "verified": False}, force=True)
@@ -2483,9 +2607,14 @@ def prune(args):
 
 
 def upgrade(args):
-    target = args.to or latest_version(args.repo, refresh=args.refresh)
+    target = (args.to if args.to is not None
+              else latest_version(args.repo, refresh=args.refresh))
     if not target:
         print("error: no target version", file=sys.stderr)
+        return 2
+    error = target_error(target)
+    if error:
+        print(f"error: {error}", file=sys.stderr)
         return 2
     home, link = live_paths(args)
     install = topology(home, link)
