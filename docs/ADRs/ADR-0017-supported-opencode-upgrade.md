@@ -214,10 +214,13 @@ started/updated. The child waits up to 600 s for the **TUI** to exit
 `--service` and supervision processes); on timeout it records `timeout` and
 performs no service stop, backup, install, or migration. After the TUI exits,
 the child confirms the merged `main` `VERSION_PIN` equals the target
-(`pin-check` on mismatch), stops the service, and runs the existing apply
-directly (`apply_supported`, not the whole upgrade pipeline). Phases:
-`waiting-tui`, `timeout`, `pin-check`, `stopping-service`, `applying`,
-`done`/`failed`. It never passes `--force`.
+(`pin-check` on mismatch) and that the local `scripts/` and `agents/` trees
+match `origin/main` with no uncommitted changes in those paths (`tree-check`
+on divergence; an unresolvable `origin/main` fails closed). Only then does it
+stop the service and run the existing apply directly (`apply_supported`, not
+the whole upgrade pipeline). Phases: `waiting-tui`, `timeout`, `pin-check`,
+`tree-check`, `stopping-service`, `applying`, `done`/`failed`. It never passes
+`--force`.
 
 The auto lane uses the same supervisor: after a successful auto-merge with
 `--drain-acknowledged` it spawns the detached child; without the drain

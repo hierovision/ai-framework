@@ -3367,15 +3367,22 @@ def auto_pre_merge(args, target):
         want_detach = (getattr(args, "detach", False)
                        or (getattr(args, "auto", False)
                            and getattr(args, "auto_merge", False)))
-        if want_detach and getattr(args, "drain_acknowledged", False):
-            rc = spawn_supervisor(args, target, merge_commit=merge_commit)
-            write_last_run(
-                target, "supervisor-started", source_version=v2.VERSION_PIN,
-                artifact=manifest_path, merge_commit=merge_commit,
-                next_step="close the TUI; the detached supervisor continues")
-            return rc
         apply_cmd = (f"python3 scripts/opencode_upgrade.py upgrade --to "
                      f"{target} --apply --drain-acknowledged")
+        if want_detach and getattr(args, "drain_acknowledged", False):
+            rc = spawn_supervisor(args, target, merge_commit=merge_commit)
+            if rc == 0:
+                write_last_run(
+                    target, "supervisor-started",
+                    source_version=v2.VERSION_PIN, artifact=manifest_path,
+                    merge_commit=merge_commit,
+                    next_step="close the TUI; the detached supervisor continues")
+            else:
+                write_last_run(
+                    target, "supervisor-failed",
+                    source_version=v2.VERSION_PIN, artifact=manifest_path,
+                    merge_commit=merge_commit, next_step=apply_cmd)
+            return rc
         print(f"apply: {apply_cmd}")
         write_last_run(
             target, "merged", source_version=v2.VERSION_PIN,
@@ -3453,6 +3460,9 @@ def supervisor_next_command(data):
     if phase == "pin-check":
         return (f"merged main pin does not match {target}; run the full apply "
                 f"after the merge lands (log: {log})")
+    if phase == "tree-check":
+        return ("checkout does not match origin/main; switch/pull and retry: "
+                f"{detach} (log: {log})")
     if not alive and phase == "waiting-tui":
         return (f"supervisor stopped while waiting for the TUI; close it and "
                 f"rerun: {detach} (log: {log})")
@@ -3527,8 +3537,35 @@ def spawn_supervisor(args, target, merge_commit=None):
     return 0
 
 
+def checkout_matches_main(repo):
+    """`(ok, reason)`: scripts/ and agents/ match origin/main and are clean.
+
+    The smoke runs the local scripts and derives expected agent IDs from the
+    local agents/ corpus, so a checkout that diverges from the merged main
+    must not be applied. Fail closed when origin/main is unresolvable.
+    """
+    ref = run(["git", "-C", repo, "rev-parse", "--verify", "origin/main"],
+              timeout=30)
+    if ref.returncode != 0 or not (ref.stdout or "").strip():
+        return False, "cannot resolve origin/main"
+    dirty = run(["git", "-C", repo, "status", "--porcelain",
+                 "--untracked-files=no", "--", "scripts", "agents"],
+                timeout=30)
+    if dirty.returncode != 0:
+        return False, "cannot read the tracked tree status"
+    if (dirty.stdout or "").strip():
+        return False, "uncommitted changes under scripts/ or agents/"
+    diff = run(["git", "-C", repo, "diff", "--quiet", "origin/main", "--",
+                "scripts", "agents"], timeout=60)
+    if diff.returncode != 0:
+        if diff.returncode == 1:
+            return False, "scripts/ or agents/ differ from origin/main"
+        return False, "cannot diff scripts/ and agents/ against origin/main"
+    return True, None
+
+
 def supervise(args, target):
-    """Child entry: wait for the TUI, confirm the merged pin, then apply."""
+    """Child entry: wait for the TUI, confirm pin + tree, then apply."""
     update_supervisor(target, "waiting-tui", pid=os.getpid())
 
     def no_tui():
@@ -3554,6 +3591,13 @@ def supervise(args, target):
         update_supervisor(target, "pin-check", merged_pin=pin)
         print(f"supervisor: merged main pin is {pin or 'unreadable'}, not "
               f"{target}; refusing to apply (no mutation)", file=sys.stderr)
+        return 2
+    tree_ok, tree_reason = checkout_matches_main(args.repo)
+    if not tree_ok:
+        update_supervisor(target, "tree-check", detail=tree_reason)
+        print(f"supervisor: checkout does not match origin/main "
+              f"({tree_reason}); switch/pull and retry (no mutation)",
+              file=sys.stderr)
         return 2
     home, link = live_paths(args)
     update_supervisor(target, "stopping-service", polls=polls, merged_pin=pin)

@@ -153,9 +153,12 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
   updated. The child waits up to 600 s for the OpenCode **TUI** to exit
   (`tui_processes()` excludes `serve`/`--service`), writes phase `timeout`
   and mutates nothing on expiry, then confirms the merged `main` `VERSION_PIN`
-  equals the target (phase `pin-check` on mismatch), stops the service, and
-  runs the existing apply (phases `waiting-tui`, `stopping-service`,
-  `applying`, `done`/`failed`). It never passes `--force`. After a successful
+  equals the target (phase `pin-check` on mismatch) and that the local
+  `scripts/` + `agents/` trees match `origin/main` with no uncommitted changes
+  there (phase `tree-check` on divergence; unresolvable `origin/main` fails
+  closed). Only then does it stop the service and run the existing apply
+  (phases `waiting-tui`, `tree-check`, `stopping-service`, `applying`,
+  `done`/`failed`). It never passes `--force`. After a successful
   auto-merge with `--drain-acknowledged`, the auto lane spawns the same
   supervisor; without a drain acknowledgment it stops at merged and prints the
   apply command.

@@ -5051,9 +5051,13 @@ def test_detached_supervisor_waits_for_tui():
         upgrade.apply_supported = lambda args, t, resume_prior=None: (
             applied.append(t) or 0)
         stopped = []
-        upgrade.run = lambda argv, **kwargs: (
+
+        def fake_run(argv, **kwargs):
             stopped.append(list(argv))
-            or subprocess.CompletedProcess(argv, 0, "", ""))
+            text = "sha\n" if argv[3:4] == ["rev-parse"] else ""
+            return subprocess.CompletedProcess(argv, 0, text, "")
+
+        upgrade.run = fake_run
         with contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
             rc = upgrade.supervise(
@@ -5142,6 +5146,121 @@ def test_supervisor_refuses_pin_mismatch():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_supervisor_refuses_diverged_checkout():
+    """Blocker 1: scripts/agents diverging from origin/main refuses."""
+    root = _tmp("upgrade-tree-diverged-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    real = (upgrade.stage_config.tui_processes, upgrade.merged_pin,
+            upgrade.run, upgrade.apply_supported)
+    try:
+        upgrade.stage_config.tui_processes = lambda: []
+        upgrade.merged_pin = lambda repo, refs=None: target
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(list(argv))
+            if argv[3:4] == ["rev-parse"]:
+                return subprocess.CompletedProcess(argv, 0, "sha\n", "")
+            if argv[3:5] == ["diff", "--quiet"]:
+                return subprocess.CompletedProcess(argv, 1, "", "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        upgrade.run = fake_run
+        upgrade.apply_supported = lambda *a, **k: calls.append("apply") or 0
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.supervise(
+                _args(root, home=fixture["home"]), target)
+        assert rc == 2, out.getvalue()
+        assert "does not match origin/main" in out.getvalue(), out.getvalue()
+        assert "switch/pull and retry" in out.getvalue(), out.getvalue()
+        assert not [argv for argv in calls
+                    if "service" in argv or "apply" in argv], calls
+        assert json.load(open(upgrade.supervisor_path()))["phase"] == \
+            "tree-check"
+    finally:
+        (upgrade.stage_config.tui_processes, upgrade.merged_pin,
+         upgrade.run, upgrade.apply_supported) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_supervisor_refuses_dirty_scripts():
+    """Blocker 1: uncommitted scripts/ changes refuse before mutation."""
+    root = _tmp("upgrade-tree-dirty-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    real = (upgrade.stage_config.tui_processes, upgrade.merged_pin,
+            upgrade.run, upgrade.apply_supported)
+    try:
+        upgrade.stage_config.tui_processes = lambda: []
+        upgrade.merged_pin = lambda repo, refs=None: target
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(list(argv))
+            if argv[3:4] == ["rev-parse"]:
+                return subprocess.CompletedProcess(argv, 0, "sha\n", "")
+            if argv[3:4] == ["status"]:
+                return subprocess.CompletedProcess(
+                    argv, 0, " M scripts/opencode_upgrade.py\n", "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        upgrade.run = fake_run
+        upgrade.apply_supported = lambda *a, **k: calls.append("apply") or 0
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.supervise(
+                _args(root, home=fixture["home"]), target)
+        assert rc == 2, out.getvalue()
+        assert "uncommitted changes under scripts/ or agents/" in out.getvalue()
+        assert not [argv for argv in calls
+                    if "service" in argv or "apply" in argv], calls
+        assert json.load(open(upgrade.supervisor_path()))["phase"] == \
+            "tree-check"
+    finally:
+        (upgrade.stage_config.tui_processes, upgrade.merged_pin,
+         upgrade.run, upgrade.apply_supported) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_supervisor_refuses_unresolvable_origin_main():
+    """Blocker 1: an unresolvable origin/main refuses like pin-check."""
+    root = _tmp("upgrade-tree-noref-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    real = (upgrade.stage_config.tui_processes, upgrade.merged_pin,
+            upgrade.run, upgrade.apply_supported)
+    try:
+        upgrade.stage_config.tui_processes = lambda: []
+        upgrade.merged_pin = lambda repo, refs=None: target
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(list(argv))
+            if argv[3:4] == ["rev-parse"]:
+                return subprocess.CompletedProcess(argv, 1, "", "fatal")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        upgrade.run = fake_run
+        upgrade.apply_supported = lambda *a, **k: calls.append("apply") or 0
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.supervise(
+                _args(root, home=fixture["home"]), target)
+        assert rc == 2, out.getvalue()
+        assert "cannot resolve origin/main" in out.getvalue(), out.getvalue()
+        assert not [argv for argv in calls
+                    if "service" in argv or "apply" in argv], calls
+    finally:
+        (upgrade.stage_config.tui_processes, upgrade.merged_pin,
+         upgrade.run, upgrade.apply_supported) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_supervisor_refreshes_stale_main_once():
     """AC11: one best-effort fetch before the pin check fails closed."""
     root = _tmp("upgrade-detach-stale-main-")
@@ -5159,9 +5278,13 @@ def test_supervisor_refreshes_stale_main_once():
 
         upgrade.merged_pin = merged
         calls = []
-        upgrade.run = lambda argv, **kwargs: (
+
+        def fake_run(argv, **kwargs):
             calls.append(list(argv))
-            or subprocess.CompletedProcess(argv, 0, "", ""))
+            text = "sha\n" if argv[3:4] == ["rev-parse"] else ""
+            return subprocess.CompletedProcess(argv, 0, text, "")
+
+        upgrade.run = fake_run
         applied = []
         upgrade.apply_supported = lambda *a, **k: applied.append(a[1]) or 0
         with contextlib.redirect_stdout(io.StringIO()), \
@@ -5176,6 +5299,23 @@ def test_supervisor_refreshes_stale_main_once():
         (upgrade.stage_config.tui_processes, upgrade.merged_pin,
          upgrade.run, upgrade.apply_supported) = real
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_supervisor_next_command_messages():
+    """AC12: timeout/pin-check/tree-check name the exact next action."""
+    base = {"target": v2.VERSION_PIN, "log": "/state/supervisor.log"}
+    timeout = dict(base, phase="timeout")
+    assert "close the TUI and rerun" in upgrade.supervisor_next_command(timeout)
+    pin = dict(base, phase="pin-check")
+    assert "does not match" in upgrade.supervisor_next_command(pin)
+    tree = dict(base, phase="tree-check")
+    assert "switch/pull and retry" in upgrade.supervisor_next_command(tree)
+    dead = dict(base, phase="applying", alive=False)
+    assert "resume" in upgrade.supervisor_next_command(dead)
+    failed = dict(base, phase="failed")
+    assert "verify" in upgrade.supervisor_next_command(failed)
+    done = dict(base, phase="done")
+    assert upgrade.supervisor_next_command(done) == "up to date"
 
 
 def test_status_resume_after_crash():
@@ -5336,6 +5476,30 @@ def test_resume_smoke_failure_delegates_to_verify():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_resume_missing_backup_falls_back_to_full_apply():
+    """Minor 4: a prior artifact whose backup is gone uses the full apply."""
+    root = _tmp("upgrade-resume-missing-backup-")
+    target = v2.VERSION_PIN
+    prior = _resume_prior(target, "migration",
+                          os.path.join(root, "gone-backup"))
+    _write(upgrade.apply_artifact_path(root, target), json.dumps(prior) + "\n")
+    real = upgrade.apply_supported
+    calls = []
+    upgrade.apply_supported = lambda args, target_, resume_prior=None: (
+        calls.append(resume_prior) or 0)
+    try:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = upgrade.apply_resume(
+                _args(root, to=target, drain_acknowledged=True), target)
+        assert rc == 0
+        assert calls == [None], calls
+        assert "no usable prior backup" in out.getvalue(), out.getvalue()
+    finally:
+        upgrade.apply_supported = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_resume_without_artifact_falls_back_to_full_apply():
     """AC12: no prior artifact -> the full apply path."""
     root = _tmp("upgrade-resume-none-")
@@ -5424,6 +5588,49 @@ def test_auto_spawns_supervisor_after_merge():
         text = open(upgrade.last_run_path(), encoding="utf-8").read()
         assert "- result: supervisor-started" in text, text
         assert "- merge_commit: merge-sha" in text, text
+    finally:
+        (upgrade.run, upgrade.auto_merge_decision, upgrade.wait_for_merge,
+         upgrade.run_check_pr, upgrade.open_pr, upgrade.plugin_peers,
+         upgrade.canary_summary, upgrade.spawn_supervisor) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_spawn_failure_writes_supervisor_failed():
+    """Minor 2: a failed spawn never claims supervisor-started."""
+    root = _tmp("upgrade-auto-spawn-fail-")
+    target = "2.2.8"
+    real = (upgrade.run, upgrade.auto_merge_decision, upgrade.wait_for_merge,
+            upgrade.run_check_pr, upgrade.open_pr, upgrade.plugin_peers,
+            upgrade.canary_summary, upgrade.spawn_supervisor)
+    try:
+        _write_manifest(root, target)
+        upgrade.run = lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 0, "", "")
+        upgrade.auto_merge_decision = lambda *a, **k: {
+            "allowed": True, "reasons": [], "checks": {"pr_head": "head-a"},
+            "pr": {"headRefOid": "head-a"}}
+        upgrade.wait_for_merge = lambda repo, url, timeout=None, interval=None: {
+            "merged": True, "closed": False,
+            "state": {"state": "MERGED", "headRefOid": "head-a",
+                      "mergeCommit": {"oid": "merge-sha"}},
+            "polls": 1, "timed_out": False}
+        upgrade.run_check_pr = lambda args: 0
+        upgrade.open_pr = lambda args, t, o, s, manifest=None: (0, PR_URL)
+        upgrade.plugin_peers = lambda *a, **k: {}
+        upgrade.canary_summary = lambda repo, t: {
+            "ok": True, "gates": {"C1": "PASS"}, "residual": 0}
+        upgrade.spawn_supervisor = lambda *a, **k: 2
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc = upgrade.auto_pre_merge(
+                _args(root, to=target, auto=True, auto_merge=True,
+                      drain_acknowledged=True, opentui="0.8.2"), target)
+        assert rc == 2
+        text = open(upgrade.last_run_path(), encoding="utf-8").read()
+        assert "- result: supervisor-failed" in text, text
+        assert "- result: supervisor-started" not in text, text
+        assert (f"- next: python3 scripts/opencode_upgrade.py upgrade --to "
+                f"{target} --apply --drain-acknowledged") in text, text
     finally:
         (upgrade.run, upgrade.auto_merge_decision, upgrade.wait_for_merge,
          upgrade.run_check_pr, upgrade.open_pr, upgrade.plugin_peers,
