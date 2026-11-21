@@ -2646,7 +2646,7 @@ def test_apply_force_forwards_to_plugin_refresh():
 
     def refresh(repo, target, expected, force=False):
         seen["force"] = force
-        return os.path.join(expected, "plugins.v1-backup-test")
+        return os.path.join(target, "plugins.v1-backup-test")
 
     upgrade.stage_config.refresh_plugins = refresh
     try:
@@ -2656,6 +2656,10 @@ def test_apply_force_forwards_to_plugin_refresh():
                 contextlib.redirect_stderr(io.StringIO()):
             assert upgrade.apply_supported(args, target) == 0, seen
         assert seen.get("force") is True, seen
+        data = json.load(open(_artifact(root, target)))
+        expected_backup = os.path.join(
+            fixture["home"], ".config", "opencode", "plugins.v1-backup-test")
+        assert data["plugins_backup"] == expected_backup, data
     finally:
         (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
          upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
