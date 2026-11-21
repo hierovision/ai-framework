@@ -213,6 +213,18 @@ def refresh_plugins(repo, target, expected, dry_run=False, force=False):
                 raise RuntimeError(f"missing plugin source: {src}")
             shutil.copytree(src, os.path.join(staging, name),
                             ignore=PLUGIN_IGNORE)
+        # Preserve any operator-added plugin entry that is not one of the
+        # three reviewed corpus plugins; the refresh owns only those three.
+        if os.path.isdir(plugin_root):
+            for name in os.listdir(plugin_root):
+                if name in PLUGIN_DIRS:
+                    continue
+                src = os.path.join(plugin_root, name)
+                dst = os.path.join(staging, name)
+                if os.path.isdir(src):
+                    shutil.copytree(src, dst, symlinks=True)
+                else:
+                    shutil.copy2(src, dst)
         problems = verify_plugin_versions(staging, expected)
         if problems:
             raise RuntimeError("plugin corpus version mismatch: "

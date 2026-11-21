@@ -145,11 +145,19 @@ def test_refresh_plugins_replaces_and_backs_up():
     try:
         target = os.path.join(root, "config", "opencode")
         _old_plugin_corpus(target)
+        _write(os.path.join(target, "plugins", "custom-operator",
+                            "index.js"), "export default {};\n")
         backup = stage.refresh_plugins(REPO, target, stage.v2.VERSION_PIN)
         assert backup and os.path.isdir(backup), backup
         rows = stage.plugin_versions(os.path.join(target, "plugins"))
         assert all(row["version"] == stage.v2.VERSION_PIN
                    for row in rows.values()), rows
+        assert os.path.isfile(os.path.join(
+            target, "plugins", "custom-operator", "index.js")), \
+            "operator-added plugin should be preserved"
+        assert os.path.isfile(os.path.join(
+            backup, "custom-operator", "index.js")), \
+            "operator-added plugin should be in the backup too"
         old = json.load(open(os.path.join(
             backup, "delegation-observer", "package.json")))
         assert old["version"] == "2.2.5", old
