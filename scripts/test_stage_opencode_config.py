@@ -132,6 +132,112 @@ def test_backup_flag_is_documented_noop():
     assert "--backup" in out.getvalue()
 
 
+def _old_plugin_corpus(target):
+    for name in stage.PLUGIN_DIRS:
+        _write(os.path.join(target, "plugins", name, "package.json"),
+               json.dumps({"name": name, "version": "2.2.5"}) + "\n")
+
+
+def test_refresh_plugins_replaces_and_backs_up():
+    root = _tmp("refresh-plugins-")
+    real_live = stage.live_processes
+    stage.live_processes = lambda: []
+    try:
+        target = os.path.join(root, "config", "opencode")
+        _old_plugin_corpus(target)
+        backup = stage.refresh_plugins(REPO, target, stage.v2.VERSION_PIN)
+        assert backup and os.path.isdir(backup), backup
+        rows = stage.plugin_versions(os.path.join(target, "plugins"))
+        assert all(row["version"] == stage.v2.VERSION_PIN
+                   for row in rows.values()), rows
+        old = json.load(open(os.path.join(
+            backup, "delegation-observer", "package.json")))
+        assert old["version"] == "2.2.5", old
+        assert not os.path.isdir(os.path.join(target, ".plugins-staging-"
+                                              + backup.rsplit("-", 1)[-1]))
+    finally:
+        stage.live_processes = real_live
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_refresh_plugins_refuses_live_processes():
+    root = _tmp("refresh-plugins-live-")
+    real_live = stage.live_processes
+    stage.live_processes = lambda: ["123 opencode"]
+    try:
+        target = os.path.join(root, "config", "opencode")
+        _old_plugin_corpus(target)
+        try:
+            stage.refresh_plugins(REPO, target, stage.v2.VERSION_PIN)
+            assert False, "refresh should refuse a live process"
+        except RuntimeError as exc:
+            assert "processes are running" in str(exc)
+        old = json.load(open(os.path.join(
+            target, "plugins", "delegation-observer", "package.json")))
+        assert old["version"] == "2.2.5", old
+    finally:
+        stage.live_processes = real_live
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_refresh_plugins_dry_run_is_read_only():
+    root = _tmp("refresh-plugins-dry-")
+    real_live = stage.live_processes
+    stage.live_processes = lambda: []
+    try:
+        target = os.path.join(root, "config", "opencode")
+        _old_plugin_corpus(target)
+        before = sorted(os.listdir(target))
+        assert stage.refresh_plugins(REPO, target, stage.v2.VERSION_PIN,
+                                     dry_run=True) is None
+        assert sorted(os.listdir(target)) == before, os.listdir(target)
+        old = json.load(open(os.path.join(
+            target, "plugins", "delegation-observer", "package.json")))
+        assert old["version"] == "2.2.5", old
+    finally:
+        stage.live_processes = real_live
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_refresh_plugins_version_mismatch_leaves_old_corpus():
+    root = _tmp("refresh-plugins-mismatch-")
+    real_live = stage.live_processes
+    stage.live_processes = lambda: []
+    try:
+        target = os.path.join(root, "config", "opencode")
+        _old_plugin_corpus(target)
+        try:
+            stage.refresh_plugins(REPO, target, "9.9.9")
+            assert False, "mismatched corpus should refuse"
+        except RuntimeError as exc:
+            assert "version mismatch" in str(exc)
+        old = json.load(open(os.path.join(
+            target, "plugins", "delegation-observer", "package.json")))
+        assert old["version"] == "2.2.5", old
+        assert not any(name.startswith("plugins.v1-backup-")
+                       for name in os.listdir(target)), os.listdir(target)
+    finally:
+        stage.live_processes = real_live
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_plugins_only_cli_refreshes():
+    root = _tmp("refresh-plugins-cli-")
+    real_live = stage.live_processes
+    stage.live_processes = lambda: []
+    try:
+        target = os.path.join(root, "config", "opencode")
+        _old_plugin_corpus(target)
+        assert stage.main(["--plugins-only", "--config-root", target,
+                           "--repo", REPO]) == 0
+        rows = stage.plugin_versions(os.path.join(target, "plugins"))
+        assert all(row["version"] == stage.v2.VERSION_PIN
+                   for row in rows.values()), rows
+    finally:
+        stage.live_processes = real_live
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def _fake_ps(text):
     real = stage.subprocess.run
     stage.subprocess.run = lambda argv, **kwargs: subprocess.CompletedProcess(

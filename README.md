@@ -71,7 +71,11 @@ with `upgrade --to <pin> --apply --resume --drain-acknowledged`: it reuses the
 prior backup/DB snapshot, does not reinstall an installed target, and a
 smoke-only failure delegates to `verify`. `last-run.md` records the target,
 source/target versions, result, checks, artifact, backup, merge commit, and
-next step. Rollback remains manual; there is no automatic rollback.
+next step. The apply also refreshes the live `~/.config/opencode/plugins/`
+corpus from the repo and the smoke checks its versions; if the observer panel
+says `delegation-observer not loaded`, repair it with
+`python3 scripts/stage_opencode_config.py --plugins-only` (TUI closed, service
+stopped). Rollback remains manual; there is no automatic rollback.
 
 For a V1 previous default, rollback uses the actual
 `~/.config/opencode.v1-backup-*` tree, not the V2-era pre-apply snapshot.

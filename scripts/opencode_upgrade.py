@@ -2584,6 +2584,15 @@ def api_version(stdout, target):
     return version == target, f"version={version}"
 
 
+def plugin_versions_check(config_root, target):
+    """The live config plugin corpus must match the installed version."""
+    problems = stage_config.verify_plugin_versions(
+        os.path.join(config_root, "plugins"), target)
+    if problems:
+        return False, "; ".join(problems)
+    return True, f"live plugin versions/peers == {target}"
+
+
 def post_upgrade_smoke(args, target, command=None):
     """Post-apply verification against an explicit, repaired executable."""
     home = os.path.abspath(args.home or os.path.expanduser("~"))
@@ -2610,6 +2619,8 @@ def post_upgrade_smoke(args, target, command=None):
                                      config_root=os.path.dirname(expected),
                                      binary=command)
     checks.append(("plugin", plugin[0], plugin[1][:240]))
+    versions = plugin_versions_check(expected, target)
+    checks.append(("plugin-versions", versions[0], versions[1]))
     _row, observer = observer_plugin(command)
     checks.append(("observer", "tui=True" in observer, observer))
     return checks
@@ -2798,6 +2809,17 @@ def apply_supported(args, target, resume_prior=None):
                   f"{payload['target_package']['path']}", file=sys.stderr)
             for line in rollback_lines(payload["rollback"]):
                 print(f"rollback: {line}", file=sys.stderr)
+            return 1
+        stage = "plugin-refresh"
+        try:
+            stage_config.refresh_plugins(
+                args.repo, os.path.join(home, ".config", "opencode"), target)
+        except (OSError, RuntimeError) as exc:
+            payload = record_failure("plugin-refresh", [])
+            print(f"error: live plugin refresh failed: {exc}", file=sys.stderr)
+            for line in rollback_lines(payload["rollback"]):
+                print(f"rollback: {line}", file=sys.stderr)
+            print(f"restore: {restore_text()}", file=sys.stderr)
             return 1
         stage = "migration"
         migration = resume_migration(args, home, link)
