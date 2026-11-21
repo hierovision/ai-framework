@@ -246,6 +246,66 @@ def test_plugins_only_cli_refreshes():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_refresh_plugins_force_bypasses_live_processes():
+    root = _tmp("refresh-plugins-force-")
+    real_live = stage.live_processes
+    stage.live_processes = lambda: ["123 opencode"]
+    try:
+        target = os.path.join(root, "config", "opencode")
+        _old_plugin_corpus(target)
+        backup = stage.refresh_plugins(REPO, target, stage.v2.VERSION_PIN,
+                                       force=True)
+        assert backup and os.path.isdir(backup), backup
+        rows = stage.plugin_versions(os.path.join(target, "plugins"))
+        assert all(row["version"] == stage.v2.VERSION_PIN
+                   for row in rows.values()), rows
+    finally:
+        stage.live_processes = real_live
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_verify_plugin_versions_rejects_stale_peer():
+    root = _tmp("refresh-plugins-peer-")
+    try:
+        for name in stage.PLUGIN_DIRS:
+            peer = "2.2.5" if name == "delegation-observer" else None
+            data = {"name": name, "version": stage.v2.VERSION_PIN}
+            if peer:
+                data["peerDependencies"] = {"@opencode/plugin": peer}
+            _write(os.path.join(root, "plugins", name, "package.json"),
+                   json.dumps(data) + "\n")
+        problems = stage.verify_plugin_versions(
+            os.path.join(root, "plugins"), stage.v2.VERSION_PIN)
+        assert any("delegation-observer" in p and "peer" in p
+                   for p in problems), problems
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_refresh_plugins_missing_source_and_target():
+    root = _tmp("refresh-plugins-missing-")
+    real_live = stage.live_processes
+    stage.live_processes = lambda: []
+    try:
+        target = os.path.join(root, "config", "opencode")
+        _old_plugin_corpus(target)
+        try:
+            stage.refresh_plugins(os.path.join(root, "missing-repo"), target,
+                                  stage.v2.VERSION_PIN)
+            assert False, "missing repo should refuse"
+        except RuntimeError as exc:
+            assert "missing plugin source" in str(exc), exc
+        try:
+            stage.refresh_plugins(REPO, os.path.join(root, "missing-target"),
+                                  stage.v2.VERSION_PIN)
+            assert False, "missing target should refuse"
+        except RuntimeError as exc:
+            assert "config root missing" in str(exc), exc
+    finally:
+        stage.live_processes = real_live
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def _fake_ps(text):
     real = stage.subprocess.run
     stage.subprocess.run = lambda argv, **kwargs: subprocess.CompletedProcess(

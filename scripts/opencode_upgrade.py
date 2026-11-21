@@ -2707,17 +2707,20 @@ def apply_supported(args, target, resume_prior=None):
         else:
             print(f"would install {target} via the official command")
         print(f"would repair the default {link} shadow to the V2 package")
+        print("would refresh the live config plugins/ corpus from the repo "
+              "(backup plugins.v1-backup-<stamp>) and verify versions/peers")
         print("would re-arm the DB migration cursor, start the repaired V2 "
               "service, wait for migration completion, and verify every "
               "source V1 ID plus the pre-existing V2 baseline")
         print("would run the post-upgrade smoke (binary, config root, API, "
-              "agents, plugin loader, observer)")
+              "agents, plugin loader, plugin versions, observer)")
         print(f"would write {artifact} and update upgrade-state.json")
         return 0
     artifact = import_apply_artifact(args.repo, target)
     backup = None
     db = None
     migration = None
+    plugins_backup = None
     stage = "preflight"
 
     def restore_text():
@@ -2812,10 +2815,14 @@ def apply_supported(args, target, resume_prior=None):
             return 1
         stage = "plugin-refresh"
         try:
-            stage_config.refresh_plugins(
-                args.repo, os.path.join(home, ".config", "opencode"), target)
+            plugins_backup = stage_config.refresh_plugins(
+                args.repo, os.path.join(home, ".config", "opencode"), target,
+                force=getattr(args, "force", False))
         except (OSError, RuntimeError) as exc:
-            payload = record_failure("plugin-refresh", [])
+            payload = record_failure(
+                "plugin-refresh", [],
+                extra={"plugins_backup": None,
+                       "plugin_refresh_error": str(exc)})
             print(f"error: live plugin refresh failed: {exc}", file=sys.stderr)
             for line in rollback_lines(payload["rollback"]):
                 print(f"rollback: {line}", file=sys.stderr)
@@ -2844,6 +2851,7 @@ def apply_supported(args, target, resume_prior=None):
                                  checks, verified=verified, db=db)
         payload["shadow"] = shadow
         payload["migration"] = migration
+        payload["plugins_backup"] = plugins_backup
         if resume_prior is not None:
             payload["resumed_from"] = resume_prior
         write_apply_artifact(artifact, payload)
@@ -3868,11 +3876,13 @@ def upgrade(args):
             print(f"would run: {install['command']} upgrade {target} "
                   f"--method {args.method}")
         print(f"would repair the default {link} shadow to the V2 package")
+        print("would refresh the live config plugins/ corpus from the repo "
+              "(backup plugins.v1-backup-<stamp>) and verify versions/peers")
         print("would re-arm the DB migration cursor, start the repaired V2 "
               "service, wait for migration completion, and verify every "
               "source V1 ID plus the pre-existing V2 baseline")
         print("would run the post-upgrade smoke (binary, config root, API, "
-              "agents, plugin loader, observer)")
+              "agents, plugin loader, plugin versions, observer)")
         print(f"would write {artifact} and update upgrade-state.json")
         return 0
     if getattr(args, "auto", False):

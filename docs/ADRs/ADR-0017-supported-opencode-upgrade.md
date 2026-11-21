@@ -260,8 +260,9 @@ old `plugins/` is renamed to `plugins.v1-backup-<stamp>` inside the config
 root, and the staged tree is swapped in. A failed copy or version/peer check
 records `failure_stage: plugin-refresh` and leaves the target installed with
 manual rollback guidance. The post-smoke adds a `plugin-versions` check: every
-live plugin `package.json` version (and non-null `@opencode/plugin` peer) must
-equal the target.
+reviewed corpus plugin (`auto-compact-at-threshold`, `delegation-observer`,
+`delegation-sentinel`) `package.json` version (and non-null
+`@opencode/plugin` peer) must equal the target.
 
 The manual repair is `python3 scripts/stage_opencode_config.py
 --plugins-only` with the TUI closed and service stopped; it does not move the

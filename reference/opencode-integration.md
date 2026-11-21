@@ -153,8 +153,10 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
   the apply replaces `~/.config/opencode/plugins/` with the reviewed repo
   corpus (`plugins.v1-backup-<stamp>` holds the old tree) and fails with
   `failure_stage: plugin-refresh` if the copy or version check fails. The
-  post-smoke adds `plugin-versions`: every live plugin `package.json` version
-  (and non-null `@opencode/plugin` peer) must equal the target. The 2.2.7 host
+  post-smoke adds `plugin-versions`: every reviewed corpus plugin
+  (`auto-compact-at-threshold`, `delegation-observer`,
+  `delegation-sentinel`) `package.json` version and non-null
+  `@opencode/plugin` peer must equal the target. The 2.2.7 host
   exposed the gap: the repo plugins were 2.2.7 but the live config still had
   2.2.5, so the observer TUI never registered and the panel showed the
   sentinel fallback. Manual repair: `python3 scripts/stage_opencode_config.py

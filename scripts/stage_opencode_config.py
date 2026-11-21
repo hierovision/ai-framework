@@ -196,6 +196,10 @@ def refresh_plugins(repo, target, expected, dry_run=False, force=False):
                 "OpenCode/supervision processes are running: "
                 + "; ".join(running[:3])
                 + " — close the TUI and run `opencode service stop` first")
+    for name in PLUGIN_DIRS:
+        src = os.path.join(repo, "plugins", name)
+        if not os.path.isdir(src):
+            raise RuntimeError(f"missing plugin source: {src}")
     plugin_root = os.path.join(target, "plugins")
     stamp = now_stamp()
     staging = os.path.join(target, f".plugins-staging-{stamp}")
