@@ -263,6 +263,22 @@ def resolve_wake_url(cfg):
             or v2.service_url())
 
 
+def _api_server(wake_url):
+    """Use the authenticated CLI for the local service; direct HTTP for remote.
+
+    The local service requires the `service.json` password. `opencode api`
+    supplies it; a bare `http://127.0.0.1:<port>` URL does not. Passing the
+    local discovery URL to `api_call` as a `server` therefore wrote 401s and
+    deferred every wake (the 2026-11-21 reviewer observations).
+    """
+    if os.environ.get("OPENCODE_V2_API_VIA_CLI") == "1":
+        return None
+    local = v2.service_url()
+    if local and wake_url and local.rstrip("/") == wake_url.rstrip("/"):
+        return None
+    return wake_url
+
+
 def deliver(cfg, text, wake_url):
     """Wake through the V2 service API (no client attach, no new session).
 
@@ -271,7 +287,8 @@ def deliver(cfg, text, wake_url):
     `(accepted, failure_detail)`.
     """
     sid = cfg.orchestrator_session
-    status, payload = v2.api_call("GET", f"/api/session/{sid}", server=wake_url)
+    server = _api_server(wake_url)
+    status, payload = v2.api_call("GET", f"/api/session/{sid}", server=server)
     if status == 404:
         return False, "unknown-session"
     if status != 200:
@@ -283,10 +300,10 @@ def deliver(cfg, text, wake_url):
         returned = data.get("id")
     if returned and returned != sid:
         return False, f"session-mismatch:{returned}"
-    status, _ = v2.session_switch_agent(sid, cfg.wake_agent, server=wake_url)
+    status, _ = v2.session_switch_agent(sid, cfg.wake_agent, server=server)
     if status not in (200, 201, 202, 204):
         return False, f"agent-switch-failed:{status}"
-    status, _ = v2.session_prompt(sid, text, server=wake_url)
+    status, _ = v2.session_prompt(sid, text, server=server)
     if status not in (200, 201, 202, 204):
         return False, f"prompt-failed:{status}"
     return True, None
