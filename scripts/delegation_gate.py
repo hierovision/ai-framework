@@ -121,7 +121,8 @@ def build_run_vehicle_command(agent, minutes, paths, prompt_file, parent,
 
 def build_subagent_instruction(agent, label):
     """The only permitted in-session form: background, same cwd, read-only."""
-    return (f'subagent(agent="{agent}", description={json.dumps(label)}, '
+    return (f'subagent(agent={json.dumps(agent)}, '
+            f'description={json.dumps(label)}, '
             "background=true) — same cwd, read-only, <= 2 minutes")
 
 

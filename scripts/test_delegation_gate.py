@@ -117,6 +117,11 @@ def main():
               all(token in proc.stdout.lower()
                   for token in ("same cwd", "read-only", "2 minutes")),
               proc.stdout)
+        quoted = run_gate(
+            ["--agent", 'explore"x', "--minutes", "1", "--read-only",
+             "--record", os.path.join(tmp, "quoted-agent.json")])
+        check("subagent instruction JSON-escapes the agent",
+              json.dumps('explore"x') in quoted.stdout, quoted.stdout)
 
         # --- run-vehicle command carries the required flags -------------------
         rv_record = os.path.join(tmp, "reviewer.json")
