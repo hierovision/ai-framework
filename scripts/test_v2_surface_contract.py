@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Contract tests for the foreground-delegation guidance net (RM-069 AC12).
 
-`check_v2_surfaces.py` gained four delegation patterns. These tests prove the
-net catches each prohibited form, allows the equivalent permitted wording,
-allowlists historical records, and passes on the real tree (i.e. the sweep is
+`check_v2_surfaces.py` gained four delegation patterns and a required-guidance
+check. These tests prove the net catches each prohibited form, allows the
+equivalent permitted wording, allowlists historical records, fails when the
+vehicle-gate guidance is absent, and passes on the real tree (i.e. the sweep is
 actually done, not merely asserted).
 
 Run: python3 scripts/test_v2_surface_contract.py
@@ -43,6 +44,19 @@ def _scan_tree(files):
         shutil.rmtree(root, ignore_errors=True)
 
 
+def _guidance_tree(files):
+    root = tempfile.mkdtemp(prefix="guidance-contract-")
+    try:
+        for rel, text in files.items():
+            path = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text + "\n")
+        return linter.check_required_guidance(root)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     prohibited = {
         "foreground task": "Run the task in the foreground task lane.",
@@ -69,6 +83,32 @@ def main():
     historical = _scan_tree({"docs/ADRs/ADR-9999-old.md":
                              "A foreground Task was the old guidance."})
     check("historical records stay allowlisted", historical == [], historical)
+
+    missing = _guidance_tree({
+        "agents/architect.md": "Dispatch per reference/agent-teams.md.",
+        "reference/agent-teams.md": "Pick a vehicle by judgment.",
+    })
+    check("required guidance fails without the gate phrase", len(missing) == 2,
+          missing)
+    check("required guidance names both files",
+          any("agents/architect.md" in hit for hit in missing)
+          and any("reference/agent-teams.md" in hit for hit in missing),
+          missing)
+
+    present = _guidance_tree({
+        "agents/architect.md": "Run scripts/delegation_gate.py before dispatch.",
+        "reference/agent-teams.md": "Vehicle gate: scripts/delegation_gate.py.",
+    })
+    check("required guidance passes with the gate phrase", present == [],
+          present)
+
+    absent_file = _guidance_tree({"agents/architect.md": "delegation_gate.py"})
+    check("missing guidance file is reported", len(absent_file) == 1,
+          absent_file)
+
+    real_guidance = linter.check_required_guidance(REPO)
+    check("the real tree carries the vehicle-gate guidance",
+          real_guidance == [], real_guidance)
 
     real = linter.scan(REPO)
     check("the active tree has no foreground-delegation guidance", real == [],

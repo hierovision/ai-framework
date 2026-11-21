@@ -12,6 +12,11 @@ Also fails on guidance that prescribes **foreground/blocking delegation**
 progress, questions and terminal state are delivered. Historical records
 (AGENTS.md tiers: ADRs, ROADMAP, roadmap detail, plans) are allowlisted.
 
+And it fails when the required delegation-vehicle guidance is missing: both
+`agents/architect.md` and `reference/agent-teams.md` must mention
+`delegation_gate.py`, so an orchestrator always has the mechanical gate in
+view before dispatching.
+
 `--log-level`/`--print-logs` are valid V2 global flags, so they are not
 V1-only. They remain forbidden in the eval workflows (AC24: evals use
 `OPENCODE_LOG_LEVEL=ERROR`); the post-smoke loader probe legitimately uses
@@ -50,6 +55,10 @@ PATTERNS = (
     (r"(?i)\bfire[- ]and[- ]forget\b", "fire-and-forget delegation"),
 )
 EVAL_LOG_FLAGS = re.compile(r"--(?:log-level|print-logs)\b")
+REQUIRED_GUIDANCE = (
+    ("agents/architect.md", "delegation_gate.py"),
+    ("reference/agent-teams.md", "delegation_gate.py"),
+)
 SCAN_DIRS = ("agents", "scripts", "skills", "reference", "docs",
              ".github", ".opencode", "plugins")
 SCAN_FILES = ("README.md", "install.sh", "AGENTS.md")
@@ -123,11 +132,27 @@ def scan(root):
     return hits
 
 
+def check_required_guidance(root):
+    """Both dispatch guides must point at the delegation-vehicle gate."""
+    hits = []
+    for rel, phrase in REQUIRED_GUIDANCE:
+        path = os.path.join(root, rel)
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            hits.append(f"{rel}: missing required guidance file ({phrase})")
+            continue
+        if phrase not in text:
+            hits.append(f"{rel}: must mention {phrase} (vehicle gate)")
+    return hits
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="V1 surface linter.")
     ap.add_argument("--root", default=REPO)
     args = ap.parse_args(argv)
-    hits = scan(args.root)
+    hits = scan(args.root) + check_required_guidance(args.root)
     if hits:
         print(f"FAIL: {len(hits)} V1-only surface(s)")
         for hit in hits:

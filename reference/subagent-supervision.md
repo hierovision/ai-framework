@@ -9,6 +9,10 @@ a hang. Promoted from `.scratch/skill-gap-analysis/SUBAGENT-PROTOCOL.md`
 
 ## Dispatch vehicles
 
+Use `scripts/delegation_gate.py` to choose the vehicle (role, mutability,
+duration, external dirs, live observation) before dispatching; its output is
+the dispatch decision (`reference/agent-teams.md` section "Vehicle gate").
+
 - **In-session Task**: works when the parent session is on a nested-capable
   tier (Go / Zen / direct-key); a nested free-bound subagent is
   environment-dependent (CI rejects it) — see `reference/agent-teams.md`
@@ -35,8 +39,10 @@ a hang. Promoted from `.scratch/skill-gap-analysis/SUBAGENT-PROTOCOL.md`
 
 ## 1. Bound the dispatch (the orchestrator's job)
 
-- One Task == one checkpoint of ≤ ~10 minutes of wall clock. Split authoring
-  from verification; split multi-round eval work per round.
+- One Task == one checkpoint of ≤ ~10 minutes of wall clock. In-session
+  subagent consults are limited to ≤2 minutes read-only by the Vehicle gate;
+  longer work uses the run-vehicle. Split authoring from verification; split
+  multi-round eval work per round.
 - Never dispatch a monolith whose only output is a final summary. If a phase
   cannot be time-boxed, it is two dispatches.
 - For anything expected to exceed ~10 min (eval rounds), the subagent must
