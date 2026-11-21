@@ -132,10 +132,14 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
   `X.Y` (never a minor/major; explicit `--to` wins). No newer patch exits 0
   with `already current` / `no newer patch` and runs no plan or canary.
 - `upgrade --to <patch> --auto` — one-command pre-merge: plan → canary →
-  prepare (clean lockfiles, local suites + pins) → `check --pr` → PR. The
-  Phase 1 gate runs **inside `prepare` in this lane** and, on a resumed or
-  direct call, `auto_pre_merge` runs it before the PR if no gate evidence
-  exists; no gate is skipped. Without `--auto-merge` it exits 0 at the PR URL
+  prepare (clean lockfiles, local suites + pins) → `check --pr` → PR. On a
+  clean tracked tree, `main` is switched to `chore/opencode-<target>` (created
+  when absent) before the plan; an unrelated branch or dirty tree is refused
+  before any plan/commit/push, and `--dry-run` never switches. `--auto
+  --resume` on `main` requires recorded state for the target. The Phase 1
+  gate runs **inside `prepare` in this lane** and, on a resumed or direct
+  call, `auto_pre_merge` runs it before the PR if no gate evidence exists; no
+  gate is skipped. Without `--auto-merge` it exits 0 at the PR URL
   with the canary/CI summary.
   `--auto-merge` is opt-in and additionally enables
   `gh pr merge --auto --squash`, but only when the target is a patch in the

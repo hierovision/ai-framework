@@ -52,8 +52,11 @@ For a patch upgrade, the owner can run one pre-merge command:
 `python3 scripts/opencode_upgrade.py upgrade --to <latest> --auto`
 (add `--channel patch` to resolve the newest patch inside the pinned `X.Y`).
 It runs plan → canary → prepare (clean lockfiles, the four local suites and
-`check --pins-only`) → `check --pr` → PR. Without `--auto-merge` it stops at
-the PR URL with the canary summary. `--auto-merge` is explicit opt-in: it
+`check --pins-only`) → `check --pr` → PR. From a clean tracked tree on `main`,
+`--auto` creates (or switches to) `chore/opencode-<target>` itself before the
+plan; it refuses an unrelated branch or a dirty checkout and never switches on
+`--dry-run`. Without `--auto-merge` it stops at the PR URL with the canary
+summary. `--auto-merge` is explicit opt-in: it
 enables `gh pr merge --auto --squash` only for a patch target with a
 machine-only full PR diff, a passing canary, a clean tracked tree, and a
 `main`-based PR; otherwise the PR stays open for review. Minor/major targets

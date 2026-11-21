@@ -4264,7 +4264,8 @@ def _write_manifest(root, target):
 @contextlib.contextmanager
 def _auto_patches(calls, target, canary_rc=0, prepare_rc=0):
     names = ("topology", "version_of", "plan", "canary", "prepare",
-             "run_check_pr", "open_pr", "plugin_peers", "canary_summary")
+             "run_check_pr", "open_pr", "plugin_peers", "canary_summary",
+             "ensure_auto_branch")
     real = {name: getattr(upgrade, name) for name in names}
     upgrade.topology = lambda home, link: {"supported": True,
                                            "command": "opencode"}
@@ -4280,6 +4281,7 @@ def _auto_patches(calls, target, canary_rc=0, prepare_rc=0):
     upgrade.plugin_peers = lambda *a, **k: {}
     upgrade.canary_summary = lambda repo, t: {"gates": {"C1": "PASS"},
                                               "residual": 0, "ok": True}
+    upgrade.ensure_auto_branch = lambda args, t: 0
     try:
         yield calls
     finally:
@@ -4446,7 +4448,8 @@ def test_auto_runs_premerge_in_order():
     target = "2.2.8"
     real = {name: getattr(upgrade, name)
             for name in ("run", "plan", "canary", "topology", "version_of",
-                         "plugin_peers", "fetch_releases")}
+                         "plugin_peers", "fetch_releases",
+                         "ensure_auto_branch")}
     recorded = []
     try:
         _fixture(root)
@@ -4485,6 +4488,7 @@ def test_auto_runs_premerge_in_order():
         upgrade.version_of = lambda binary: v2.VERSION_PIN
         upgrade.plugin_peers = lambda *a, **k: {}
         upgrade.fetch_releases = lambda timeout=30: []
+        upgrade.ensure_auto_branch = lambda args, t: 0
         with _clean_lockfiles(), \
                 contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
@@ -5715,6 +5719,237 @@ def test_status_and_verify_keep_legacy_fallback_with_supervisor():
         assert payload["supervisor"]["phase"] == "failed"
         assert upgrade.last_verify_verified(root, target) is True
         assert upgrade.read_apply_artifact(root, target)[1] == legacy_artifact
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _branch_fake(calls, branch="main", status="", exists=False,
+                 switch_rc=0):
+    def fake(argv, **kwargs):
+        calls.append(list(argv))
+        if argv[3:4] == ["branch"]:
+            return subprocess.CompletedProcess(argv, 0, branch + "\n", "")
+        if argv[3:4] == ["status"]:
+            return subprocess.CompletedProcess(argv, 0, status, "")
+        if argv[3:4] == ["rev-parse"]:
+            return subprocess.CompletedProcess(argv, 0 if exists else 1,
+                                               "", "")
+        if argv[3:4] == ["switch"]:
+            return subprocess.CompletedProcess(
+                argv, switch_rc, "", "" if switch_rc == 0 else "switch failed")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    return fake
+
+
+@contextlib.contextmanager
+def _auto_branch_env(calls, fake_run, target):
+    names = ("run", "topology", "version_of", "plan", "canary", "prepare",
+             "auto_pre_merge")
+    real = {name: getattr(upgrade, name) for name in names}
+    upgrade.run = fake_run
+    upgrade.topology = lambda home, link: {"supported": True,
+                                           "command": "opencode"}
+    upgrade.version_of = lambda binary: v2.VERSION_PIN
+    upgrade.plan = lambda args: calls.append(("plan", args.to)) or 0
+    upgrade.canary = lambda args: calls.append(("canary", args.to)) or 0
+    upgrade.prepare = lambda args: calls.append(("prepare", args.to)) or 0
+    upgrade.auto_pre_merge = lambda args, t: calls.append(("auto", t)) or 0
+    try:
+        yield calls
+    finally:
+        for name, value in real.items():
+            setattr(upgrade, name, value)
+
+
+def test_auto_creates_branch_on_clean_main():
+    """--auto creates chore/opencode-<target> before plan/prepare."""
+    root = _tmp("upgrade-auto-branch-create-")
+    target = "2.2.8"
+    desired = f"chore/opencode-{target}"
+    calls = []
+    try:
+        with _auto_branch_env(calls, _branch_fake(calls), target):
+            rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                       opentui="0.8.2"))
+        assert rc == 0
+        switch = next(argv for argv in calls if isinstance(argv, list)
+                      and argv[3:5] == ["switch", "-c"])
+        assert switch[5] == desired, switch
+        assert calls.index(switch) < calls.index(("plan", target)), calls
+        assert any(isinstance(argv, list) and argv[3:4] == ["status"]
+                   for argv in calls), calls
+        assert any(isinstance(argv, list) and argv[3:4] == ["rev-parse"]
+                   for argv in calls), calls
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_switches_existing_branch():
+    """An existing chore/opencode-<target> is switched to, not recreated."""
+    root = _tmp("upgrade-auto-branch-existing-")
+    target = "2.2.8"
+    desired = f"chore/opencode-{target}"
+    calls = []
+    try:
+        with _auto_branch_env(calls,
+                              _branch_fake(calls, exists=True), target):
+            rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                       opentui="0.8.2"))
+        assert rc == 0
+        switch = next(argv for argv in calls if isinstance(argv, list)
+                      and argv[3:4] == ["switch"])
+        assert switch[3:] == ["switch", desired], switch
+        assert "-c" not in switch, switch
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_refuses_unrelated_branch():
+    """--auto on a feature branch refuses before plan/prepare/PR."""
+    root = _tmp("upgrade-auto-branch-other-")
+    target = "2.2.8"
+    calls = []
+    try:
+        with _auto_branch_env(calls,
+                              _branch_fake(calls, branch="feat/other"),
+                              target):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                           opentui="0.8.2"))
+        assert rc == 2, out.getvalue()
+        assert "must run from main" in out.getvalue(), out.getvalue()
+        assert not any(isinstance(argv, list) and argv[3:4] == ["switch"]
+                       for argv in calls), calls
+        assert ("plan", target) not in calls, calls
+        assert ("prepare", target) not in calls, calls
+        assert ("auto", target) not in calls, calls
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_refuses_dirty_main():
+    """--auto refuses a dirty tracked tree on main."""
+    root = _tmp("upgrade-auto-branch-dirty-")
+    target = "2.2.8"
+    calls = []
+    try:
+        with _auto_branch_env(
+                calls, _branch_fake(calls, status=" M scripts/foo.py\n"),
+                target):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                           opentui="0.8.2"))
+        assert rc == 2, out.getvalue()
+        assert "requires a clean tracked tree" in out.getvalue(), out.getvalue()
+        assert not any(isinstance(argv, list) and argv[3:4] == ["switch"]
+                       for argv in calls), calls
+        assert ("plan", target) not in calls, calls
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_dry_run_does_not_create_branch():
+    """--auto --dry-run must not switch or create a branch."""
+    root = _tmp("upgrade-auto-branch-dry-")
+    target = "2.2.8"
+    calls = []
+    real_resolve = upgrade.resolve_target_binary
+    try:
+        with _auto_branch_env(calls, _branch_fake(calls), target):
+            upgrade.resolve_target_binary = lambda home, t: (None, [])
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                           dry_run=True, opentui="0.8.2"))
+        assert rc == 0, out.getvalue()
+        assert not any(isinstance(argv, list) and argv[3:4] in
+                       (["branch"], ["status"], ["rev-parse"], ["switch"])
+                       for argv in calls), calls
+    finally:
+        upgrade.resolve_target_binary = real_resolve
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_already_current_does_not_create_branch():
+    """The target==pin early return wins before any branch action."""
+    root = _tmp("upgrade-auto-branch-current-")
+    target = v2.VERSION_PIN
+    calls = []
+    real_shadow = upgrade.shadow_state
+    real_prior = upgrade.last_verify_verified
+    try:
+        upgrade.shadow_state = lambda home, link, t: {
+            "target_installed": t, "supported_config": True,
+            "shadow_ok": True, "default_version": t,
+            "target_package": {"path": "x"}}
+        upgrade.last_verify_verified = lambda repo, t: True
+        with _auto_branch_env(calls, _branch_fake(calls), target):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                           opentui="0.8.2"))
+        assert rc == 0, out.getvalue()
+        assert "already current" in out.getvalue(), out.getvalue()
+        assert not any(isinstance(argv, list) for argv in calls), calls
+    finally:
+        upgrade.shadow_state = real_shadow
+        upgrade.last_verify_verified = real_prior
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_branch_switch_failure_refuses():
+    """A failed switch refuses with the git error; no plan runs."""
+    root = _tmp("upgrade-auto-branch-fail-")
+    target = "2.2.8"
+    calls = []
+    try:
+        with _auto_branch_env(
+                calls, _branch_fake(calls, switch_rc=1), target):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                           opentui="0.8.2"))
+        assert rc == 2, out.getvalue()
+        assert "cannot switch" in out.getvalue(), out.getvalue()
+        assert ("plan", target) not in calls, calls
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_resume_from_main_requires_matching_state():
+    """--auto --resume on main needs recorded state for the target."""
+    root = _tmp("upgrade-auto-branch-resume-")
+    target = "2.2.8"
+    calls = []
+    try:
+        upgrade.write_state(root, "2.2.7", "prepared")
+        with _auto_branch_env(calls, _branch_fake(calls), target):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                           resume=True, opentui="0.8.2"))
+        assert rc == 2, out.getvalue()
+        assert "requires recorded state" in out.getvalue(), out.getvalue()
+        assert not any(isinstance(argv, list) and argv[3:4] == ["switch"]
+                       for argv in calls), calls
+
+        upgrade.write_state(root, target, "prepared")
+        calls = []
+        with _auto_branch_env(calls, _branch_fake(calls), target):
+            rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                       resume=True, opentui="0.8.2"))
+        assert rc == 0
+        assert any(isinstance(argv, list) and argv[3:5] == ["switch", "-c"]
+                   for argv in calls), calls
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

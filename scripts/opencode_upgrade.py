@@ -3673,6 +3673,71 @@ def apply_resume(args, target):
     return apply_supported(args, target, resume_prior=prior)
 
 
+def git_current_branch(repo):
+    proc = run(["git", "-C", repo, "branch", "--show-current"], timeout=30)
+    if proc.returncode != 0:
+        return None
+    return (proc.stdout or "").strip()
+
+
+def ensure_auto_branch(args, target):
+    """Create/switch `chore/opencode-<target>` for the auto lane on clean main.
+
+    The auto lane commits and pushes HEAD; running it on `main` would push
+    there. This refuses an unrelated or dirty checkout and never touches the
+    tree when `--auto` is combined with `--dry-run` (the caller returns before
+    this helper).
+    """
+    desired = f"chore/opencode-{target}"
+    current = git_current_branch(args.repo)
+    if current is None:
+        print(f"error: cannot determine the current git branch; --auto needs "
+              f"main or {desired}", file=sys.stderr)
+        return 2
+    if current == desired:
+        print(f"branch: already on {desired}")
+        return 0
+    if current != "main":
+        print(f"error: --auto must run from main or {desired}; currently on "
+              f"{current}. Switch to main (or {desired}) and retry",
+              file=sys.stderr)
+        return 2
+    if getattr(args, "resume", False):
+        state = read_state(args.repo)
+        if state.get("target") != target:
+            print(f"error: --auto --resume from main requires recorded state "
+                  f"for {target}; none found (state target: "
+                  f"{state.get('target') or 'none'})", file=sys.stderr)
+            return 2
+    status = run(["git", "-C", args.repo, "status", "--porcelain",
+                  "--untracked-files=no"], timeout=30)
+    if status.returncode != 0:
+        print(f"error: cannot read the tracked tree: "
+              f"{(status.stderr or '').strip()[-300:]}", file=sys.stderr)
+        return 2
+    if (status.stdout or "").strip():
+        print(f"error: --auto requires a clean tracked tree before creating "
+              f"{desired}; commit or stash first", file=sys.stderr)
+        print(f"  {(status.stdout or '').strip().splitlines()[0]}",
+              file=sys.stderr)
+        return 2
+    exists = run(["git", "-C", args.repo, "rev-parse", "--verify", "--quiet",
+                  f"refs/heads/{desired}"], timeout=30)
+    if exists.returncode == 0:
+        action = run(["git", "-C", args.repo, "switch", desired], timeout=60)
+        verb = "switched to existing"
+    else:
+        action = run(["git", "-C", args.repo, "switch", "-c", desired],
+                     timeout=60)
+        verb = "created"
+    if action.returncode != 0:
+        print(f"error: cannot switch to {desired}: "
+              f"{(action.stderr or '').strip()[-300:]}", file=sys.stderr)
+        return 2
+    print(f"branch: {verb} {desired} from main")
+    return 0
+
+
 def upgrade(args):
     if getattr(args, "supervise", False):
         try:
@@ -3778,6 +3843,10 @@ def upgrade(args):
               "agents, plugin loader, observer)")
         print(f"would write {artifact} and update upgrade-state.json")
         return 0
+    if getattr(args, "auto", False):
+        rc = ensure_auto_branch(args, target)
+        if rc != 0:
+            return rc
     state = read_state(args.repo)
     stages_done = (completed_stages(state)
                    if state.get("target") == target else set())
