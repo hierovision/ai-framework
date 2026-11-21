@@ -23,6 +23,10 @@ The script copies the versioned config's `opencode.jsonc`, `cli.json`,
 `~/.config/opencode.v1-backup-<timestamp>` and any SQLite DB copy is written
 with mode 0600; nothing is deleted. `--backup` is accepted for compatibility
 because backup is already the default behavior.
+
+`--plugins-only` refreshes only the live `plugins/` corpus from the repo,
+with an in-config `plugins.v1-backup-<stamp>`; it does not move the config or
+DB. The supported upgrade apply does this automatically after shadow repair.
 """
 import argparse
 import datetime
@@ -127,6 +131,10 @@ def tui_processes():
     return parse_tui_processes(proc.stdout)
 
 
+PLUGIN_IGNORE = shutil.ignore_patterns(
+    "node_modules", "*.test.ts", "mutation-check.mjs", ".scratch")
+
+
 def build_plugins(repo, target):
     plugin_root = os.path.join(target, "plugins")
     os.makedirs(plugin_root, exist_ok=True)
@@ -135,9 +143,108 @@ def build_plugins(repo, target):
         if not os.path.isdir(src):
             raise SystemExit(f"missing plugin source: {src}")
         dst = os.path.join(plugin_root, name)
-        ignore = shutil.ignore_patterns("node_modules", "*.test.ts",
-                                        "mutation-check.mjs")
-        shutil.copytree(src, dst, ignore=ignore)
+        shutil.copytree(src, dst, ignore=PLUGIN_IGNORE)
+
+
+def plugin_versions(plugin_root):
+    """`{name: {"version", "peer"}}` for the three live plugin dirs."""
+    rows = {}
+    for name in PLUGIN_DIRS:
+        path = os.path.join(plugin_root, name, "package.json")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            rows[name] = {"version": None, "peer": None}
+            continue
+        peers = data.get("peerDependencies") or {}
+        rows[name] = {
+            "version": data.get("version"),
+            "peer": peers.get("@opencode/plugin"),
+        }
+    return rows
+
+
+def verify_plugin_versions(plugin_root, expected):
+    """Return named mismatches for the live plugin corpus."""
+    problems = []
+    for name, row in plugin_versions(plugin_root).items():
+        if row["version"] != expected:
+            problems.append(
+                f"{name}: version {row['version']} != {expected}")
+        if row["peer"] is not None and row["peer"] != expected:
+            problems.append(
+                f"{name}: @opencode/plugin peer {row['peer']} != {expected}")
+    return problems
+
+
+def refresh_plugins(repo, target, expected, dry_run=False, force=False):
+    """Replace only the live config `plugins/` with the reviewed repo corpus.
+
+    The whole config and DB are not moved; the old plugin corpus is backed up
+    inside the config root as `plugins.v1-backup-<stamp>`. Staging is verified
+    against `expected` before the swap, so a broken copy never becomes live.
+    Requires OpenCode/supervision processes stopped unless `force`.
+    """
+    target = os.path.abspath(target)
+    if not os.path.isdir(target):
+        raise RuntimeError(f"config root missing: {target}")
+    if not dry_run and not force:
+        running = live_processes()
+        if running:
+            raise RuntimeError(
+                "OpenCode/supervision processes are running: "
+                + "; ".join(running[:3])
+                + " — close the TUI and run `opencode service stop` first")
+    for name in PLUGIN_DIRS:
+        src = os.path.join(repo, "plugins", name)
+        if not os.path.isdir(src):
+            raise RuntimeError(f"missing plugin source: {src}")
+    plugin_root = os.path.join(target, "plugins")
+    stamp = now_stamp()
+    staging = os.path.join(target, f".plugins-staging-{stamp}")
+    backup = os.path.join(target, f"plugins.v1-backup-{stamp}")
+    if dry_run:
+        print(f"would refresh plugins from {repo}/plugins into {plugin_root}")
+        print(f"would back up the current corpus to {backup}")
+        print(f"would verify version/peer == {expected}")
+        return None
+    try:
+        os.makedirs(staging, exist_ok=True)
+        for name in PLUGIN_DIRS:
+            src = os.path.join(repo, "plugins", name)
+            if not os.path.isdir(src):
+                raise RuntimeError(f"missing plugin source: {src}")
+            shutil.copytree(src, os.path.join(staging, name),
+                            ignore=PLUGIN_IGNORE)
+        # Preserve any operator-added plugin entry that is not one of the
+        # three reviewed corpus plugins; the refresh owns only those three.
+        if os.path.isdir(plugin_root):
+            for name in os.listdir(plugin_root):
+                if name in PLUGIN_DIRS:
+                    continue
+                src = os.path.join(plugin_root, name)
+                dst = os.path.join(staging, name)
+                if os.path.isdir(src):
+                    shutil.copytree(src, dst, symlinks=True)
+                else:
+                    shutil.copy2(src, dst)
+        problems = verify_plugin_versions(staging, expected)
+        if problems:
+            raise RuntimeError("plugin corpus version mismatch: "
+                               + "; ".join(problems))
+        if os.path.isdir(plugin_root):
+            os.rename(plugin_root, backup)
+        os.rename(staging, plugin_root)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        if os.path.isdir(backup) and not os.path.isdir(plugin_root):
+            os.rename(backup, plugin_root)
+        raise
+    print(f"refreshed plugins from {repo}/plugins")
+    print(f"backup: {backup}")
+    print(f"verified version/peer == {expected}")
+    return backup
 
 
 def build_config_json(source, target):
@@ -240,7 +347,22 @@ def main(argv=None):
     ap.add_argument("--backup", action="store_true",
                     help="accepted for compatibility; backup is already the "
                          "default behavior (no-op flag)")
+    ap.add_argument("--plugins-only", action="store_true",
+                    help="refresh only the live config plugins/ corpus from "
+                         "the repo, with an in-config backup; does not move "
+                         "the config or DB")
     args = ap.parse_args(argv)
+    if args.plugins_only:
+        home = os.path.abspath(args.home or os.path.expanduser("~"))
+        target = os.path.abspath(args.config_root
+                                 or os.path.join(home, ".config", "opencode"))
+        try:
+            refresh_plugins(args.repo, target, v2.VERSION_PIN,
+                            dry_run=args.dry_run, force=args.force)
+        except (OSError, RuntimeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        return 0
     return stage(args)
 
 

@@ -298,12 +298,13 @@ def _smoke_recorder(calls, ok=True):
 def _patch_apply(backup, smoke, install=None, migration=None):
     real = (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
             upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
-            upgrade.resume_migration)
+            upgrade.resume_migration, upgrade.stage_config.refresh_plugins)
     upgrade.pre_upgrade_backup = lambda a, t: (
         backup, os.path.join(backup, "db"))
     upgrade.official_upgrade = install or (lambda a, t, command=None: 0)
     upgrade.post_upgrade_smoke = smoke
     upgrade.stage_config.live_processes = lambda: []
+    upgrade.stage_config.refresh_plugins = lambda repo, target, expected, force=False: None
     upgrade.resume_migration = migration or (
         lambda a, h, l: {"ok": True, "verified": True, "skipped": "test",
                          "source_session_rows": 0,
@@ -314,7 +315,7 @@ def _patch_apply(backup, smoke, install=None, migration=None):
 def _restore_apply(real):
     (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
      upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
-     upgrade.resume_migration) = real
+     upgrade.resume_migration, upgrade.stage_config.refresh_plugins) = real
 
 
 @contextlib.contextmanager
@@ -2544,7 +2545,8 @@ def test_apply_stops_service_before_drain_gate():
     order = []
     stopped = {"done": False}
     real = (upgrade.run, upgrade.pre_upgrade_backup, upgrade.official_upgrade,
-            upgrade.stage_config.live_processes, upgrade.post_upgrade_smoke)
+            upgrade.stage_config.live_processes, upgrade.post_upgrade_smoke,
+            upgrade.stage_config.refresh_plugins)
 
     def fake_run(argv, **kwargs):
         order.append("run:" + " ".join(argv))
@@ -2569,6 +2571,7 @@ def test_apply_stops_service_before_drain_gate():
     upgrade.official_upgrade = lambda a, t, command=None: 0
     upgrade.post_upgrade_smoke = lambda a, t, command=None: [
         ("binary", True, "ok")]
+    upgrade.stage_config.refresh_plugins = lambda repo, target, expected, force=False: None
     try:
         args = _args(root, to=target, home=fixture["home"], skip_canary=True,
                      drain_acknowledged=True, stop_service=True)
@@ -2582,7 +2585,146 @@ def test_apply_stops_service_before_drain_gate():
     finally:
         (upgrade.run, upgrade.pre_upgrade_backup, upgrade.official_upgrade,
          upgrade.stage_config.live_processes,
-         upgrade.post_upgrade_smoke) = real
+         upgrade.post_upgrade_smoke,
+         upgrade.stage_config.refresh_plugins) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_refreshes_live_plugins_before_smoke():
+    """The apply stages the repo plugin corpus before the post-smoke."""
+    root = _tmp("upgrade-plugin-refresh-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    real = (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+            upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
+            upgrade.resume_migration, upgrade.stage_config.refresh_plugins)
+    calls = []
+    upgrade.pre_upgrade_backup = lambda a, t: (backup, None)
+    upgrade.official_upgrade = lambda a, t, command=None: 0
+    upgrade.post_upgrade_smoke = lambda a, t, command=None: (
+        calls.append("smoke") or [("binary", True, "ok")])
+    upgrade.stage_config.live_processes = lambda: []
+    upgrade.resume_migration = lambda a, h, l: (
+        calls.append("migration") or {
+            "ok": True, "verified": True, "skipped": "test"})
+    upgrade.stage_config.refresh_plugins = lambda repo, target, expected, force=False: (
+        calls.append("refresh"))
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.apply_supported(args, target) == 0, calls
+        assert calls == ["refresh", "migration", "smoke"], calls
+    finally:
+        (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+         upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
+         upgrade.resume_migration, upgrade.stage_config.refresh_plugins) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_force_forwards_to_plugin_refresh():
+    """--force must not dead-end at plugin-refresh after install/shadow."""
+    root = _tmp("upgrade-plugin-refresh-force-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    real = (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+            upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
+            upgrade.resume_migration, upgrade.stage_config.refresh_plugins)
+    seen = {}
+    upgrade.pre_upgrade_backup = lambda a, t: (backup, None)
+    upgrade.official_upgrade = lambda a, t, command=None: 0
+    upgrade.post_upgrade_smoke = lambda a, t, command=None: [
+        ("binary", True, "ok")]
+    upgrade.stage_config.live_processes = lambda: ["opencode running"]
+    upgrade.resume_migration = lambda a, h, l: {
+        "ok": True, "verified": True, "skipped": "test"}
+
+    def refresh(repo, target, expected, force=False):
+        seen["force"] = force
+        return os.path.join(target, "plugins.v1-backup-test")
+
+    upgrade.stage_config.refresh_plugins = refresh
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True, force=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.apply_supported(args, target) == 0, seen
+        assert seen.get("force") is True, seen
+        data = json.load(open(_artifact(root, target)))
+        expected_backup = os.path.join(
+            fixture["home"], ".config", "opencode", "plugins.v1-backup-test")
+        assert data["plugins_backup"] == expected_backup, data
+    finally:
+        (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+         upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
+         upgrade.resume_migration, upgrade.stage_config.refresh_plugins) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_apply_plugin_refresh_failure_is_truthful():
+    """A live plugin refresh failure is a named stage, not a smoke pass."""
+    root = _tmp("upgrade-plugin-refresh-fail-")
+    target = v2.VERSION_PIN
+    fixture = _shadow_home(root, target, package_version=target)
+    backup = os.path.join(root, "backup")
+    os.makedirs(backup)
+    real = (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+            upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
+            upgrade.resume_migration, upgrade.stage_config.refresh_plugins)
+    upgrade.pre_upgrade_backup = lambda a, t: (backup, None)
+    upgrade.official_upgrade = lambda a, t, command=None: 0
+    upgrade.post_upgrade_smoke = lambda *a, **k: (
+        _ for _ in ()).throw(AssertionError("smoke must not run"))
+    upgrade.stage_config.live_processes = lambda: []
+    upgrade.resume_migration = lambda *a, **k: (
+        _ for _ in ()).throw(AssertionError("migration must not run"))
+
+    def fail_refresh(*_a, **_k):
+        raise RuntimeError("stale live plugin corpus")
+
+    upgrade.stage_config.refresh_plugins = fail_refresh
+    try:
+        args = _args(root, to=target, home=fixture["home"], skip_canary=True,
+                     drain_acknowledged=True)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            assert upgrade.apply_supported(args, target) == 1
+        data = json.load(open(_artifact(root, target)))
+        assert data["verified"] is False, data
+        assert data["failure_stage"] == "plugin-refresh", data
+        assert data["plugins_backup"] is None, data
+        assert "stale live plugin corpus" in data["plugin_refresh_error"], data
+        assert upgrade.read_state(root)["stage"] == "prepared", data
+    finally:
+        (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
+         upgrade.post_upgrade_smoke, upgrade.stage_config.live_processes,
+         upgrade.resume_migration, upgrade.stage_config.refresh_plugins) = real
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_plugin_versions_check_reports_stale_corpus():
+    root = _tmp("upgrade-plugin-versions-")
+    try:
+        for name in upgrade.stage_config.PLUGIN_DIRS:
+            _write(os.path.join(root, "plugins", name, "package.json"),
+                   json.dumps({"name": name, "version": "2.2.5"}) + "\n")
+        ok, detail = upgrade.plugin_versions_check(root, v2.VERSION_PIN)
+        assert ok is False and "2.2.5" in detail, (ok, detail)
+        for name in upgrade.stage_config.PLUGIN_DIRS:
+            data = json.load(open(os.path.join(
+                root, "plugins", name, "package.json")))
+            data["version"] = v2.VERSION_PIN
+            _write(os.path.join(root, "plugins", name, "package.json"),
+                   json.dumps(data) + "\n")
+        ok, detail = upgrade.plugin_versions_check(root, v2.VERSION_PIN)
+        assert ok is True, detail
+    finally:
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -3223,12 +3365,14 @@ def test_cli_successful_apply_records_state():
     target = v2.VERSION_PIN
     fixture = _shadow_home(root, target, package_version=target)
     real = (upgrade.pre_upgrade_backup, upgrade.post_upgrade_smoke,
-            upgrade.stage_config.live_processes)
+            upgrade.stage_config.live_processes,
+            upgrade.stage_config.refresh_plugins)
     upgrade.pre_upgrade_backup = lambda a, t: (
         os.path.join(root, "backup"), None)
     upgrade.post_upgrade_smoke = lambda a, t, command=None: [
         ("binary", True, "ok")]
     upgrade.stage_config.live_processes = lambda: []
+    upgrade.stage_config.refresh_plugins = lambda repo, target, expected, force=False: None
     try:
         out = io.StringIO()
         with contextlib.redirect_stdout(out), \
@@ -3243,7 +3387,8 @@ def test_cli_successful_apply_records_state():
         assert json.load(open(_artifact(root, target)))["verified"] is True
     finally:
         (upgrade.pre_upgrade_backup, upgrade.post_upgrade_smoke,
-         upgrade.stage_config.live_processes) = real
+         upgrade.stage_config.live_processes,
+         upgrade.stage_config.refresh_plugins) = real
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -5380,7 +5525,8 @@ def test_resume_skips_completed_install_and_backup():
     _write(upgrade.apply_artifact_path(root, target), json.dumps(prior) + "\n")
     real = (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
             upgrade.resume_migration, upgrade.post_upgrade_smoke,
-            upgrade.stage_config.live_processes)
+            upgrade.stage_config.live_processes,
+            upgrade.stage_config.refresh_plugins)
     calls = []
 
     def forbidden(name):
@@ -5395,6 +5541,7 @@ def test_resume_skips_completed_install_and_backup():
         "ok": True, "verified": True, "skipped": "test"}
     upgrade.post_upgrade_smoke = lambda *a, **k: [("binary", True, "ok")]
     upgrade.stage_config.live_processes = lambda: []
+    upgrade.stage_config.refresh_plugins = lambda repo, target, expected, force=False: None
     try:
         with contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
@@ -5410,7 +5557,8 @@ def test_resume_skips_completed_install_and_backup():
     finally:
         (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
          upgrade.resume_migration, upgrade.post_upgrade_smoke,
-         upgrade.stage_config.live_processes) = real
+         upgrade.stage_config.live_processes,
+         upgrade.stage_config.refresh_plugins) = real
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -5425,7 +5573,8 @@ def test_resume_shadow_stage_reuses_backup():
            json.dumps(_resume_prior(target, "shadow", backup)) + "\n")
     real = (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
             upgrade.resume_migration, upgrade.post_upgrade_smoke,
-            upgrade.stage_config.live_processes)
+            upgrade.stage_config.live_processes,
+            upgrade.stage_config.refresh_plugins)
     calls = []
 
     def forbidden(name):
@@ -5440,6 +5589,7 @@ def test_resume_shadow_stage_reuses_backup():
         "ok": True, "verified": True, "skipped": "test"}
     upgrade.post_upgrade_smoke = lambda *a, **k: [("binary", True, "ok")]
     upgrade.stage_config.live_processes = lambda: []
+    upgrade.stage_config.refresh_plugins = lambda repo, target, expected, force=False: None
     try:
         with contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
@@ -5453,7 +5603,8 @@ def test_resume_shadow_stage_reuses_backup():
     finally:
         (upgrade.pre_upgrade_backup, upgrade.official_upgrade,
          upgrade.resume_migration, upgrade.post_upgrade_smoke,
-         upgrade.stage_config.live_processes) = real
+         upgrade.stage_config.live_processes,
+         upgrade.stage_config.refresh_plugins) = real
         shutil.rmtree(root, ignore_errors=True)
 
 

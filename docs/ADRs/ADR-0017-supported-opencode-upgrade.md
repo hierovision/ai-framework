@@ -244,6 +244,31 @@ backup, merge commit, and next step.
 Rollback remains manual. This amendment does not add automatic rollback, an
 auto-rollback on a failed smoke, or a `rollback` command.
 
+## 2026-11-21 amendment — refresh the live plugin corpus
+
+The 2.2.7 host exposed a split between the reviewed repo plugin corpus and
+the live config copy: the repo plugins were 2.2.7, but
+`~/.config/opencode/plugins/` still held 2.2.5. The observer's TUI component
+did not register, so the panel showed the sentinel fallback and delegates were
+invisible; the completion observer's wake was also deferred by a local-service
+401 (fixed separately by using the authenticated `opencode api` CLI for a
+local wake URL).
+
+The supported apply now refreshes the live corpus after shadow repair and
+before migration: the repo plugins are copied to a verified staging tree, the
+old `plugins/` is renamed to `plugins.v1-backup-<stamp>` inside the config
+root, and the staged tree is swapped in. A failed copy or version/peer check
+records `failure_stage: plugin-refresh` and leaves the target installed with
+manual rollback guidance. The post-smoke adds a `plugin-versions` check: every
+reviewed corpus plugin (`auto-compact-at-threshold`, `delegation-observer`,
+`delegation-sentinel`) `package.json` version (and non-null
+`@opencode/plugin` peer) must equal the target.
+
+The manual repair is `python3 scripts/stage_opencode_config.py
+--plugins-only` with the TUI closed and service stopped; it does not move the
+config or DB. It is not a new installer and does not change the supported
+`opencode upgrade` path.
+
 ## Sources
 
 - Owner directive 2026-11-02 (supported path; yarn global; V1 shadowed; thin
