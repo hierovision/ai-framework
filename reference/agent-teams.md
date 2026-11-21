@@ -24,8 +24,9 @@ validity in `reference/delegated-result-contract.md`.
   forbidden. The leaf side of the permission matrix enforces the stop.
 - **Fan-out ≤ 6**: at most six parallel workers per dispatch wave (the council
   precedent: five lenses + chairman). Split larger sets into waves, and keep
-  each Task to one checkpoint of ≤ ~10 minutes per
-  `reference/subagent-supervision.md` §1.
+  each checkpoint to ≤ ~10 minutes per `reference/subagent-supervision.md` §1.
+  In-session subagent consults are limited to ≤2 minutes read-only by the
+  Vehicle gate; longer work uses the run-vehicle.
 - The only encoded dispatch rule is **leaf hygiene**: the planner, every
   `council-*` lens, and the single-shot roles (`reviewer`, `skill-reviewer`,
   `vision-critic-fast`, `vision-critic-final`) deny `task`, so a single-shot
@@ -102,10 +103,13 @@ JSON (`.scratch/delegation/<agent>-<UTC>.json`) is the audit trail.
 - A delegation runs on the lane the target's declared `model` resolves to;
   named dispatch honors the target's frontmatter `model`
   (`reference/opencode-integration.md`).
-- **In-session Task works when the parent session is on a nested-capable
-  tier — Go, Zen, or the direct-key lane.** Every framework persona is
-  Go-bound by default (go-first policy, 2026-10-03 — plan
-  go-first-model-bindings), so in-session dispatch is the normal path.
+- **In-session Task is available when the parent session is on a
+  nested-capable tier — Go, Zen, or the direct-key lane.** Every framework
+  persona is Go-bound by default (go-first policy, 2026-10-03 — plan
+  go-first-model-bindings), but availability is not the decision: the Vehicle
+  gate decides. In-session is the short-consult lane only (read-only, same
+  cwd, ≤2 minutes); implementation, review, test, debug, mutating, external,
+  or longer work uses the run-vehicle.
 - **A nested free-bound subagent is environment-dependent.** CI rejects it
   (`OpenCode's free tier can only be used from within OpenCode` —
   `scripts/ci-lane-overrides.py` keeps the guard for free-bound consumer

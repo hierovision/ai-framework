@@ -39,8 +39,10 @@ the dispatch decision (`reference/agent-teams.md` section "Vehicle gate").
 
 ## 1. Bound the dispatch (the orchestrator's job)
 
-- One Task == one checkpoint of ≤ ~10 minutes of wall clock. Split authoring
-  from verification; split multi-round eval work per round.
+- One Task == one checkpoint of ≤ ~10 minutes of wall clock. In-session
+  subagent consults are limited to ≤2 minutes read-only by the Vehicle gate;
+  longer work uses the run-vehicle. Split authoring from verification; split
+  multi-round eval work per round.
 - Never dispatch a monolith whose only output is a final summary. If a phase
   cannot be time-boxed, it is two dispatches.
 - For anything expected to exceed ~10 min (eval rounds), the subagent must

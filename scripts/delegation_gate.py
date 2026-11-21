@@ -37,6 +37,7 @@ import argparse
 import json
 import math
 import os
+import shlex
 import sys
 from datetime import datetime, timezone
 
@@ -63,10 +64,7 @@ def _stamp(now=None):
 
 
 def _quote(value):
-    text = str(value)
-    if any(ch.isspace() for ch in text):
-        return '"' + text.replace('"', '\\"') + '"'
-    return text
+    return shlex.quote(str(value))
 
 
 def default_paths(agent, stamp=None):
@@ -80,14 +78,16 @@ def default_paths(agent, stamp=None):
     }
 
 
-def run_vehicle_reasons(agent, minutes, mutating, external_dirs,
-                        live_observation):
+def run_vehicle_reasons(agent, minutes, mutating, mutating_explicit,
+                        external_dirs, live_observation):
     """Every condition that forces the run-vehicle, in a stable order."""
     reasons = []
     if agent in RUN_VEHICLE_AGENTS:
         reasons.append(f"agent role requires the run-vehicle: {agent}")
     if mutating:
-        reasons.append("task is mutating (default classification, fail closed)")
+        reasons.append(
+            "task is mutating (--mutating)" if mutating_explicit
+            else "task is mutating (default classification, fail closed)")
     if minutes > MAX_SUBAGENT_MINUTES:
         reasons.append(
             f"expected duration {minutes:g} min > {MAX_SUBAGENT_MINUTES:g} min")
@@ -121,13 +121,14 @@ def build_run_vehicle_command(agent, minutes, paths, prompt_file, parent,
 
 def build_subagent_instruction(agent, label):
     """The only permitted in-session form: background, same cwd, read-only."""
-    return (f'subagent(agent="{agent}", description="{label}", '
+    return (f'subagent(agent="{agent}", description={json.dumps(label)}, '
             "background=true) — same cwd, read-only, <= 2 minutes")
 
 
 def decide(args):
     """Resolve the decision dict and whether the request was refused."""
     mutating = not args.read_only
+    mutating_explicit = bool(args.mutating)
     external_dirs = list(args.external_dirs or [])
     live_observation = bool(args.live_observation)
 
@@ -143,7 +144,8 @@ def decide(args):
         label)
     subagent_instruction = build_subagent_instruction(args.agent, label)
     forces = run_vehicle_reasons(
-        args.agent, args.minutes, mutating, external_dirs, live_observation)
+        args.agent, args.minutes, mutating, mutating_explicit, external_dirs,
+        live_observation)
 
     refused = False
     if args.request == "run-vehicle":
@@ -174,6 +176,8 @@ def decide(args):
     decision = {
         "agent": args.agent,
         "vehicle": vehicle,
+        "request": args.request,
+        "refused": refused,
         "reasons": reasons,
         "command": command,
         "record": record_path,

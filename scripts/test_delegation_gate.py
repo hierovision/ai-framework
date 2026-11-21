@@ -17,9 +17,13 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
 GATE = os.path.join(HERE, "delegation_gate.py")
 REQUIRED_JSON_KEYS = {
-    "agent", "vehicle", "reasons", "command", "record", "minutes",
-    "mutating", "external_dirs", "live_observation",
+    "agent", "vehicle", "request", "refused", "reasons", "command", "record",
+    "minutes", "mutating", "external_dirs", "live_observation",
 }
+RUN_VEHICLE_ROLES = (
+    "implementer", "reviewer", "test-writer", "debugger", "skill-author",
+    "skill-reviewer", "vision-critic-fast", "vision-critic-final",
+)
 REQUIRED_RUN_FLAGS = (
     "--detach", "--heartbeat", "--stream-out", "--stream-err",
     "--delegation-to", "--wake-to", "--wake-agent", "--task-label",
@@ -65,6 +69,12 @@ def main():
             ("explore 1 min read-only -> subagent",
              ["--agent", "explore", "--minutes", "1", "--read-only"],
              "subagent"),
+            ("explore 2 min read-only -> subagent boundary",
+             ["--agent", "explore", "--minutes", "2", "--read-only"],
+             "subagent"),
+            ("explore 2.01 min -> run-vehicle boundary",
+             ["--agent", "explore", "--minutes", "2.01", "--read-only"],
+             "run-vehicle"),
             ("explore 5 min -> run-vehicle",
              ["--agent", "explore", "--minutes", "5", "--read-only"],
              "run-vehicle"),
@@ -132,31 +142,56 @@ def main():
               and ".stderr" in command, command)
 
         # --- refused subagent requests ---------------------------------------
-        refused = [
-            ("reviewer", ["--agent", "reviewer", "--minutes", "0.5",
-                          "--read-only", "--request", "subagent"]),
-            ("implementer", ["--agent", "implementer", "--minutes", "1",
-                             "--request", "subagent"]),
-        ]
-        for index, (name, args) in enumerate(refused):
+        for index, role in enumerate(RUN_VEHICLE_ROLES):
+            args = ["--agent", role, "--minutes", "0.5", "--read-only",
+                    "--request", "subagent"]
             record = os.path.join(tmp, f"refused-{index}.json")
             proc = run_gate([*args, "--record", record])
-            check(f"refuses subagent for {name} (rc 2)",
+            check(f"refuses subagent for {role} (rc 2)",
                   proc.returncode == 2, proc.returncode)
-            check(f"refusal names reasons for {name}",
-                  "reasons:" in proc.stdout and "refused" in proc.stdout,
+            check(f"refusal names the role reason for {role}",
+                  "agent role requires the run-vehicle" in proc.stdout,
                   proc.stdout)
-            check(f"refusal prints the run-vehicle command for {name}",
+            check(f"refusal prints the run-vehicle command for {role}",
                   "--detach" in proc.stdout and "dispatch_agent.py" in proc.stdout,
                   proc.stdout)
-            check(f"refusal prints no usable subagent instruction for {name}",
+            check(f"refusal prints no usable subagent instruction for {role}",
                   "background=true" not in proc.stdout, proc.stdout)
             json_proc, data = json_case(args, record)
-            check(f"refusal JSON vehicle is run-vehicle for {name}",
+            check(f"refusal JSON vehicle is run-vehicle for {role}",
                   json_proc.returncode == 2
                   and data.get("vehicle") == "run-vehicle", data)
-            check(f"refusal JSON has no subagent command for {name}",
+            check(f"refusal JSON records request/refused for {role}",
+                  data.get("request") == "subagent"
+                  and data.get("refused") is True, data)
+            check(f"refusal JSON has no subagent command for {role}",
                   "background=true" not in data.get("command", ""), data)
+
+        # Every violation is listed, not just the first.
+        multi_args = [
+            "--agent", "reviewer", "--minutes", "5", "--read-only",
+            "--external-dir", os.path.join(tmp, "outside"),
+            "--live-observation", "--request", "subagent",
+        ]
+        multi_record = os.path.join(tmp, "refused-multi.json")
+        multi_proc = run_gate([*multi_args, "--record", multi_record])
+        check("multi-violation refusal rc 2", multi_proc.returncode == 2,
+              multi_proc.returncode)
+        for phrase in ("agent role requires", "expected duration",
+                       "external directory", "live observation"):
+            check(f"multi-violation lists {phrase}",
+                  phrase in multi_proc.stdout, multi_proc.stdout)
+        _, multi = json_case(multi_args, multi_record)
+        check("multi-violation JSON records request/refused",
+              multi.get("request") == "subagent"
+              and multi.get("refused") is True, multi)
+
+        # Explicit --mutating is named as such, not as the default.
+        explicit = run_gate(["--agent", "explore", "--minutes", "1",
+                             "--mutating", "--record",
+                             os.path.join(tmp, "explicit-mutating.json")])
+        check("explicit --mutating is named in the reason",
+              "(--mutating)" in explicit.stdout, explicit.stdout)
 
         # --- usage error ------------------------------------------------------
         proc = run_gate(["--agent", "explore", "--read-only",
