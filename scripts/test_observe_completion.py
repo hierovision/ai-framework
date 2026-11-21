@@ -302,6 +302,22 @@ def test_ac1_wake_on_success_exactly_once():
 
 # --- AC2: failure + abort both enumerated ------------------------------------
 
+def test_api_server_uses_cli_for_local_service_url():
+    """A local service URL must use the authenticated `opencode api` CLI.
+
+    Passing the local discovery URL to `api_call` as `server` uses direct HTTP
+    without the service password and gets 401, deferring every wake.
+    """
+    obs = _load_observe()
+    with _env({"OPENCODE_V2_SERVICE_URL": "http://127.0.0.1:4096",
+               "OPENCODE_V2_API_VIA_CLI": None}):
+        assert obs._api_server("http://127.0.0.1:4096") is None
+        assert obs._api_server("https://remote.example") == "https://remote.example"
+    with _env({"OPENCODE_V2_SERVICE_URL": "http://127.0.0.1:4096",
+               "OPENCODE_V2_API_VIA_CLI": "1"}):
+        assert obs._api_server("https://remote.example") is None
+
+
 def test_ac2_failure_names_missing_markers():
     obs = _load_observe()
     td = tempfile.mkdtemp(prefix="observe-ac2f-")
