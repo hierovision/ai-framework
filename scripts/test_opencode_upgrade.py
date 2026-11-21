@@ -5724,7 +5724,7 @@ def test_status_and_verify_keep_legacy_fallback_with_supervisor():
 
 
 def _branch_fake(calls, branch="main", status="", exists=False,
-                 switch_rc=0):
+                 remote_exists=False, switch_rc=0):
     def fake(argv, **kwargs):
         calls.append(list(argv))
         if argv[3:4] == ["branch"]:
@@ -5732,7 +5732,10 @@ def _branch_fake(calls, branch="main", status="", exists=False,
         if argv[3:4] == ["status"]:
             return subprocess.CompletedProcess(argv, 0, status, "")
         if argv[3:4] == ["rev-parse"]:
-            return subprocess.CompletedProcess(argv, 0 if exists else 1,
+            ref = argv[-1]
+            found = (remote_exists if ref.startswith("refs/remotes/")
+                     else exists)
+            return subprocess.CompletedProcess(argv, 0 if found else 1,
                                                "", "")
         if argv[3:4] == ["switch"]:
             return subprocess.CompletedProcess(
@@ -5782,6 +5785,100 @@ def test_auto_creates_branch_on_clean_main():
         assert any(isinstance(argv, list) and argv[3:4] == ["rev-parse"]
                    for argv in calls), calls
     finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_refuses_remote_only_branch():
+    """A remote-only origin/chore/... is refused before any plan."""
+    root = _tmp("upgrade-auto-branch-remote-")
+    target = "2.2.8"
+    desired = f"chore/opencode-{target}"
+    calls = []
+    try:
+        with _auto_branch_env(
+                calls, _branch_fake(calls, remote_exists=True), target):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                           opentui="0.8.2"))
+        assert rc == 2, out.getvalue()
+        assert "exists on origin but not locally" in out.getvalue(), \
+            out.getvalue()
+        assert desired in out.getvalue(), out.getvalue()
+        assert not any(isinstance(argv, list) and argv[3:4] == ["switch"]
+                       for argv in calls), calls
+        assert ("plan", target) not in calls, calls
+        assert ("prepare", target) not in calls, calls
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_proceeds_on_desired_branch():
+    """Already on chore/opencode-<target> proceeds with no branch action."""
+    root = _tmp("upgrade-auto-branch-already-")
+    target = "2.2.8"
+    desired = f"chore/opencode-{target}"
+    calls = []
+    try:
+        with _auto_branch_env(calls,
+                              _branch_fake(calls, branch=desired), target):
+            rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                       opentui="0.8.2"))
+        assert rc == 0
+        assert ("plan", target) in calls, calls
+        assert ("prepare", target) in calls, calls
+        assert not [argv for argv in calls if isinstance(argv, list)
+                    and argv[3:4] in (["switch"], ["rev-parse"], ["status"])], \
+            calls
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_detached_head_refuses():
+    """Empty branch output (detached HEAD) is a named refusal."""
+    root = _tmp("upgrade-auto-branch-detached-")
+    target = "2.2.8"
+    calls = []
+    try:
+        with _auto_branch_env(calls, _branch_fake(calls, branch=""), target):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                           opentui="0.8.2"))
+        assert rc == 2, out.getvalue()
+        assert "cannot determine the current git branch" in out.getvalue(), \
+            out.getvalue()
+        assert ("plan", target) not in calls, calls
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_auto_unsupported_install_returns_before_branch():
+    """The install-layout refusal precedes any branch/plan action."""
+    root = _tmp("upgrade-auto-branch-layout-")
+    target = "2.2.8"
+    calls = []
+    real_shadow = upgrade.shadow_state
+    try:
+        with _auto_branch_env(calls, _branch_fake(calls), target):
+            upgrade.topology = lambda home, link: {"supported": False,
+                                                   "command": "opencode"}
+            upgrade.shadow_state = lambda home, link, t: {
+                "target_installed": None, "supported_config": False}
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(out):
+                rc = upgrade.upgrade(_args(root, to=target, auto=True,
+                                           opentui="0.8.2"))
+        assert rc == 2, out.getvalue()
+        assert "not the supported install layout" in out.getvalue(), \
+            out.getvalue()
+        assert not [argv for argv in calls if isinstance(argv, list)], calls
+        assert ("plan", target) not in calls, calls
+    finally:
+        upgrade.shadow_state = real_shadow
         shutil.rmtree(root, ignore_errors=True)
 
 

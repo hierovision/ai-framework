@@ -3674,10 +3674,12 @@ def apply_resume(args, target):
 
 
 def git_current_branch(repo):
+    """The checked-out branch, or None on a git error/detached HEAD."""
     proc = run(["git", "-C", repo, "branch", "--show-current"], timeout=30)
     if proc.returncode != 0:
         return None
-    return (proc.stdout or "").strip()
+    name = (proc.stdout or "").strip()
+    return name or None
 
 
 def ensure_auto_branch(args, target):
@@ -3727,6 +3729,14 @@ def ensure_auto_branch(args, target):
         action = run(["git", "-C", args.repo, "switch", desired], timeout=60)
         verb = "switched to existing"
     else:
+        remote = run(["git", "-C", args.repo, "rev-parse", "--verify",
+                      "--quiet", f"refs/remotes/origin/{desired}"],
+                     timeout=30)
+        if remote.returncode == 0:
+            print(f"error: {desired} exists on origin but not locally; track "
+                  f"it manually (`git switch --track origin/{desired}`) or "
+                  "delete the remote branch before --auto", file=sys.stderr)
+            return 2
         action = run(["git", "-C", args.repo, "switch", "-c", desired],
                      timeout=60)
         verb = "created"
