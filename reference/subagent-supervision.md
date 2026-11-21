@@ -9,6 +9,10 @@ a hang. Promoted from `.scratch/skill-gap-analysis/SUBAGENT-PROTOCOL.md`
 
 ## Dispatch vehicles
 
+Use `scripts/delegation_gate.py` to choose the vehicle (role, mutability,
+duration, external dirs, live observation) before dispatching; its output is
+the dispatch decision (`reference/agent-teams.md` section "Vehicle gate").
+
 - **In-session Task**: works when the parent session is on a nested-capable
   tier (Go / Zen / direct-key); a nested free-bound subagent is
   environment-dependent (CI rejects it) — see `reference/agent-teams.md`

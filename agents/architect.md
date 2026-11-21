@@ -65,6 +65,15 @@ Project-specific context to bring into that skill's research step:
 - Plans are written to `.opencode/plans/<slug>.md` (one file per item, per
   the skill's plan-format) — not a single shared file.
 
+## Before any delegation
+
+Run `python3 scripts/delegation_gate.py` and use the vehicle it returns; do not
+choose the vehicle by habit. If you mean to use the in-session `subagent` tool
+and the gate refuses it, refuse that route and use the run-vehicle command the
+gate prints. State `vehicle=run-vehicle` or `vehicle=subagent` in the dispatch
+line before starting. Decision table: `reference/agent-teams.md` section
+"Vehicle gate".
+
 ## When to Delegate
 
 - If scope or requirements are unclear, run `curator` first.

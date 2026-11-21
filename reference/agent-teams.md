@@ -61,6 +61,42 @@ The leaf deny is the one mechanically encoded exception.
 commands and heartbeat writes external-repo read+draft briefs need —
 check the map or a judgment-led lane; consults carry `--contract` (RM-044).
 
+## Vehicle gate
+
+Choose the vehicle mechanically, before dispatching. `scripts/delegation_gate.py`
+makes the decision and writes the audit record: run it first, use the vehicle
+it returns. No dispatch without the gate's output, and the dispatch line states
+`vehicle=...`.
+
+| Situation | Vehicle |
+| --- | --- |
+| role in `{implementer, reviewer, test-writer, debugger, skill-author, skill-reviewer, vision-critic-fast, vision-critic-final}` | run-vehicle |
+| mutating task | run-vehicle |
+| expected duration over 2 minutes | run-vehicle |
+| any `--external-dir` | run-vehicle |
+| live observation | run-vehicle |
+| explicit `--request run-vehicle` | run-vehicle |
+| short read-only same-cwd consult (2 minutes or less, no external, no live) | subagent, `background=true` |
+
+Pre-dispatch command:
+
+```bash
+python3 scripts/delegation_gate.py --agent <name> --minutes <float> \
+  [--read-only | --mutating] [--external-dir <path> ...] \
+  [--live-observation] [--prompt-file <path>] \
+  [--parent-session <ses_...>] [--orchestrator-agent <name>] \
+  [--task-label <text>] [--request auto|subagent|run-vehicle]
+```
+
+The gate defaults the classification to mutating (fail closed). When it returns
+`run-vehicle`, the printed command carries the full detached form (`--detach`,
+heartbeat, stream, wake, delegation and timeout flags) and stable
+`.scratch/delegation/` artifact paths. When it returns `subagent`, the
+instruction requires `background=true` and is valid only for the short
+read-only same-cwd consult. A requested `subagent` that violates any rule exits
+2 with every reason and prints the run-vehicle command instead. The `--record`
+JSON (`.scratch/delegation/<agent>-<UTC>.json`) is the audit trail.
+
 ## Lane policy
 
 - A delegation runs on the lane the target's declared `model` resolves to;
