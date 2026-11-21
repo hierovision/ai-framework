@@ -188,7 +188,11 @@ message and does not run the plan or canary.
 
 `upgrade --to <patch> --auto` composes the existing gates rather than
 bypassing them: plan → canary → prepare (clean lockfiles, local four suites +
-pins) → `check --pr` → PR. With `--auto-merge` it additionally enables
+pins) → `check --pr` → PR. On a clean tracked tree it creates or switches to
+`chore/opencode-<target>` from `main` before the plan; an unrelated branch or
+dirty checkout is refused before any plan/commit/push, and `--dry-run` never
+switches. `--auto --resume` from `main` requires recorded state for the
+target. With `--auto-merge` it additionally enables
 `gh pr merge --auto --squash` only when **all** of these hold: the target is a
 patch inside the pinned `X.Y`; the Phase 1 manifest is present and
 `machine_diff` is true for the full PR diff (generated writes plus any
