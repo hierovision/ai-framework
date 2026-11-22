@@ -255,9 +255,10 @@ invisible; the completion observer's wake was also deferred by a local-service
 local wake URL).
 
 The supported apply now refreshes the live corpus after shadow repair and
-before migration: the repo plugins are copied to a verified staging tree, the
-old `plugins/` is renamed to `plugins.v1-backup-<stamp>` inside the config
-root, and the staged tree is swapped in. A failed copy or version/peer check
+before migration: the three reviewed plugins are copied to a verified staging
+tree, operator-added plugin entries are preserved, the old `plugins/` is
+renamed to `plugins.v1-backup-<stamp>` inside the config root, and the staged
+tree is swapped in. A failed copy or version/peer check
 records `failure_stage: plugin-refresh` and leaves the target installed with
 manual rollback guidance. The post-smoke adds a `plugin-versions` check: every
 reviewed corpus plugin (`auto-compact-at-threshold`, `delegation-observer`,

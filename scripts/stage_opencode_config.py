@@ -228,12 +228,14 @@ def refresh_plugins(repo, target, expected, dry_run=False, force=False):
                 if os.path.isdir(src):
                     shutil.copytree(src, dst, symlinks=True)
                 else:
-                    shutil.copy2(src, dst)
+                    shutil.copy2(src, dst, follow_symlinks=False)
         problems = verify_plugin_versions(staging, expected)
         if problems:
             raise RuntimeError("plugin corpus version mismatch: "
                                + "; ".join(problems))
         if os.path.isdir(plugin_root):
+            if os.path.exists(backup):
+                raise RuntimeError(f"backup already exists: {backup}")
             os.rename(plugin_root, backup)
         os.rename(staging, plugin_root)
     except Exception:
@@ -351,13 +353,21 @@ def main(argv=None):
                     help="refresh only the live config plugins/ corpus from "
                          "the repo, with an in-config backup; does not move "
                          "the config or DB")
+    ap.add_argument("--to", default=None,
+                    help="expected plugin version for --plugins-only "
+                         "(default: the live `opencode --version`)")
     args = ap.parse_args(argv)
     if args.plugins_only:
         home = os.path.abspath(args.home or os.path.expanduser("~"))
         target = os.path.abspath(args.config_root
                                  or os.path.join(home, ".config", "opencode"))
+        expected = args.to or v2.version()
+        if not expected:
+            print("error: cannot determine the live opencode version; pass "
+                  "--to <X.Y.Z>", file=sys.stderr)
+            return 2
         try:
-            refresh_plugins(args.repo, target, v2.VERSION_PIN,
+            refresh_plugins(args.repo, target, expected,
                             dry_run=args.dry_run, force=args.force)
         except (OSError, RuntimeError) as exc:
             print(f"error: {exc}", file=sys.stderr)
