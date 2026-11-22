@@ -204,8 +204,8 @@ const MUTATIONS = [
     id: "plugin-status-missing",
     why: "an absent plugin record must degrade, never read as loaded",
     file: "model.ts",
-    from: '    if (!entry) return { loaded: false, state: "missing", tui: false };\n',
-    to: '    if (!entry) return { loaded: true, state: "active", tui: true };\n',
+    from: '    return { loaded: false, state: "missing", tui: false };\n',
+    to: '    return { loaded: true, state: "active", tui: true };\n',
     expect: "a missing plugin degrades the status command with the banner reason",
   },
   {

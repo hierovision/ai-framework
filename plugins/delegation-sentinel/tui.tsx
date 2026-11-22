@@ -17,9 +17,9 @@ import { Show, createMemo, createSignal, onCleanup } from "solid-js";
 import {
   OBSERVER_ID,
   SENTINEL_ID,
-  healthRecordPath,
+  healthPathCandidates,
+  observerPathCandidates,
   observerPresent,
-  observerStatePath,
   parsePresence,
   sentinelBanner,
   sentinelEnabled,
@@ -38,10 +38,11 @@ function readJson(path: string | null) {
 
 export function createSentinelModel(ctx: any) {
   const enabled = sentinelEnabled(process.env);
-  const location = ctx?.location?.directory ?? ctx?.location?.path
-    ?? process.cwd();
-  const presencePath = observerStatePath(location);
-  const healthPath = healthRecordPath(location);
+  const locations = [process.cwd(), ctx?.location?.directory,
+    ctx?.location?.path]
+    .filter((dir): dir is string => Boolean(dir));
+  const presencePaths = observerPathCandidates(locations);
+  const healthPaths = healthPathCandidates(locations);
   const [version, setVersion] = createSignal(0);
   const [observer, setObserver] = createSignal<{ present: boolean; state: string }>({
     present: true, state: "active",
@@ -50,11 +51,20 @@ export function createSentinelModel(ctx: any) {
 
   const refresh = async () => {
     try {
-      const result = await ctx?.client?.plugin?.list?.(
-        location ? { location: { directory: location } } : {},
-      );
-      const list = Array.isArray(result) ? result : (result?.data ?? []);
-      const entry = list.find((p: any) => p?.id === OBSERVER_ID);
+      let entry: any = null;
+      for (const directory of locations) {
+        const result = await ctx?.client?.plugin?.list?.(
+          { location: { directory } },
+        );
+        const list = Array.isArray(result) ? result : (result?.data ?? []);
+        entry = list.find((p: any) => p?.id === OBSERVER_ID) ?? null;
+        if (entry) break;
+      }
+      if (!entry) {
+        const result = await ctx?.client?.plugin?.list?.({});
+        const list = Array.isArray(result) ? result : (result?.data ?? []);
+        entry = list.find((p: any) => p?.id === OBSERVER_ID) ?? null;
+      }
       setObserver(entry
         ? {
           present: true,
@@ -76,16 +86,21 @@ export function createSentinelModel(ctx: any) {
   const banner = createMemo(() => {
     version();
     const status = observer();
-    const health = readJson(healthPath) ?? {};
-    const presence = parsePresence(
-      (() => {
+    const health = healthPaths
+      .map((path) => readJson(path))
+      .filter((row): row is Record<string, any> => Boolean(row))
+      .sort((a, b) => (Number(b.updated) || 0) - (Number(a.updated) || 0))[0]
+      ?? {};
+    const presence = presencePaths
+      .map((path) => {
         try {
-          return readFileSync(presencePath ?? "", "utf8");
+          return parsePresence(readFileSync(path, "utf8"));
         } catch {
           return null;
         }
-      })(),
-    );
+      })
+      .filter((row): row is { pid: number; ts: number } => Boolean(row))
+      .sort((a, b) => b.ts - a.ts)[0] ?? null;
     const presenceAgeMs = presence ? Date.now() - presence.ts : null;
     const healthUpdated = Number(health.updated) || 0;
     return sentinelBanner({

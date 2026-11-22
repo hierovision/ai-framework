@@ -7,7 +7,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  healthPathCandidates,
   healthRecordPath,
+  observerPathCandidates,
   observerPresent,
   observerStatePath,
   parsePresence,
@@ -73,6 +75,17 @@ test("paths and presence parsing are total", () => {
   assert.deepEqual(parsePresence('{"pid":7,"ts":123}'), { pid: 7, ts: 123 });
   assert.equal(parsePresence("junk"), null);
   assert.equal(parsePresence(""), null);
+});
+
+test("path candidates cover cwd and the TUI location without duplicates", () => {
+  assert.deepEqual(observerPathCandidates(["/repo", "/home", "/repo"]), [
+    "/repo/.scratch/delegation-observer/tui.json",
+    "/home/.scratch/delegation-observer/tui.json",
+  ]);
+  assert.deepEqual(healthPathCandidates(["/repo", "/home"], {}), [
+    "/repo/.scratch/delegation-observer/health.json",
+    "/home/.scratch/delegation-observer/health.json",
+  ]);
 });
 
 test("the sentinel can be disabled explicitly", () => {
