@@ -61,19 +61,28 @@ export type ModelMode = "live" | "history";
  * answer (not loaded); an unreachable list is reported as unknown and the
  * banner says so instead of pretending the observer is healthy.
  */
-export async function readPluginStatus(client: any, directory?: string) {
+export async function readPluginStatus(client: any, directory?: string | string[]) {
   try {
-    // /api/plugin is location-scoped: without the TUI's location the list is
-    // empty on a shared service, which would read as "not loaded" (review M4).
-    const input = directory ? { location: { directory } } : {};
-    const result = await client?.plugin?.list?.(input);
-    const list = Array.isArray(result) ? result : (result?.data ?? []);
-    const entry = list.find((p: any) => p?.id === PLUGIN_ID);
-    if (!entry) return { loaded: false, state: "missing", tui: false };
-    const state = entry.state?.status === "failed"
-      ? `failed: ${entry.state.error ?? "unknown error"}`
-      : "active";
-    return { loaded: true, state, tui: Boolean(entry.features?.tui) };
+    // /api/plugin is location-scoped. The shared service can report a
+    // location (`/home/user`) that is not the TUI's working directory, and a
+    // single empty answer then reads as "not loaded" even though the plugin is
+    // active for this checkout. Try every candidate before failing.
+    const dirs = (Array.isArray(directory) ? directory : [directory])
+      .filter((dir): dir is string => Boolean(dir));
+    const inputs: any[] = dirs.length
+      ? dirs.map((dir) => ({ location: { directory: dir } }))
+      : [{}];
+    for (const input of inputs) {
+      const result = await client?.plugin?.list?.(input);
+      const list = Array.isArray(result) ? result : (result?.data ?? []);
+      const entry = list.find((p: any) => p?.id === PLUGIN_ID);
+      if (!entry) continue;
+      const state = entry.state?.status === "failed"
+        ? `failed: ${entry.state.error ?? "unknown error"}`
+        : "active";
+      return { loaded: true, state, tui: Boolean(entry.features?.tui) };
+    }
+    return { loaded: false, state: "missing", tui: false };
   } catch (error) {
     return { loaded: false, state: "unknown", tui: false, error: String(error) };
   }
@@ -279,7 +288,9 @@ export function createTuiModel(ctx: any) {
   timer?.unref?.();
 
   const refreshPlugin = async () => {
-    setPluginStatus(await readPluginStatus(ctx.client, ctx?.location?.directory));
+    const candidates = [ctx?.location?.directory, process.cwd()]
+      .filter((dir): dir is string => Boolean(dir));
+    setPluginStatus(await readPluginStatus(ctx.client, candidates));
     refreshServerHealth();
     bump();
   };

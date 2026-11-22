@@ -377,6 +377,29 @@ test("the location is passed to the plugin query when known", async () => {
   assert.deepEqual(seen, [{ location: { directory: "/work/dir" } }, {}]);
 });
 
+test("readPluginStatus tries every location candidate", async () => {
+  const seen: any[] = [];
+  const client = {
+    plugin: {
+      list: async (input: any) => {
+        seen.push(input);
+        return input?.location?.directory === "/repo"
+          ? [{
+            id: "delegation-observer",
+            state: { status: "active" },
+            features: { tui: true },
+          }]
+          : [];
+      },
+    },
+  };
+  const status = await readPluginStatus(client, ["/home/user", "/repo"]);
+  assert.equal(status.loaded, true, "a later location candidate is authoritative");
+  assert.equal(status.tui, true);
+  assert.deepEqual(seen.map((row) => row.location.directory),
+                   ["/home/user", "/repo"]);
+});
+
 test("a healthy observer reports healthy from the status command", async () => {
   const { ctx, calls } = mockHost({ plugin: "active" });
   const model = createTuiModel(ctx);

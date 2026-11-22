@@ -37,6 +37,31 @@ export function healthRecordPath(
   return `${String(directory).replace(/\/+$/, "")}/.scratch/delegation-observer/health.json`;
 }
 
+/** Every distinct presence path for the candidate roots (cwd first). */
+export function observerPathCandidates(
+  directories: (string | null | undefined)[],
+): string[] {
+  const out: string[] = [];
+  for (const directory of directories) {
+    const path = observerStatePath(directory);
+    if (path && !out.includes(path)) out.push(path);
+  }
+  return out;
+}
+
+/** Every distinct health record path for the candidate roots (cwd first). */
+export function healthPathCandidates(
+  directories: (string | null | undefined)[],
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const out: string[] = [];
+  for (const directory of directories) {
+    const path = healthRecordPath(directory, env);
+    if (path && !out.includes(path)) out.push(path);
+  }
+  return out;
+}
+
 export function sentinelEnabled(env: Record<string, string | undefined> = process.env): boolean {
   const raw = env?.DELEGATION_SENTINEL_ENABLED;
   if (raw === undefined || raw === "") return true;
