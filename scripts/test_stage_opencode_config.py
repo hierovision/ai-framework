@@ -237,12 +237,74 @@ def test_plugins_only_cli_refreshes():
         target = os.path.join(root, "config", "opencode")
         _old_plugin_corpus(target)
         assert stage.main(["--plugins-only", "--config-root", target,
+                           "--repo", REPO, "--to",
+                           stage.v2.VERSION_PIN]) == 0
+        rows = stage.plugin_versions(os.path.join(target, "plugins"))
+        assert all(row["version"] == stage.v2.VERSION_PIN
+                   for row in rows.values()), rows
+    finally:
+        stage.live_processes = real_live
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_plugins_only_cli_uses_live_version():
+    root = _tmp("refresh-plugins-cli-live-")
+    real_live = stage.live_processes
+    real_version = stage.v2.version
+    stage.live_processes = lambda: []
+    stage.v2.version = lambda: stage.v2.VERSION_PIN
+    try:
+        target = os.path.join(root, "config", "opencode")
+        _old_plugin_corpus(target)
+        assert stage.main(["--plugins-only", "--config-root", target,
                            "--repo", REPO]) == 0
         rows = stage.plugin_versions(os.path.join(target, "plugins"))
         assert all(row["version"] == stage.v2.VERSION_PIN
                    for row in rows.values()), rows
     finally:
         stage.live_processes = real_live
+        stage.v2.version = real_version
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_plugins_only_cli_refuses_unknown_live_version():
+    root = _tmp("refresh-plugins-cli-unknown-")
+    real_live = stage.live_processes
+    real_version = stage.v2.version
+    stage.live_processes = lambda: []
+    stage.v2.version = lambda: None
+    try:
+        target = os.path.join(root, "config", "opencode")
+        _old_plugin_corpus(target)
+        assert stage.main(["--plugins-only", "--config-root", target,
+                           "--repo", REPO]) == 2
+    finally:
+        stage.live_processes = real_live
+        stage.v2.version = real_version
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_refresh_plugins_backup_collision_refuses():
+    root = _tmp("refresh-plugins-collision-")
+    real_live = stage.live_processes
+    real_stamp = stage.now_stamp
+    stage.live_processes = lambda: []
+    stage.now_stamp = lambda: "fixed"
+    try:
+        target = os.path.join(root, "config", "opencode")
+        _old_plugin_corpus(target)
+        os.makedirs(os.path.join(target, "plugins.v1-backup-fixed"))
+        try:
+            stage.refresh_plugins(REPO, target, stage.v2.VERSION_PIN)
+            assert False, "collision should refuse"
+        except RuntimeError as exc:
+            assert "backup already exists" in str(exc), exc
+        old = json.load(open(os.path.join(
+            target, "plugins", "delegation-observer", "package.json")))
+        assert old["version"] == "2.2.5", old
+    finally:
+        stage.live_processes = real_live
+        stage.now_stamp = real_stamp
         shutil.rmtree(root, ignore_errors=True)
 
 

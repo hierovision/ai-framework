@@ -150,10 +150,12 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
   `.scratch/opencode-v2/auto-merge-<pin>.json`; minor/major and non-machine
   diffs always stop at PR ready. Merge is user-initiated by default.
 - **Live plugin corpus refresh.** After shadow repair and before migration,
-  the apply replaces `~/.config/opencode/plugins/` with the reviewed repo
-  corpus (`plugins.v1-backup-<stamp>` holds the old tree) and fails with
-  `failure_stage: plugin-refresh` if the copy or version check fails. The
-  post-smoke adds `plugin-versions`: every reviewed corpus plugin
+  the apply replaces the three reviewed plugins in
+  `~/.config/opencode/plugins/` with the repo corpus; operator-added plugin
+  entries are preserved, and `plugins.v1-backup-<stamp>` holds the old tree.
+  A failed copy or version check records `failure_stage: plugin-refresh` and
+  leaves the target installed with manual rollback guidance. The post-smoke
+  adds `plugin-versions`: every reviewed corpus plugin
   (`auto-compact-at-threshold`, `delegation-observer`,
   `delegation-sentinel`) `package.json` version and non-null
   `@opencode/plugin` peer must equal the target. The 2.2.7 host

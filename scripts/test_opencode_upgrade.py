@@ -2708,6 +2708,11 @@ def test_apply_plugin_refresh_failure_is_truthful():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_plugin_versions_is_not_verify_eligible():
+    """A stale live corpus cannot be repaired by verify; full apply only."""
+    assert "plugin-versions" not in upgrade.SMOKE_FAILURE_STAGES
+
+
 def test_plugin_versions_check_reports_stale_corpus():
     root = _tmp("upgrade-plugin-versions-")
     try:
