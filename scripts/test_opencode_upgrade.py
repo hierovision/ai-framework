@@ -389,29 +389,30 @@ def test_prepare_dry_run_and_update():
 
 def test_plan_matrix_and_breaking_notes():
     root = _tmp("upgrade-plan-")
+    target = _next_minor(v2.VERSION_PIN)
     try:
         _fixture(root)
         peers = _json_file(root, {
-            "@opencode/plugin": "2.3.0",
+            "@opencode/plugin": target,
             "@opentui/core": ">=0.8.0",
             "@opentui/solid": ">=0.8.0",
             "solid-js": ">=1.9.0"}, "peers.json")
         releases = _json_file(root, [{
-            "tag_name": "v2.3.0",
+            "tag_name": "v" + target,
             "body": "### Breaking changes\n#### Plugin API\n- change A\n"
                     "### Core\n- unrelated\n"}], "releases.json")
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            rc = upgrade.plan(_args(root, to="2.3.0", opentui="0.8.2",
+            rc = upgrade.plan(_args(root, to=target, opentui="0.8.2",
                                     plugin_json=peers,
                                     releases_file=releases, json=True))
         assert rc == 0
         data = json.loads(out.getvalue())
-        assert data["target"] == "2.3.0"
+        assert data["target"] == target
         matrix = {row[0]: row for row in data["matrix"]}
-        assert matrix["CLI"][1:] == [v2.VERSION_PIN, "2.3.0"]
+        assert matrix["CLI"][1:] == [v2.VERSION_PIN, target]
         assert matrix["@opentui/core"][2] == "0.8.2"
-        assert data["breaking"][0][0] == "2.3.0"
+        assert data["breaking"][0][0] == target
         assert "change A" in data["breaking"][0][1]
         assert data["seams"]
     finally:
@@ -4396,6 +4397,18 @@ def _releases_file(root, tags):
                              for tag in tags], "releases.json")
 
 
+def _next_patch(version):
+    """The synthetic next patch, so fixtures track the active pin."""
+    major, minor, patch = (int(part) for part in version.split("."))
+    return f"{major}.{minor}.{patch + 1}"
+
+
+def _next_minor(version):
+    """The synthetic next minor, so fixtures track the active pin."""
+    major, minor, _patch = (int(part) for part in version.split("."))
+    return f"{major}.{minor + 1}.0"
+
+
 def _machine_manifest(target):
     return {"target": target, "files": [
         {"path": "README.md", "added": 1, "removed": 1},
@@ -4447,14 +4460,17 @@ def test_channel_patch_stays_in_minor():
     real_version = upgrade.version_of
     real_resolve = upgrade.resolve_target_binary
     try:
-        releases = _releases_file(root, ["2.2.7", "2.3.0", "2.2.8"])
+        pinned = v2.VERSION_PIN
+        patch = _next_patch(pinned)
+        minor = _next_minor(pinned)
+        releases = _releases_file(root, [pinned, minor, patch])
         assert upgrade.patch_target(json.load(open(releases)),
-                                    v2.VERSION_PIN) == "2.2.8"
+                                    pinned) == patch
         assert upgrade.patch_target(
             [{"tag_name": "v2.2.9"}, {"tag_name": "v2.2.70"}],
             "2.2.7") == "2.2.70"
         args = _args(root, channel="patch", releases_file=releases)
-        assert upgrade.resolve_target(args) == ("2.2.8", None)
+        assert upgrade.resolve_target(args) == (patch, None)
         calls = []
         upgrade.plan = lambda a: calls.append(a.to) or 0
         upgrade.topology = lambda home, link: {"supported": True,
@@ -4465,7 +4481,7 @@ def test_channel_patch_stays_in_minor():
             rc = upgrade.upgrade(_args(root, channel="patch",
                                        releases_file=releases, dry_run=True))
         assert rc == 0
-        assert calls == ["2.2.8"], calls
+        assert calls == [patch], calls
     finally:
         upgrade.plan = real_plan
         upgrade.topology = real_topology
@@ -4889,6 +4905,7 @@ def test_auto_merge_head_drift_is_loud():
 def test_auto_merge_refuses_missing_pr_head():
     """Minor 4: no headRefOid means the drift check is impossible -> refuse."""
     root = _tmp("upgrade-auto-no-head-")
+    target = _next_patch(v2.VERSION_PIN)
     real_run = upgrade.run
     real_view = upgrade.pr_view
     try:
@@ -4899,7 +4916,7 @@ def test_auto_merge_refuses_missing_pr_head():
         upgrade.pr_view = lambda repo, url: {"baseRefName": "main",
                                              "state": "OPEN", "url": url}
         result = upgrade.auto_merge_decision(
-            _args(root), "2.2.8", _machine_manifest("2.2.8"),
+            _args(root), target, _machine_manifest(target),
             {"ok": True}, PR_URL)
         assert result["allowed"] is False
         assert any("cannot read the PR head" in reason
@@ -4984,8 +5001,9 @@ def _decision(root, target, manifest, *, summary=None, status_out="",
 def test_auto_merge_allowed_for_clean_patch():
     """AC10: patch + machine-only + canary + clean tree + main base."""
     root = _tmp("upgrade-auto-allowed-")
+    target = _next_patch(v2.VERSION_PIN)
     try:
-        result = _decision(root, "2.2.8", _machine_manifest("2.2.8"))
+        result = _decision(root, target, _machine_manifest(target))
         assert result["allowed"] is True, result["reasons"]
         assert result["checks"]["patch"] is True
         assert result["checks"]["machine_only"] is True
@@ -5000,8 +5018,9 @@ def test_auto_merge_allowed_for_clean_patch():
 def test_auto_merge_refuses_minor():
     """AC10: a minor target is never auto-merged."""
     root = _tmp("upgrade-auto-minor-")
+    target = _next_minor(v2.VERSION_PIN)
     try:
-        result = _decision(root, "2.3.0", _machine_manifest("2.3.0"))
+        result = _decision(root, target, _machine_manifest(target))
         assert result["allowed"] is False
         assert any("not a patch" in reason for reason in result["reasons"]), \
             result["reasons"]
@@ -5013,10 +5032,11 @@ def test_auto_merge_refuses_harness_diff():
     """AC10: a non-machine diff disables auto-merge."""
     root = _tmp("upgrade-auto-harness-")
     try:
-        manifest = _machine_manifest("2.2.8")
+        target = _next_patch(v2.VERSION_PIN)
+        manifest = _machine_manifest(target)
         manifest["files"].append({"path": "scripts/opencode_v2_canary.py",
                                   "added": 3, "removed": 1})
-        result = _decision(root, "2.2.8", manifest)
+        result = _decision(root, target, manifest)
         assert result["allowed"] is False
         assert any("not machine-only" in reason for reason in result["reasons"]), \
             result["reasons"]
@@ -5028,7 +5048,8 @@ def test_auto_merge_refuses_dirty_tree():
     """AC10: a dirty tracked tree disables auto-merge."""
     root = _tmp("upgrade-auto-dirty-")
     try:
-        result = _decision(root, "2.2.8", _machine_manifest("2.2.8"),
+        target = _next_patch(v2.VERSION_PIN)
+        result = _decision(root, target, _machine_manifest(target),
                            status_out=" M scripts/opencode_upgrade.py\n")
         assert result["allowed"] is False
         assert any("dirty" in reason for reason in result["reasons"]), \
@@ -5041,12 +5062,13 @@ def test_auto_merge_refuses_non_main_base():
     """AC10: a non-main PR base or a non-main ancestry is refused."""
     root = _tmp("upgrade-auto-base-")
     try:
-        result = _decision(root, "2.2.8", _machine_manifest("2.2.8"),
+        target = _next_patch(v2.VERSION_PIN)
+        result = _decision(root, target, _machine_manifest(target),
                            base="release")
         assert result["allowed"] is False
         assert any("not main" in reason for reason in result["reasons"]), \
             result["reasons"]
-        result = _decision(root, "2.2.8", _machine_manifest("2.2.8"),
+        result = _decision(root, target, _machine_manifest(target),
                            ancestry_rc=1)
         assert result["allowed"] is False
         assert any("not based on main" in reason
@@ -5059,7 +5081,8 @@ def test_auto_merge_refuses_failed_canary():
     """AC10: a non-passing canary disables auto-merge."""
     root = _tmp("upgrade-auto-canary-")
     try:
-        result = _decision(root, "2.2.8", _machine_manifest("2.2.8"),
+        target = _next_patch(v2.VERSION_PIN)
+        result = _decision(root, target, _machine_manifest(target),
                            summary={"ok": False})
         assert result["allowed"] is False
         assert any("canary" in reason for reason in result["reasons"]), \
