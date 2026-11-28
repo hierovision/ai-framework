@@ -3819,6 +3819,10 @@ def upgrade(args):
     if error:
         print(f"error: {error}", file=sys.stderr)
         return 2
+    # `--channel patch` resolves the target here. The later stages read
+    # `args.to`, so leaving it None makes canary/prepare fall back to
+    # VERSION_PIN and prepare the pinned version instead (the 2.4.2 failure).
+    args.to = target
     home, link = live_paths(args)
     install = topology(home, link)
     shadow = None
