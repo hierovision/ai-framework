@@ -4,10 +4,14 @@ model: opencode-go/kimi-k3.1-pro
 mode: all
 permissions:
   # Ordered rules — V2 evaluates the LAST matching rule.
-  # shell
+  # shell — no ad-hoc check watcher outside the upgrade orchestrator.
+  # Shell rules match last-wins, so this follows the broad allow.
   - action: shell
     resource: "*"
     effect: allow
+  - action: shell
+    resource: "gh pr checks *--watch*"
+    effect: deny
   # edit
   - action: edit
     resource: "*"
