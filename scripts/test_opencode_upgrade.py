@@ -4527,6 +4527,39 @@ def test_channel_explicit_to_wins():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_channel_patch_auto_propagates_target():
+    """AC8/AC9: the resolved patch drives canary and prepare, not VERSION_PIN."""
+    root = _tmp("upgrade-channel-auto-target-")
+    target = _next_patch(v2.VERSION_PIN)
+    names = ("resolve_target", "topology", "version_of",
+             "ensure_auto_branch", "plan", "canary", "prepare",
+             "auto_pre_merge")
+    real = {name: getattr(upgrade, name) for name in names}
+    calls = []
+    try:
+        upgrade.resolve_target = lambda args: (target, None)
+        upgrade.topology = lambda home, link: {"supported": True,
+                                               "command": "opencode"}
+        upgrade.version_of = lambda binary: v2.VERSION_PIN
+        upgrade.ensure_auto_branch = lambda args, t: 0
+        upgrade.plan = lambda args: calls.append(("plan", args.to)) or 0
+        upgrade.canary = lambda args: calls.append(("canary", args.to)) or 0
+        upgrade.prepare = lambda args: calls.append(("prepare", args.to)) or 0
+        upgrade.auto_pre_merge = lambda args, t: (
+            calls.append(("merge", t)) or 0)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(out):
+            rc = upgrade.upgrade(_args(root, channel="patch", auto=True))
+        assert rc == 0, out.getvalue()
+        assert calls == [("plan", target), ("canary", target),
+                         ("prepare", target), ("merge", target)], calls
+    finally:
+        for name, value in real.items():
+            setattr(upgrade, name, value)
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_fetch_releases_failures_are_none():
     """Major 2: transport/HTTP/JSON failure is None; an empty list is []."""
     real = upgrade.urllib.request.urlopen
