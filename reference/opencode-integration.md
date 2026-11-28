@@ -3,8 +3,8 @@
 Single home for the OpenCode V2 facts this library relies on. The vendor API
 changes; re-verify against the linked docs before relying on any line.
 **Behavioral facts validated 2026-10-26/27 against opencode `2.1.4`; the
-`2.4.0` upgrade passed the canary on 2026-11-17** (evidence under
-`.scratch/v2-canary-2.4.0/`, read as the legacy fallback and imported into
+`2.4.2` upgrade passed the canary on 2026-11-17** (evidence under
+`.scratch/v2-canary-2.4.2/`, read as the legacy fallback and imported into
 `$XDG_STATE_HOME/opencode-upgrade/v2-canary-2.2.7/` on the first state write).
 Notes that cite `2.1.4` are the original probes;
 the canary revalidated version, service, model catalog, stability, config/
@@ -16,8 +16,8 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
 
 ## Binary, package, version
 
-- Package: `@opencode/cli@2.4.0` (never the legacy V1 package, never `latest`).
-- `opencode --version` prints `opencode v2.4.0` (the exact string is
+- Package: `@opencode/cli@2.4.2` (never the legacy V1 package, never `latest`).
+- `opencode --version` prints `opencode v2.4.2` (the exact string is
   `opencode v2.2.7`).
 - `opencode run` flags: `--agent`, `--model/-m` (`provider/model#variant`),
   `--session/-s`, `--continue/-c`, `--fork`, `--format <default|json>`,
@@ -33,8 +33,8 @@ the V1 config plus a pre-upgrade DB backup are the full restore.
 
 ## Install and config root
 
-- Package: `@opencode/cli@2.4.0` (never the legacy V1 package, never `latest`).
-- `opencode --version` prints `opencode v2.4.0`.
+- Package: `@opencode/cli@2.4.2` (never the legacy V1 package, never `latest`).
+- `opencode --version` prints `opencode v2.4.2`.
 - Supported upgrade: `opencode upgrade <target> --method
   <curl|npm|pnpm|bun|yarn|vp|brew|winget>`; this machine uses yarn-global.
   For the **same-version** migration use `yarn global add
@@ -365,7 +365,7 @@ accepts for consumer manifests and logs. `filePath` is now `path`; the
 
 ## Plugins
 
-- `@opencode/plugin@2.4.0` is the matching runtime package (the legacy V1
+- `@opencode/plugin@2.4.2` is the matching runtime package (the legacy V1
   plugin package is not a V2 contract). 2.2.x requires OpenTUI 0.7 (2.2.0) and
   0.8 (2.2.3+); the 2.2.7 plugin peer accepts `>=0.8.1`, and this library pins
   the canary-tested `@opentui/core`/`solid` 0.9.2.
